@@ -68,12 +68,13 @@
 
 ### Windows
 
-1. 下载 `imagePicker_<版本>_x64-setup.exe`（NSIS 安装程序）并运行。
-2. 若系统缺少 WebView2，请先安装 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
+1. 下载 `imagePicker_<版本>_x64-setup.exe`（NSIS 安装程序；企业部署可用 `.msi`）并运行。
+2. 安装包**暂未进行代码签名**，Windows SmartScreen 可能提示「Windows 已保护你的电脑」：点「更多信息 → 仍要运行」。可用 Releases 页的 `SHA256SUMS.txt` 核对文件（PowerShell：`Get-FileHash .\imagePicker_*_x64-setup.exe`）。
+3. 若系统缺少 WebView2，请先安装 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
 
 ### macOS
 
-下载 `.dmg`，把应用拖入「应用程序」。首次打开如被系统拦截，请在「系统设置 → 隐私与安全性」中允许。
+下载 `.dmg`（通用版，Intel 与 Apple 芯片均可），把应用拖入「应用程序」。应用**暂未签名/公证**，首次打开会被 Gatekeeper 拦截：在 Finder 中**右键 → 打开 → 打开**，或在「系统设置 → 隐私与安全性」中点「仍要打开」；也可在终端执行 `xattr -dr com.apple.quarantine /Applications/imagePicker.app`。
 
 ### Linux（含 CachyOS / Arch）
 
