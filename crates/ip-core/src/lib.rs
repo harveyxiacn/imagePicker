@@ -1,5 +1,6 @@
 //! Catalog (SQLite), import, thumbnail scheduling, tasks and events.
 
+pub mod analysis;
 pub mod catalog;
 pub mod db;
 pub mod error;
@@ -12,6 +13,8 @@ pub mod paths;
 pub mod thumbs;
 
 #[cfg(any(test, feature = "testutil"))]
+pub mod fake_worker;
+#[cfg(any(test, feature = "testutil"))]
 pub mod testutil;
 
 use std::path::{Path, PathBuf};
@@ -19,12 +22,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use analysis::types::*;
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};
 pub use imaging::{Imaging, RealImaging};
 pub use model::*;
 
 use db::Db;
+use ip_worker_client::{AiWorker, ManagedWorker, WorkerConfig};
 use paths::DataDirs;
 use thumbs::Thumbs;
 
@@ -34,6 +39,8 @@ pub struct CoreConfig {
     pub imaging: Arc<dyn Imaging>,
     /// Thumbnail worker threads; `None` = number of CPU cores.
     pub thumb_workers: Option<usize>,
+    /// `None` = the real Python worker (started lazily on first use).
+    pub worker: Option<Arc<dyn AiWorker>>,
 }
 
 impl CoreConfig {
@@ -42,6 +49,7 @@ impl CoreConfig {
             data_dir,
             imaging: Arc::new(RealImaging),
             thumb_workers: None,
+            worker: None,
         }
     }
 }
@@ -52,7 +60,10 @@ pub struct Core {
     pub events: EventBus,
     pub thumbs: Thumbs,
     pub dirs: DataDirs,
+    pub worker: Arc<dyn AiWorker>,
     task_seq: AtomicU64,
+    pub(crate) runs: std::sync::Mutex<std::collections::HashMap<i64, analysis::RunInfo>>,
+    pub(crate) analysis_gate: tokio::sync::Semaphore,
 }
 
 impl Core {
@@ -77,14 +88,29 @@ impl Core {
             &dirs.previews,
             workers,
         );
-        Ok(Arc::new(Core {
+        let worker: Arc<dyn AiWorker> = match cfg.worker {
+            Some(w) => w,
+            None => {
+                let mut wc = WorkerConfig::from_env();
+                if wc.models_dir.is_none() {
+                    wc.models_dir = Some(dirs.root.join("models"));
+                }
+                Arc::new(ManagedWorker::new(wc))
+            }
+        };
+        let core = Arc::new(Core {
             db,
             imaging: cfg.imaging,
             events,
             thumbs,
             dirs,
+            worker,
             task_seq: AtomicU64::new(tasks as u64),
-        }))
+            runs: Default::default(),
+            analysis_gate: tokio::sync::Semaphore::new(1),
+        });
+        Core::spawn_worker_status_forwarder(&core);
+        Ok(core)
     }
 
     pub(crate) fn next_task_seq(&self) -> u64 {
@@ -109,8 +135,14 @@ impl Core {
     pub async fn delete_session(&self, id: i64) -> Result<()> {
         let keys = self
             .db
-            .call(move |c| catalog::delete_session(c, id))
+            .call(move |c| {
+                let keys = catalog::delete_session(c, id)?;
+                analysis::store::purge_session_groups(c, id)?;
+                analysis::store::purge_orphan_people(c)?;
+                Ok(keys)
+            })
             .await?;
+        self.runs.lock().unwrap().remove(&id);
         self.thumbs.purge(&keys);
         Ok(())
     }
@@ -191,3 +223,5 @@ impl Core {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_m2;

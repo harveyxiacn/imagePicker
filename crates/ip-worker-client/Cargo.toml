@@ -1,28 +1,24 @@
 [package]
-name = "ip-core"
+name = "ip-worker-client"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[features]
-# Exposes `ip_core::testutil` (FakeImaging) to downstream crates' tests.
-testutil = []
+[[bin]]
+name = "ip-fake-worker"
+path = "src/bin/ip_fake_worker.rs"
 
 [dependencies]
-ip-imaging.workspace = true
-ip-worker-client.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
 tracing.workspace = true
-rayon.workspace = true
-blake3.workspace = true
-rusqlite.workspace = true
-dirs.workspace = true
-image.workspace = true
 async-trait.workspace = true
+getrandom.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

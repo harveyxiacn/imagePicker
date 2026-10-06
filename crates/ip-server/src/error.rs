@@ -12,6 +12,8 @@ pub struct ApiError {
     pub status: StatusCode,
     pub code: &'static str,
     pub message: String,
+    /// Extra top-level fields of the body (e.g. `models` of a 409 `models_missing`).
+    pub extra: Option<serde_json::Value>,
 }
 
 impl ApiError {
@@ -20,6 +22,7 @@ impl ApiError {
             status,
             code,
             message: message.into(),
+            extra: None,
         }
     }
     pub fn not_found(message: impl Into<String>) -> Self {
@@ -32,7 +35,12 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = serde_json::json!({"error": {"code": self.code, "message": self.message}});
+        let mut body = serde_json::json!({"error": {"code": self.code, "message": self.message}});
+        if let (Some(serde_json::Value::Object(extra)), Some(obj)) =
+            (self.extra, body.as_object_mut())
+        {
+            obj.extend(extra);
+        }
         (self.status, Json(body)).into_response()
     }
 }
@@ -42,6 +50,17 @@ impl From<CoreError> for ApiError {
         match &e {
             CoreError::NotFound(m) => Self::not_found(m.clone()),
             CoreError::BadRequest(m) => Self::bad_request(m.clone()),
+            CoreError::Conflict(m) => Self::new(StatusCode::CONFLICT, "conflict", m.clone()),
+            CoreError::ModelsMissing(models) => {
+                let mut e = Self::new(StatusCode::CONFLICT, "models_missing", e.to_string());
+                e.extra = Some(serde_json::json!({ "models": models }));
+                e
+            }
+            CoreError::WorkerUnavailable(m) => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "worker_unavailable",
+                m.clone(),
+            ),
             CoreError::Internal(_) => {
                 tracing::error!(error = %e, "internal error");
                 Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string())

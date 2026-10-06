@@ -451,11 +451,13 @@ pub fn ids_needing_grid(conn: &Connection, ids: &[i64]) -> Result<Vec<i64>> {
 
 const PHOTO_COLS: &str = "p.id, r.path, p.rel_path, p.file_name, COALESCE(p.format,''), COALESCE(p.file_size,0),
     p.width, p.height, p.taken_at, p.camera, p.lens, p.focal, p.aperture, p.shutter, p.iso,
-    p.user_rating, p.ai_rating, COALESCE(p.flag,0), p.color_label, p.burst_id, COALESCE(p.thumb_state,0), p.fast_key, p.taken_at_offset_min";
+    p.user_rating, p.ai_rating, COALESCE(p.flag,0), p.color_label, p.burst_id, COALESCE(p.thumb_state,0), p.fast_key, p.taken_at_offset_min,
+    p.ai_score, COALESCE(p.issues,0), p.rank_in_burst, (SELECT b.size FROM burst b WHERE b.id=p.burst_id), p.scene_type,
+    p.face_count, p.subject_face_count, COALESCE(p.analysis_version,0)";
 
 /// Number of columns in `PHOTO_COLS`; queries append the session id at this index and the
 /// sort key (for cursors) right after it. Update when adding columns.
-const PHOTO_COL_COUNT: usize = 23;
+const PHOTO_COL_COUNT: usize = 31;
 
 /// Column `PHOTO_COL_COUNT` (after PHOTO_COLS) is the session id.
 fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
@@ -486,6 +488,14 @@ fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
         burst_id: r.get(19)?,
         thumb_ready: r.get::<_, i64>(20)? >= 2,
         thumb_version: thumb_version(&fast_key),
+        ai_score: r.get(23)?,
+        issues: crate::analysis::scoring::Issue::from_mask(r.get::<_, i64>(24)?),
+        rank_in_burst: r.get(25)?,
+        burst_size: r.get(26)?,
+        scene_type: r.get(27)?,
+        face_count: r.get(28)?,
+        subject_face_count: r.get(29)?,
+        analyzed: r.get::<_, i64>(30)? > 0,
     })
 }
 
@@ -534,6 +544,11 @@ pub fn query_photos(conn: &Connection, q: &PhotoQuery) -> Result<PhotosPage> {
         SortKey::TakenAtDesc => ("COALESCE(p.taken_at, -9223372036854775807)", true, false),
         SortKey::Name => ("p.file_name COLLATE NOCASE", false, true),
         SortKey::Rating => ("COALESCE(p.user_rating, -1)", true, false),
+        SortKey::Ai => (
+            "CAST(COALESCE(p.ai_score, -0.001) * 1000000 AS INTEGER)",
+            true,
+            false,
+        ),
     };
 
     let mut wheres: Vec<String> = Vec::new();
@@ -553,6 +568,7 @@ pub fn query_photos(conn: &Connection, q: &PhotoQuery) -> Result<PhotosPage> {
         wheres.push("p.color_label = ?".into());
         args.push(Value::Text(c.clone()));
     }
+    push_m2_filters(q, &mut wheres, &mut args);
     let base_where = if wheres.is_empty() {
         String::new()
     } else {
@@ -625,6 +641,98 @@ pub fn query_photos(conn: &Connection, q: &PhotoQuery) -> Result<PhotosPage> {
         total,
         next_cursor,
     })
+}
+
+/// M2 filters (docs/api-contract-m2.md C.4, docs/03 section 4.4). Ids and thresholds are inlined
+/// (all numeric), everything else binds parameters in order.
+fn push_m2_filters(q: &PhotoQuery, wheres: &mut Vec<String>, args: &mut Vec<Value>) {
+    if let Some(n) = q.ai_rating_gte {
+        wheres.push("p.ai_rating >= ?".into());
+        args.push(Value::Real(n));
+    }
+    if q.issues_none {
+        wheres.push("p.analysis_version > 0 AND COALESCE(p.issues,0) = 0".into());
+    }
+    if !q.issues_any.is_empty() {
+        let mask = crate::analysis::scoring::Issue::to_mask(&q.issues_any);
+        wheres.push(format!("(COALESCE(p.issues,0) & {mask}) <> 0"));
+    }
+    if q.burst_best_only {
+        wheres.push("(p.burst_id IS NULL OR p.rank_in_burst = 0)".into());
+    }
+    if let Some(b) = q.burst_id {
+        wheres.push("p.burst_id = ?".into());
+        args.push(Value::Integer(b));
+    }
+    if let Some(s) = &q.scene_type {
+        wheres.push("p.scene_type = ?".into());
+        args.push(Value::Text(s.clone()));
+    }
+    let id_list = |ids: &[i64]| {
+        ids.iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let mut state_conds: Vec<String> = q
+        .person_state
+        .iter()
+        .map(|s| match s {
+            PersonState::EyesOpen => format!("f.eyes_open >= {EYES_OPEN_MIN}"),
+            PersonState::Smiling => format!("f.smile >= {SMILE_MIN}"),
+            PersonState::Looking => format!("f.gaze >= {GAZE_MIN}"),
+            PersonState::Subject => "f.is_subject = 1".to_string(),
+        })
+        .collect();
+    if !q.include_background && !q.person_state.contains(&PersonState::Subject) {
+        state_conds.push("f.is_subject = 1".into());
+    }
+    if !q.persons.is_empty() {
+        let mut ids = q.persons.clone();
+        ids.sort_unstable();
+        ids.dedup();
+        let mut conds = vec![format!("f.person_id IN ({})", id_list(&ids))];
+        conds.extend(state_conds.iter().cloned());
+        let having = match q.person_mode {
+            PersonMode::All => format!(
+                " GROUP BY f.photo_id HAVING COUNT(DISTINCT f.person_id) = {}",
+                ids.len()
+            ),
+            PersonMode::Any => String::new(),
+        };
+        wheres.push(format!(
+            "p.id IN (SELECT f.photo_id FROM face f WHERE {}{having})",
+            conds.join(" AND ")
+        ));
+    } else if !q.person_state.is_empty() {
+        wheres.push(format!(
+            "EXISTS (SELECT 1 FROM face f WHERE f.photo_id = p.id AND {})",
+            state_conds.join(" AND ")
+        ));
+    }
+    if !q.exclude_persons.is_empty() {
+        let mut conds = vec![
+            "f.photo_id = p.id".to_string(),
+            format!("f.person_id IN ({})", id_list(&q.exclude_persons)),
+        ];
+        if !q.include_background {
+            conds.push("f.is_subject = 1".into());
+        }
+        wheres.push(format!(
+            "NOT EXISTS (SELECT 1 FROM face f WHERE {})",
+            conds.join(" AND ")
+        ));
+    }
+    if let Some(n) = q.faces_min {
+        wheres.push(format!(
+            "p.subject_face_count IS NOT NULL AND p.subject_face_count >= {n}"
+        ));
+    }
+    if let Some(n) = q.faces_max {
+        wheres.push(format!(
+            "p.subject_face_count IS NOT NULL AND p.subject_face_count <= {n}"
+        ));
+    }
 }
 
 fn get_session_exists(conn: &Connection, id: i64) -> Result<()> {

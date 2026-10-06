@@ -85,6 +85,55 @@ CREATE INDEX idx_photo_name ON photo(file_name COLLATE NOCASE);
     r#"
 ALTER TABLE photo ADD COLUMN taken_at_offset_min INTEGER;
 "#,
+    // v4: M2 analysis (docs/05 §1.1 + additive columns, see docs/api-contract-m2.md §B).
+    r#"
+ALTER TABLE photo ADD COLUMN face_count INTEGER;
+ALTER TABLE photo ADD COLUMN subject_face_count INTEGER;
+ALTER TABLE burst ADD COLUMN session_id INTEGER;
+ALTER TABLE burst ADD COLUMN start_at INTEGER;
+ALTER TABLE burst ADD COLUMN end_at INTEGER;
+ALTER TABLE scene ADD COLUMN session_id INTEGER;
+ALTER TABLE scene ADD COLUMN end_at INTEGER;
+CREATE INDEX idx_burst_session ON burst(session_id);
+CREATE INDEX idx_scene_session ON scene(session_id);
+CREATE TABLE analysis (
+  photo_id INTEGER PRIMARY KEY REFERENCES photo(id) ON DELETE CASCADE,
+  profile TEXT,                           -- additive: fast | standard
+  steps_done INTEGER DEFAULT 0,
+  model_versions TEXT,                    -- JSON {step: model id}
+  phash BLOB,                             -- 8 bytes, big endian
+  embedding BLOB,                         -- f16 little endian, L2-normalised
+  sharpness REAL, exposure REAL, noise REAL, tilt_deg REAL,
+  aesthetic REAL, iqa REAL, composition REAL,
+  mean_luminance REAL, clipped_highlights REAL, crushed_shadows REAL,   -- additive: issue inputs
+  scene_scores TEXT,                      -- additive: JSON
+  explain TEXT,                           -- JSON {contributions, reasons}
+  artifacts_dir TEXT,
+  analyzed_at INTEGER
+);
+CREATE TABLE person (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT, cover_face_id INTEGER, hidden INTEGER NOT NULL DEFAULT 0, beauty_profile TEXT,
+  center BLOB,                            -- additive: f16 mean identity embedding
+  created_at INTEGER
+);
+CREATE TABLE face (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  photo_id INTEGER NOT NULL REFERENCES photo(id) ON DELETE CASCADE,
+  idx INTEGER NOT NULL DEFAULT 0,         -- additive: position inside the photo's faces[]
+  person_id INTEGER REFERENCES person(id) ON DELETE SET NULL,
+  person_locked INTEGER NOT NULL DEFAULT 0,  -- additive: assigned by the user (must-link / cannot-link)
+  track_id INTEGER,
+  bbox_x REAL, bbox_y REAL, bbox_w REAL, bbox_h REAL,   -- normalised, display orientation
+  det_score REAL, embedding BLOB,         -- 512d f16
+  eyes_open REAL, smile REAL, gaze REAL, yaw REAL, pitch REAL, roll REAL,
+  sharpness REAL, occlusion REAL, expression_score REAL,
+  is_subject INTEGER NOT NULL DEFAULT 0, is_bystander INTEGER NOT NULL DEFAULT 0,
+  blendshapes TEXT
+);
+CREATE INDEX idx_face_person ON face(person_id, photo_id);
+CREATE INDEX idx_face_photo ON face(photo_id);
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.

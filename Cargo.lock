@@ -2126,10 +2126,12 @@ name = "ip-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "blake3",
  "dirs",
  "image",
  "ip-imaging",
+ "ip-worker-client",
  "rayon",
  "rusqlite",
  "serde",
@@ -2195,6 +2197,23 @@ dependencies = [
  "tokio-tungstenite 0.30.0",
  "tower",
  "tower-http",
+ "tracing",
+]
+
+[[package]]
+name = "ip-worker-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "getrandom 0.4.3",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
  "tracing",
 ]
 

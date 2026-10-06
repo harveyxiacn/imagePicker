@@ -1,10 +1,11 @@
 //! Typed event bus (`tokio::sync::broadcast`) and the per-connection coalescer used by the WebSocket.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
+use crate::analysis::types::RunState;
 use crate::model::{PhotoUpdate, Session, ThumbItem};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -26,6 +27,26 @@ pub enum Event {
         total: i64,
         state: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    #[serde(rename = "analysis.progress")]
+    AnalysisProgress {
+        session_id: i64,
+        state: RunState,
+        stage: Option<String>,
+        done: i64,
+        total: i64,
+    },
+    #[serde(rename = "analysis.updated")]
+    AnalysisUpdated { session_id: i64, ids: Vec<i64> },
+    #[serde(rename = "groups.updated")]
+    GroupsUpdated { session_id: i64 },
+    #[serde(rename = "people.updated")]
+    PeopleUpdated { session_id: i64 },
+    #[serde(rename = "worker.status")]
+    WorkerStatus {
+        state: String,
+        tier: Option<String>,
         error: Option<String>,
     },
 }
@@ -67,6 +88,11 @@ pub struct Coalescer {
     added: HashMap<i64, i64>,
     sessions: HashMap<i64, Session>,
     tasks: HashMap<String, Event>,
+    analysis_progress: HashMap<i64, Event>,
+    analysis_ids: HashMap<i64, Vec<i64>>,
+    groups: HashSet<i64>,
+    people: HashSet<i64>,
+    worker: Option<Event>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +102,11 @@ enum Key {
     Added(i64),
     Session(i64),
     Task(String),
+    AnalysisProgress(i64),
+    AnalysisIds(i64),
+    Groups(i64),
+    People(i64),
+    Worker,
 }
 
 impl Coalescer {
@@ -112,6 +143,35 @@ impl Coalescer {
             Event::SessionUpdated { session } => {
                 self.note(Key::Session(session.id));
                 self.sessions.insert(session.id, session);
+            }
+            ev @ Event::AnalysisProgress { .. } => {
+                let sid = match &ev {
+                    Event::AnalysisProgress { session_id, .. } => *session_id,
+                    _ => unreachable!(),
+                };
+                self.note(Key::AnalysisProgress(sid));
+                self.analysis_progress.insert(sid, ev);
+            }
+            Event::AnalysisUpdated { session_id, ids } => {
+                self.note(Key::AnalysisIds(session_id));
+                let e = self.analysis_ids.entry(session_id).or_default();
+                for id in ids {
+                    if !e.contains(&id) {
+                        e.push(id);
+                    }
+                }
+            }
+            Event::GroupsUpdated { session_id } => {
+                self.note(Key::Groups(session_id));
+                self.groups.insert(session_id);
+            }
+            Event::PeopleUpdated { session_id } => {
+                self.note(Key::People(session_id));
+                self.people.insert(session_id);
+            }
+            ev @ Event::WorkerStatus { .. } => {
+                self.note(Key::Worker);
+                self.worker = Some(ev);
             }
             ev @ Event::TaskProgress { .. } => {
                 let id = match &ev {
@@ -150,6 +210,34 @@ impl Coalescer {
                 }
                 Key::Task(id) => {
                     if let Some(ev) = self.tasks.remove(&id) {
+                        out.push(ev);
+                    }
+                }
+                Key::AnalysisProgress(sid) => {
+                    if let Some(ev) = self.analysis_progress.remove(&sid) {
+                        out.push(ev);
+                    }
+                }
+                Key::AnalysisIds(sid) => {
+                    if let Some(ids) = self.analysis_ids.remove(&sid) {
+                        out.push(Event::AnalysisUpdated {
+                            session_id: sid,
+                            ids,
+                        });
+                    }
+                }
+                Key::Groups(sid) => {
+                    if self.groups.remove(&sid) {
+                        out.push(Event::GroupsUpdated { session_id: sid });
+                    }
+                }
+                Key::People(sid) => {
+                    if self.people.remove(&sid) {
+                        out.push(Event::PeopleUpdated { session_id: sid });
+                    }
+                }
+                Key::Worker => {
+                    if let Some(ev) = self.worker.take() {
                         out.push(ev);
                     }
                 }
@@ -208,6 +296,53 @@ mod tests {
             matches!(&out[2], Event::PhotosUpdated { items } if items.len() == 1 && items[0].user_rating == Some(4))
         );
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn m2_events_coalesce() {
+        let mut c = Coalescer::default();
+        for ids in [vec![1, 2], vec![2, 3]] {
+            c.push(Event::AnalysisUpdated { session_id: 1, ids });
+        }
+        c.push(Event::AnalysisUpdated {
+            session_id: 2,
+            ids: vec![9],
+        });
+        for done in [1, 5] {
+            c.push(Event::AnalysisProgress {
+                session_id: 1,
+                state: RunState::Running,
+                stage: Some("analyzing".into()),
+                done,
+                total: 10,
+            });
+        }
+        c.push(Event::GroupsUpdated { session_id: 1 });
+        c.push(Event::GroupsUpdated { session_id: 1 });
+        c.push(Event::PeopleUpdated { session_id: 1 });
+        for st in ["starting", "ready"] {
+            c.push(Event::WorkerStatus {
+                state: st.into(),
+                tier: None,
+                error: None,
+            });
+        }
+        let out = c.drain();
+        assert_eq!(out.len(), 6);
+        assert_eq!(
+            out[0],
+            Event::AnalysisUpdated {
+                session_id: 1,
+                ids: vec![1, 2, 3]
+            }
+        );
+        assert!(matches!(&out[2], Event::AnalysisProgress { done: 5, .. }));
+        assert!(matches!(&out[5], Event::WorkerStatus { state, .. } if state == "ready"));
+        let v = serde_json::to_value(&out[5]).unwrap();
+        assert_eq!(v["type"], "worker.status");
+        assert!(v["error"].is_null() && v.get("error").is_some());
+        let v = serde_json::to_value(&out[2]).unwrap();
+        assert_eq!(v["state"], "running");
     }
 
     #[test]
