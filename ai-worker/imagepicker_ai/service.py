@@ -12,6 +12,7 @@ from typing import Any
 
 from . import PROTOCOL_VERSION, __version__
 from . import hw as hwmod
+from .beauty import BeautyPreparer
 from .errors import DownloadFailed, InvalidParams, RpcError
 from .masks import TARGETS as MASK_TARGETS
 from .masks import MaskGenerator
@@ -22,6 +23,7 @@ from .paths import resolve_models_dir
 from .pipeline import Analyzer
 from .rpc import Ctx, RpcServer
 from .steps import PROFILES, STEPS
+from .steps.face_search import faces_embed
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ class WorkerService:
         self.manager = ModelManager(self.models_dir, self.registry, self.hw)
         self.analyzer = Analyzer(self.manager, self.hw, decode_workers=decode_workers)
         self.masks = MaskGenerator(self.manager, self.hw)
+        self.beauty = BeautyPreparer(self.masks)
         self.io_pool = ThreadPoolExecutor(2, thread_name_prefix="io")
         self.idle_unload_s = idle_unload_s
         self.started_at = time.time()
@@ -61,6 +64,8 @@ class WorkerService:
             "models.unload": self.models_unload,
             "analyze.batch": self.analyze_batch,
             "mask.generate": self.mask_generate,
+            "beauty.prepare": self.beauty_prepare,
+            "faces.embed": self.faces_embed,
         }
 
     # ------------------------------------------------------------------ lifecycle
@@ -75,6 +80,7 @@ class WorkerService:
             self._sweeper.cancel()
         await self.server.stop()
         self.analyzer.shutdown()
+        self.beauty.shutdown()
         self.masks.shutdown()
         self.manager.unload()
         self.io_pool.shutdown(wait=False, cancel_futures=True)
@@ -130,6 +136,7 @@ class WorkerService:
             "models_dir": str(self.models_dir),
             "profiles": profiles,
             # what `models.ensure` must fetch on this machine for each mask target
+            "beauty_models": self.beauty.required_models(),
             "mask_models": {
                 t: self.masks.required_models(t) + self.masks.optional_models(t)
                 for t in MASK_TARGETS
@@ -188,6 +195,12 @@ class WorkerService:
 
     async def mask_generate(self, params: Any, ctx: Ctx) -> dict[str, Any]:
         return await self.masks.generate(params, lambda p: ctx.progress(**p))
+
+    async def beauty_prepare(self, params: Any, ctx: Ctx) -> dict[str, Any]:
+        return await self.beauty.prepare(params, lambda p: ctx.progress(**p))
+
+    async def faces_embed(self, params: Any, _ctx: Ctx) -> dict[str, Any]:
+        return await faces_embed(self.analyzer, params, self.analyzer.decode_pool)
 
 
 def _model_ids(params: Any) -> list[str]:

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Aperture, CheckCircle2, FolderOpen, ImageOff, Loader2, Settings, Trash2, Upload } from 'lucide-react'
+import { Aperture, CheckCircle2, FolderOpen, HeartHandshake, ImageOff, Loader2, Settings, Trash2, Upload } from 'lucide-react'
 import { useMemo, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
@@ -59,6 +59,10 @@ export function Home() {
         </div>
         <div className="flex items-center gap-2">
           <HeaderControls />
+          <Link to="/taste" className="btn btn-ghost" data-testid="home-taste-link">
+            <HeartHandshake size={15} />
+            {t('taste.title')}
+          </Link>
           <button className="btn btn-ghost" disabled title={t('common.soon')}>
             <Settings size={15} />
             {t('home.settings')}

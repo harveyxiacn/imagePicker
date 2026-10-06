@@ -1,4 +1,4 @@
-import { ChevronLeft, Columns2, Download, GalleryHorizontal, HelpCircle, LayoutGrid, PanelRight, Search, Square, Users } from 'lucide-react'
+import { ChevronLeft, Columns2, Download, GalleryHorizontal, HelpCircle, LayoutGrid, PanelLeft, PanelRight, Search, Square, Users } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import type { Session } from '@/api/types'
@@ -26,9 +26,21 @@ export function TopBar({ sessionId, session, onView }: Props) {
   const setInspectorOpen = useUi((s) => s.setInspectorOpen)
   const setHelpOpen = useUi((s) => s.setHelpOpen)
   const setExportOpen = useUi((s) => s.setExportOpen)
+  const sidebarOpen = useUi((s) => s.sidebarOpen)
+  const setSidebarOpen = useUi((s) => s.setSidebarOpen)
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-2 sm:gap-3 sm:px-3">
+      <button
+        className="btn btn-ghost btn-icon"
+        aria-pressed={sidebarOpen}
+        aria-label={t('collections.toggle')}
+        title={t('collections.toggle')}
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        data-testid="sidebar-toggle"
+      >
+        <PanelLeft size={16} />
+      </button>
       <Link to="/" className="btn btn-ghost" aria-label={t('common.back')} title={t('common.back')}>
         <ChevronLeft size={16} />
         <span className="hidden max-w-48 truncate font-semibold sm:inline">{session?.title ?? '…'}</span>

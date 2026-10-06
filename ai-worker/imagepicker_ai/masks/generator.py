@@ -94,6 +94,18 @@ def write_png(path: Path, alpha_u8: np.ndarray) -> None:
     os.replace(tmp, path)
 
 
+def load_upright(path: str, size: int, orientation: int | None) -> np.ndarray:
+    """Decode to an upright RGB uint8 array whose long edge is exactly `size` (up- or downscaled)."""
+    d = load_image(path, size, orientation)
+    rgb = d.rgb
+    long_edge = max(d.width, d.height)
+    if long_edge != size:
+        s = size / long_edge
+        nw, nh = max(1, round(d.width * s)), max(1, round(d.height * s))
+        rgb = cv2.resize(rgb, (nw, nh), interpolation=cv2.INTER_CUBIC if s > 1 else cv2.INTER_AREA)
+    return np.ascontiguousarray(rgb)
+
+
 @dataclass
 class MaskRequest:
     photo_id: Any
@@ -378,16 +390,7 @@ class MaskGenerator:
             return self._compute(photo, target, bbox)
 
     def _load_photo(self, req: MaskRequest) -> _Photo:
-        d = load_image(req.path, req.size, req.orientation)
-        rgb = d.rgb
-        long_edge = max(d.width, d.height)
-        if long_edge != req.size:
-            s = req.size / long_edge
-            nw, nh = max(1, round(d.width * s)), max(1, round(d.height * s))
-            rgb = cv2.resize(
-                rgb, (nw, nh), interpolation=cv2.INTER_CUBIC if s > 1 else cv2.INTER_AREA
-            )
-        return _Photo(np.ascontiguousarray(rgb))
+        return _Photo(load_upright(req.path, req.size, req.orientation))
 
     async def generate(self, params: Any, progress: ProgressFn | None = None) -> dict[str, Any]:
         req = MaskRequest.parse(params)

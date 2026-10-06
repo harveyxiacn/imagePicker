@@ -191,10 +191,11 @@ interface Props {
   onOpen: (id: number) => void
   onToggleStack: (burstId: number) => void
   onToggleScene: (sceneId: number) => void
+  onContext?: (e: React.MouseEvent, id: number) => void
 }
 
 /** Virtualized thumbnail grid with scene headers and stacks: only visible rows are mounted (20k+ items). */
-export function Grid({ items, onOpen, onToggleStack, onToggleScene }: Props) {
+export function Grid({ items, onOpen, onToggleStack, onToggleScene, onContext }: Props) {
   const { t } = useTranslation()
   const [ref, size] = useElementSize<HTMLDivElement>()
   const thumbSize = useUi((s) => s.thumbSize)
@@ -291,6 +292,10 @@ export function Grid({ items, onOpen, onToggleStack, onToggleScene }: Props) {
       className="h-full overflow-y-auto"
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      onContextMenu={(e) => {
+        const id = idFromEvent(e)
+        if (id !== null && onContext) onContext(e, id)
+      }}
       role="grid"
       aria-label={t('grid.label')}
       aria-rowcount={rows.length}

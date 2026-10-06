@@ -9,6 +9,7 @@ import { HSL_BANDS } from '@/api/types'
 import { curveFn } from '@/lib/curves'
 import { getCrop, isEmptyStack, isGlobal, isLocal, isLut, isSharpen, normalizeStack } from '@/lib/edit'
 import { drawMask } from './masks'
+import { applyBeauty, applyWarps } from './portrait'
 import { photoSvg } from './svg'
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
@@ -274,6 +275,8 @@ export async function renderMock(p: Photo, stackIn: EditStack, opts: MockRenderO
     const data = ctx.getImageData(0, 0, cw, ch)
     const px = data.data
     const n = cw * ch
+    const cropRect = (crop?.rect ?? [0, 0, 1, 1]) as [number, number, number, number]
+    applyWarps(px, cw, ch, stack, p, cropRect)
     for (const op of stack.ops) {
       if (isGlobal(op)) {
         const { type: _t, ...adj } = op
@@ -288,6 +291,7 @@ export async function renderMock(p: Photo, stackIn: EditStack, opts: MockRenderO
         geom(c)
       }, p, W, H)
     }
+    applyBeauty(px, cw, ch, stack, p, cropRect)
     for (const op of stack.ops) {
       if (isLut(op)) {
         const f = MOCK_LUTS[op.file] ?? MOCK_LUTS.teal_orange

@@ -1,4 +1,4 @@
-import { ChevronsUpDown, Layers, Star, X } from 'lucide-react'
+import { ChevronsUpDown, FolderPlus, Layers, Star, X } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePeople } from '@/api/queries'
@@ -76,7 +76,7 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
 
   const personPill = p.include.length > 0
   const preset = facesPreset(p)
-  const showPills = personPill || p.exclude.length > 0 || preset !== 'any' || filter.issueMode !== 'all' || filter.sceneType !== null
+  const showPills = personPill || p.exclude.length > 0 || preset !== 'any' || filter.issueMode !== 'all' || filter.sceneType !== null || filter.bestOnly || filter.edited
 
   return (
     <div className="shrink-0 border-b border-line">
@@ -220,10 +220,16 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
         </div>
 
         {active && (
-          <button className="btn btn-ghost" onClick={resetFilter}>
-            <X size={13} />
-            {t('filter.clear')}
-          </button>
+          <>
+            <button className="btn btn-ghost" onClick={resetFilter}>
+              <X size={13} />
+              {t('filter.clear')}
+            </button>
+            <button className="btn" onClick={() => useUi.getState().setSaveCollectionOpen(true)} title={t('collections.save')} data-testid="filter-save-collection">
+              <FolderPlus size={14} />
+              {t('collections.save')}
+            </button>
+          </>
         )}
 
         <div className="ml-auto flex items-center gap-4">
@@ -282,6 +288,16 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
               <span>
                 {filter.issueMode === 'none' ? t('filter.issues_none') : filter.issues.length ? filter.issues.map((i) => t(`issue.${i}`)).join(' / ') : t('filter.issues_any')}
               </span>
+            </Pill>
+          )}
+          {filter.bestOnly && (
+            <Pill label={t('collections.builtin_best_per_group')} onRemove={() => setFilter({ bestOnly: false })}>
+              <span>{t('collections.builtin_best_per_group')}</span>
+            </Pill>
+          )}
+          {filter.edited && (
+            <Pill label={t('collections.builtin_edited')} onRemove={() => setFilter({ edited: false })}>
+              <span>{t('collections.builtin_edited')}</span>
             </Pill>
           )}
           {filter.sceneType && (

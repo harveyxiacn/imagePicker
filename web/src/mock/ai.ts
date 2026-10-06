@@ -41,6 +41,9 @@ const MODELS: ModelInfo[] = [
   { id: 'scrfd-10g', task: ['face_detect'], size_mb: 17, license: 'insightface NC', noncommercial: true, installed: false, required_for: [] },
   // M3 AI masks (not part of any analysis profile; fetched on first use of a mask)
   { id: 'sky-seg', task: ['mask_sky'], size_mb: 28, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
+  // M4 portrait geometry (fetched on first use of the beauty panel)
+  { id: 'mediapipe-pose-landmarker', task: ['pose'], size_mb: 9, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
+  { id: 'selfie-multiclass', task: ['mask_skin', 'mask_person'], size_mb: 16, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
   { id: 'sam2-tiny', task: ['mask_subject', 'mask_person'], size_mb: 156, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
 ]
 
@@ -632,6 +635,59 @@ function toFace(f: FaceRec): Face {
   return face
 }
 
+// ============================================================================
+// M4 helpers (people of a photo, session faces) used by mock/m4.ts and the mock renderer
+// ============================================================================
+
+export interface MockPhotoPerson {
+  face_id: number
+  person_id: number | null
+  person_name: string | null
+  face_box: [number, number, number, number]
+  is_subject: boolean
+  has_pose: boolean
+  /** ground-truth identity index (avatar style) */
+  pi: number
+}
+
+/** First id of the synthetic faces of photos that were never analysed (`SYNTHETIC_FACE_BASE + pi`). */
+export const SYNTHETIC_FACE_BASE = 9_000_000
+
+/** People in a photo: analysed faces when present, else the photo's ground-truth tracks (so the beauty panel works before analysis). */
+export function mockPeopleOfPhoto(p: Photo): MockPhotoPerson[] {
+  const ai = photoAi.get(p.id)
+  const hasPose = (box: [number, number, number, number], subject: boolean, pi: number) => subject && box[2] >= 0.11 && !(pi === 6 && p.id % 2 === 1)
+  if (ai) {
+    return ai.faces.map((f) => ({
+      face_id: f.id,
+      person_id: f.person_id,
+      person_name: f.person_name,
+      face_box: f.bbox,
+      is_subject: f.is_subject,
+      has_pose: hasPose(f.bbox, f.is_subject, f.pi),
+      pi: f.pi,
+    }))
+  }
+  const aspect = (p.width ?? 3) / (p.height ?? 2)
+  return truthFor(burstKeyOf(p.id)).tracks.map((tr) => {
+    const h = Math.min(0.9, tr.w * aspect)
+    const box: [number, number, number, number] = [r2(Math.min(0.98 - tr.w, Math.max(0.01, tr.x))), r2(Math.min(0.98 - h, tr.y)), r2(tr.w), r2(h)]
+    return {
+      face_id: SYNTHETIC_FACE_BASE + tr.pi,
+      person_id: tr.pi + 1,
+      person_name: people.get(tr.pi + 1)?.name ?? null,
+      face_box: box,
+      is_subject: !tr.bg,
+      has_pose: hasPose(box, !tr.bg, tr.pi),
+      pi: tr.pi,
+    }
+  })
+}
+
+export const peopleListOf = (sessionId: number | null): Person[] => peopleList(sessionId)
+export const sessionFaces = (sessionId: number): Face[] => facesOfSession(sessionId).map(toFace)
+export const personAvatarStyle = (personId: number): number => people.get(personId)?.style ?? personId
+
 export function seedAiMock(): void {
   // nothing to seed: everything is derived on demand
 }
@@ -810,9 +866,16 @@ export const aiHandlers = [
   }),
 
   http.get('/api/faces/:id/crop', ({ params, request }) => {
-    const f = faceById.get(Number(params.id))
-    if (!f) return err(404, 'not_found', 'face not found')
+    const fid = Number(params.id)
     const s = Number(new URL(request.url).searchParams.get('s') ?? 128)
+    if (fid >= SYNTHETIC_FACE_BASE) {
+      const pi = fid - SYNTHETIC_FACE_BASE
+      return new HttpResponse(avatarSvg(avatarStyleOf(pi), 1, 0.4, s), {
+        headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' },
+      })
+    }
+    const f = faceById.get(fid)
+    if (!f) return err(404, 'not_found', 'face not found')
     const style = people.get(f.person_id ?? -1)?.style ?? f.pi
     return new HttpResponse(avatarSvg(avatarStyleOf(style), f.eyes_open ?? 1, f.smile ?? 0.3, s), {
       headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' },

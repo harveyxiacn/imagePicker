@@ -33,6 +33,8 @@ Authenticate with `Authorization: Bearer <token>` or `ws://host:port/?token=<tok
 | `models.unload` `{id?}` | free VRAM |
 | `analyze.batch` | `{items:[{photo_id,path,orientation?}], profile?:"fast"\|"standard", steps?:[..], analysis_size, out_dir, allow_download?}`; `progress` `{req,kind:"analyze",done,total}` |
 | `mask.generate` | `{photo:{photo_id,path,orientation?}, targets:[..], person_bbox?:[x,y,w,h], size, out_dir, allow_download?}` -> `{masks,models,skipped}`; `progress` `{req,kind:"mask",done,total}` when more than one target runs (see below) |
+| `beauty.prepare` | `{photo:{photo_id,path,orientation?}, faces?:[{face_id,bbox}], size, out_dir, allow_download?}` -> `{people,models,skipped,timings}` (below) |
+| `faces.embed` | `{path, orientation?, analysis_size?, allow_download?}` -> `{faces:[{bbox,det_score}], embeddings:[[512 floats]]}`: AuraFace, L2-normalised, same decode / YuNet / alignment as `identity`, rows aligned with `faces`, no files |
 | `system.shutdown`, `system.ping`, `cancel {req}` | lifecycle / cancel an in-flight request |
 
 ### Steps and profiles (contract `docs/api-contract-m2.md` section A)
@@ -80,6 +82,33 @@ filter on the luminance at output resolution.
 `models.list` also returns `mask_models` (`{target: [model ids]}`) for `models.ensure`. YuNet is an optional helper for
 `person` / `skin` / `hair` / `clothes` (other people, small-person crops).
 
+## Portrait geometry (`beauty.prepare`, contract `docs/api-contract-m4.md` section B)
+
+Per face (given `bbox`es, normalised upright; when `faces` is empty YuNet detects them and `face_id` is `null`;
+at most 12 faces) the result carries `face_box`, `face_landmarks` (478 MediaPipe Face Mesh points on a face crop, `[]`
+if unavailable), `pose` (33 MediaPipe Pose Landmarker keypoints `[x, y, visibility]` of the body that owns the
+face, `[]` if none; coordinates may lie slightly outside 0..1 for cropped limbs), `skin_mask`, `body_mask`
+(8-bit PNG, long edge = `size`, upright, `<out_dir>/<photo_id>_<face_id|f<index>>_skin.png|_body.png`, `null` when
+the models are missing) and `blemishes` (`[x, y, r]`, r relative to the long edge, at most 24 per face).
+`models` names what produced each part, `skipped` maps `face_landmarks | pose | body_mask | skin_mask | blemishes | faces`
+to `model_unavailable`, `download_failed`, `out_of_memory`, `failed` or `requires_body_and_landmarks`; `timings` is a
+per-stage wall-clock breakdown (seconds, summed over faces).
+
+| part | how |
+|---|---|
+| landmarks | `mediapipe-face-landmarker` on a square crop (face + 35 % margin); of up to 4 faces in the crop the one nearest the box centre is taken |
+| pose | `mediapipe-pose-landmarker-full` (Apache-2.0, 9.4 MB) on a body crop (3.2 face widths either side, 1.2 above, 8 below), up to 4 poses; the pose whose visible head keypoints (nose, eyes, ears, mouth) are nearest the face-box centre (< 0.6 face sizes, nose inside the box +35 %) wins |
+| body | BiRefNet person selection of `mask.generate` (`select_person`), plus pose skeletons (shoulder-hip-limb polylines) as extra watershed seeds, so touching people keep their own arms; pixels still claimed by two people go to the nearest seed |
+| skin | selfie-multiclass (face-skin + body-skin) x the person's matte, guided filter, minus the eye / eyebrow / outer-lip polygons below (dilated by 1.2 % / 1.0 % / 1.0 % of the face width, feathered) |
+| blemishes | DoG blob detector on masked Lab L and a* (see `beauty/blemish.py`): radii 1.2-5 % of the face width, robust z >= 4.5 plus >= 2.5 Lab units contrast, 3x3x3 NMS, rejected on edge / line structure (Hessian eigenvalue ratio), eyes / brows / lips / nostrils (+ margins), hair, non-skin, outside the face oval |
+
+Landmark index sets (`imagepicker_ai/beauty/landmarks.py`, MediaPipe canonical topology, subject's left/right):
+`RIGHT_EYE` 33 7 163 144 145 153 154 155 133 173 157 158 159 160 161 246; `LEFT_EYE` 362 382 381 380 374 373 390 249 263 466 388 387 386 385 384 398;
+`RIGHT_BROW` 46 53 52 65 55 107 66 105 63 70; `LEFT_BROW` 276 283 282 295 285 336 296 334 293 300;
+`LIPS_OUTER` 61 146 91 181 84 17 314 405 321 375 291 409 270 269 267 0 37 39 40 185 (removed from the skin, includes mouth opening / teeth);
+`LIPS_INNER` 78 95 88 178 87 14 317 402 318 324 308 415 310 311 312 13 82 81 80 191; `FACE_OVAL` 10 338 297 332 284 251 389 356 454 323 361 288 397 365 379 378 400 377 152 148 176 149 150 136 172 58 132 93 234 127 162 21 54 103 67 109;
+`NOSTRILS` (blemish rejection hull) 48 64 98 97 2 326 327 294 278 331 279 360 438 457 237 218 129 358; iris points 468-477.
+
 ## Develop
 
 ```bash
@@ -87,5 +116,6 @@ uv run pytest                # fast tests, no downloads
 uv run pytest -m models      # needs model weights (downloaded into .models/ on first run) + network
 uv run ruff check . && uv run ruff format .
 uv run python scripts/bench_analyze.py --synth 200 [--device cpu] [--profile fast|standard] [--portrait some_face.jpg]
+uv run python scripts/bench_beauty.py a.jpg b.jpg [--device cpu] [--side-by-side]   # ms per face of beauty.prepare
 uv run python scripts/export_siglip2_onnx.py --out .models/export/x   # only for models without an ONNX export
 ```

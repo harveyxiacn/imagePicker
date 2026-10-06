@@ -34,6 +34,10 @@ export interface FilterState {
   issues: Issue[]
   sceneType: SceneType | null
   person: PersonFilter
+  /** M4: only the best shot of every burst (built-in collection "each group's best") */
+  bestOnly: boolean
+  /** M4: only photos that carry saved edits */
+  edited: boolean
   sort: SortKey
 }
 
@@ -46,6 +50,8 @@ export const DEFAULT_FILTER: FilterState = {
   issues: [],
   sceneType: null,
   person: DEFAULT_PERSON_FILTER,
+  bestOnly: false,
+  edited: false,
   sort: 'taken_at',
 }
 
@@ -63,6 +69,8 @@ export function buildPhotosQuery(sessionId: number, f: FilterState): PhotosListQ
   if (f.issueMode === 'none') q.issues_none = true
   else if (f.issueMode === 'any') q.issues_any = f.issues.length ? [...f.issues] : [...ALL_ISSUES]
   if (f.sceneType) q.scene_type = f.sceneType
+  if (f.bestOnly) q.burst_best_only = true
+  if (f.edited) q.has_edits = true
   const p = f.person
   if (p.include.length) {
     q.persons = [...p.include]
@@ -89,6 +97,8 @@ export function isFilterActive(f: FilterState): boolean {
     f.color !== null ||
     f.issueMode !== 'all' ||
     f.sceneType !== null ||
+    f.bestOnly ||
+    f.edited ||
     isPersonFilterActive(f.person)
   )
 }
