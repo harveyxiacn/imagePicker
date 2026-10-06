@@ -158,6 +158,83 @@ pub struct ModelsListing {
     pub profiles: std::collections::BTreeMap<String, ProfileInfo>,
     /// Models portrait retouching needs: ids, or objects with an `id` (kept raw on purpose).
     pub beauty_models: serde_json::Value,
+    /// Every other top-level key, e.g. `besttake_models`, `inpaint_models` (`{lama: [..],
+    /// sdxl: [..]}`) and `enhance_models` (`{denoise: [..], upscale: {"2": [..]}}`).
+    #[serde(flatten)]
+    pub extra: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+impl ModelsListing {
+    /// The exact model ids the worker says `<feature>_models` needs on this machine, following
+    /// `path` into nested maps (e.g. `("enhance", &["upscale", "2"])`). `None` if the worker
+    /// does not publish such a list. Entries may be ids or objects with an `id`; an object
+    /// node reached at the end of `path` contributes the ids of all its values.
+    pub fn named_models(&self, feature: &str, path: &[&str]) -> Option<Vec<String>> {
+        let key = format!("{feature}_models");
+        let mut node = if feature == "beauty" {
+            &self.beauty_models
+        } else {
+            self.extra.get(&key)?
+        };
+        for p in path {
+            node = node.get(*p)?;
+        }
+        let mut out = Vec::new();
+        collect_ids(node, &mut out);
+        Some(out)
+    }
+}
+
+fn collect_ids(v: &serde_json::Value, out: &mut Vec<String>) {
+    match v {
+        serde_json::Value::String(s) => {
+            if !out.contains(s) {
+                out.push(s.clone())
+            }
+        }
+        serde_json::Value::Array(a) => a.iter().for_each(|x| collect_ids(x, out)),
+        serde_json::Value::Object(o) => match o.get("id").and_then(|i| i.as_str()) {
+            Some(id) => collect_ids(&serde_json::Value::String(id.to_string()), out),
+            None => o.values().for_each(|x| collect_ids(x, out)),
+        },
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod named_models_tests {
+    use super::*;
+
+    #[test]
+    fn reads_nested_feature_lists() {
+        let l: ModelsListing = serde_json::from_value(serde_json::json!({
+            "models": [],
+            "beauty_models": ["face-landmarker"],
+            "besttake_models": ["birefnet-lite-fp16", {"id": "selfie"}],
+            "inpaint_models": {"lama": ["lama-big-fp32"], "sdxl": ["sdxl-inpaint"]},
+            "enhance_models": {"denoise": ["scunet"], "upscale": {"2": ["esr-x2"], "4": ["esr-x4"]}}
+        }))
+        .unwrap();
+        assert_eq!(l.named_models("beauty", &[]).unwrap(), ["face-landmarker"]);
+        assert_eq!(
+            l.named_models("besttake", &[]).unwrap(),
+            ["birefnet-lite-fp16", "selfie"]
+        );
+        assert_eq!(
+            l.named_models("inpaint", &["lama"]).unwrap(),
+            ["lama-big-fp32"]
+        );
+        assert_eq!(
+            l.named_models("enhance", &["upscale", "4"]).unwrap(),
+            ["esr-x4"]
+        );
+        assert_eq!(
+            l.named_models("enhance", &["upscale"]).unwrap(),
+            ["esr-x2", "esr-x4"]
+        );
+        assert!(l.named_models("enhance", &["face_restore"]).is_none());
+        assert!(l.named_models("nope", &[]).is_none());
+    }
 }
 
 /// Photo of a `mask.generate` request.

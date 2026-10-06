@@ -506,12 +506,23 @@ fn is_fatal(e: &CoreError) -> bool {
 impl Core {
     /// 409 when `models.list` reports a model of `feature` (`besttake`, `inpaint`, `enhance`)
     /// as not installed, 503/504 when the worker cannot be reached.
-    pub(crate) async fn preflight_models(&self, feature: &str) -> Result<()> {
+    /// 409 `models_missing` up front when the models `feature` (narrowed by `path`, e.g.
+    /// `("inpaint", &["lama"])`) needs are not installed. Prefers the worker's exact
+    /// `<feature>_models` list; falls back to `required_for` tags, ignoring optional models
+    /// (e.g. the SDXL "pro" pack must not block LaMa inpainting).
+    pub(crate) async fn preflight_models(&self, feature: &str, path: &[&str]) -> Result<()> {
         let listing = self.worker.models_list().await.map_err(map_worker_err)?;
+        let named = listing.named_models(feature, path);
         let missing: Vec<String> = listing
             .models
             .iter()
-            .filter(|m| !m.installed && m.required_for.iter().any(|s| s == feature))
+            .filter(|m| {
+                !m.installed
+                    && match &named {
+                        Some(ids) => ids.contains(&m.id),
+                        None => !m.optional && m.required_for.iter().any(|s| s == feature),
+                    }
+            })
             .map(|m| m.id.clone())
             .collect();
         if missing.is_empty() {
@@ -636,7 +647,7 @@ impl Core {
                 Ok((base, faces))
             })
             .await?;
-        self.preflight_models("besttake").await?;
+        self.preflight_models("besttake", &[]).await?;
         let task_id = format!("besttake-{}", self.next_task_seq());
         let items: Vec<(BestTakeChoice, Face, Face, PhotoRef)> = req
             .choices
@@ -893,7 +904,7 @@ impl Core {
                 "give bystanders, face_ids or strokes".to_string()
             }));
         }
-        self.preflight_models("inpaint").await?;
+        self.preflight_models("inpaint", &[model.as_str()]).await?;
         let task_id = format!("inpaint-{}", self.next_task_seq());
         self.task_progress(
             &task_id,
@@ -1073,7 +1084,7 @@ impl Core {
         if op == "face_restore" && faces.is_empty() {
             return Err(CoreError::Unprocessable("the photo has no faces".into()));
         }
-        self.preflight_models("enhance").await?;
+        self.preflight_models("enhance", &[op.as_str()]).await?;
         let task_id = format!("enhance-{}", self.next_task_seq());
         self.task_progress(&task_id, "enhance", 0, 1, "running", None);
         let (core, tid) = (self.clone(), task_id.clone());

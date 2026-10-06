@@ -15,6 +15,7 @@ use crate::edit::sync::SyncKind;
 use crate::edit::{validate_stack, SyncRequest};
 use crate::fake_worker::{
     person, FakeFace, FakeSpec, FakeWorker, BESTTAKE_MODEL, ENHANCE_MODEL, INPAINT_MODEL,
+    SDXL_MODEL,
 };
 use crate::generate::{auto_choices, body_box, plan_from_tracks, MaskCanvas, Stroke};
 use crate::testutil::{write_jpeg, FakeImaging, FakeRenderer};
@@ -1946,4 +1947,22 @@ async fn partial_portrait_geometry_is_rebuilt_after_the_models_arrive() {
         .unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(s.e.core.photo_people(a1).await.unwrap().ready);
+}
+
+#[tokio::test]
+async fn optional_sdxl_pack_never_blocks_lama_inpainting() {
+    let e = env();
+    // The 6.7 GB SDXL "pro" pack is not installed; LaMa is.
+    e.worker.set_missing(&[SDXL_MODEL]);
+    e.core.preflight_models("inpaint", &["lama"]).await.unwrap();
+    match e.core.preflight_models("inpaint", &["sdxl"]).await {
+        Err(CoreError::ModelsMissing(m)) => assert_eq!(m, vec![SDXL_MODEL.to_string()]),
+        other => panic!("expected models_missing for sdxl, got {other:?}"),
+    }
+    // Features without an exact list fall back to tags, still ignoring optional models.
+    e.worker.set_missing(&[SDXL_MODEL, ENHANCE_MODEL]);
+    match e.core.preflight_models("enhance", &["denoise"]).await {
+        Err(CoreError::ModelsMissing(m)) => assert_eq!(m, vec![ENHANCE_MODEL.to_string()]),
+        other => panic!("expected models_missing for enhance, got {other:?}"),
+    }
 }

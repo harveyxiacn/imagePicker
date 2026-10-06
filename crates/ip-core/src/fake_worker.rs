@@ -16,6 +16,7 @@ pub const BEAUTY_MODEL: &str = "mediapipe-face";
 /// Ids of the fake M5 models (`required_for` `besttake` / `inpaint` / `enhance`).
 pub const BESTTAKE_MODEL: &str = "besttake-align";
 pub const INPAINT_MODEL: &str = "lama";
+pub const SDXL_MODEL: &str = "fake-sdxl-inpaint";
 pub const ENHANCE_MODEL: &str = "enhance-pack";
 
 /// One synthetic face.
@@ -385,6 +386,10 @@ impl AiWorker for FakeWorker {
                 models: vec!["yunet".into(), "siglip2-base".into()],
             },
         );
+        // like the real worker: an optional "pro" SDXL pack that must never block LaMa
+        let mut sdxl = m(SDXL_MODEL, 6700.0, &["inpaint", "pro"]);
+        sdxl.recommended = false;
+        sdxl.optional = true;
         let mut beauty = m(BEAUTY_MODEL, 12.0, &["beauty"]);
         beauty.recommended = false;
         beauty.optional = true;
@@ -396,9 +401,16 @@ impl AiWorker for FakeWorker {
                 m(BESTTAKE_MODEL, 20.0, &["besttake"]),
                 m(INPAINT_MODEL, 200.0, &["inpaint"]),
                 m(ENHANCE_MODEL, 300.0, &["enhance"]),
+                sdxl,
             ],
             profiles,
             beauty_models: json!([BEAUTY_MODEL]),
+            extra: [(
+                "inpaint_models".to_string(),
+                json!({"lama": [INPAINT_MODEL], "sdxl": [SDXL_MODEL]}),
+            )]
+            .into_iter()
+            .collect(),
         })
     }
     async fn models_ensure(

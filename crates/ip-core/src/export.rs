@@ -359,8 +359,10 @@ impl Core {
         if req.upscale.is_some_and(|s| s != 2 && s != 4) {
             return Err(CoreError::bad_request("upscale must be 2 or 4"));
         }
-        if req.upscale.is_some() {
-            self.preflight_models("enhance").await?;
+        if let Some(scale) = req.upscale {
+            let scale = scale.to_string();
+            self.preflight_models("enhance", &["upscale", scale.as_str()])
+                .await?;
         }
         let dest = PathBuf::from(&req.dest);
         std::fs::create_dir_all(&dest)
