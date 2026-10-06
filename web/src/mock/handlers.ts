@@ -16,6 +16,7 @@ import {
 import { aiHandlers, missingModelIds } from './ai'
 import { filterPhotos } from './query'
 import { m6Gate, m6Handlers } from './m6'
+import { m8Handlers } from './m8'
 import { editHandlers, renderEdited } from './edits'
 import { m4Handlers, recordTasteLabels } from './m4'
 import { m5Handlers } from './m5'
@@ -144,6 +145,7 @@ export const handlers = [
   ...editHandlers,
   ...m4Handlers,
   ...m6Handlers,
+  ...m8Handlers,
   ...m5Handlers,
 
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0-mock' })),

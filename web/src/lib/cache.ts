@@ -36,6 +36,8 @@ export const qk = {
   cacheInfo: ['cache'] as const,
   onboarding: ['onboarding'] as const,
   lan: ['lan'] as const,
+  remoteStatus: ['remote', 'status'] as const,
+  remoteDevices: ['remote', 'devices'] as const,
 }
 
 /** Photo fields owned by the analysis pipeline (never user-editable, safe to overwrite from the server). */

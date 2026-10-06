@@ -66,12 +66,13 @@ Home: drop a folder (desktop) or click *Choose folder* to import; *Recent* lists
 
 ### Windows
 
-1. Download `imagePicker_<version>_x64-setup.exe` (NSIS installer) and run it.
-2. If WebView2 is missing, install the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) first.
+1. Download `imagePicker_<version>_x64-setup.exe` (NSIS installer; `.msi` for managed deployment) and run it.
+2. The installers are **not code-signed yet**, so Windows SmartScreen may say "Windows protected your PC": click *More info → Run anyway*. You can verify the download against `SHA256SUMS.txt` on the Releases page (PowerShell: `Get-FileHash .\imagePicker_*_x64-setup.exe`).
+3. If WebView2 is missing, install the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) first.
 
 ### macOS
 
-Download the `.dmg` and drag the app to *Applications*. If Gatekeeper blocks the first launch, allow it in *System Settings → Privacy & Security*.
+Download the `.dmg` (universal: Intel and Apple silicon) and drag the app to *Applications*. The app is **not signed or notarised yet**, so Gatekeeper blocks the first launch: in Finder **right-click → Open → Open**, or click *Open Anyway* in *System Settings → Privacy & Security*, or run `xattr -dr com.apple.quarantine /Applications/imagePicker.app` in Terminal.
 
 ### Linux (incl. CachyOS / Arch)
 

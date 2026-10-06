@@ -7,6 +7,8 @@ import type { AnalysisProfile, WorkerState } from '@/api/types'
 import { analysisFraction, startAnalysis } from '@/lib/analysis'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useUi } from '@/stores/ui'
+import { useIsMobile } from '@/lib/useLayout'
+import { AnalyzeSheet } from './mobile/AnalyzeSheet'
 
 const PROFILES: AnalysisProfile[] = ['fast', 'standard']
 
@@ -64,9 +66,10 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
   const wrap = useRef<HTMLDivElement>(null)
   const onlySelected = useRef(false)
   const running = status.data?.state === 'running'
+  const isMobile = useIsMobile()
 
   useEffect(() => {
-    if (!open) return
+    if (!open || isMobile) return
     const onDown = (e: MouseEvent) => {
       if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false)
     }
@@ -77,7 +80,7 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
       document.removeEventListener('mousedown', onDown)
       window.removeEventListener('keydown', onKey)
     }
-  }, [open, setOpen])
+  }, [open, setOpen, isMobile])
 
   const start = async () => {
     setOpen(false)
@@ -86,6 +89,8 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
   }
 
   const pct = status.data && running ? Math.round(analysisFraction(status.data) * 100) : 0
+
+  if (isMobile) return <AnalyzeSheet sessionId={sessionId} photoCount={photoCount} />
 
   return (
     <div className="relative" ref={wrap}>

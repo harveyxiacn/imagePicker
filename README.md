@@ -67,7 +67,7 @@ NVIDIA 显卡需要安装 AI 组件的 CUDA 版本才会被识别为 GPU 档位�
 
 ### 安装与快速开始
 
-**普通用户**：安装包将发布在 [GitHub Releases](https://github.com/harveyxiacn/imagePicker/releases)（Windows / macOS / Linux 含 CachyOS）。发布前请使用下面的方式从源码运行。安装步骤详见 [用户指南 · 安装](docs/user-guide/zh-CN.md#2-安装)。
+**普通用户**：安装包将发布在 [GitHub Releases](https://github.com/harveyxiacn/imagePicker/releases)（Windows / macOS / Linux 含 CachyOS）。发布前请使用下面的方式从源码运行。安装包暂未代码签名：Windows 首次运行点「更多信息 → 仍要运行」，macOS 右键 → 打开。安装步骤详见 [用户指南 · 安装](docs/user-guide/zh-CN.md#2-安装)。
 
 **从源码运行（桌面版）**
 
@@ -162,7 +162,7 @@ NVIDIA GPUs are only recognised as a GPU tier when the AI components are install
 
 ### Install & quick start
 
-**End users:** installers will be published on [GitHub Releases](https://github.com/harveyxiacn/imagePicker/releases) (Windows / macOS / Linux incl. CachyOS). Until then run from source as below. Details: [User Guide · Installation](docs/user-guide/en.md#2-installation).
+**End users:** installers will be published on [GitHub Releases](https://github.com/harveyxiacn/imagePicker/releases) (Windows / macOS / Linux incl. CachyOS). Until then run from source as below. The installers are not code-signed yet: on Windows click *More info → Run anyway*, on macOS right-click → Open. Details: [User Guide · Installation](docs/user-guide/en.md#2-installation).
 
 **Run from source (desktop)**
 

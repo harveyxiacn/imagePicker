@@ -13,11 +13,13 @@ import { HistoryPanel } from '@/components/edit/HistoryPanel'
 import { ExportDialog } from '@/components/ExportDialog'
 import { Filmstrip } from '@/components/Filmstrip'
 import { GenTasks } from '@/components/GenTasks'
+import { HoldCompare, MobileEditDrawer } from '@/components/mobile/MobileEditDrawer'
 import { HelpOverlay } from '@/components/HelpOverlay'
 import { ModelConsentDialog } from '@/components/ModelConsentDialog'
 import { can } from '@/lib/auth'
 import { qk } from '@/lib/cache'
 import { flushSaves } from '@/lib/editActions'
+import { useIsMobile } from '@/lib/useLayout'
 import { isEmptyStack } from '@/lib/edit'
 import { useHistory } from '@/lib/history'
 import { useEdit } from '@/stores/edit'
@@ -37,6 +39,7 @@ export function Edit() {
   const navigate = useNavigate()
 
   const role = useMe().data?.role ?? 'owner'
+  const isMobile = useIsMobile()
   const filter = useUi((s) => s.filter)
   const exportOpen = useUi((s) => s.exportOpen)
   const photosQ = usePhotos(sessionId, filter)
@@ -125,7 +128,7 @@ export function Edit() {
             <Redo2 size={15} />
           </button>
         </div>
-        <div className="flex items-center gap-1" role="group" aria-label={t('edit.beforeAfter')}>
+        <div className="flex items-center gap-1 max-md:hidden" role="group" aria-label={t('edit.beforeAfter')}>
           <button className="btn" aria-pressed={compare === 'split'} onClick={actions.toggleSplit} data-testid="compare-split" title={t('edit.split')}>
             <Columns2 size={14} />
             <span className="hidden md:inline">{t('edit.split')}</span>
@@ -136,11 +139,11 @@ export function Edit() {
             <kbd>\</kbd>
           </button>
         </div>
-        <button className="btn" aria-pressed={historyOpen} onClick={() => useEdit.getState().setHistoryOpen(!historyOpen)} data-testid="history-toggle">
+        <button className="btn max-md:!hidden" aria-pressed={historyOpen} onClick={() => useEdit.getState().setHistoryOpen(!historyOpen)} data-testid="history-toggle">
           <History size={14} />
           <span className="hidden md:inline">{t('edit.history')}</span> ▸
         </button>
-        <button className="btn" disabled={!edited} onClick={actions.resetAll} data-testid="reset-all" title={t('edit.resetAll')}>
+        <button className="btn max-md:!hidden" disabled={!edited} onClick={actions.resetAll} data-testid="reset-all" title={t('edit.resetAll')}>
           <RotateCcw size={14} />
           <span className="hidden lg:inline">{t('edit.resetAll')}</span>
         </button>
@@ -158,14 +161,18 @@ export function Edit() {
       </header>
 
       <div className="relative flex min-h-0 flex-1">
-        <main className="min-w-0 flex-1">{photo ? <EditCanvas photo={photo} /> : <div className="flex h-full items-center justify-center text-muted"><Loader2 className="animate-spin" size={18} /></div>}</main>
-        <aside className="w-[320px] shrink-0 overflow-y-auto border-l border-line bg-panel" aria-label={t('edit.panel')}>
-          {photo && <EditPanel photo={photo} />}
-        </aside>
-        {historyOpen && <HistoryPanel />}
+        <main className="relative min-w-0 flex-1">{isMobile && <HoldCompare />}{photo ? <EditCanvas photo={photo} /> : <div className="flex h-full items-center justify-center text-muted"><Loader2 className="animate-spin" size={18} /></div>}</main>
+        {!isMobile && (
+          <aside className="w-[320px] shrink-0 overflow-y-auto border-l border-line bg-panel" aria-label={t('edit.panel')}>
+            {photo && <EditPanel photo={photo} />}
+          </aside>
+        )}
+        {historyOpen && !isMobile && <HistoryPanel />}
       </div>
 
-      <div className="flex h-9 shrink-0 items-center gap-2 border-t border-line bg-panel px-3" data-testid="edit-toolbar">
+      {isMobile && photo && <MobileEditDrawer photo={photo} />}
+
+      <div className="flex h-9 shrink-0 items-center gap-2 border-t border-line bg-panel px-3 max-md:hidden" data-testid="edit-toolbar">
         <button className="btn" onClick={actions.copy} title={`${t('edit.copySettings')} (Ctrl+Shift+C)`} data-testid="copy-settings">
           <ClipboardCopy size={14} />
           {t('edit.copySettings')}
@@ -185,7 +192,7 @@ export function Edit() {
         </span>
         <span className="text-xs text-muted">{photos.length > 0 && photo ? `${photos.findIndex((p) => p.id === photo.id) + 1} / ${photos.length}` : ''}</span>
       </div>
-      <Filmstrip photos={photos} activeId={photoId} onPick={go} />
+      {!isMobile && <Filmstrip photos={photos} activeId={photoId} onPick={go} />}
 
       <HelpOverlay />
       <ModelConsentDialog />

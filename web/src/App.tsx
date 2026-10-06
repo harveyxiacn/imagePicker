@@ -6,10 +6,13 @@ import { startEvents } from '@/api/events'
 import { useMe, useSettings } from '@/api/queries'
 import { can, LOGIN_PATH, loginTarget, setRole, shouldRedirectOn401 } from '@/lib/auth'
 import { qk } from '@/lib/cache'
+import { showsBottomNav } from '@/lib/layout'
+import { useIsMobile } from '@/lib/useLayout'
 import { onAssistantDone } from '@/lib/assistantRun'
 import { handleXmpConflict } from '@/lib/xmp'
 import { Login } from '@/pages/Login'
 import { Settings } from '@/pages/Settings'
+import { BottomNav } from '@/components/mobile/BottomNav'
 import { Onboarding } from '@/components/Onboarding'
 import { useAssistant } from '@/stores/assistant'
 import { genOnDone, genOnTask } from '@/lib/gen'
@@ -98,6 +101,8 @@ function Shell() {
   useLang()
   useAuthGuard()
   useAppearanceSync()
+  const isMobile = useIsMobile()
+  const { pathname } = useLocation()
   useEffect(
     () =>
       startEvents(queryClient, {
@@ -115,17 +120,22 @@ function Shell() {
   )
   return (
     <>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/s/:sessionId" element={<Library />} />
-        <Route path="/s/:sessionId/people" element={<People />} />
-        <Route path="/s/:sessionId/edit/:photoId" element={<Edit />} />
-        <Route path="/s/:sessionId/besttake/:burstId" element={<BestTake />} />
-        <Route path="/taste" element={<Taste />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <div className="flex h-full flex-col">
+        <div className="relative min-h-0 flex-1">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/s/:sessionId" element={<Library />} />
+            <Route path="/s/:sessionId/people" element={<People />} />
+            <Route path="/s/:sessionId/edit/:photoId" element={<Edit />} />
+            <Route path="/s/:sessionId/besttake/:burstId" element={<BestTake />} />
+            <Route path="/taste" element={<Taste />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
+        {isMobile && showsBottomNav(pathname) && <BottomNav />}
+      </div>
       <Onboarding />
       <Toasts />
     </>
