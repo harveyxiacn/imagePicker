@@ -673,7 +673,8 @@ pub fn build(req: &RenderRequest<'_>) -> Result<Plan> {
                 }
             }
             // Warp is applied as a plan-level field (built above), right after the crop.
-            // TODO(M5): composite patch layers onto the source before crop.
+            // Patches are composited onto the source by the renderers (patch.rs) before
+            // this plan is built.
             Op::Crop(_) | Op::Warp(_) | Op::Patch(_) | Op::Unknown => {}
         }
     }

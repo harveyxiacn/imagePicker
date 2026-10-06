@@ -447,6 +447,20 @@ pub struct RenderRequest<'a> {
     pub max_long_edge: Option<u32>,
 }
 
+impl RenderRequest<'_> {
+    /// The same request rendering from `source` instead (e.g. a patched copy); `None`
+    /// keeps the original source.
+    pub(crate) fn with_source<'b>(&'b self, source: Option<&'b RgbImage>) -> RenderRequest<'b> {
+        RenderRequest {
+            source: source.unwrap_or(self.source),
+            stack: self.stack,
+            masks: self.masks,
+            luts: self.luts,
+            max_long_edge: self.max_long_edge,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Backend {
@@ -540,6 +554,7 @@ mod cpu;
 mod cube;
 mod geom;
 mod gpu;
+mod patch;
 mod portrait;
 mod prep;
 mod presets;
