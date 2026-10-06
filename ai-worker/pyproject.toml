@@ -41,6 +41,9 @@ cuda = [
 mediapipe = ["mediapipe>=0.10.14"]
 # transformers+torch fallback for embeddings (and for exporting ONNX models).
 torch = ["torch>=2.4", "transformers>=4.49", "sentencepiece", "protobuf", "onnx"]
+# SDXL inpainting (`inpaint.run` with model "sdxl", OpenRAIL++ weights, T3). Install a CUDA build of
+# torch yourself if the default wheel is CPU-only; without this extra `sdxl` answers -32010.
+pro = ["torch>=2.4", "diffusers>=0.30", "transformers>=4.49", "accelerate>=0.33", "safetensors>=0.4"]
 
 [project.scripts]
 imagepicker-ai = "imagepicker_ai.cli:main"

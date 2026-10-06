@@ -34,6 +34,9 @@ Authenticate with `Authorization: Bearer <token>` or `ws://host:port/?token=<tok
 | `analyze.batch` | `{items:[{photo_id,path,orientation?}], profile?:"fast"\|"standard", steps?:[..], analysis_size, out_dir, allow_download?}`; `progress` `{req,kind:"analyze",done,total}` |
 | `mask.generate` | `{photo:{photo_id,path,orientation?}, targets:[..], person_bbox?:[x,y,w,h], size, out_dir, allow_download?}` -> `{masks,models,skipped}`; `progress` `{req,kind:"mask",done,total}` when more than one target runs (see below) |
 | `beauty.prepare` | `{photo:{photo_id,path,orientation?}, faces?:[{face_id,bbox}], size, out_dir, allow_download?}` -> `{people,models,skipped,timings}` (below) |
+| `besttake.compose` | `{base:{photo_id,path,orientation?}, source:{..}, base_face:[x,y,w,h], source_face:[x,y,w,h], out_dir, allow_download?}` -> `{patch, rect, quality:{score,aligned,warnings}}` or `{patch:null, reason}` (M5 below) |
+| `inpaint.run` | `{photo, mask, model?:"lama"\|"sdxl", out_dir, allow_download?}` -> `{patch, rect, model}` |
+| `enhance.run` | `{photo, op:"denoise"\|"face_restore"\|"upscale", strength?, scale?:2\|4, faces?, out_dir, allow_download?}` -> `{patch,rect}` \| `{patches:[{patch,rect,face_index}]}` \| `{image}` |
 | `faces.embed` | `{path, orientation?, analysis_size?, allow_download?}` -> `{faces:[{bbox,det_score}], embeddings:[[512 floats]]}`: AuraFace, L2-normalised, same decode / YuNet / alignment as `identity`, rows aligned with `faces`, no files |
 | `system.shutdown`, `system.ping`, `cancel {req}` | lifecycle / cancel an in-flight request |
 
@@ -109,6 +112,37 @@ Landmark index sets (`imagepicker_ai/beauty/landmarks.py`, MediaPipe canonical t
 `LIPS_INNER` 78 95 88 178 87 14 317 402 318 324 308 415 310 311 312 13 82 81 80 191; `FACE_OVAL` 10 338 297 332 284 251 389 356 454 323 361 288 397 365 379 378 400 377 152 148 176 149 150 136 172 58 132 93 234 127 162 21 54 103 67 109;
 `NOSTRILS` (blemish rejection hull) 48 64 98 97 2 326 327 294 278 331 279 360 438 457 237 218 129 358; iris points 468-477.
 
+## Generative methods (M5, contract `docs/api-contract-m5.md` section B)
+
+All three work on the full-resolution upright photo and write RGBA PNG patches (alpha = feathered mask)
+into `out_dir`; `rect` is normalised in the upright, uncropped base image. Missing models -> `-32010`
+(`error.data.detail.models` lists the registry ids; `models.list` returns `besttake_models`,
+`inpaint_models`, `enhance_models` for `models.ensure`). Big models run on one worker thread; ONNX models are
+LRU / idle-unloaded by the `ModelManager`; on OOM the tile is halved down to 128 px, then the model is reloaded
+on the CPU (per request), then `-32012`.
+
+`besttake.compose` (doc 03 section 5): face landmarks + head pose (MediaPipe, pose matrix) of both faces;
+pose delta (yaw, pitch) > 25 deg -> `reason: large_pose_change` (> 15 deg only warns). Global alignment source -> base
+on a 1280 px copy with ORB (AKAZE fallback when this OpenCV build has it) + RANSAC homography (faces masked out), ECC
+refinement; rejected as `camera_moved` for < 14 inliers / < 20 % inlier ratio / median residual > 3 px / shift > 12 % /
+scale > 15 % / rotation > 8 deg / background NCC < 0.55. Local: robust similarity from stable landmarks (no chin arc,
+eyes, mouth) inside the face, blended into the homography over 0.45 face widths, plus DIS flow (clamped to 3 % of the
+face width, interpolated across eyes / brows / mouth). Region = face + hair + neck of both frames (selfie-multiclass x
+BiRefNet person matte), ellipse-limited, other detected faces cut out. LAB mean/std match on the boundary band +
+low-frequency residual field, Laplacian pyramid blend (2-6 levels from the face width). Quality: landmarks re-detected
+on the aligned source (`seam` warning > 3 % of the face width, not composable > 10 %), gradient discontinuity and luma
+misfit on the seam ring, occlusion (face-skin fraction < 0.5, oval outside the frame, another face over it) ->
+`quality.score`, `warnings`. Required models: `mediapipe-face-landmarker`, `mediapipe-selfie-multiclass`, BiRefNet;
+`yunet` is optional (other people).
+
+| method | model (registry id) | notes |
+|---|---|---|
+| `inpaint.run` lama | `lama-big-fp32` (Carve/LaMa-ONNX, Apache-2.0, 198 MB) | 512 tile around each mask cluster with >= 96 px / 40 % context (native resolution for small holes, resized for big ones), ring colour correction, grain re-added, feathered paste |
+| `inpaint.run` sdxl | `sdxl-inpaint` (OpenRAIL++, 6.7 GB fp16, exclusive group `diffusion`) | needs `uv sync --extra pro`; resident when the VRAM budget allows, else CPU offload (also after one OOM); without torch/diffusers -> `-32010` naming `sdxl-inpaint` |
+| denoise | `scunet-color-real-psnr` (Apache-2.0, 73 MB) | 512 tiles, 32 px feathered overlap; `strength` blends with the input (omitted: ISO-adaptive from a noise estimate) |
+| face_restore | `gfpgan-v1.4` (Apache-2.0, 325 MB) + `mediapipe-face-landmarker` | FFHQ 5-point 512 alignment, oval feathered paste, `strength` (default 0.8) blended; large faces keep the photo's own detail band, faces < 48 px are skipped (`skipped` list) |
+| upscale | `realesrgan-x2[-fp16]`, `realesrgan-x4[-fp16]` (BSD-3-Clause, 66 / 34 MB) | fp16 on GPU; 512 tiles + 16 px context; output <= 400 MP; `strength` blends with bicubic |
+
 ## Develop
 
 ```bash
@@ -117,5 +151,6 @@ uv run pytest -m models      # needs model weights (downloaded into .models/ on 
 uv run ruff check . && uv run ruff format .
 uv run python scripts/bench_analyze.py --synth 200 [--device cpu] [--profile fast|standard] [--portrait some_face.jpg]
 uv run python scripts/bench_beauty.py a.jpg b.jpg [--device cpu] [--side-by-side]   # ms per face of beauty.prepare
+uv run python scripts/bench_m5.py [--device cpu] [--runs 3]   # ms: besttake, inpaint 512 mask, denoise, face_restore, upscale x2
 uv run python scripts/export_siglip2_onnx.py --out .models/export/x   # only for models without an ONNX export
 ```

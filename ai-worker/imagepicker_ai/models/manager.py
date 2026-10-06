@@ -17,7 +17,8 @@ import gc
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -110,8 +111,17 @@ class ModelManager:
         with self._lock:
             return sum(m.cost_mb for m in self._loaded.values())
 
-    def acquire(self, model_id: str, loader: Callable[[ModelSpec, Path], Any]) -> Any:
-        """Return a loaded handle for `model_id`, loading (and evicting) as necessary."""
+    def acquire(
+        self,
+        model_id: str,
+        loader: Callable[[ModelSpec, Path], Any],
+        cost_mb: int | None = None,
+    ) -> Any:
+        """Return a loaded handle for `model_id`, loading (and evicting) as necessary.
+
+        `cost_mb` overrides the registry cost for this load (e.g. a diffusion pipeline loaded with
+        CPU offload needs far less VRAM than its fully resident registry figure).
+        """
         spec = self.registry.get(model_id)
         with self._lock:
             m = self._loaded.get(model_id)
@@ -125,17 +135,41 @@ class ModelManager:
                 if m:
                     m.last_used = time.monotonic()
                     return m.handle
-                self._make_room(spec)
+                self._make_room(spec, cost_mb)
             path = self.path(model_id)
             t0 = time.monotonic()
             handle = loader(spec, path)
             log.info("loaded %s in %.2fs", model_id, time.monotonic() - t0)
             with self._lock:
-                self._loaded[model_id] = _Loaded(spec, handle, self._cost_mb(spec))
+                self._loaded[model_id] = _Loaded(
+                    spec, handle, cost_mb if cost_mb is not None else self._cost_mb(spec)
+                )
             return handle
 
-    def _make_room(self, spec: ModelSpec) -> None:
-        need = self._cost_mb(spec)
+    @contextmanager
+    def lease(
+        self,
+        model_id: str,
+        loader: Callable[[ModelSpec, Path], Any],
+        cost_mb: int | None = None,
+    ) -> Iterator[Any]:
+        """`acquire` + mark the model in use for the duration (never evicted / idle-unloaded)."""
+        handle = self.acquire(model_id, loader, cost_mb)
+        with self._lock:
+            m = self._loaded.get(model_id)
+            if m:
+                m.in_use += 1
+        try:
+            yield handle
+        finally:
+            with self._lock:
+                m = self._loaded.get(model_id)
+                if m:
+                    m.in_use = max(0, m.in_use - 1)
+                    m.last_used = time.monotonic()
+
+    def _make_room(self, spec: ModelSpec, cost_mb: int | None = None) -> None:
+        need = cost_mb if cost_mb is not None else self._cost_mb(spec)
         if need > self.budget_mb:
             raise OutOfMemory(
                 f"model {spec.id} needs {need} MB but the budget is {self.budget_mb} MB"
@@ -143,6 +177,11 @@ class ModelManager:
         if spec.exclusive_group:
             for mid, m in list(self._loaded.items()):
                 if m.spec.exclusive_group == spec.exclusive_group:
+                    if m.in_use:
+                        raise OutOfMemory(
+                            f"{mid} is busy; cannot load {spec.id} (exclusive group "
+                            f"{spec.exclusive_group})"
+                        )
                     self._unload_locked(mid)
         while self.used_mb() + need > self.budget_mb:
             victims = [(mid, m) for mid, m in self._loaded.items() if m.in_use == 0]
@@ -201,6 +240,9 @@ class ModelManager:
                     "cost_mb": m.cost_mb,
                     "idle_s": round(now - m.last_used, 1),
                     "resident": m.spec.resident,
+                    "exclusive_group": m.spec.exclusive_group,
+                    "in_use": m.in_use > 0,
+                    "providers": list(getattr(m.handle, "providers", None) or []),
                 }
                 for mid, m in self._loaded.items()
             ]
