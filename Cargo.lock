@@ -2179,6 +2179,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ip-render"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ip-server"
 version = "0.1.0"
 dependencies = [

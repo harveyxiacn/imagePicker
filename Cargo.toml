@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ip-imaging", "crates/ip-worker-client", "crates/ip-core", "crates/ip-server", "crates/ip-cli", "apps/desktop/src-tauri"]
+members = ["crates/ip-imaging", "crates/ip-worker-client", "crates/ip-core", "crates/ip-server", "crates/ip-cli", "apps/desktop/src-tauri", "crates/ip-render"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ ip-imaging = { path = "crates/ip-imaging" }
 ip-core = { path = "crates/ip-core" }
 ip-worker-client = { path = "crates/ip-worker-client" }
 ip-server = { path = "crates/ip-server" }
+ip-render = { path = "crates/ip-render" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
