@@ -9,6 +9,9 @@
  * In the browser, `pickFolder` is null and the server-side folder browser (/api/fs/*) is used.
  */
 import { useEffect } from 'react'
+import { albumCoverUrl, createMediaApi, isAndroidShell, type MediaApi } from './android'
+
+export * from './android'
 
 declare global {
   interface Window {
@@ -31,18 +34,52 @@ export interface Platform {
   pickFolder: (() => Promise<string | null>) | null
   /** "Reveal in Explorer/Finder"; null = unavailable (browser). */
   revealInFolder: ((path: string) => Promise<void>) | null
+  /** Android shell only: permissions, albums, share, trash, foreground service, publish. */
+  media: MediaApi | null
+  /** Android-only flat aliases of `media` (optional so desktop/browser need none). */
+  requestPermission?: MediaApi['requestPermission']
+  listAlbums?: MediaApi['listAlbums']
+  albumCoverUrl?: (album: { cover_path?: string | null }) => string | null
+  share?: MediaApi['share']
+  trash?: MediaApi['trash']
+  publishExports?: MediaApi['publishExports']
+  startForeground?: MediaApi['startForeground']
+  stopForeground?: MediaApi['stopForeground']
+  keepAwake?: MediaApi['keepAwake']
 }
 
 export function getPlatform(): Platform {
+  if (isAndroidShell()) {
+    // No native folder dialog or drag-and-drop on Android: the UI lists albums (`listAlbums`).
+    const media = createMediaApi((cmd, args) => window.__TAURI_INTERNALS__!.invoke(cmd, args))
+    return {
+      kind: 'tauri',
+      canDropFolders: false,
+      pickFolder: null,
+      revealInFolder: null,
+      media,
+      // Flat aliases feature-detected by web/src/lib/mobilePlatform.ts.
+      requestPermission: media.requestPermission,
+      listAlbums: media.listAlbums,
+      albumCoverUrl,
+      share: media.share,
+      trash: media.trash,
+      publishExports: media.publishExports,
+      startForeground: media.startForeground,
+      stopForeground: media.stopForeground,
+      keepAwake: media.keepAwake,
+    }
+  }
   if (isTauri()) {
     return {
       kind: 'tauri',
       canDropFolders: true,
       pickFolder: () => invoke<string | null>('pick_folder'),
       revealInFolder: (path) => invoke<void>('reveal_in_folder', { path }),
+      media: null,
     }
   }
-  return { kind: 'browser', canDropFolders: false, pickFolder: null, revealInFolder: null }
+  return { kind: 'browser', canDropFolders: false, pickFolder: null, revealInFolder: null, media: null }
 }
 
 /** Subscribes to native import requests (menu / OS folder drop). No-op in the browser. */

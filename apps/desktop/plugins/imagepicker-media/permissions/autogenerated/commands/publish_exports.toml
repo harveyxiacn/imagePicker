@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-publish-exports"
+description = "Enables the publish_exports command without any pre-configured scope."
+commands.allow = ["publish_exports"]
+
+[[permission]]
+identifier = "deny-publish-exports"
+description = "Denies the publish_exports command without any pre-configured scope."
+commands.deny = ["publish_exports"]

@@ -102,3 +102,43 @@ jobs:
       - uses: actions/checkout@v4
       # Cargo workspace, Cargo.lock, tauri.conf.json, both package.json files and pyproject.toml must agree.
       - run: bash scripts/bump-version.sh --check
+
+  android:
+    name: Android (debug APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK 27
+        run: |
+          sdkmanager --install "ndk;27.2.12479018" "platforms;android-36" "build-tools;36.0.0"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Core cross-compile check
+        run: cargo check -p ip-server -p tauri-plugin-imagepicker-media --target aarch64-linux-android
+        env:
+          CC_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
+          AR_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
+      - name: Kotlin unit tests and debug APK
+        working-directory: apps/desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm tauri android build --debug --apk --target x86_64
+          (cd src-tauri/gen/android && ./gradlew :tauri-plugin-imagepicker-media:testDebugUnitTest)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: imagepicker-android-debug-apk
+          path: apps/desktop/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
