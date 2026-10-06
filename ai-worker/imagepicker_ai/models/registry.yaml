@@ -51,6 +51,27 @@
   license: Apache-2.0
   resident: true
 
+# MediaPipe Pose Landmarker (full, float16 v1): 33 body keypoints (BlazePose GHUM). Used by
+# `beauty.prepare` for body warps. `heavy` is more accurate but ~3x slower; `full` is plenty for
+# the renderer's limb-width estimates.
+- id: mediapipe-pose-landmarker-full
+  task: [pose_landmarks]
+  source: { hf: null, origin: "google-ai-edge/mediapipe (Pose Landmarker full, float16 v1)" }
+  files:
+    - path: pose_landmarker_full.task
+      url: https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task
+      sha256: 5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1
+      size: 9398198
+  backend: mediapipe
+  precision: fp16
+  tiers: [T0, T1, T2, T3]
+  vram_mb: 0
+  ram_mb: 200
+  size_mb: 9.0
+  required_for: [beauty.prepare]
+  license: Apache-2.0
+  resident: false
+
 # SigLIP2-base image tower, fp32. Pre-exported ONNX from onnx-community (upstream: google/siglip2-base-patch16-224).
 - id: siglip2-base
   task: [embed_image]

@@ -69,11 +69,16 @@ def select_person(
     face: Box,
     others: list[Box],
     matte: Callable[[np.ndarray], np.ndarray],
+    own_marker: np.ndarray | None = None,
+    other_markers: list[np.ndarray | None] | None = None,
 ) -> np.ndarray:
     """Soft alpha (float32 HxW, full image size) of the person owning `face`.
 
     `matte(crop_rgb)` returns the foreground alpha for a crop (BiRefNet). `others` are the other
     detected face boxes of the image (pixels); the target face is dropped from them.
+    `own_marker` / `other_markers` (optional, uint8 full-image masks, `other_markers` aligned with
+    `others`) are extra watershed seeds, e.g. thick pose skeletons: they keep arms and hands with the
+    right person when bodies touch.
     """
     ih, iw = rgb.shape[:2]
     x0, y0, x1, y1 = body_crop(face, iw, ih)
@@ -100,14 +105,19 @@ def select_person(
     keep[best] = True
     selected = keep[labels]
 
-    rivals = [
-        (o[0] - x0, o[1] - y0, o[2], o[3])
-        for o in others
-        if not _same_person(face, o)
-        and _box_mask((ch, cw), (o[0] - x0, o[1] - y0, o[2], o[3])).any()
-    ]
+    rivals: list[Box] = []
+    rival_extra: list[np.ndarray | None] = []
+    for k, o in enumerate(others):
+        if _same_person(face, o):
+            continue
+        ob: Box = (o[0] - x0, o[1] - y0, o[2], o[3])
+        if _box_mask((ch, cw), ob).any():
+            rivals.append(ob)
+            m = other_markers[k] if other_markers is not None else None
+            rival_extra.append(None if m is None else m[y0:y1, x0:x1])
     if rivals:
-        selected = _split_with_watershed(crop, alpha, selected, local, rivals)
+        own = None if own_marker is None else own_marker[y0:y1, x0:x1]
+        selected = _split_with_watershed(crop, alpha, selected, local, rivals, own, rival_extra)
 
     sel = cv2.GaussianBlur(selected.astype(np.float32), (0, 0), 1.5)
     out[y0:y1, x0:x1] = alpha * np.clip(sel * 1.5, 0.0, 1.0)
@@ -115,7 +125,13 @@ def select_person(
 
 
 def _split_with_watershed(
-    crop: np.ndarray, alpha: np.ndarray, selected: np.ndarray, face: Box, rivals: list[Box]
+    crop: np.ndarray,
+    alpha: np.ndarray,
+    selected: np.ndarray,
+    face: Box,
+    rivals: list[Box],
+    own_extra: np.ndarray | None = None,
+    rival_extra: list[np.ndarray | None] | None = None,
 ) -> np.ndarray:
     ch, cw = crop.shape[:2]
     s = min(1.0, 512.0 / max(ch, cw))
@@ -135,9 +151,16 @@ def _split_with_watershed(
     bg_label = len(rivals) + 2
     markers[al < 0.1] = bg_label
     markers[(sel > 0) & (markers == bg_label)] = 0
-    markers[_torso_marker((sh, sw), sc(face)).astype(bool) & (sel > 0)] = 1
+    own_m = _torso_marker((sh, sw), sc(face)).astype(bool)
+    if own_extra is not None:
+        own_m |= _fit(own_extra, sw, sh)
+    markers[own_m & (sel > 0)] = 1
     for i, r in enumerate(rivals):
-        m = _torso_marker((sh, sw), sc(r)).astype(bool) & (sel > 0) & (markers != 1)
+        rm = _torso_marker((sh, sw), sc(r)).astype(bool)
+        extra = rival_extra[i] if rival_extra is not None else None
+        if extra is not None:
+            rm |= _fit(extra, sw, sh)
+        m = rm & (sel > 0) & (markers != 1)
         markers[m] = i + 2
     if not (markers == 1).any():
         return selected
@@ -152,3 +175,9 @@ def _split_with_watershed(
     if s < 1.0:
         won = cv2.resize(won.astype(np.uint8), (cw, ch), interpolation=cv2.INTER_NEAREST) > 0
     return won & selected
+
+
+def _fit(mask: np.ndarray, w: int, h: int) -> np.ndarray:
+    if mask.shape[1] != w or mask.shape[0] != h:
+        mask = cv2.resize(mask.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST)
+    return mask > 0
