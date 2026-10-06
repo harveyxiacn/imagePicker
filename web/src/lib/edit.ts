@@ -22,6 +22,10 @@ import {
   type MaskRef,
   type Op,
   type OutputSharpenOp,
+  type BeautyOp,
+  type WarpBodyOp,
+  type WarpFaceOp,
+  type PortraitOp,
   type Point,
 } from '@/api/types'
 import { isIdentityCurve } from './curves'
@@ -37,6 +41,10 @@ export const isGlobal = (o: Op): o is GlobalOp => o.type === 'global'
 export const isLocal = (o: Op): o is LocalOp => o.type === 'local'
 export const isLut = (o: Op): o is LutOp => o.type === 'lut'
 export const isSharpen = (o: Op): o is OutputSharpenOp => o.type === 'output_sharpen'
+export const isBeauty = (o: Op): o is BeautyOp => o.type === 'beauty'
+export const isWarpFace = (o: Op): o is WarpFaceOp => o.type === 'warp' && (o as { kind?: unknown }).kind === 'face'
+export const isWarpBody = (o: Op): o is WarpBodyOp => o.type === 'warp' && (o as { kind?: unknown }).kind === 'body'
+export const isPortrait = (o: Op): o is PortraitOp => isBeauty(o) || isWarpFace(o) || isWarpBody(o)
 export const isKnown = (o: Op): o is KnownOp => EDIT_SECTIONS.includes(o.type as EditSection)
 
 // ---------------------------------------------------------------- ranges
@@ -143,16 +151,28 @@ export function normalizeStack(stack: EditStack): EditStack {
       if (op.file && (op.amount ?? 1) > 0) ops.push(op)
     } else if (isLocal(op)) {
       ops.push({ ...op, adjust: normalizeAdjust(op.adjust, false) })
+    } else if (isPortrait(op)) {
+      if (!isNeutralPortrait(op)) ops.push(op)
     } else ops.push(op)
   }
   return { version: stack.version ?? 1, ops }
 }
 
-export const isEmptyStack = (s: EditStack): boolean => normalizeStack(s).ops.every((o) => !isKnown(o))
+const zero = (v: unknown) => !(typeof v === 'number' && Math.abs(v) > 1e-6)
+
+/** A portrait op with every amount at 0 renders nothing and is dropped (`protect_background` / `level` alone do not count). */
+export function isNeutralPortrait(o: PortraitOp): boolean {
+  if (isBeauty(o)) return zero(o.smooth) && zero(o.whiten) && !o.blemish && zero(o.eye_brighten) && zero(o.teeth_whiten) && zero(o.dark_circles)
+  if (isWarpFace(o)) return zero(o.slim) && zero(o.chin) && zero(o.eyes) && zero(o.nose)
+  return zero(o.arms) && zero(o.legs) && zero(o.waist) && zero(o.lengthen_legs)
+}
+
+export const isEmptyStack = (s: EditStack): boolean => normalizeStack(s).ops.every((o) => !isKnown(o) && !isPortrait(o))
 
 // ---------------------------------------------------------------- ordering
 
-const RANK: Record<string, number> = { crop: 0, global: 1, local: 3, lut: 4, output_sharpen: 5 }
+// Render order (docs/api-contract-m4.md A): crop -> warp -> global -> local -> beauty -> LUT -> sharpen.
+const RANK: Record<string, number> = { crop: 0, warp: 0.5, global: 1, local: 3, beauty: 3.5, lut: 4, output_sharpen: 5 }
 const rankOf = (o: Op) => RANK[o.type] ?? 2
 
 export function orderOps(ops: Op[]): Op[] {

@@ -15,6 +15,7 @@ import {
 } from './db'
 import { aiHandlers, filterAi, sortAi } from './ai'
 import { editHandlers, renderEdited } from './edits'
+import { m4Handlers, recordTasteLabels } from './m4'
 import { photoSvg } from './svg'
 
 const err = (status: number, code: string, message: string) =>
@@ -144,6 +145,7 @@ function filterPhotos(photos: Photo[], q: URLSearchParams): Photo[] {
     if (flag === 'unflagged' && p.flag !== 0) return false
     if (flag === 'not_rejected' && p.flag === -1) return false
     if (color && p.color_label !== color) return false
+    if (q.get('has_edits') === '1' && !p.has_edits) return false
     return true
   })
   out = filterAi(out, q)
@@ -165,6 +167,7 @@ const lat = () => delay(15 + Math.random() * 35)
 export const handlers = [
   ...aiHandlers,
   ...editHandlers,
+  ...m4Handlers,
 
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0-mock' })),
 
@@ -233,6 +236,8 @@ export const handlers = [
       }
     }
     emit({ type: 'photos.updated', items })
+    // ratings / flags are taste training labels (M4)
+    if ('user_rating' in body || 'flag' in body) recordTasteLabels(items.length)
     return HttpResponse.json({ updated: items.length })
   }),
 
@@ -271,7 +276,9 @@ export const handlers = [
     await lat()
     const body = (await request.json()) as ExportBody
     if (!body.dest) return err(400, 'bad_request', 'dest required')
-    return HttpResponse.json({ task_id: simulateExport(body.ids.length) }, { status: 202 })
+    ;(globalThis as { __lastExport?: unknown }).__lastExport = body
+    const total = body.folders ? Object.values(body.folders).reduce((n, ids) => n + ids.length, 0) : (body.ids?.length ?? 0)
+    return HttpResponse.json({ task_id: simulateExport(total) }, { status: 202 })
   }),
 
   http.get('/api/fs/roots', () => HttpResponse.json({ roots: ['C:\\', 'D:\\', 'C:\\Users\\demo'] })),

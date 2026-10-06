@@ -12,6 +12,8 @@ interface Props {
   onOpenChange: (b: boolean) => void
   selectedIds: number[]
   allIds: number[]
+  /** Export by person: sub-folder name -> photo ids (replaces the scope choice; docs/api-contract-m4.md C.2). */
+  folders?: Record<string, number[]>
 }
 
 type EdgeChoice = 'original' | '2048' | '4096' | 'custom'
@@ -25,7 +27,7 @@ const readDest = () => {
   }
 }
 
-export function ExportDialog({ open, onOpenChange, selectedIds, allIds }: Props) {
+export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders }: Props) {
   const { t } = useTranslation()
   const [dest, setDest] = useState(readDest)
   const [edge, setEdge] = useState<EdgeChoice>('2048')
@@ -39,11 +41,12 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds }: Props)
 
   const hasSelection = selectedIds.length > 0
   const effectiveScope = hasSelection ? scope : 'all'
-  const ids = effectiveScope === 'selected' ? selectedIds : allIds
+  const byFolder = folders && Object.keys(folders).length > 0 ? folders : undefined
+  const ids = byFolder ? Object.values(byFolder).flat() : effectiveScope === 'selected' ? selectedIds : allIds
   const longEdge = edge === 'original' ? null : edge === 'custom' ? custom : Number(edge)
 
   const mut = useMutation({
-    mutationFn: () => api.exportPhotos({ ids, dest, long_edge: longEdge, quality, name_template: template || '{name}' }),
+    mutationFn: () => api.exportPhotos({ ...(byFolder ? { folders: byFolder } : { ids }), dest, long_edge: longEdge, quality, name_template: template || '{name}' }),
     onSuccess: ({ task_id }) => {
       try {
         localStorage.setItem(LS_KEY, dest)
@@ -78,7 +81,20 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds }: Props)
         }
       >
         <div className="flex flex-col gap-4">
-          <fieldset className="flex gap-4">
+          {byFolder && (
+            <div className="flex flex-col gap-1" data-testid="export-folders">
+              <span className="text-muted">{t('export.byPerson')}</span>
+              <ul className="max-h-32 overflow-y-auto rounded-control border border-line p-1.5 text-xs">
+                {Object.entries(byFolder).map(([name, list]) => (
+                  <li key={name} className="flex justify-between gap-2 px-1 py-0.5">
+                    <span className="truncate font-mono">{name}/</span>
+                    <span className="tnum text-muted">{t('home.photoCount', { n: list.length })}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <fieldset className={`flex gap-4 ${byFolder ? 'hidden' : ''}`}>
             <legend className="mb-1 text-muted">{t('export.scope')}</legend>
             <label className="flex items-center gap-1.5">
               <input type="radio" name="scope" checked={effectiveScope === 'selected'} disabled={!hasSelection} onChange={() => setScope('selected')} />

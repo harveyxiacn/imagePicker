@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useGroups, usePhotos, useSession } from '@/api/queries'
+import { CollectionsSidebar } from '@/components/CollectionsSidebar'
 import { Compare } from '@/components/Compare'
 import { ExportDialog } from '@/components/ExportDialog'
+import { FaceSearchDialog } from '@/components/FaceSearchDialog'
 import { FilterBar } from '@/components/FilterBar'
 import { Grid } from '@/components/Grid'
 import { GroupView } from '@/components/GroupView'
@@ -14,6 +16,8 @@ import { Inspector } from '@/components/Inspector'
 import { Loupe } from '@/components/Loupe'
 import { Modal } from '@/components/Modal'
 import { ModelConsentDialog } from '@/components/ModelConsentDialog'
+import { usePhotoMenu } from '@/components/PhotoMenu'
+import { SaveCollectionDialog } from '@/components/SaveCollectionDialog'
 import { StatusBar } from '@/components/StatusBar'
 import { TopBar } from '@/components/TopBar'
 import { acceptAiRatings, editPhotos } from '@/lib/actions'
@@ -44,6 +48,8 @@ export function Library() {
   const compareCount = useUi((s) => s.compareCount)
   const syncZoom = useUi((s) => s.syncZoom)
   const inspectorOpen = useUi((s) => s.inspectorOpen)
+  const sidebarOpen = useUi((s) => s.sidebarOpen)
+  const photoMenu = usePhotoMenu(sessionId)
   const exportOpen = useUi((s) => s.exportOpen)
   const grouped = useUi((s) => s.grouped)
   const expandAll = useUi((s) => s.expandAll)
@@ -138,6 +144,11 @@ export function Library() {
       />
 
       <div className="relative flex min-h-0 flex-1">
+        {sidebarOpen && (
+          <aside className="shrink-0 max-lg:absolute max-lg:top-0 max-lg:left-0 max-lg:bottom-0 max-lg:z-30 max-lg:shadow-[var(--shadow)]">
+            <CollectionsSidebar sessionId={sessionId} />
+          </aside>
+        )}
         <main className="min-w-0 flex-1">
           {photosQ.isPending ? (
             <div className="flex h-full items-center justify-center gap-2 text-muted">
@@ -154,6 +165,7 @@ export function Library() {
           ) : view === 'grid' ? (
             <Grid
               items={items}
+              onContext={photoMenu.open}
               onOpen={(id) => {
                 useUi.getState().setActive(id)
                 ctrl.setView('loupe')
@@ -255,6 +267,9 @@ export function Library() {
       >
         <div className="text-muted">{t('ai.acceptAllHint')}</div>
       </Modal>
+      {photoMenu.node}
+      <SaveCollectionDialog />
+      <FaceSearchDialog sessionId={sessionId} />
       <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={selectedIds} allIds={allIds} />
     </div>
   )

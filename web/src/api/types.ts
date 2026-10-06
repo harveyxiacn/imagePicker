@@ -91,6 +91,8 @@ export interface PhotosQuery {
   include_background?: boolean
   faces_min?: number
   faces_max?: number
+  /** M4: only photos with a saved non-empty edit stack (built-in "edited" collection) */
+  has_edits?: boolean
   cursor?: string
   limit?: number
 }
@@ -122,7 +124,10 @@ export interface ImportBody {
 }
 
 export interface ExportBody {
-  ids: number[]
+  /** exactly one of `ids` / `folders` (M4 C.2) */
+  ids?: number[]
+  /** sub-folder name -> photo ids (export by person) */
+  folders?: Record<string, number[]>
   dest: string
   long_edge?: number | null
   quality?: number
@@ -286,6 +291,9 @@ export type ServerEvent =
   | { type: 'people.updated'; session_id: number }
   | { type: 'edits.updated'; items: { id: number; has_edits: boolean; thumb_version: string }[] }
   | { type: 'worker.status'; state: WorkerState; tier: 'T0' | 'T1' | 'T2' | 'T3' | null; error: string | null }
+  | { type: 'beauty.ready'; photo_id: number }
+  | { type: 'taste.updated'; labels: number; active: boolean; alpha: number }
+  | { type: 'collections.updated' }
 
 export interface ApiErrorBody {
   error: { code: string; message: string }
@@ -401,13 +409,127 @@ export interface OutputSharpenOp {
   type: 'output_sharpen'
   amount: number
 }
-/** M4/M5 ops (warp, beauty, patch...) are preserved verbatim and ignored by the M3 UI. */
+// ---- M4: portrait ops (mirrors ip-render `Level`, `Beauty`, `Warp::{Face,Body}`) ----
+
+export type Level = 'natural' | 'standard' | 'refined'
+export const LEVELS: Level[] = ['natural', 'standard', 'refined']
+
+/** Skin retouching; every amount 0..100 (0 = off). `person_id` omitted/null = every detected face. */
+export interface BeautyOp {
+  type: 'beauty'
+  person_id?: number | null
+  level: Level
+  smooth: number
+  whiten: number
+  blemish: boolean
+  eye_brighten: number
+  teeth_whiten: number
+  dark_circles: number
+}
+/** Parametric face liquify, amounts -100..100. */
+export interface WarpFaceOp {
+  type: 'warp'
+  kind: 'face'
+  person_id?: number | null
+  level: Level
+  slim: number
+  chin: number
+  eyes: number
+  nose: number
+}
+/** Parametric body liquify, amounts 0..100. */
+export interface WarpBodyOp {
+  type: 'warp'
+  kind: 'body'
+  person_id?: number | null
+  level: Level
+  arms: number
+  legs: number
+  waist: number
+  lengthen_legs: number
+  protect_background: boolean
+}
+export type WarpOp = WarpFaceOp | WarpBodyOp
+export type PortraitOp = BeautyOp | WarpOp
+
+export const BEAUTY_KEYS = ['smooth', 'whiten', 'eye_brighten', 'teeth_whiten', 'dark_circles'] as const
+export type BeautyKey = (typeof BEAUTY_KEYS)[number]
+export const WARP_FACE_KEYS = ['slim', 'chin', 'eyes', 'nose'] as const
+export type WarpFaceKey = (typeof WARP_FACE_KEYS)[number]
+export const WARP_BODY_KEYS = ['arms', 'legs', 'waist', 'lengthen_legs'] as const
+export type WarpBodyKey = (typeof WARP_BODY_KEYS)[number]
+
+/** Saved per-person look (docs/api-contract-m4.md C.1); applied by filling in `person_id`. */
+export interface BeautyProfile {
+  beauty?: Omit<BeautyOp, 'type' | 'person_id'>
+  face?: Omit<WarpFaceOp, 'type' | 'kind' | 'person_id'>
+  body?: Omit<WarpBodyOp, 'type' | 'kind' | 'person_id'>
+}
+
+export interface PhotoPerson {
+  face_id: number
+  person_id: number | null
+  person_name: string | null
+  /** normalised x, y, w, h (upright image) */
+  face_box: [number, number, number, number]
+  is_subject: boolean
+  has_pose: boolean
+  has_profile: boolean
+}
+export interface PhotoPeopleResponse {
+  people: PhotoPerson[]
+  ready: boolean
+}
+
+// ---- M4: M2 remainder ----
+
+export interface BestPeopleResponse {
+  people: { person_id: number; photos: { photo_id: number; score: number }[] }[]
+}
+
+export interface FaceSearchCandidate {
+  person_id: number
+  person_name: string | null
+  similarity: number
+}
+export interface FaceSearchResponse {
+  /** normalised [x, y, w, h] of every face found in the query image */
+  faces_detected: [number, number, number, number][]
+  /** index into `faces_detected` the candidates belong to */
+  query_face: number
+  candidates: FaceSearchCandidate[]
+  similar_faces: { face_id: number; photo_id: number; similarity: number }[]
+}
+
+export interface Collection {
+  id: string
+  name: string
+  /** URLSearchParams string with the /api/photos filter params (no session_id / cursor / limit) */
+  query: string
+  builtin: boolean
+}
+
+export interface TasteTrait {
+  key: string
+  params?: Record<string, string | number>
+}
+export interface Taste {
+  labels: number
+  active: boolean
+  /** 0..0.6 fusion weight */
+  alpha: number
+  holdout_accuracy: number | null
+  traits: TasteTrait[]
+  updated_at: number | null
+}
+
+/** Other M5 ops (patch...) are preserved verbatim and ignored by the UI. */
 export interface UnknownOp {
   type: string
   [k: string]: unknown
 }
 export type KnownOp = CropOp | GlobalOp | LocalOp | LutOp | OutputSharpenOp
-export type Op = KnownOp | UnknownOp
+export type Op = KnownOp | PortraitOp | UnknownOp
 
 export interface EditStack {
   version: number

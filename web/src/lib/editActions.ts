@@ -205,3 +205,29 @@ export async function syncToPhotos(
   }
   return updated
 }
+
+/**
+ * Run a server-side batch edit over `ids` as ONE undo step: stacks are read before and after, and the diff
+ * becomes a single history entry (undo = PUT every `before` back).
+ */
+export async function batchEditWithUndo(qc: QueryClient, ids: number[], label: string, run: () => Promise<number>): Promise<number> {
+  if (!ids.length) return 0
+  await flushSaves(qc)
+  const befores = await Promise.all(ids.map((id) => fetchStack(qc, id)))
+  const updated = await run()
+  const afters = await Promise.all(ids.map((id) => fetchStack(qc, id)))
+  const edits: EditChange[] = []
+  ids.forEach((id, i) => {
+    if (!stacksEqual(befores[i], afters[i])) edits.push({ photoId: id, before: befores[i], after: afters[i] })
+  })
+  if (edits.length) {
+    useHistory.getState().push({ label, changes: [], edits })
+    const st = useEdit.getState()
+    for (const e of edits) if (st.photoId === e.photoId) st.reset(e.photoId, e.after)
+  }
+  return updated
+}
+
+/** "Apply beauty profiles to the selected photos" (docs/api-contract-m4.md C.1): undoable as one step. */
+export const applyProfilesToPhotos = (qc: QueryClient, ids: number[], label: string): Promise<number> =>
+  batchEditWithUndo(qc, ids, label, () => api.applyProfiles(ids).then((r) => r.updated))

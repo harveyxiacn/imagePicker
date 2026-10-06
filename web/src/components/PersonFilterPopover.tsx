@@ -1,4 +1,4 @@
-import { Ban, Check, Search, Users } from 'lucide-react'
+import { Ban, Check, FolderPlus, ScanSearch, Search, Users } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { faceCropUrl } from '@/api/client'
@@ -199,11 +199,34 @@ function Popover({ sessionId, resultCount }: Props) {
         {t('person.background')}
       </label>
 
-      <div className="mt-3 flex items-center justify-between border-t border-line pt-2">
-        <span className="tnum text-muted" data-testid="person-result">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-y-2 border-t border-line pt-2">
+        <span className="tnum whitespace-nowrap text-muted" data-testid="person-result">
           {t('person.result', { n: resultCount.toLocaleString(i18n.language) })}
         </span>
         <div className="flex gap-2">
+          <button
+            className="btn"
+            onClick={() => {
+              setOpen(false)
+              useUi.getState().setFaceSearchOpen(true)
+            }}
+            data-testid="person-face-search"
+          >
+            <ScanSearch size={13} />
+            {t('faceSearch.button')}
+          </button>
+          <button
+            className="btn"
+            disabled={!isPersonFilterActive(filter)}
+            onClick={() => {
+              setOpen(false)
+              useUi.getState().setSaveCollectionOpen(true)
+            }}
+            data-testid="person-save-collection"
+          >
+            <FolderPlus size={13} />
+            {t('collections.save')}
+          </button>
           <button className="btn btn-ghost" onClick={() => set(DEFAULT_PERSON_FILTER)} disabled={!isPersonFilterActive(filter)}>
             {t('person.reset')}
           </button>

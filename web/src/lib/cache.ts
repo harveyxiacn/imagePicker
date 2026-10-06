@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import type { AnalysisStatus, HardwareInfo, Photo, ServerEvent, Session } from '@/api/types'
+import type { AnalysisStatus, HardwareInfo, Photo, ServerEvent, Session, Taste } from '@/api/types'
 import type { PhotosListQuery } from './filter'
 
 export const qk = {
@@ -21,6 +21,12 @@ export const qk = {
   burstFaces: (burstId: number) => ['burstFaces', burstId] as const,
   peopleAll: ['people'] as const,
   people: (sid: number | undefined) => ['people', sid ?? 'all'] as const,
+  photoPeople: (photoId: number) => ['photoPeople', photoId] as const,
+  photoPeopleAll: ['photoPeople'] as const,
+  collections: ['collections'] as const,
+  collectionCount: (sid: number, query: string) => ['collectionCount', sid, query] as const,
+  taste: ['taste'] as const,
+  best: (sid: number, ids: number[], n: number) => ['best', sid, ids, n] as const,
 }
 
 /** Photo fields owned by the analysis pipeline (never user-editable, safe to overwrite from the server). */
@@ -134,6 +140,9 @@ export function applyEvents(
   const groupsChanged = new Set<number>()
   const editedIds = new Set<number>()
   let peopleChanged = false
+  let collectionsChanged = false
+  const beautyReady = new Set<number>()
+  let taste: Extract<ServerEvent, { type: 'taste.updated' }> | null = null
   let worker: Extract<ServerEvent, { type: 'worker.status' }> | null = null
 
   for (const ev of events) {
@@ -178,6 +187,15 @@ export function applyEvents(
         break
       case 'worker.status':
         worker = ev
+        break
+      case 'beauty.ready':
+        beautyReady.add(ev.photo_id)
+        break
+      case 'taste.updated':
+        taste = ev
+        break
+      case 'collections.updated':
+        collectionsChanged = true
         break
     }
   }
@@ -235,6 +253,17 @@ export function applyEvents(
     void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === 'edits' && editedIds.has(q.queryKey[1] as number) })
   }
   if (peopleChanged) void qc.invalidateQueries({ queryKey: qk.peopleAll })
+  for (const id of beautyReady) void qc.invalidateQueries({ queryKey: qk.photoPeople(id) })
+  if (collectionsChanged) {
+    void qc.invalidateQueries({ queryKey: qk.collections })
+    void qc.invalidateQueries({ queryKey: ['collectionCount'] })
+  }
+  if (taste) {
+    const t = taste
+    // Merge the pushed numbers right away; traits / accuracy come with the refetch.
+    qc.setQueryData<Taste>(qk.taste, (old) => (old ? { ...old, labels: t.labels, active: t.active, alpha: t.alpha } : old))
+    void qc.invalidateQueries({ queryKey: qk.taste })
+  }
 
   if (worker) {
     const w = worker
