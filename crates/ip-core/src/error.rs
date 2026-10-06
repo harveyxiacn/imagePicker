@@ -8,6 +8,14 @@ pub enum CoreError {
     NotFound(String),
     #[error("{0}")]
     BadRequest(String),
+    #[error("{0}")]
+    Conflict(String),
+    /// Models the analysis needs are not installed (HTTP 409 `models_missing`).
+    #[error("required models are not installed: {}", .0.join(", "))]
+    ModelsMissing(Vec<String>),
+    /// The AI worker cannot run (HTTP 503 `worker_unavailable`).
+    #[error("{0}")]
+    WorkerUnavailable(String),
     #[error("{0:#}")]
     Internal(anyhow::Error),
 }
@@ -26,6 +34,9 @@ impl CoreError {
         match self {
             Self::NotFound(_) => "not_found",
             Self::BadRequest(_) => "bad_request",
+            Self::Conflict(_) => "conflict",
+            Self::ModelsMissing(_) => "models_missing",
+            Self::WorkerUnavailable(_) => "worker_unavailable",
             Self::Internal(_) => "internal",
         }
     }

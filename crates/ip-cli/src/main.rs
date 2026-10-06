@@ -225,6 +225,7 @@ mod tests {
             data_dir: Some(data.path().to_path_buf()),
             imaging: Arc::new(FakeImaging::new()),
             thumb_workers: Some(2),
+            worker: None,
         })
         .unwrap();
         let stats = import_headless(&core, src.path().to_path_buf(), true, None)

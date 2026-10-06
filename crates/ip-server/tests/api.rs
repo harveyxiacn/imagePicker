@@ -28,6 +28,7 @@ fn env_with_web(web_dir: Option<std::path::PathBuf>) -> Env {
         data_dir: Some(data.path().to_path_buf()),
         imaging: Arc::new(FakeImaging::new()),
         thumb_workers: Some(2),
+        worker: None,
     })
     .unwrap();
     let app = build_router(core.clone(), web_dir);

@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+pub use crate::analysis::scoring::Issue;
+
 pub const COLOR_LABELS: [&str; 5] = ["red", "yellow", "green", "blue", "purple"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -31,6 +33,15 @@ pub struct Photo {
     pub burst_id: Option<i64>,
     pub thumb_ready: bool,
     pub thumb_version: String,
+    // ---- M2 (docs/api-contract-m2.md C.1)
+    pub ai_score: Option<f64>,
+    pub issues: Vec<Issue>,
+    pub rank_in_burst: Option<i64>,
+    pub burst_size: Option<i64>,
+    pub scene_type: Option<String>,
+    pub face_count: Option<i64>,
+    pub subject_face_count: Option<i64>,
+    pub analyzed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,6 +178,8 @@ pub enum SortKey {
     TakenAtDesc,
     Name,
     Rating,
+    /// `ai_score` descending, unanalysed last.
+    Ai,
 }
 
 impl SortKey {
@@ -176,10 +189,44 @@ impl SortKey {
             "-taken_at" => Self::TakenAtDesc,
             "name" => Self::Name,
             "rating" => Self::Rating,
+            "ai" => Self::Ai,
             _ => return None,
         })
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PersonMode {
+    /// All listed people in the same photo (default).
+    #[default]
+    All,
+    Any,
+}
+
+/// States a listed person must satisfy (`person_state`, thresholds from docs/03 section 4.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersonState {
+    EyesOpen,
+    Smiling,
+    Looking,
+    Subject,
+}
+
+impl PersonState {
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "eyes_open" => Self::EyesOpen,
+            "smiling" => Self::Smiling,
+            "looking" => Self::Looking,
+            "subject" => Self::Subject,
+            _ => return None,
+        })
+    }
+}
+
+pub const EYES_OPEN_MIN: f64 = 0.55;
+pub const SMILE_MIN: f64 = 0.5;
+pub const GAZE_MIN: f64 = 0.6;
 
 #[derive(Debug, Clone, Default)]
 pub struct PhotoQuery {
@@ -190,6 +237,20 @@ pub struct PhotoQuery {
     pub sort: SortKey,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
+    // ---- M2
+    pub ai_rating_gte: Option<f64>,
+    pub issues_none: bool,
+    pub issues_any: Vec<Issue>,
+    pub burst_best_only: bool,
+    pub burst_id: Option<i64>,
+    pub scene_type: Option<String>,
+    pub persons: Vec<i64>,
+    pub person_mode: PersonMode,
+    pub exclude_persons: Vec<i64>,
+    pub person_state: Vec<PersonState>,
+    pub include_background: bool,
+    pub faces_min: Option<i64>,
+    pub faces_max: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

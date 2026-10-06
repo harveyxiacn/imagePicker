@@ -27,6 +27,7 @@ fn env() -> Env {
         data_dir: Some(data.path().to_path_buf()),
         imaging: imaging.clone(),
         thumb_workers: Some(3),
+        worker: None,
     })
     .unwrap();
     Env {
@@ -311,6 +312,7 @@ async fn filters_sorting_and_cursor_pagination() {
                 assert!(seen.windows(2).all(|w| r(&w[0]) >= r(&w[1])));
                 assert_eq!(seen[0].user_rating, Some(5));
             }
+            SortKey::Ai => {}
         }
     }
 
