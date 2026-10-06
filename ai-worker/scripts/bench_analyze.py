@@ -5,13 +5,16 @@ Usage (from ai-worker/):
   uv run python scripts/bench_analyze.py --synth 200            # generated 12 MP JPEGs
   uv run python scripts/bench_analyze.py --synth 200 --device cpu
   uv run python scripts/bench_analyze.py --synth 200 --portrait .bench/img/Albert_Einstein_Head.jpg
+  uv run python scripts/bench_analyze.py --synth 200 --profile standard --portrait <face.jpg>
 
 Models must be installed (the script downloads missing ones unless --no-download).
 Rows:
   decode        Pillow decode + EXIF + resize only (thread pool)
-  <step>        full pipeline restricted to that single step (includes decode)
+  <step>        full pipeline restricted to that single step (includes decode). `identity` also runs
+                `faces` (it needs the detections); `scene` and `iqa` include the SigLIP2 image pass
+                they share with `embed` when it is not part of the run
   embed_model   SigLIP2 forward only on pre-decoded 224px tensors (no decode)
-  all           phash+quality+faces+embed together (decode overlapped with GPU)
+  all           every step of --profile together (decode overlapped with GPU; default: standard)
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from imagepicker_ai import hw as hwmod  # noqa: E402
 from imagepicker_ai.decode import load_image  # noqa: E402
 from imagepicker_ai.models import ModelManager, Registry  # noqa: E402
 from imagepicker_ai.pipeline import Analyzer  # noqa: E402
+from imagepicker_ai.steps import PROFILES  # noqa: E402
 from imagepicker_ai.steps.embed import prepare_image  # noqa: E402
 
 EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tif", ".tiff", ".bmp"}
@@ -92,7 +96,8 @@ async def run(args: argparse.Namespace) -> dict:
         mgr, hw, decode_workers=args.workers, batch_size=args.batch_size, embed_backend=emb_backend
     )
 
-    need = ["yunet", "mediapipe-face-landmarker"] + an.embedder.required_models()
+    profile_steps = list(PROFILES[args.profile])
+    need = an.models_for_steps(profile_steps)
     for m in need:
         if not mgr.is_installed(m):
             if args.no_download:
@@ -123,7 +128,7 @@ async def run(args: argparse.Namespace) -> dict:
     await an.analyze_batch(
         {
             "items": items[: min(16, n)],
-            "steps": ["phash", "quality", "faces", "embed"],
+            "profile": args.profile,
             "analysis_size": args.size,
             "out_dir": out_dir,
         }
@@ -136,10 +141,12 @@ async def run(args: argparse.Namespace) -> dict:
     dt = time.perf_counter() - t0
     rows["decode"] = {"images_per_s": n / dt, "wall_s": dt}
 
-    for step in ("phash", "quality", "faces", "embed"):
+    for step in profile_steps:
         res = await an.analyze_batch(
             {"items": items, "steps": [step], "analysis_size": args.size, "out_dir": out_dir}
         )
+        if res["skipped_steps"]:
+            print(f"step {step} skipped: {res['warnings']}", file=sys.stderr)
         rows[step] = {
             "images_per_s": res["timings"]["images_per_s"],
             "wall_s": res["timings"]["wall_s"],
@@ -156,7 +163,7 @@ async def run(args: argparse.Namespace) -> dict:
     res = await an.analyze_batch(
         {
             "items": items,
-            "steps": ["phash", "quality", "faces", "embed"],
+            "profile": args.profile,
             "analysis_size": args.size,
             "out_dir": out_dir,
         }
@@ -165,7 +172,9 @@ async def run(args: argparse.Namespace) -> dict:
         "images_per_s": res["timings"]["images_per_s"],
         "wall_s": res["timings"]["wall_s"],
         "cpu_s_per_step": {
-            k: v for k, v in res["timings"].items() if k.endswith("_s") and k != "wall_s"
+            k: v
+            for k, v in res["timings"].items()
+            if k.endswith("_s") and k not in ("wall_s", "images_per_s")
         },
     }
     info = {
@@ -177,6 +186,10 @@ async def run(args: argparse.Namespace) -> dict:
         "decode_workers": an.decode_workers,
         "embed_model": res["models"].get("embed"),
         "faces_model": res["models"].get("faces"),
+        "models": res["models"],
+        "profile": args.profile,
+        "skipped_steps": res["skipped_steps"],
+        "faces_found": sum(len(it.get("faces", [])) for it in res["items"] if "error" not in it),
         "images": n,
         "analysis_size": args.size,
         "batch_size": an.embedder.batch_size,
@@ -197,6 +210,7 @@ def main() -> None:
     )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--device", choices=["auto", "cpu"], default="auto")
+    ap.add_argument("--profile", choices=sorted(PROFILES), default="standard")
     ap.add_argument("--size", type=int, default=1024, help="analysis_size")
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--workers", type=int, default=None)
@@ -214,10 +228,14 @@ def main() -> None:
         f"| {info['images']} images @ {info['analysis_size']}px | decode workers={info['decode_workers']} "
         f"batch={info['batch_size']} | embed={info['embed_model']}"
     )
+    print(f"profile={info['profile']} models={info['models']} skipped={info['skipped_steps']}")
+    print(f"faces found in the 'all' run: {info['faces_found']}")
     print(f"{'step':<14}{'images/s':>10}{'wall s':>10}")
-    for k in ("decode", "phash", "quality", "faces", "embed", "embed_model", "all"):
-        r = rows[k]
+    for k, r in rows.items():
         print(f"{k:<14}{r['images_per_s']:>10.1f}{r['wall_s']:>10.2f}")
+    print("summed per-step thread time in the 'all' run (s):")
+    for k, v in rows["all"]["cpu_s_per_step"].items():
+        print(f"  {k:<14}{v:>8.2f}")
     if args.json:
         Path(args.json).write_text(json.dumps(result, indent=2))
 

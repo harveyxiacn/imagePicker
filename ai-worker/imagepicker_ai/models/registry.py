@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 DEFAULT_REGISTRY = Path(__file__).with_name("registry.yaml")
-BACKENDS = {"onnx", "torch", "mediapipe", "opencv"}
+BACKENDS = {"onnx", "torch", "mediapipe", "opencv", "tflite"}
 TIERS = ("T0", "T1", "T2", "T3")
 
 
@@ -45,6 +45,7 @@ class ModelSpec:
     resident: bool = False
     exclusive_group: str | None = None
     optional: bool = False
+    required_for: tuple[str, ...] = ()
     load_time_s: float | None = None
     extra: dict[str, Any] = field(default_factory=dict, compare=False)
 
@@ -66,6 +67,7 @@ class ModelSpec:
             "noncommercial": self.noncommercial,
             "resident": self.resident,
             "optional": self.optional,
+            "required_for": list(self.required_for),
             "source": {"hf": self.hf_repo, "modelscope": self.modelscope, "origin": self.origin},
         }
 
@@ -148,6 +150,7 @@ def _parse_entry(e: Any, idx: int) -> ModelSpec:
         "resident",
         "exclusive_group",
         "optional",
+        "required_for",
         "load_time",
         "sha256",
     }
@@ -170,6 +173,7 @@ def _parse_entry(e: Any, idx: int) -> ModelSpec:
         resident=bool(e.get("resident", False)),
         exclusive_group=e.get("exclusive_group"),
         optional=bool(e.get("optional", False)),
+        required_for=tuple(str(x) for x in _as_list(e.get("required_for"))),
         load_time_s=e.get("load_time"),
         extra={k: v for k, v in e.items() if k not in known},
     )

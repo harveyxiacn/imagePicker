@@ -6,6 +6,8 @@ Per face the result carries
   smile     = mean(mouthSmileLeft, mouthSmileRight)
   yaw / pitch / roll (degrees, from the facial transformation matrix; sign follows MediaPipe's
   camera-space convention, magnitude is what the scorer uses)
+  gaze      0-1 "looking at the camera": iris position inside the eye socket (MediaPipe iris
+            landmarks vs eye corners / lids) combined with head yaw / pitch, see `gaze_score`
   sharpness (0-1, see quality.face_sharpness), blendshapes {52 coefficients}
 If mediapipe is not installed (or no landmarks were found for a face) the landmark-derived
 fields are null and `landmarks` is false.
@@ -23,6 +25,17 @@ import cv2
 import numpy as np
 
 from .quality import face_sharpness
+
+# MediaPipe Face Landmarker topology (468 face points + 10 iris points)
+_EYES = (
+    # (corner A (image left), corner B (image right), upper lid, lower lid, iris centre)
+    (33, 133, 159, 145, 468),  # subject's right eye (image left)
+    (362, 263, 386, 374, 473),  # subject's left eye (image right)
+)
+GAZE_SIGMA_H = 0.11  # iris offset along the eye axis, in eye widths (0 = centred)
+GAZE_SIGMA_V = 0.10  # iris offset across the eye axis, in eye widths
+GAZE_SIGMA_YAW = 25.0  # degrees
+GAZE_SIGMA_PITCH = 20.0
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +68,53 @@ def _euler_from_matrix(m: np.ndarray) -> tuple[float, float, float]:
         yaw = math.atan2(-r[2, 0], sy)
         roll = 0.0
     return math.degrees(yaw), math.degrees(pitch), math.degrees(roll)
+
+
+def iris_offsets(pts: np.ndarray) -> tuple[float, float] | None:
+    """Mean iris offset from the eye centre in eye widths: (along eye axis, across it).
+
+    `pts` are the 478 MediaPipe landmarks in pixels. Returns None for degenerate eyes.
+    """
+    dxs, dys = [], []
+    for a, b, up, lo, iris in _EYES:
+        pa, pb, pu, pl, pi_ = pts[a], pts[b], pts[up], pts[lo], pts[iris]
+        axis = pb - pa
+        width = float(np.linalg.norm(axis))
+        if width < 4:
+            return None
+        u = axis / width
+        n = np.array([-u[1], u[0]])
+        centre = (pa + pb) / 2 * 0.5 + (pu + pl) / 2 * 0.5  # corners + lids average
+        d = pi_ - centre
+        dxs.append(float(d @ u) / width)
+        dys.append(float(d @ n) / width)
+    return float(np.mean(dxs)), float(np.mean(dys))
+
+
+def gaze_score(
+    pts: np.ndarray, yaw: float, pitch: float, eyes_open: float | None = None
+) -> float | None:
+    """0-1 "looking at the camera".
+
+    score = pose * eye * lids
+      pose = exp(-0.5 * ((yaw/25 deg)^2 + (pitch/20 deg)^2))      head turned away -> low
+      eye  = exp(-0.5 * ((dx/0.11)^2 + (dy/0.10)^2))              iris off-centre in the socket -> low
+      lids = smoothstep(eyes_open, 0.25, 0.6)                    (closed eyes are not looking)
+    Head rotation compensated by opposite eye rotation is deliberately not credited (conservative).
+    """
+    off = iris_offsets(pts)
+    if off is None:
+        return None
+    dx, dy = off
+    # pitch from the pose matrix may be reported around 180 deg for some conventions: wrap to +-90
+    p = (pitch + 90.0) % 180.0 - 90.0
+    pose = math.exp(-0.5 * ((yaw / GAZE_SIGMA_YAW) ** 2 + (p / GAZE_SIGMA_PITCH) ** 2))
+    eye = math.exp(-0.5 * ((dx / GAZE_SIGMA_H) ** 2 + (dy / GAZE_SIGMA_V) ** 2))
+    lids = 1.0
+    if eyes_open is not None:
+        t = min(1.0, max(0.0, (eyes_open - 0.25) / 0.35))
+        lids = t * t * (3 - 2 * t)
+    return float(min(1.0, max(0.0, pose * eye * lids)))
 
 
 class FaceAnalyzer:
@@ -127,6 +187,10 @@ class FaceAnalyzer:
                 continue
             faces.append(
                 {
+                    # YuNet 5-point landmarks (px in the analysed image): eye (image left),
+                    # eye (image right), nose, mouth corner (left), mouth corner (right).
+                    # Private: consumed by the identity step and stripped from the result.
+                    "_kps": [[float(r[4 + 2 * i]), float(r[5 + 2 * i])] for i in range(5)],
                     "bbox": [
                         round(x0 / w, 5),
                         round(y0 / h, 5),
@@ -178,6 +242,11 @@ class FaceAnalyzer:
         if res.facial_transformation_matrixes:
             yaw, pitch, roll = _euler_from_matrix(res.facial_transformation_matrixes[0])
             out.update(yaw=round(yaw, 2), pitch=round(pitch, 2), roll=round(roll, 2))
+        if res.face_landmarks and out.get("yaw") is not None:
+            lm = res.face_landmarks[0]
+            if len(lm) >= 478:
+                pts = np.array([[p.x * crop.shape[1], p.y * crop.shape[0]] for p in lm])
+                out["gaze"] = _r(gaze_score(pts, out["yaw"], out["pitch"], out["eyes_open"]))
         return out
 
     def close(self) -> None:
@@ -193,6 +262,7 @@ _NULL_LANDMARK_FIELDS: dict[str, Any] = {
     "pitch": None,
     "roll": None,
     "blendshapes": None,
+    "gaze": None,
 }
 
 

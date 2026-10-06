@@ -20,6 +20,7 @@ dependencies = [
     "tokenizers>=0.20",
     "platformdirs>=4",
     "psutil>=5.9",
+    "ai-edge-litert>=2.0",  # NIMA aesthetic / technical IQA (Apache-2.0, tiny)
 ]
 
 [project.optional-dependencies]
