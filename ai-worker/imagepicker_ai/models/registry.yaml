@@ -1,0 +1,133 @@
+# Model registry (schema: docs/07-模型清单与许可.md §1, extended with `files`).
+#
+# Per entry:
+#   id            unique id
+#   task          list of tasks the model serves (embed_image, embed_text, face_detect, face_landmarks, ...)
+#   source        { hf: <repo>, revision: <opt>, modelscope: <opt>, origin: <upstream repo, informational> }
+#   files         [{ path, sha256?, size?, url? }]  files to fetch; `url` (instead of source.hf) for plain HTTP.
+#                 The first file is the primary one (what `ModelManager` hands to the loader as `path`).
+#   backend       onnx | torch | mediapipe | opencv
+#   precision     fp32 | fp16 | int8 (informational)
+#   tiers         tiers for which this is a default/recommended model
+#   vram_mb/ram_mb/size_mb  budget numbers used by ModelManager
+#   license / noncommercial
+#   resident      keep loaded unless budget forces eviction (analysis models); false = LRU/idle evicted first
+#   exclusive_group  at most one loaded model per group (e.g. vlm vs diffusion)
+# Weights are never shipped with this repository; they are downloaded on user request.
+
+- id: yunet
+  task: [face_detect]
+  source: { hf: opencv/face_detection_yunet, modelscope: null }
+  files:
+    - path: face_detection_yunet_2023mar.onnx
+      sha256: 8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4
+      size: 232589
+  backend: opencv
+  precision: fp32
+  tiers: [T0, T1, T2, T3]
+  vram_mb: 0
+  ram_mb: 50
+  size_mb: 0.3
+  license: MIT
+  resident: true
+
+- id: mediapipe-face-landmarker
+  task: [face_landmarks, face_blendshapes, head_pose]
+  source: { hf: null, origin: "google-ai-edge/mediapipe (Face Landmarker, float16 v1)" }
+  files:
+    - path: face_landmarker.task
+      url: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+      sha256: 64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff
+      size: 3758596
+  backend: mediapipe
+  precision: fp16
+  tiers: [T0, T1, T2, T3]
+  vram_mb: 0
+  ram_mb: 150
+  size_mb: 3.7
+  license: Apache-2.0
+  resident: true
+
+# SigLIP2-base image tower, fp32. Pre-exported ONNX from onnx-community (upstream: google/siglip2-base-patch16-224).
+- id: siglip2-base
+  task: [embed_image]
+  source: { hf: onnx-community/siglip2-base-patch16-224-ONNX, origin: google/siglip2-base-patch16-224 }
+  files:
+    - path: onnx/vision_model.onnx
+      sha256: c0573e3f4140c3a7c4e9cc5912bd6b26a033b46a6a8e8af26cbea262b163bcad
+      size: 371807752
+    - path: preprocessor_config.json
+    - path: config.json
+  backend: onnx
+  precision: fp32
+  tiers: [T0, T1]
+  vram_mb: 700
+  ram_mb: 900
+  size_mb: 355
+  license: Apache-2.0
+  resident: true
+
+# Same tower in fp16 (half the size / VRAM; preferred on GPU).
+- id: siglip2-base-fp16
+  task: [embed_image]
+  source: { hf: onnx-community/siglip2-base-patch16-224-ONNX, origin: google/siglip2-base-patch16-224 }
+  files:
+    - path: onnx/vision_model_fp16.onnx
+      sha256: a1959f7bd3993a607e48839f6d01e25b876fe76afda301b028b78eef68aabd95
+      size: 186039516
+    - path: preprocessor_config.json
+    - path: config.json
+  backend: onnx
+  precision: fp16
+  tiers: [T1, T2, T3]
+  vram_mb: 450
+  ram_mb: 500
+  size_mb: 178
+  license: Apache-2.0
+  resident: true
+
+# Text tower (natural-language search). 256k-token Gemma vocab makes this large; fp16 halves it.
+- id: siglip2-base-text
+  task: [embed_text, zero_shot]
+  source: { hf: onnx-community/siglip2-base-patch16-224-ONNX, origin: google/siglip2-base-patch16-224 }
+  files:
+    - path: onnx/text_model_fp16.onnx
+      sha256: 711da56ada0a4aa11c7dd3320df741081a3cae4f0ae1b5e5c6d5b294738d0eb0
+      size: 564862230
+    - path: tokenizer.json
+      sha256: cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322
+      size: 34363039
+    - path: config.json
+  backend: onnx
+  precision: fp16
+  tiers: [T1, T2, T3]
+  vram_mb: 700
+  ram_mb: 800
+  size_mb: 550
+  license: Apache-2.0
+  resident: false
+
+# PyTorch/transformers fallback (image + text in one checkpoint).
+- id: siglip2-base-torch
+  task: [embed_image, embed_text, zero_shot]
+  source: { hf: google/siglip2-base-patch16-224, origin: google/siglip2-base-patch16-224 }
+  files:
+    - path: model.safetensors
+      sha256: 612923381c76ec5a9bed335d1c48827e3f2e506ac31b044b63b2031fadee6a0b
+      size: 1500800904
+    - path: config.json
+    - path: preprocessor_config.json
+    - path: tokenizer.json
+      sha256: cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322
+    - path: tokenizer.model
+    - path: tokenizer_config.json
+    - path: special_tokens_map.json
+  backend: torch
+  precision: fp32
+  tiers: []
+  vram_mb: 1800
+  ram_mb: 2500
+  size_mb: 1430
+  license: Apache-2.0
+  resident: false
+  optional: true
