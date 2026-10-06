@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Pencil } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { previewUrl } from '@/api/client'
@@ -18,12 +18,13 @@ interface Props {
   onMove: (delta: number) => void
   onPick: (id: number) => void
   onRate: (n: number | null) => void
+  onEdit?: () => void
 }
 
 const PRELOAD = 2
 
 /** Single-photo view: fit / 100% / wheel zoom, pan, progressive loading, neighbour preloading, filmstrip. */
-export function Loupe({ photos, photo, index, onMove, onPick, onRate }: Props) {
+export function Loupe({ photos, photo, index, onMove, onPick, onRate, onEdit }: Props) {
   const { t } = useTranslation()
   // View is keyed by photo id so it resets to "fit" automatically when the photo changes.
   const [state, setState] = useState<{ id: number | null; view: ViewState }>({ id: null, view: FIT_VIEW })
@@ -42,7 +43,7 @@ export function Loupe({ photos, photo, index, onMove, onPick, onRate }: Props) {
       const p = photos[index + d]
       if (p && d !== 0) {
         const im = new Image()
-        im.src = previewUrl(p.id, 2048)
+        im.src = previewUrl(p.id, 2048, p.thumb_version)
         imgs.push(im)
       }
     }
@@ -97,6 +98,12 @@ export function Loupe({ photos, photo, index, onMove, onPick, onRate }: Props) {
               <AiStars value={photo.ai_rating} />
             </div>
           </div>
+          {onEdit && (
+            <button className="btn pointer-events-auto bg-black/50 backdrop-blur" onClick={onEdit} data-testid="open-edit" title={`${t('edit.open')} (D)`}>
+              <Pencil size={14} />
+              {t('edit.open')}
+            </button>
+          )}
         </div>
       </div>
       <Filmstrip photos={photos} activeId={photo.id} onPick={onPick} />

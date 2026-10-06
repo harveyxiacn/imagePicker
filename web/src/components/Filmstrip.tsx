@@ -45,6 +45,11 @@ const Thumb = memo(function Thumb({ photo, index, active, marked, onPick }: { ph
       <div className={`absolute left-0.5 flex gap-0.5 ${index !== null ? 'top-4' : 'top-0.5'}`}>
         {photo.flag === 1 && <FlagIcon size={11} className="text-success" fill="currentColor" />}
         {photo.flag === -1 && <Ban size={11} className="text-danger" />}
+        {photo.has_edits && (
+          <span className="rounded bg-black/60 px-0.5 text-[10px] leading-3 text-accent" data-testid="edit-badge">
+            ✎
+          </span>
+        )}
       </div>
       {photo.color_label && (
         <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full" style={{ background: colorVar(photo.color_label) }} />

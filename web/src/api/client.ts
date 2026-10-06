@@ -17,6 +17,15 @@ import type {
   PhotosResponse,
   Session,
   Face,
+  AutoMode,
+  EditStack,
+  EditsPutResponse,
+  EditsResponse,
+  Preset,
+  PreviewBody,
+  PreviewResult,
+  SyncBody,
+  Adjust,
 } from './types'
 
 export class ApiError extends Error {
@@ -56,6 +65,48 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+async function toApiError(res: Response): Promise<ApiError> {
+  let code = 'http_error'
+  let message = `${res.status} ${res.statusText}`
+  let body: unknown
+  try {
+    const j = (await res.json()) as ApiErrorBody
+    body = j
+    code = j.error.code
+    message = j.error.message
+  } catch {
+    /* non-JSON error body */
+  }
+  return new ApiError(res.status, code, message, body)
+}
+
+/** POST /api/render/preview: JPEG body plus `X-Render-Ms` / `X-Render-Backend` headers. Abortable. */
+export async function renderPreview(body: PreviewBody, signal?: AbortSignal): Promise<PreviewResult> {
+  const res = await fetch(`${BASE}/render/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok) throw await toApiError(res)
+  const ms = Number(res.headers.get('X-Render-Ms'))
+  const backend = res.headers.get('X-Render-Backend')
+  return {
+    blob: await res.blob(),
+    renderMs: Number.isFinite(ms) && res.headers.has('X-Render-Ms') ? ms : null,
+    backend: backend === 'gpu' || backend === 'cpu' ? backend : null,
+  }
+}
+
+/** GET /api/masks/{id}: 8-bit grey PNG. 409 models_missing / 503 surface as ApiError. */
+export async function fetchMask(photoId: number, target: string, personId?: number, signal?: AbortSignal): Promise<Blob> {
+  const q = new URLSearchParams({ target })
+  if (personId !== undefined) q.set('person_id', String(personId))
+  const res = await fetch(`${BASE}/masks/${photoId}?${q.toString()}`, { signal })
+  if (!res.ok) throw await toApiError(res)
+  return res.blob()
 }
 
 /** Builds the query string for GET /api/photos. Omits unset values. */
@@ -117,6 +168,16 @@ export const api = {
   mergePeople: (ids: number[], into: number) => request<{ person: Person }>('POST', '/people/merge', { ids, into }),
   setFacePerson: (id: number, person_id: number | null) =>
     request<{ face: Face }>('POST', `/faces/${id}/person`, { person_id }),
+  // ---- M3 ----
+  edits: (id: number) => request<EditsResponse>('GET', `/edits/${id}`),
+  putEdits: (id: number, stack: EditStack) => request<EditsPutResponse>('PUT', `/edits/${id}`, { stack }),
+  deleteEdits: (id: number) => request<void>('DELETE', `/edits/${id}`),
+  autoEdit: (id: number, mode: AutoMode) => request<{ adjust: Adjust }>('POST', `/edits/${id}/auto`, { mode }),
+  syncEdits: (body: SyncBody) => request<{ updated: number }>('POST', '/edits/sync', body),
+  presets: () => request<{ presets: Preset[] }>('GET', '/presets'),
+  savePreset: (name: string, stack: EditStack) => request<{ preset: Preset }>('POST', '/presets', { name, stack }),
+  deletePreset: (id: string) => request<void>('DELETE', `/presets/${encodeURIComponent(id)}`),
+  importLut: (path: string) => request<{ id: string; name: string }>('POST', '/luts/import', { path }),
   fsRoots: () => request<{ roots: string[] }>('GET', '/fs/roots'),
   fsList: (path?: string) =>
     request<FsList>('GET', `/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -143,6 +204,8 @@ export async function fetchAllPhotos(
 
 export const thumbUrl = (p: Pick<Photo, 'id' | 'thumb_version'>, s: 256 | 512 = 256) =>
   `${BASE}/thumb/${p.id}?s=${s}&v=${encodeURIComponent(p.thumb_version)}`
-export const previewUrl = (id: number, s: 1024 | 2048 | 4096 = 2048) => `${BASE}/preview/${id}?s=${s}`
+/** `v` (thumb_version) busts the cache when edits change the rendered preview. */
+export const previewUrl = (id: number, s: 1024 | 2048 | 4096 = 2048, v?: string) =>
+  `${BASE}/preview/${id}?s=${s}${v ? `&v=${encodeURIComponent(v)}` : ''}`
 export const faceCropUrl = (faceId: number, s: 128 | 256 = 128) => `${BASE}/faces/${faceId}/crop?s=${s}`
 export const originalUrl = (id: number) => `${BASE}/original/${id}`

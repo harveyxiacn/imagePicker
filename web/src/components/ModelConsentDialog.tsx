@@ -41,7 +41,8 @@ export function ModelConsentDialog() {
     useToasts.getState().dismissTask(ensureTaskId) // analysis resumes right away: no "ready" toast
     void qc.invalidateQueries({ queryKey: ['models'] })
     setConsent(null)
-    void startAnalysis(qc, c.sessionId, c.profile, c.photoIds)
+    if (c.onReady) c.onReady()
+    else void startAnalysis(qc, c.sessionId, c.profile, c.photoIds)
   }, [consent, ensureTaskId, task?.state, qc, setConsent])
 
   const confirm = async () => {

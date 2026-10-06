@@ -7,6 +7,8 @@ export interface ConsentRequest {
   photoIds?: number[]
   /** Model ids the server reported as missing (409 models_missing). */
   models: string[]
+  /** When set, called after the download instead of retrying an analysis (M3 AI masks). */
+  onReady?: () => void
 }
 
 interface AnalysisUiState {

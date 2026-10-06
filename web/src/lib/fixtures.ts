@@ -34,6 +34,7 @@ export function makePhoto(id: number, over: Partial<Photo> = {}): Photo {
     face_count: null,
     subject_face_count: null,
     analyzed: false,
+    has_edits: false,
     ...over,
   }
 }

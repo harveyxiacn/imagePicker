@@ -39,7 +39,15 @@ const MODELS: ModelInfo[] = [
   { id: 'topiq-nr', task: ['iqa'], size_mb: 120, license: 'Research / NC', noncommercial: true, installed: false, required_for: ['standard'] },
   { id: 'aesthetic-head', task: ['aesthetic'], size_mb: 4, license: 'MIT', noncommercial: false, installed: false, required_for: ['standard'] },
   { id: 'scrfd-10g', task: ['face_detect'], size_mb: 17, license: 'insightface NC', noncommercial: true, installed: false, required_for: [] },
+  // M3 AI masks (not part of any analysis profile; fetched on first use of a mask)
+  { id: 'sky-seg', task: ['mask_sky'], size_mb: 28, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
+  { id: 'sam2-tiny', task: ['mask_subject', 'mask_person'], size_mb: 156, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
 ]
+
+/** Ids from `ids` that are not installed yet (used by the M3 mask endpoint to answer 409 models_missing). */
+export function missingModelIds(ids: string[]): string[] {
+  return MODELS.filter((m) => ids.includes(m.id) && !m.installed).map((m) => m.id)
+}
 
 const worker: HardwareInfo['worker'] = {
   state: 'stopped',

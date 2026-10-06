@@ -32,6 +32,8 @@ export interface ControllerHooks {
   groupGo?: (dir: 1 | -1) => void
   /** Enter: pick A as the group's keeper; `next` also advances to the next group. */
   groupPick?: (next: boolean) => void
+  /** `D`: open the edit page for the cursor photo. */
+  openEdit?: () => void
 }
 
 /** All user-facing photo operations. Reads store state lazily so callbacks stay stable. */
@@ -198,6 +200,7 @@ export function useController(photos: Photo[], hooks: ControllerHooks = {}) {
   }, [setActiveIndex])
 
   const groupPick = useCallback((next: boolean) => hooksRef.current.groupPick?.(next), [])
+  const openEdit = useCallback(() => hooksRef.current.openEdit?.(), [])
 
   const doSelectAll = useCallback(() => {
     const ui = useUi.getState()
@@ -214,8 +217,8 @@ export function useController(photos: Photo[], hooks: ControllerHooks = {}) {
   }, [])
 
   return useMemo(
-    () => ({ move, moveRow, setActiveIndex, indexOf, rate, setFlag, setColor, undo: doUndo, redo: doRedo, setView, selectAll: doSelectAll, swapCompare, targetIds, acceptAi, stacks, jump, groupPick }),
-    [move, moveRow, setActiveIndex, indexOf, rate, setFlag, setColor, doUndo, doRedo, setView, doSelectAll, swapCompare, targetIds, acceptAi, stacks, jump, groupPick],
+    () => ({ move, moveRow, setActiveIndex, indexOf, rate, setFlag, setColor, undo: doUndo, redo: doRedo, setView, selectAll: doSelectAll, swapCompare, targetIds, acceptAi, stacks, jump, groupPick, openEdit }),
+    [move, moveRow, setActiveIndex, indexOf, rate, setFlag, setColor, doUndo, doRedo, setView, doSelectAll, swapCompare, targetIds, acceptAi, stacks, jump, groupPick, openEdit],
   )
 }
 

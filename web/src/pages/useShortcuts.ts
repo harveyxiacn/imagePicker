@@ -54,6 +54,7 @@ export function buildHandlers(ctrl: Controller): Handlers {
   h['edit.undo'] = () => void ctrl.undo()
   h['edit.redo'] = () => void ctrl.redo()
   h['select.all'] = () => ctrl.selectAll()
+  h['edit.open'] = () => ctrl.openEdit()
   h['export.open'] = () => ui().setExportOpen(true)
   h['help.toggle'] = () => ui().setHelpOpen(!ui().helpOpen)
   return h

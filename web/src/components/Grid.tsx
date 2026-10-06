@@ -83,6 +83,11 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
           <div className="flex items-center gap-1">
             {photo.flag === 1 && <FlagIcon size={14} className="text-success drop-shadow" fill="currentColor" />}
             {rejected && <Ban size={14} className="text-danger drop-shadow" />}
+            {photo.has_edits && (
+              <span className="rounded bg-black/65 px-1 text-[11px] leading-4 text-accent" data-testid="edit-badge" title={t('edit.edited')} aria-label={t('edit.edited')}>
+                ✎
+              </span>
+            )}
           </div>
           {badges.length > 0 && (
             <div className="flex gap-0.5 rounded bg-black/65 px-1 text-[11px] leading-4" data-testid="issue-badges">

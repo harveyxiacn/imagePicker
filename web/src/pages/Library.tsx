@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useGroups, usePhotos, useSession } from '@/api/queries'
 import { Compare } from '@/components/Compare'
 import { ExportDialog } from '@/components/ExportDialog'
@@ -32,6 +32,9 @@ export function Library() {
   const sessionId = Number(raw)
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const keepState = useRef(!!(location.state as { keep?: boolean } | null)?.keep)
 
   const filter = useUi((s) => s.filter)
   const view = useUi((s) => s.view)
@@ -59,6 +62,8 @@ export function Library() {
   useEffect(() => {
     if (resetFor.current === sessionId) return
     resetFor.current = sessionId
+    // Coming back from the edit page: keep filter / cursor / undo history.
+    if (keepState.current) return
     useUi.getState().resetSessionState()
     useHistory.getState().clear()
   }, [sessionId])
@@ -74,7 +79,11 @@ export function Library() {
   const group = useGroup(sessionId)
   // Navigation / actions operate on what the current view shows.
   const listPhotos = view === 'group' ? group.photos : gridPhotos
-  const ctrl = useController(listPhotos, { groupGo: group.go, groupPick: group.pickA })
+  const openEdit = () => {
+    const id = useUi.getState().activeId
+    if (id !== null) navigate(`/s/${sessionId}/edit/${id}`)
+  }
+  const ctrl = useController(listPhotos, { groupGo: group.go, groupPick: group.pickA, openEdit })
   useShortcuts(ctrl)
 
   // Keep the cursor valid as the list changes (filters, live updates, collapsed stacks).
@@ -168,6 +177,7 @@ export function Library() {
               onMove={(d) => ctrl.move(d)}
               onPick={pick}
               onRate={(n) => ctrl.rate(n ?? 0)}
+              onEdit={openEdit}
             />
           ) : view === 'group' ? (
             <GroupView

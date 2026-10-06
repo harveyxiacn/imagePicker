@@ -53,3 +53,15 @@ export function photoSvg(p: Photo, longEdge: number, label = true): string {
     `</svg>`
   )
 }
+
+/** Normalised scene layout of a mock photo (same random sequence as `photoSvg`), used by the mock renderer / masks. */
+export function photoGeometry(p: Photo): { sun: { x: number; y: number; r: number }; horizon: number; ridge: number[] } {
+  const r2 = mulberry32(p.id * 104729 + 7)
+  const sunX = 0.2 + r2() * 0.6
+  const sunY = 0.18 + r2() * 0.25
+  const sunR = 0.05 + r2() * 0.05
+  const hor = 0.55 + r2() * 0.15
+  const ridge = [hor]
+  for (let i = 1; i <= 8; i++) ridge.push(hor - r2() * 0.18)
+  return { sun: { x: sunX, y: sunY, r: sunR }, horizon: hor, ridge }
+}
