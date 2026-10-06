@@ -544,9 +544,11 @@ mod tests {
         .unwrap();
         assert_eq!(second.status.total, 0);
         print_report(&r);
-        assert!(analyze_headless(&core, "99999", Profile::Fast, false, false)
-            .await
-            .is_err());
+        assert!(
+            analyze_headless(&core, "99999", Profile::Fast, false, false)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

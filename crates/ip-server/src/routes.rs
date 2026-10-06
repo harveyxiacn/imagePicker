@@ -87,7 +87,9 @@ fn flag_of(name: &str, v: &Option<String>) -> Result<bool, ApiError> {
         None => Ok(false),
         Some("1") | Some("true") => Ok(true),
         Some("0") | Some("false") => Ok(false),
-        Some(_) => Err(ApiError::bad_request(format!("{name} must be 1/0/true/false"))),
+        Some(_) => Err(ApiError::bad_request(format!(
+            "{name} must be 1/0/true/false"
+        ))),
     }
 }
 

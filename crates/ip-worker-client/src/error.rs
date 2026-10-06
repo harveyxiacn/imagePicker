@@ -60,7 +60,9 @@ impl WorkerError {
         match self {
             Self::Rpc {
                 code, kind, detail, ..
-            } if *code == CODE_MODEL_UNAVAILABLE || kind.as_deref() == Some("model_unavailable") => {
+            } if *code == CODE_MODEL_UNAVAILABLE
+                || kind.as_deref() == Some("model_unavailable") =>
+            {
                 Some(
                     detail
                         .as_ref()

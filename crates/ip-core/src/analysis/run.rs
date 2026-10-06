@@ -98,8 +98,14 @@ impl Core {
         Ok(WorkerOut {
             state: st.state.as_str().to_string(),
             tier: st.tier.clone(),
-            device: info.as_ref().map(|i| i.hardware.device.clone()).filter(|d| !d.is_empty()),
-            providers: info.as_ref().map(|i| i.providers.clone()).unwrap_or_default(),
+            device: info
+                .as_ref()
+                .map(|i| i.hardware.device.clone())
+                .filter(|d| !d.is_empty()),
+            providers: info
+                .as_ref()
+                .map(|i| i.providers.clone())
+                .unwrap_or_default(),
             gpu: info
                 .as_ref()
                 .and_then(|i| i.hardware.gpus.first())
@@ -125,7 +131,9 @@ impl Core {
                         None => {
                             let any = !m.required_for.is_empty();
                             if p == "fast" {
-                                m.required_for.iter().any(|s| fast_steps.contains(&s.as_str()))
+                                m.required_for
+                                    .iter()
+                                    .any(|s| fast_steps.contains(&s.as_str()))
                             } else {
                                 any
                             }
@@ -168,20 +176,24 @@ impl Core {
         let core = self.clone();
         let tid = task_id.clone();
         tokio::spawn(async move {
-            let ev = |done: i64, total: i64, state: &str, error: Option<String>| Event::TaskProgress {
-                task_id: tid.clone(),
-                kind: "model_download".into(),
-                done,
-                total,
-                state: state.into(),
-                error,
-            };
+            let ev =
+                |done: i64, total: i64, state: &str, error: Option<String>| Event::TaskProgress {
+                    task_id: tid.clone(),
+                    kind: "model_download".into(),
+                    done,
+                    total,
+                    state: state.into(),
+                    error,
+                };
             let mut totals: HashMap<String, (i64, i64)> = ids
                 .iter()
                 .map(|i| (i.clone(), (0, size[i] as i64)))
                 .collect();
             let sum = |t: &HashMap<String, (i64, i64)>| {
-                (t.values().map(|v| v.0).sum::<i64>(), t.values().map(|v| v.1).sum::<i64>())
+                (
+                    t.values().map(|v| v.0).sum::<i64>(),
+                    t.values().map(|v| v.1).sum::<i64>(),
+                )
             };
             let (d, t) = sum(&totals);
             core.events.emit(ev(d, t, "running", None));
@@ -189,7 +201,9 @@ impl Core {
             let worker = core.worker.clone();
             let ids2 = ids.clone();
             let call = tokio::spawn(async move {
-                worker.models_ensure(&ids2, Some(ptx), &CancelToken::new()).await
+                worker
+                    .models_ensure(&ids2, Some(ptx), &CancelToken::new())
+                    .await
             });
             while let Some(p) = prx.recv().await {
                 if let (Some(m), Some(done)) = (
@@ -214,7 +228,9 @@ impl Core {
             match res {
                 Ok(Ok(())) => core.events.emit(ev(t, t, "done", None)),
                 Ok(Err(e)) => core.events.emit(ev(d, t, "failed", Some(e.to_string()))),
-                Err(e) => core.events.emit(ev(d, t, "failed", Some(format!("task crashed: {e}")))),
+                Err(e) => core
+                    .events
+                    .emit(ev(d, t, "failed", Some(format!("task crashed: {e}")))),
             }
         });
         Ok(task_id)
@@ -340,7 +356,10 @@ impl Core {
         };
         {
             let mut g = self.runs.lock().unwrap();
-            if g.get(&sid).map(|r| r.status.state == RunState::Running).unwrap_or(false) {
+            if g.get(&sid)
+                .map(|r| r.status.state == RunState::Running)
+                .unwrap_or(false)
+            {
                 return Err(CoreError::Conflict(format!(
                     "an analysis of session {sid} is already running"
                 )));
@@ -357,7 +376,8 @@ impl Core {
         {
             let (tid, params) = (
                 task_id.clone(),
-                json!({"session_id": sid, "profile": req.profile.as_str(), "count": refs.len()}).to_string(),
+                json!({"session_id": sid, "profile": req.profile.as_str(), "count": refs.len()})
+                    .to_string(),
             );
             self.db
                 .call(move |c| {
@@ -464,7 +484,9 @@ impl Core {
                 let r = self.worker.analyze_batch(&areq, Some(ptx), &cancel).await;
                 let _ = fwd.await;
                 match r {
-                    Err(WorkerError::Disconnected) if attempt < MAX_BATCH_RETRIES && !cancel.is_cancelled() => {
+                    Err(WorkerError::Disconnected)
+                        if attempt < MAX_BATCH_RETRIES && !cancel.is_cancelled() =>
+                    {
                         attempt += 1;
                         tracing::warn!(attempt, "worker crashed during a batch; retrying");
                         continue;
@@ -538,8 +560,10 @@ impl Core {
         let _ = std::fs::remove_dir_all(&out_dir);
 
         // ---- finishing stages over the whole session
-        let had_data = ingested_any || refs.is_empty() || {
-            let n: i64 = self
+        let had_data = ingested_any
+            || refs.is_empty()
+            || {
+                let n: i64 = self
                 .db
                 .call(move |c| {
                     Ok(c.query_row(
@@ -550,8 +574,8 @@ impl Core {
                 })
                 .await
                 .unwrap_or(0);
-            n > 0
-        };
+                n > 0
+            };
         let mut finish_err: Option<String> = None;
         if had_data {
             if let Err(e) = self.finish_stages(sid, &task_id).await {
@@ -579,7 +603,8 @@ impl Core {
         });
         let state = if cancelled {
             RunState::Idle
-        } else if fatal.is_some() || (error.is_some() && failed.len() as i64 >= total && total > 0) {
+        } else if fatal.is_some() || (error.is_some() && failed.len() as i64 >= total && total > 0)
+        {
             RunState::Failed
         } else {
             RunState::Done
@@ -627,12 +652,19 @@ impl Core {
             .db
             .call(move |c| store::regroup_session(c, sid, &GroupParams::default()))
             .await?;
-        tracing::info!(ms = t.elapsed().as_millis() as u64, bursts = burst_ids.len(), "grouped");
+        tracing::info!(
+            ms = t.elapsed().as_millis() as u64,
+            bursts = burst_ids.len(),
+            "grouped"
+        );
 
         stage("clustering");
         // cluster before scoring so closed-eye issues name the right people and subjects are final
         let t = Instant::now();
-        let outcome = self.db.call(move |c| store::cluster_session(c, sid)).await?;
+        let outcome = self
+            .db
+            .call(move |c| store::cluster_session(c, sid))
+            .await?;
         tracing::info!(ms = t.elapsed().as_millis() as u64, "clustered");
 
         stage("scoring");
@@ -670,11 +702,15 @@ impl Core {
     // ------------------------------------------------------------ reads
 
     pub async fn photo_analysis(&self, photo_id: i64) -> Result<AnalysisDetail> {
-        self.db.call(move |c| store::analysis_detail(c, photo_id)).await
+        self.db
+            .call(move |c| store::analysis_detail(c, photo_id))
+            .await
     }
 
     pub async fn groups(&self, session_id: i64) -> Result<GroupsOut> {
-        self.db.call(move |c| store::groups_of_session(c, session_id)).await
+        self.db
+            .call(move |c| store::groups_of_session(c, session_id))
+            .await
     }
 
     pub async fn burst_faces(&self, burst_id: i64) -> Result<BurstFacesOut> {
@@ -685,7 +721,9 @@ impl Core {
         if let Some(s) = session_id {
             self.session(s).await?;
         }
-        self.db.call(move |c| store::list_people(c, session_id)).await
+        self.db
+            .call(move |c| store::list_people(c, session_id))
+            .await
     }
 
     // ------------------------------------------------------------ manual group edits
@@ -714,13 +752,18 @@ impl Core {
             .db
             .call(move |c| store::split_burst(c, req.burst_id, req.at_photo_id))
             .await?;
-        self.after_group_edit(out.session_id, out.burst_ids.to_vec()).await?;
+        self.after_group_edit(out.session_id, out.burst_ids.to_vec())
+            .await?;
         Ok(out.burst_ids)
     }
 
     pub async fn merge_bursts(&self, req: MergeBurstsRequest) -> Result<i64> {
-        let out = self.db.call(move |c| store::merge_bursts(c, &req.burst_ids)).await?;
-        self.after_group_edit(out.session_id, vec![out.burst_id]).await?;
+        let out = self
+            .db
+            .call(move |c| store::merge_bursts(c, &req.burst_ids))
+            .await?;
+        self.after_group_edit(out.session_id, vec![out.burst_id])
+            .await?;
         Ok(out.burst_id)
     }
 
@@ -741,7 +784,11 @@ impl Core {
 
     // ------------------------------------------------------------ people
 
-    async fn after_people_change(&self, person_ids: Vec<i64>, photo_ids: Option<Vec<i64>>) -> Result<()> {
+    async fn after_people_change(
+        &self,
+        person_ids: Vec<i64>,
+        photo_ids: Option<Vec<i64>>,
+    ) -> Result<()> {
         // names change who counts as a subject; rescore what changed
         let pids = person_ids.clone();
         let (sessions, changed) = self
@@ -789,11 +836,17 @@ impl Core {
 
     pub async fn patch_person(&self, id: i64, patch: PersonPatch) -> Result<Person> {
         let renamed = patch.name.is_some();
-        let p = self.db.call(move |c| store::patch_person(c, id, &patch)).await?;
+        let p = self
+            .db
+            .call(move |c| store::patch_person(c, id, &patch))
+            .await?;
         if renamed {
             self.after_people_change(vec![id], None).await?;
         } else {
-            let sessions = self.db.call(move |c| store::sessions_of_people(c, &[id])).await?;
+            let sessions = self
+                .db
+                .call(move |c| store::sessions_of_people(c, &[id]))
+                .await?;
             for s in sessions {
                 self.events.emit(Event::PeopleUpdated { session_id: s });
             }
@@ -806,9 +859,14 @@ impl Core {
         let sessions_before = {
             let mut all = ids.clone();
             all.push(into);
-            self.db.call(move |c| store::sessions_of_people(c, &all)).await?
+            self.db
+                .call(move |c| store::sessions_of_people(c, &all))
+                .await?
         };
-        let p = self.db.call(move |c| store::merge_people(c, &ids, into)).await?;
+        let p = self
+            .db
+            .call(move |c| store::merge_people(c, &ids, into))
+            .await?;
         self.after_people_change(vec![into], None).await?;
         for s in sessions_before {
             self.events.emit(Event::PeopleUpdated { session_id: s });
@@ -821,7 +879,8 @@ impl Core {
             .db
             .call(move |c| store::set_face_person(c, face_id, person_id))
             .await?;
-        self.after_people_change(touched, Some(vec![photo_id])).await?;
+        self.after_people_change(touched, Some(vec![photo_id]))
+            .await?;
         Ok(face)
     }
 
@@ -832,7 +891,10 @@ impl Core {
         if size != 128 && size != 256 {
             return Err(CoreError::bad_request("s must be 128 or 256"));
         }
-        let (photo_id, bbox) = self.db.call(move |c| store::face_crop_ref(c, face_id)).await?;
+        let (photo_id, bbox) = self
+            .db
+            .call(move |c| store::face_crop_ref(c, face_id))
+            .await?;
         let preview = self.thumbs.ensure(photo_id, 2048).await?;
         let dir = self.dirs.root.join("cache").join("faces");
         let stem = preview
@@ -889,7 +951,8 @@ fn crop_face(preview: &Path, bbox: [f64; 4], size: u32, out: &Path) -> Result<()
     let side = ((bbox[2] * w).max(bbox[3] * h) * 1.4).clamp(8.0, w.min(h));
     let x0 = (cx - side / 2.0).clamp(0.0, w - side);
     let y0 = (cy - side / 2.0).clamp(0.0, h - side);
-    let crop = image::imageops::crop_imm(&img, x0 as u32, y0 as u32, side as u32, side as u32).to_image();
+    let crop =
+        image::imageops::crop_imm(&img, x0 as u32, y0 as u32, side as u32, side as u32).to_image();
     let resized = image::imageops::resize(&crop, size, size, image::imageops::FilterType::Triangle);
     if let Some(p) = out.parent() {
         std::fs::create_dir_all(p)?;

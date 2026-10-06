@@ -162,7 +162,8 @@ pub fn subject_flags(faces: &[(FaceFeat, bool /* person named */)]) -> Vec<bool>
         .map(|(f, named)| {
             let area = (f.bbox[2] * f.bbox[3]).max(0.0);
             let (cx, cy) = (f.bbox[0] + f.bbox[2] / 2.0, f.bbox[1] + f.bbox[3] / 2.0);
-            let d = ((cx - 0.5).powi(2) + (cy - 0.5).powi(2)).sqrt() / 0.7071;
+            let d =
+                ((cx - 0.5).powi(2) + (cy - 0.5).powi(2)).sqrt() / std::f64::consts::FRAC_1_SQRT_2;
             let center = (1.0 - 1.2 * d).clamp(0.2, 1.0);
             let sharp = 0.3 + 0.7 * clamp01(f.sharpness.unwrap_or(0.6));
             let look = 0.7 + 0.3 * clamp01(f.gaze.unwrap_or(0.5));
@@ -287,7 +288,10 @@ pub fn detect_issues(feat: &PhotoFeat, scene: &str) -> (Vec<Issue>, Vec<Issue>) 
     }
     if scene != "night" {
         let under = feat.crushed_shadows.unwrap_or(0.0) >= UNDEREXPOSED_CRUSHED
-            || feat.mean_luminance.map(|m| m < UNDEREXPOSED_MEAN).unwrap_or(false);
+            || feat
+                .mean_luminance
+                .map(|m| m < UNDEREXPOSED_MEAN)
+                .unwrap_or(false);
         if under {
             issues.push(Issue::Underexposed);
             if feat.crushed_shadows.unwrap_or(0.0) >= UNDEREXPOSED_SEVERE_CRUSHED
@@ -314,7 +318,10 @@ pub fn detect_issues(feat: &PhotoFeat, scene: &str) -> (Vec<Issue>, Vec<Issue>) 
 pub fn score_photo(feat: &PhotoFeat) -> PhotoScore {
     let scene = scene_class(feat);
     let subjects: Vec<&FaceFeat> = feat.faces.iter().filter(|f| f.is_subject).collect();
-    let face_scores: Vec<f64> = subjects.iter().filter_map(|f| expression_score(f)).collect();
+    let face_scores: Vec<f64> = subjects
+        .iter()
+        .filter_map(|f| expression_score(f))
+        .collect();
     let face_score = (!face_scores.is_empty())
         .then(|| face_scores.iter().sum::<f64>() / face_scores.len() as f64);
 
@@ -509,10 +516,7 @@ pub fn rank_burst(members: Vec<BurstMember<'_>>) -> Vec<Ranked> {
                     });
                 }
             }
-            if let (Some(a), Some(b)) = (
-                comp(&m.score, "sharpness"),
-                comp(second, "sharpness"),
-            ) {
+            if let (Some(a), Some(b)) = (comp(&m.score, "sharpness"), comp(second, "sharpness")) {
                 if a - b >= 0.1 {
                     reasons.push(Reason {
                         key: "sharpest_in_group".into(),
@@ -630,7 +634,10 @@ mod tests {
         // weights are renormalised over the available components (composition missing)
         let wsum: f64 = s.components.iter().map(|c| c.2).sum();
         assert!((wsum - 1.0).abs() < 1e-9);
-        assert!(s.contributions.iter().all(|c| c.label_key.starts_with("score.")));
+        assert!(s
+            .contributions
+            .iter()
+            .all(|c| c.label_key.starts_with("score.")));
     }
 
     #[test]
@@ -736,9 +743,9 @@ mod tests {
             )
         };
         let flags = subject_flags(&[
-            mk(0.4, 0.3, 0.2, 0.3),   // big, centred
+            mk(0.4, 0.3, 0.2, 0.3),    // big, centred
             mk(0.35, 0.35, 0.15, 0.2), // similar size
-            mk(0.9, 0.9, 0.04, 0.05), // tiny, in the corner
+            mk(0.9, 0.9, 0.04, 0.05),  // tiny, in the corner
         ]);
         assert_eq!(flags, vec![true, true, false]);
         // a lone tiny face is not a subject either
@@ -769,13 +776,19 @@ mod tests {
             })
             .collect();
         let r = rank_burst(members);
-        assert_eq!(r.iter().map(|x| x.photo_id).collect::<Vec<_>>(), vec![2, 3, 1]);
+        assert_eq!(
+            r.iter().map(|x| x.photo_id).collect::<Vec<_>>(),
+            vec![2, 3, 1]
+        );
         assert_eq!(r[0].rank, 0);
         assert_eq!(r[0].burst_size, 3);
         assert!(r[0].reasons.iter().any(|x| x.key == "best_in_group"));
         assert!(r[0].reasons.iter().any(|x| x.key == "sharpest_in_group"));
         // the best photo got the bonus: half a star above its absolute stars
-        assert_eq!(r[0].ai_rating, base_stars(r[0].q) + 0.5_f64.min(5.0 - base_stars(r[0].q)));
+        assert_eq!(
+            r[0].ai_rating,
+            base_stars(r[0].q) + 0.5_f64.min(5.0 - base_stars(r[0].q))
+        );
         assert!(r[1].ai_rating <= base_stars(r[1].q));
     }
 

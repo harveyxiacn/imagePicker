@@ -149,16 +149,36 @@ fn build_scene(e: &Env) {
             FakeFace::new(face_b(), person(1, jb)).eyes(eyes_b),
         ]
     };
-    e.worker
-        .set("a1.jpg", FakeSpec::at(0.0).sharp(0.5).with_faces(faces(40.0, 1.0, 0.9)));
-    e.worker
-        .set("a2.jpg", FakeSpec::at(2.0).sharp(0.95).with_faces(faces(2.0, 0.0, 0.9)));
-    e.worker
-        .set("a3.jpg", FakeSpec::at(3.0).sharp(0.7).with_faces(faces(0.0, 2.0, 0.9)));
-    e.worker
-        .set("b1.jpg", FakeSpec::at(90.0).sharp(0.8).with_faces(faces(3.0, 1.0, 0.9)));
-    e.worker
-        .set("b2.jpg", FakeSpec::at(91.0).sharp(0.8).with_faces(faces(1.0, 2.0, 0.1)));
+    e.worker.set(
+        "a1.jpg",
+        FakeSpec::at(0.0)
+            .sharp(0.5)
+            .with_faces(faces(40.0, 1.0, 0.9)),
+    );
+    e.worker.set(
+        "a2.jpg",
+        FakeSpec::at(2.0)
+            .sharp(0.95)
+            .with_faces(faces(2.0, 0.0, 0.9)),
+    );
+    e.worker.set(
+        "a3.jpg",
+        FakeSpec::at(3.0)
+            .sharp(0.7)
+            .with_faces(faces(0.0, 2.0, 0.9)),
+    );
+    e.worker.set(
+        "b1.jpg",
+        FakeSpec::at(90.0)
+            .sharp(0.8)
+            .with_faces(faces(3.0, 1.0, 0.9)),
+    );
+    e.worker.set(
+        "b2.jpg",
+        FakeSpec::at(91.0)
+            .sharp(0.8)
+            .with_faces(faces(1.0, 2.0, 0.1)),
+    );
     e.worker.set(
         "c1.jpg",
         FakeSpec::at(200.0)
@@ -178,14 +198,22 @@ async fn full_pipeline_groups_scores_people() {
     assert_eq!(st.state, RunState::Done, "{st:?}");
     assert_eq!((st.done, st.total), (6, 6));
     assert!(st.error.is_none());
-    assert_eq!(e.worker.last_profile.lock().unwrap().as_deref(), Some("standard"));
+    assert_eq!(
+        e.worker.last_profile.lock().unwrap().as_deref(),
+        Some("standard")
+    );
     assert_eq!(*e.worker.last_allow_download.lock().unwrap(), Some(false));
 
     let ph = all(&e, sid).await;
     assert!(ph.values().all(|p| p.analyzed));
     // ---- bursts
-    let a: Vec<&Photo> = ["a1.jpg", "a2.jpg", "a3.jpg"].iter().map(|n| &ph[*n]).collect();
-    assert!(a.iter().all(|p| p.burst_id == a[0].burst_id && p.burst_size == Some(3)));
+    let a: Vec<&Photo> = ["a1.jpg", "a2.jpg", "a3.jpg"]
+        .iter()
+        .map(|n| &ph[*n])
+        .collect();
+    assert!(a
+        .iter()
+        .all(|p| p.burst_id == a[0].burst_id && p.burst_size == Some(3)));
     assert_eq!(ph["a2.jpg"].rank_in_burst, Some(0), "sharpest frame wins");
     assert_eq!(ph["a3.jpg"].rank_in_burst, Some(1));
     assert_eq!(ph["a1.jpg"].rank_in_burst, Some(2));
@@ -204,7 +232,10 @@ async fn full_pipeline_groups_scores_people() {
     assert!(ph["b1.jpg"].issues.is_empty());
     assert_eq!(ph["b1.jpg"].rank_in_burst, Some(0));
     // face counts
-    assert_eq!((ph["a1.jpg"].face_count, ph["a1.jpg"].subject_face_count), (Some(2), Some(2)));
+    assert_eq!(
+        (ph["a1.jpg"].face_count, ph["a1.jpg"].subject_face_count),
+        (Some(2), Some(2))
+    );
 
     // ---- groups API: time ordered scenes -> bursts, photos best first
     let g = e.core.groups(sid).await.unwrap();
@@ -227,7 +258,10 @@ async fn full_pipeline_groups_scores_people() {
     assert!(sc.sharpness.is_some() && sc.iqa.is_some() && sc.aesthetic.is_some());
     assert!(sc.face.is_some());
     assert!(sc.composition.is_none());
-    assert!(d.contributions.iter().any(|c| c.key == "closed_eyes" && c.delta < 0.0));
+    assert!(d
+        .contributions
+        .iter()
+        .any(|c| c.key == "closed_eyes" && c.delta < 0.0));
     assert!(d.contributions.iter().all(|c| !c.label_key.is_empty()));
     assert!(d.reasons.iter().any(|r| r.key == "closed_eyes"));
     let un = e.core.photo_analysis(ph["a1.jpg"].id).await.unwrap();
@@ -236,14 +270,20 @@ async fn full_pipeline_groups_scores_people() {
     // ---- people: A and B across both bursts; the stranger (one photo) is not a person
     let people = e.core.people(Some(sid)).await.unwrap();
     assert_eq!(people.len(), 2, "{people:?}");
-    assert!(people.iter().all(|p| p.photo_count == 5 && p.name.is_none() && !p.hidden));
+    assert!(people
+        .iter()
+        .all(|p| p.photo_count == 5 && p.name.is_none() && !p.hidden));
     assert!(people.iter().all(|p| p.cover_face_id.is_some()));
     let stranger = &d.faces;
     let _ = stranger;
     let c1 = e.core.photo_analysis(ph["c1.jpg"].id).await.unwrap();
     assert!(c1.faces[0].person_id.is_none());
     // tracks within the burst: both people, one cell per photo
-    let bf = e.core.burst_faces(ph["a1.jpg"].burst_id.unwrap()).await.unwrap();
+    let bf = e
+        .core
+        .burst_faces(ph["a1.jpg"].burst_id.unwrap())
+        .await
+        .unwrap();
     assert_eq!(bf.photo_ids.len(), 3);
     assert_eq!(bf.tracks.len(), 2);
     for t in &bf.tracks {
@@ -256,9 +296,20 @@ async fn full_pipeline_groups_scores_people() {
     // ---- events
     let evs = drain(&mut rx);
     assert!(evs.iter().any(|e| matches!(e, Event::AnalysisProgress { state: RunState::Running, stage: Some(s), .. } if s == "analyzing")));
-    assert!(evs.iter().any(|e| matches!(e, Event::AnalysisProgress { state: RunState::Done, stage: None, .. })));
-    assert!(evs.iter().any(|e| matches!(e, Event::GroupsUpdated { session_id } if *session_id == sid)));
-    assert!(evs.iter().any(|e| matches!(e, Event::PeopleUpdated { session_id } if *session_id == sid)));
+    assert!(evs.iter().any(|e| matches!(
+        e,
+        Event::AnalysisProgress {
+            state: RunState::Done,
+            stage: None,
+            ..
+        }
+    )));
+    assert!(evs
+        .iter()
+        .any(|e| matches!(e, Event::GroupsUpdated { session_id } if *session_id == sid)));
+    assert!(evs
+        .iter()
+        .any(|e| matches!(e, Event::PeopleUpdated { session_id } if *session_id == sid)));
     let updated: usize = evs
         .iter()
         .filter_map(|e| match e {
@@ -280,8 +331,20 @@ async fn filters_by_people_state_counts_and_ai() {
     let people = e.core.people(Some(sid)).await.unwrap();
     // identify A and B through their faces in a1 (A is the left face)
     let d = e.core.photo_analysis(ph["a1.jpg"].id).await.unwrap();
-    let pa = d.faces.iter().find(|f| f.bbox[0] < 0.4).unwrap().person_id.unwrap();
-    let pb = d.faces.iter().find(|f| f.bbox[0] > 0.4).unwrap().person_id.unwrap();
+    let pa = d
+        .faces
+        .iter()
+        .find(|f| f.bbox[0] < 0.4)
+        .unwrap()
+        .person_id
+        .unwrap();
+    let pb = d
+        .faces
+        .iter()
+        .find(|f| f.bbox[0] > 0.4)
+        .unwrap()
+        .person_id
+        .unwrap();
     assert_ne!(pa, pb);
     assert_eq!(people.len(), 2);
 
@@ -334,7 +397,11 @@ async fn filters_by_people_state_counts_and_ai() {
     // smiling (smile 0.7) and looking (gaze 0.9) hold for everyone
     let smiling = page(q(&|q| {
         q.persons = vec![pa];
-        q.person_state = vec![PersonState::Smiling, PersonState::Looking, PersonState::Subject];
+        q.person_state = vec![
+            PersonState::Smiling,
+            PersonState::Looking,
+            PersonState::Subject,
+        ];
     }))
     .await;
     assert_eq!(smiling.total, 5);
@@ -342,16 +409,22 @@ async fn filters_by_people_state_counts_and_ai() {
     assert_eq!(page(q(&|q| q.faces_min = Some(2))).await.total, 5);
     assert_eq!(page(q(&|q| q.faces_max = Some(1))).await.total, 1);
     assert_eq!(page(q(&|q| q.faces_max = Some(0))).await.total, 0);
-    assert_eq!(page(q(&|q| {
-        q.faces_min = Some(1);
-        q.faces_max = Some(1);
-    }))
-    .await
-    .total, 1);
+    assert_eq!(
+        page(q(&|q| {
+            q.faces_min = Some(1);
+            q.faces_max = Some(1);
+        }))
+        .await
+        .total,
+        1
+    );
     // issues
     let none = page(q(&|q| q.issues_none = true)).await;
     assert_eq!(none.total, 5);
-    let closed = page(q(&|q| q.issues_any = vec![Issue::ClosedEyes, Issue::Blurry])).await;
+    let closed = page(q(&|q| {
+        q.issues_any = vec![Issue::ClosedEyes, Issue::Blurry]
+    }))
+    .await;
     assert_eq!(names(&closed), vec!["b2.jpg"]);
     // burst filters
     let best = page(q(&|q| q.burst_best_only = true)).await;
@@ -360,7 +433,10 @@ async fn filters_by_people_state_counts_and_ai() {
     let in_burst = page(q(&|q| q.burst_id = ph["b1.jpg"].burst_id)).await;
     assert_eq!(names(&in_burst), vec!["b1.jpg", "b2.jpg"]);
     // scene / ai rating / sort
-    assert_eq!(names(&page(q(&|q| q.scene_type = Some("landscape".into()))).await), vec!["c1.jpg"]);
+    assert_eq!(
+        names(&page(q(&|q| q.scene_type = Some("landscape".into()))).await),
+        vec!["c1.jpg"]
+    );
     let ai = page(q(&|q| q.ai_rating_gte = Some(4.0))).await;
     assert!(ai.photos.iter().all(|p| p.ai_rating.unwrap() >= 4.0));
     let sorted = page(q(&|q| q.sort = SortKey::Ai)).await;
@@ -406,7 +482,9 @@ async fn sort_by_ai_puts_unanalysed_last_and_paginates() {
     }
     assert_eq!(seen.len(), 6);
     assert!(seen[..3].iter().all(|p| p.analyzed));
-    assert!(seen[3..].iter().all(|p| !p.analyzed && p.ai_score.is_none()));
+    assert!(seen[3..]
+        .iter()
+        .all(|p| !p.analyzed && p.ai_score.is_none()));
     let scores: Vec<f64> = seen[..3].iter().map(|p| p.ai_score.unwrap()).collect();
     assert!(scores.windows(2).all(|w| w[0] >= w[1]));
 }
@@ -419,8 +497,20 @@ async fn people_naming_merging_and_corrections() {
     run(&e, sid, Profile::Standard).await;
     let ph = all(&e, sid).await;
     let d = e.core.photo_analysis(ph["b2.jpg"].id).await.unwrap();
-    let pb = d.faces.iter().find(|f| f.bbox[0] > 0.4).unwrap().person_id.unwrap();
-    let pa = d.faces.iter().find(|f| f.bbox[0] < 0.4).unwrap().person_id.unwrap();
+    let pb = d
+        .faces
+        .iter()
+        .find(|f| f.bbox[0] > 0.4)
+        .unwrap()
+        .person_id
+        .unwrap();
+    let pa = d
+        .faces
+        .iter()
+        .find(|f| f.bbox[0] < 0.4)
+        .unwrap()
+        .person_id
+        .unwrap();
     let mut rx = e.core.events.subscribe();
 
     // naming shows up in faces, tracks and the closed-eyes reason
@@ -437,27 +527,59 @@ async fn people_naming_merging_and_corrections() {
         .unwrap();
     assert_eq!(p.name.as_deref(), Some("小红"));
     let d = e.core.photo_analysis(ph["b2.jpg"].id).await.unwrap();
-    assert!(d.faces.iter().any(|f| f.person_name.as_deref() == Some("小红")));
+    assert!(d
+        .faces
+        .iter()
+        .any(|f| f.person_name.as_deref() == Some("小红")));
     let r = d.reasons.iter().find(|r| r.key == "closed_eyes").unwrap();
     assert_eq!(r.params["person"], "小红");
-    let bf = e.core.burst_faces(ph["b1.jpg"].burst_id.unwrap()).await.unwrap();
-    assert!(bf.tracks.iter().any(|t| t.person_name.as_deref() == Some("小红")));
+    let bf = e
+        .core
+        .burst_faces(ph["b1.jpg"].burst_id.unwrap())
+        .await
+        .unwrap();
+    assert!(bf
+        .tracks
+        .iter()
+        .any(|t| t.person_name.as_deref() == Some("小红")));
     assert!(drain(&mut rx)
         .iter()
         .any(|e| matches!(e, Event::PeopleUpdated { session_id } if *session_id == sid)));
     // empty names clear; hidden is independent
     let p = e
         .core
-        .patch_person(pb, PersonPatch { name: Some(None), hidden: Some(true) })
+        .patch_person(
+            pb,
+            PersonPatch {
+                name: Some(None),
+                hidden: Some(true),
+            },
+        )
         .await
         .unwrap();
     assert!(p.name.is_none() && p.hidden);
     assert!(matches!(
-        e.core.patch_person(pb, PersonPatch { name: None, hidden: None }).await,
+        e.core
+            .patch_person(
+                pb,
+                PersonPatch {
+                    name: None,
+                    hidden: None
+                }
+            )
+            .await,
         Err(CoreError::BadRequest(_))
     ));
     assert!(matches!(
-        e.core.patch_person(9999, PersonPatch { name: Some(None), hidden: None }).await,
+        e.core
+            .patch_person(
+                9999,
+                PersonPatch {
+                    name: Some(None),
+                    hidden: None
+                }
+            )
+            .await,
         Err(CoreError::NotFound(_))
     ));
 
@@ -470,7 +592,11 @@ async fn people_naming_merging_and_corrections() {
     // assigning it back to B
     let f = e.core.set_face_person(face_b1, Some(pb)).await.unwrap();
     assert_eq!(f.person_id, Some(pb));
-    assert_eq!(e.core.people(Some(sid)).await.unwrap().len(), 2, "emptied person is removed");
+    assert_eq!(
+        e.core.people(Some(sid)).await.unwrap().len(),
+        2,
+        "emptied person is removed"
+    );
     // a second face of the same photo cannot join the same person
     let other = d.faces.iter().find(|f| f.person_id == Some(pa)).unwrap().id;
     assert!(matches!(
@@ -480,19 +606,40 @@ async fn people_naming_merging_and_corrections() {
 
     // merge B into A: one person, all faces
     e.core
-        .patch_person(pa, PersonPatch { name: Some(Some("小明".into())), hidden: None })
+        .patch_person(
+            pa,
+            PersonPatch {
+                name: Some(Some("小明".into())),
+                hidden: None,
+            },
+        )
         .await
         .unwrap();
     // merging two people that appear together is allowed by the user (constraint only for faces)
-    let m = e.core.merge_people(MergePeopleRequest { ids: vec![pb], into: pa }).await.unwrap();
+    let m = e
+        .core
+        .merge_people(MergePeopleRequest {
+            ids: vec![pb],
+            into: pa,
+        })
+        .await
+        .unwrap();
     assert_eq!(m.id, pa);
     assert_eq!(m.name.as_deref(), Some("小明"));
     assert!(matches!(
-        e.core.merge_people(MergePeopleRequest { ids: vec![pa], into: pa }).await,
+        e.core
+            .merge_people(MergePeopleRequest {
+                ids: vec![pa],
+                into: pa
+            })
+            .await,
         Err(CoreError::BadRequest(_))
     ));
     assert_eq!(e.core.people(Some(sid)).await.unwrap().len(), 1);
-    assert!(matches!(e.core.people(Some(9999)).await, Err(CoreError::NotFound(_))));
+    assert!(matches!(
+        e.core.people(Some(9999)).await,
+        Err(CoreError::NotFound(_))
+    ));
     // whole-library listing
     assert_eq!(e.core.people(None).await.unwrap().len(), 1);
 }
@@ -505,43 +652,97 @@ async fn user_constraints_survive_reanalysis() {
     run(&e, sid, Profile::Standard).await;
     let ph = all(&e, sid).await;
     let d = e.core.photo_analysis(ph["a1.jpg"].id).await.unwrap();
-    let pa = d.faces.iter().find(|f| f.bbox[0] < 0.4).unwrap().person_id.unwrap();
+    let pa = d
+        .faces
+        .iter()
+        .find(|f| f.bbox[0] < 0.4)
+        .unwrap()
+        .person_id
+        .unwrap();
     e.core
-        .patch_person(pa, PersonPatch { name: Some(Some("Ann".into())), hidden: None })
+        .patch_person(
+            pa,
+            PersonPatch {
+                name: Some(Some("Ann".into())),
+                hidden: None,
+            },
+        )
         .await
         .unwrap();
     // the user declares a1's left face is somebody else
     let face = d.faces.iter().find(|f| f.person_id == Some(pa)).unwrap().id;
-    let lone = e.core.set_face_person(face, None).await.unwrap().person_id.unwrap();
+    let lone = e
+        .core
+        .set_face_person(face, None)
+        .await
+        .unwrap()
+        .person_id
+        .unwrap();
 
     // re-analyse everything
     e.core
-        .analysis_run(AnalysisRunRequest { force: true, ..run_req(sid, Profile::Standard) })
+        .analysis_run(AnalysisRunRequest {
+            force: true,
+            ..run_req(sid, Profile::Standard)
+        })
         .await
         .unwrap();
     assert_eq!(wait_done(&e, sid).await.state, RunState::Done);
     let d = e.core.photo_analysis(ph["a1.jpg"].id).await.unwrap();
     let left = d.faces.iter().find(|f| f.bbox[0] < 0.4).unwrap();
-    assert_eq!(left.person_id, Some(lone), "locked face keeps its person (new face id, same bbox)");
+    assert_eq!(
+        left.person_id,
+        Some(lone),
+        "locked face keeps its person (new face id, same bbox)"
+    );
     // the named person survived the re-run
     let people = e.core.people(Some(sid)).await.unwrap();
-    let ann = people.iter().find(|p| p.name.as_deref() == Some("Ann")).unwrap();
+    let ann = people
+        .iter()
+        .find(|p| p.name.as_deref() == Some("Ann"))
+        .unwrap();
     assert_eq!(ann.id, pa);
     assert!(ann.photo_count >= 1);
 
     // must-link: the user says the stranger of c1 is Ann, although the embedding is far away
     let c1 = e.core.photo_analysis(ph["c1.jpg"].id).await.unwrap();
     assert!(c1.faces[0].person_id.is_none());
-    e.core.set_face_person(c1.faces[0].id, Some(pa)).await.unwrap();
-    let before = e.core.people(Some(sid)).await.unwrap().iter().find(|p| p.id == pa).unwrap().photo_count;
     e.core
-        .analysis_run(AnalysisRunRequest { force: true, ..run_req(sid, Profile::Standard) })
+        .set_face_person(c1.faces[0].id, Some(pa))
+        .await
+        .unwrap();
+    let before = e
+        .core
+        .people(Some(sid))
+        .await
+        .unwrap()
+        .iter()
+        .find(|p| p.id == pa)
+        .unwrap()
+        .photo_count;
+    e.core
+        .analysis_run(AnalysisRunRequest {
+            force: true,
+            ..run_req(sid, Profile::Standard)
+        })
         .await
         .unwrap();
     wait_done(&e, sid).await;
     let c1 = e.core.photo_analysis(ph["c1.jpg"].id).await.unwrap();
-    assert_eq!(c1.faces[0].person_id, Some(pa), "user assignment survives re-analysis");
-    let after = e.core.people(Some(sid)).await.unwrap().iter().find(|p| p.id == pa).unwrap().photo_count;
+    assert_eq!(
+        c1.faces[0].person_id,
+        Some(pa),
+        "user assignment survives re-analysis"
+    );
+    let after = e
+        .core
+        .people(Some(sid))
+        .await
+        .unwrap()
+        .iter()
+        .find(|p| p.id == pa)
+        .unwrap()
+        .photo_count;
     assert_eq!(after, before);
 }
 
@@ -557,7 +758,10 @@ async fn manual_split_and_merge_rerank_and_persist() {
 
     let [a, b] = e
         .core
-        .split_burst(SplitRequest { burst_id: burst, at_photo_id: ph["a3.jpg"].id })
+        .split_burst(SplitRequest {
+            burst_id: burst,
+            at_photo_id: ph["a3.jpg"].id,
+        })
         .await
         .unwrap();
     assert_eq!(a, burst);
@@ -572,7 +776,9 @@ async fn manual_split_and_merge_rerank_and_persist() {
     assert_eq!(now["a3.jpg"].rank_in_burst, Some(0));
     let evs = drain(&mut rx);
     assert!(evs.iter().any(|e| matches!(e, Event::GroupsUpdated { .. })));
-    assert!(evs.iter().any(|e| matches!(e, Event::AnalysisUpdated { ids, .. } if ids.contains(&ph["a3.jpg"].id))));
+    assert!(evs.iter().any(
+        |e| matches!(e, Event::AnalysisUpdated { ids, .. } if ids.contains(&ph["a3.jpg"].id))
+    ));
     // groups API shows two bursts in the same scene
     let g = e.core.groups(sid).await.unwrap();
     assert_eq!(g.scenes[0].bursts.len(), 2);
@@ -584,21 +790,39 @@ async fn manual_split_and_merge_rerank_and_persist() {
 
     // bad splits
     assert!(matches!(
-        e.core.split_burst(SplitRequest { burst_id: a, at_photo_id: ph["a1.jpg"].id }).await,
+        e.core
+            .split_burst(SplitRequest {
+                burst_id: a,
+                at_photo_id: ph["a1.jpg"].id
+            })
+            .await,
         Err(CoreError::BadRequest(_))
     ));
     assert!(matches!(
-        e.core.split_burst(SplitRequest { burst_id: a, at_photo_id: ph["c1.jpg"].id }).await,
+        e.core
+            .split_burst(SplitRequest {
+                burst_id: a,
+                at_photo_id: ph["c1.jpg"].id
+            })
+            .await,
         Err(CoreError::BadRequest(_))
     ));
     assert!(matches!(
-        e.core.split_burst(SplitRequest { burst_id: 99999, at_photo_id: 1 }).await,
+        e.core
+            .split_burst(SplitRequest {
+                burst_id: 99999,
+                at_photo_id: 1
+            })
+            .await,
         Err(CoreError::NotFound(_))
     ));
 
     // manual bursts survive a re-run (auto grouping would have glued them together again)
     e.core
-        .analysis_run(AnalysisRunRequest { force: true, ..run_req(sid, Profile::Standard) })
+        .analysis_run(AnalysisRunRequest {
+            force: true,
+            ..run_req(sid, Profile::Standard)
+        })
         .await
         .unwrap();
     wait_done(&e, sid).await;
@@ -610,12 +834,17 @@ async fn manual_split_and_merge_rerank_and_persist() {
     let merged = e
         .core
         .merge_bursts(MergeBurstsRequest {
-            burst_ids: vec![now["a1.jpg"].burst_id.unwrap(), now["a3.jpg"].burst_id.unwrap()],
+            burst_ids: vec![
+                now["a1.jpg"].burst_id.unwrap(),
+                now["a3.jpg"].burst_id.unwrap(),
+            ],
         })
         .await
         .unwrap();
     let now = all(&e, sid).await;
-    assert!(["a1.jpg", "a2.jpg", "a3.jpg"].iter().all(|n| now[*n].burst_id == Some(merged)));
+    assert!(["a1.jpg", "a2.jpg", "a3.jpg"]
+        .iter()
+        .all(|n| now[*n].burst_id == Some(merged)));
     assert_eq!(now["a2.jpg"].rank_in_burst, Some(0));
     assert_eq!(now["a2.jpg"].burst_size, Some(3));
     let merged2 = e
@@ -626,11 +855,27 @@ async fn manual_split_and_merge_rerank_and_persist() {
         .await
         .unwrap();
     let g = e.core.groups(sid).await.unwrap();
-    let b = g.scenes.iter().flat_map(|s| &s.bursts).find(|b| b.id == merged2).unwrap();
+    let b = g
+        .scenes
+        .iter()
+        .flat_map(|s| &s.bursts)
+        .find(|b| b.id == merged2)
+        .unwrap();
     assert_eq!(b.size, 4);
-    assert!(g.scenes.iter().flat_map(|s| &s.bursts).map(|b| b.size).sum::<i64>() == 6);
+    assert!(
+        g.scenes
+            .iter()
+            .flat_map(|s| &s.bursts)
+            .map(|b| b.size)
+            .sum::<i64>()
+            == 6
+    );
     assert!(matches!(
-        e.core.merge_bursts(MergeBurstsRequest { burst_ids: vec![merged2] }).await,
+        e.core
+            .merge_bursts(MergeBurstsRequest {
+                burst_ids: vec![merged2]
+            })
+            .await,
         Err(CoreError::BadRequest(_))
     ));
 }
@@ -650,7 +895,10 @@ async fn models_missing_blocks_standard_but_not_fast() {
     // fast does not need the embedding model: grouping falls back to the perceptual hash
     let st = run(&e, sid, Profile::Fast).await;
     assert_eq!(st.state, RunState::Done);
-    assert_eq!(e.worker.last_profile.lock().unwrap().as_deref(), Some("fast"));
+    assert_eq!(
+        e.worker.last_profile.lock().unwrap().as_deref(),
+        Some("fast")
+    );
     let ph = all(&e, sid).await;
     assert!(ph.values().all(|p| p.analyzed && p.ai_rating.is_some()));
     // the scene is the same for every photo in fast mode, so everything within 10 minutes and
@@ -658,8 +906,15 @@ async fn models_missing_blocks_standard_but_not_fast() {
     let d = e.core.photo_analysis(ph["a1.jpg"].id).await.unwrap();
     assert_eq!(d.profile.as_deref(), Some("fast"));
     assert!(d.scores.unwrap().iqa.is_none());
-    assert!(e.core.people(Some(sid)).await.unwrap().is_empty(), "no identity, no people");
-    let bf = e.core.burst_faces(ph["a1.jpg"].burst_id.unwrap()).await.unwrap();
+    assert!(
+        e.core.people(Some(sid)).await.unwrap().is_empty(),
+        "no identity, no people"
+    );
+    let bf = e
+        .core
+        .burst_faces(ph["a1.jpg"].burst_id.unwrap())
+        .await
+        .unwrap();
     assert_eq!(bf.tracks.len(), 2, "tracks come from box overlap");
     // models endpoints
     let models = e.core.models().await.unwrap();
@@ -667,9 +922,16 @@ async fn models_missing_blocks_standard_but_not_fast() {
     assert!(!sig.installed);
     assert_eq!(sig.required_for, vec!["standard".to_string()]);
     let yunet = models.iter().find(|m| m.id == "yunet").unwrap();
-    assert_eq!(yunet.required_for, vec!["fast".to_string(), "standard".to_string()]);
+    assert_eq!(
+        yunet.required_for,
+        vec!["fast".to_string(), "standard".to_string()]
+    );
     let mut rx = e.core.events.subscribe();
-    let tid = e.core.models_ensure(vec!["siglip2-base".into()]).await.unwrap();
+    let tid = e
+        .core
+        .models_ensure(vec!["siglip2-base".into()])
+        .await
+        .unwrap();
     assert!(tid.starts_with("models-"));
     for _ in 0..100 {
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -678,8 +940,10 @@ async fn models_missing_blocks_standard_but_not_fast() {
         }
     }
     let evs = drain(&mut rx);
-    assert!(evs.iter().any(|ev| matches!(ev, Event::TaskProgress { kind, state, done, total, .. }
-        if kind == "model_download" && state == "done" && done == total && *total > 0)));
+    assert!(evs.iter().any(
+        |ev| matches!(ev, Event::TaskProgress { kind, state, done, total, .. }
+        if kind == "model_download" && state == "done" && done == total && *total > 0)
+    ));
     assert!(matches!(
         e.core.models_ensure(vec!["nope".into()]).await,
         Err(CoreError::BadRequest(_))
@@ -700,7 +964,10 @@ async fn skipped_steps_degrade_gracefully() {
     e.worker.set_skipped(&["aesthetic", "scene"]);
     let st = run(&e, sid, Profile::Standard).await;
     assert_eq!(st.state, RunState::Done);
-    assert_eq!(st.skipped_steps, vec!["aesthetic".to_string(), "scene".to_string()]);
+    assert_eq!(
+        st.skipped_steps,
+        vec!["aesthetic".to_string(), "scene".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -711,7 +978,10 @@ async fn batching_cancel_and_status() {
         photo(d, &format!("p{i:03}.jpg"), i * 100);
     }
     let sid = import(&e).await;
-    e.core.analysis_run(run_req(sid, Profile::Fast)).await.unwrap();
+    e.core
+        .analysis_run(run_req(sid, Profile::Fast))
+        .await
+        .unwrap();
     // a second run while one is active is rejected
     assert!(matches!(
         e.core.analysis_run(run_req(sid, Profile::Fast)).await,
@@ -733,14 +1003,21 @@ async fn batching_cancel_and_status() {
     }
     let sid2 = import(&e2).await;
     e2.worker.delay_ms.store(300, Ordering::SeqCst);
-    e2.core.analysis_run(run_req(sid2, Profile::Fast)).await.unwrap();
+    e2.core
+        .analysis_run(run_req(sid2, Profile::Fast))
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(450)).await; // first batch done, second running
     e2.core.analysis_cancel(sid2);
     let st = wait_done(&e2, sid2).await;
     assert_eq!(st.state, RunState::Idle);
     let analysed = all(&e2, sid2).await.values().filter(|p| p.analyzed).count();
-    assert!(analysed >= 32 && analysed < 70, "{analysed}");
-    assert!(all(&e2, sid2).await.values().filter(|p| p.analyzed).all(|p| p.ai_rating.is_some()));
+    assert!((32..70).contains(&analysed), "{analysed}");
+    assert!(all(&e2, sid2)
+        .await
+        .values()
+        .filter(|p| p.analyzed)
+        .all(|p| p.ai_rating.is_some()));
     // and it can be resumed: only the rest is analysed
     e2.worker.delay_ms.store(0, Ordering::SeqCst);
     let st = run(&e2, sid2, Profile::Fast).await;
@@ -778,8 +1055,10 @@ async fn failed_photos_are_reported_but_do_not_abort() {
     let e = env();
     build_scene(&e);
     let sid = import(&e).await;
-    let mut bad = FakeSpec::default();
-    bad.fail = true;
+    let bad = FakeSpec {
+        fail: true,
+        ..Default::default()
+    };
     e.worker.set("c1.jpg", bad);
     let st = run(&e, sid, Profile::Standard).await;
     assert_eq!(st.state, RunState::Done);
@@ -789,7 +1068,10 @@ async fn failed_photos_are_reported_but_do_not_abort() {
     assert!(ph["a1.jpg"].analyzed);
     let d = e.core.photo_analysis(ph["c1.jpg"].id).await.unwrap();
     assert!(!d.analyzed && d.scores.is_none() && d.faces.is_empty());
-    assert!(matches!(e.core.photo_analysis(999_999).await, Err(CoreError::NotFound(_))));
+    assert!(matches!(
+        e.core.photo_analysis(999_999).await,
+        Err(CoreError::NotFound(_))
+    ));
 }
 
 #[tokio::test]
@@ -812,11 +1094,20 @@ async fn accept_ai_writes_rounded_user_rating() {
     assert_eq!(n, 2, "unanalysed photos are skipped");
     let after = all(&e, sid).await;
     for name in ["a2.jpg", "b2.jpg"] {
-        assert_eq!(after[name].user_rating, Some(ph[name].ai_rating.unwrap().round() as i64), "{name}");
+        assert_eq!(
+            after[name].user_rating,
+            Some(ph[name].ai_rating.unwrap().round() as i64),
+            "{name}"
+        );
     }
     assert_eq!(after["a1.jpg"].user_rating, None);
-    assert!(drain(&mut rx).iter().any(|e| matches!(e, Event::PhotosUpdated { items } if items.len() == 2)));
-    assert!(matches!(e.core.accept_ai(vec![]).await, Err(CoreError::BadRequest(_))));
+    assert!(drain(&mut rx)
+        .iter()
+        .any(|e| matches!(e, Event::PhotosUpdated { items } if items.len() == 2)));
+    assert!(matches!(
+        e.core.accept_ai(vec![]).await,
+        Err(CoreError::BadRequest(_))
+    ));
 }
 
 #[tokio::test]
@@ -832,10 +1123,20 @@ async fn face_crop_is_square_and_cached() {
         let p = e.core.face_crop(fid, s).await.unwrap();
         let img = image::open(&p).unwrap();
         assert_eq!((img.width(), img.height()), (s, s));
-        assert_eq!(e.core.face_crop(fid, s).await.unwrap(), p, "cached path is stable");
+        assert_eq!(
+            e.core.face_crop(fid, s).await.unwrap(),
+            p,
+            "cached path is stable"
+        );
     }
-    assert!(matches!(e.core.face_crop(fid, 100).await, Err(CoreError::BadRequest(_))));
-    assert!(matches!(e.core.face_crop(987_654, 128).await, Err(CoreError::NotFound(_))));
+    assert!(matches!(
+        e.core.face_crop(fid, 100).await,
+        Err(CoreError::BadRequest(_))
+    ));
+    assert!(matches!(
+        e.core.face_crop(987_654, 128).await,
+        Err(CoreError::NotFound(_))
+    ));
 }
 
 #[tokio::test]
@@ -851,7 +1152,9 @@ async fn hardware_reports_worker_state_and_events() {
     assert_eq!(h.gpu.as_ref().unwrap().vram_mb, Some(24564));
     assert!(h.providers.contains(&"CUDAExecutionProvider".to_string()));
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(drain(&mut rx).iter().any(|e| matches!(e, Event::WorkerStatus { state, tier, .. }
+    assert!(drain(&mut rx)
+        .iter()
+        .any(|e| matches!(e, Event::WorkerStatus { state, tier, .. }
         if state == "ready" && tier.as_deref() == Some("T3"))));
 }
 

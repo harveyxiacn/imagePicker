@@ -182,7 +182,12 @@ impl RpcClient {
             .unwrap()
             .insert(id, Pending { resp: tx, progress });
         let frame = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        if self.inner.out.send(Message::text(frame.to_string())).is_err() {
+        if self
+            .inner
+            .out
+            .send(Message::text(frame.to_string()))
+            .is_err()
+        {
             self.inner.pending.lock().unwrap().remove(&id);
             return Err(WorkerError::Disconnected);
         }
@@ -231,7 +236,13 @@ impl Inner {
         if self.closed.send_replace(true) {
             return;
         }
-        let drained: Vec<Pending> = self.pending.lock().unwrap().drain().map(|(_, p)| p).collect();
+        let drained: Vec<Pending> = self
+            .pending
+            .lock()
+            .unwrap()
+            .drain()
+            .map(|(_, p)| p)
+            .collect();
         for p in drained {
             let _ = p.resp.send(Err(WorkerError::Disconnected));
         }
@@ -275,6 +286,7 @@ impl Inner {
 }
 
 #[cfg(test)]
+#[allow(clippy::result_large_err)]
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
@@ -322,13 +334,18 @@ mod tests {
                         let id = v.get("id").and_then(Value::as_u64);
                         match (method.as_str(), id) {
                             ("echo", Some(id)) => {
-                                let _ = tx.send(json!({"jsonrpc":"2.0","id":id,"result":v["params"]}).to_string());
+                                let _ = tx.send(
+                                    json!({"jsonrpc":"2.0","id":id,"result":v["params"]})
+                                        .to_string(),
+                                );
                             }
                             ("slow", Some(id)) => {
                                 for d in 1..=3 {
                                     let _ = tx.send(json!({"jsonrpc":"2.0","method":"progress","params":{"req":id,"done":d,"total":3}}).to_string());
                                 }
-                                let _ = tx.send(json!({"jsonrpc":"2.0","id":id,"result":"done"}).to_string());
+                                let _ = tx.send(
+                                    json!({"jsonrpc":"2.0","id":id,"result":"done"}).to_string(),
+                                );
                             }
                             ("hang", Some(id)) => {
                                 hanging.lock().unwrap().insert(id, ());
@@ -370,7 +387,10 @@ mod tests {
 
         match c.call("boom", json!({}), None, None).await {
             Err(e @ WorkerError::Rpc { .. }) => {
-                assert_eq!(e.model_unavailable(), Some(vec!["a".to_string(), "b".to_string()]));
+                assert_eq!(
+                    e.model_unavailable(),
+                    Some(vec!["a".to_string(), "b".to_string()])
+                );
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -404,7 +424,10 @@ mod tests {
         let r = c.call("hang", json!({}), None, Some(&tok)).await;
         assert!(matches!(r, Err(WorkerError::Cancelled)), "{r:?}");
         // the connection is still usable
-        assert_eq!(c.call("echo", json!(7), None, None).await.unwrap(), json!(7));
+        assert_eq!(
+            c.call("echo", json!(7), None, None).await.unwrap(),
+            json!(7)
+        );
     }
 
     #[tokio::test]

@@ -302,10 +302,7 @@ mod tests {
     fn m2_events_coalesce() {
         let mut c = Coalescer::default();
         for ids in [vec![1, 2], vec![2, 3]] {
-            c.push(Event::AnalysisUpdated {
-                session_id: 1,
-                ids,
-            });
+            c.push(Event::AnalysisUpdated { session_id: 1, ids });
         }
         c.push(Event::AnalysisUpdated {
             session_id: 2,

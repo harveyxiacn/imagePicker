@@ -78,7 +78,12 @@ async fn lazy_start_info_and_analyze() {
 #[tokio::test]
 async fn crash_is_reported_and_next_call_restarts() {
     let w = ManagedWorker::new(cfg());
-    let pid1 = w.raw_call("pid", json!({})).await.unwrap().as_u64().unwrap() as u32;
+    let pid1 = w
+        .raw_call("pid", json!({}))
+        .await
+        .unwrap()
+        .as_u64()
+        .unwrap() as u32;
     let r = w.raw_call("crash", json!({})).await;
     assert!(matches!(r, Err(WorkerError::Disconnected)), "{r:?}");
     for _ in 0..50 {
@@ -89,7 +94,12 @@ async fn crash_is_reported_and_next_call_restarts() {
     }
     assert_eq!(w.status().state, WorkerState::Crashed);
     // the next call restarts with a fresh process
-    let pid2 = w.raw_call("pid", json!({})).await.unwrap().as_u64().unwrap() as u32;
+    let pid2 = w
+        .raw_call("pid", json!({}))
+        .await
+        .unwrap()
+        .as_u64()
+        .unwrap() as u32;
     assert_ne!(pid1, pid2);
     assert_eq!(w.status().state, WorkerState::Ready);
     w.shutdown().await;
@@ -127,7 +137,10 @@ async fn unavailable_when_launcher_is_missing() {
 async fn repeated_start_failures_become_unavailable() {
     // Starts, but dies before printing the ready line (no --token => the fake worker panics).
     let w = ManagedWorker::new(WorkerConfig {
-        cmd: Some(format!("\"{}\" --nope {{token}}", env!("CARGO_BIN_EXE_ip-fake-worker"))),
+        cmd: Some(format!(
+            "\"{}\" --nope {{token}}",
+            env!("CARGO_BIN_EXE_ip-fake-worker")
+        )),
         ..cfg()
     });
     let e = w.system_info().await.unwrap_err();

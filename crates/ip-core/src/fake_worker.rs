@@ -213,7 +213,10 @@ impl AiWorker for FakeWorker {
         self.set_state(WorkerState::Ready);
         let info = SystemInfo {
             tier: Some("T3".into()),
-            providers: vec!["CUDAExecutionProvider".into(), "CPUExecutionProvider".into()],
+            providers: vec![
+                "CUDAExecutionProvider".into(),
+                "CPUExecutionProvider".into(),
+            ],
             hardware: HardwareJson {
                 device: "cuda".into(),
                 gpus: vec![GpuInfo {

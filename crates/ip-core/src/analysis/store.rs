@@ -21,7 +21,10 @@ fn placeholders(n: usize) -> String {
 }
 
 fn ids_sql(ids: &[i64]) -> String {
-    ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+    ids.iter()
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 // ====================================================================== ingest
@@ -141,7 +144,9 @@ pub fn ingest(
             // the person may have been deleted meanwhile
             let person = match person {
                 Some(p) => tx
-                    .query_row("SELECT id FROM person WHERE id=?1", [p], |r| r.get::<_, i64>(0))
+                    .query_row("SELECT id FROM person WHERE id=?1", [p], |r| {
+                        r.get::<_, i64>(0)
+                    })
                     .optional()?,
                 None => None,
             };
@@ -299,7 +304,10 @@ pub fn regroup_session(
         "DELETE FROM burst WHERE session_id=?1 AND manual=0",
         [session_id],
     )?;
-    tx.execute("UPDATE burst SET scene_id=NULL WHERE session_id=?1", [session_id])?;
+    tx.execute(
+        "UPDATE burst SET scene_id=NULL WHERE session_id=?1",
+        [session_id],
+    )?;
     tx.execute("DELETE FROM scene WHERE session_id=?1", [session_id])?;
 
     struct Unit {
@@ -324,7 +332,10 @@ pub fn regroup_session(
         )?;
         let bid = tx.last_insert_rowid();
         for m in &members {
-            tx.execute("UPDATE photo SET burst_id=?2 WHERE id=?1", params![m.id, bid])?;
+            tx.execute(
+                "UPDATE photo SET burst_id=?2 WHERE id=?1",
+                params![m.id, bid],
+            )?;
         }
         units.push(Unit {
             id: bid,
@@ -376,7 +387,10 @@ pub fn regroup_session(
         })
         .collect();
     for sc in grouping::segment_scenes(&scene_units, params) {
-        let (start, end) = (units[sc[0]].start, sc.iter().map(|&i| units[i].end).max().unwrap_or(0));
+        let (start, end) = (
+            units[sc[0]].start,
+            sc.iter().map(|&i| units[i].end).max().unwrap_or(0),
+        );
         tx.execute(
             "INSERT INTO scene(session_id, start_at, end_at) VALUES(?1,?2,?3)",
             params![session_id, start, end],
@@ -403,7 +417,11 @@ struct SRow {
     emb: Option<Vec<f32>>,
 }
 
-fn load_faces_feat(conn: &Connection, sql: &str, args: &[i64]) -> Result<HashMap<i64, Vec<FaceFeat>>> {
+fn load_faces_feat(
+    conn: &Connection,
+    sql: &str,
+    args: &[i64],
+) -> Result<HashMap<i64, Vec<FaceFeat>>> {
     let mut st = conn.prepare(sql)?;
     let mut out: HashMap<i64, Vec<FaceFeat>> = HashMap::new();
     let rows = st.query_map(params_from_iter(args.iter()), |r| {
@@ -430,7 +448,8 @@ fn load_faces_feat(conn: &Connection, sql: &str, args: &[i64]) -> Result<HashMap
     Ok(out)
 }
 
-const FACE_FEAT_COLS: &str = "f.photo_id, f.id, f.person_id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
+const FACE_FEAT_COLS: &str =
+    "f.photo_id, f.id, f.person_id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
     f.eyes_open, f.smile, f.gaze, f.yaw, f.pitch, f.sharpness, f.is_subject";
 
 /// Scores, ranks and stars every analysed photo of the given bursts and writes the results.
@@ -602,7 +621,11 @@ pub fn recompute_subjects(conn: &mut Connection, photo_ids: &[i64]) -> Result<Ve
             }
             tx.execute(
                 "UPDATE photo SET face_count=?2, subject_face_count=?3 WHERE id=?1",
-                params![pid, faces.len() as i64, flags.iter().filter(|s| **s).count() as i64],
+                params![
+                    pid,
+                    faces.len() as i64,
+                    flags.iter().filter(|s| **s).count() as i64
+                ],
             )?;
             if diff {
                 changed.push(pid);
@@ -650,7 +673,8 @@ fn load_cfaces(conn: &Connection, sql: &str, args: &[i64]) -> Result<Vec<CFace>>
     Ok(v)
 }
 
-const CFACE_COLS: &str = "f.id, f.photo_id, f.person_id, f.person_locked, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
+const CFACE_COLS: &str =
+    "f.id, f.photo_id, f.person_id, f.person_locked, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
     f.embedding, p.burst_id, COALESCE(p.taken_at, p.mtime)";
 
 /// Track index (within its group) per face; `groups` are the face indices of each burst.
@@ -662,7 +686,10 @@ fn track_groups(faces: &[CFace]) -> (Vec<usize>, BTreeMap<i64, Vec<usize>>) {
     let mut track_of = vec![0usize; faces.len()];
     for idx in groups.values() {
         // frame = rank of the photo in time order
-        let mut photos: Vec<(i64, i64)> = idx.iter().map(|&i| (faces[i].t, faces[i].photo_id)).collect();
+        let mut photos: Vec<(i64, i64)> = idx
+            .iter()
+            .map(|&i| (faces[i].t, faces[i].photo_id))
+            .collect();
         photos.sort_unstable();
         photos.dedup();
         let frame_of: HashMap<i64, usize> = photos
@@ -697,7 +724,10 @@ pub fn retrack_burst(conn: &mut Connection, burst_id: i64) -> Result<()> {
     let (track_of, _) = track_groups(&faces);
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     for (f, t) in faces.iter().zip(track_of) {
-        tx.execute("UPDATE face SET track_id=?2 WHERE id=?1", params![f.id, t as i64])?;
+        tx.execute(
+            "UPDATE face SET track_id=?2 WHERE id=?1",
+            params![f.id, t as i64],
+        )?;
     }
     tx.commit()?;
     Ok(())
@@ -820,7 +850,12 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
         recompute_person(&tx, p)?;
     }
     tx.commit()?;
-    let photo_ids: Vec<i64> = faces.iter().map(|f| f.photo_id).collect::<HashSet<_>>().into_iter().collect();
+    let photo_ids: Vec<i64> = faces
+        .iter()
+        .map(|f| f.photo_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
     let mut changed = recompute_subjects(conn, &photo_ids)?;
     changed.extend(changed_photos);
     changed.sort_unstable();
@@ -856,7 +891,10 @@ pub fn recompute_person(conn: &Connection, person_id: i64) -> Result<()> {
         if named == Some(0) {
             conn.execute("DELETE FROM person WHERE id=?1", [person_id])?;
         } else {
-            conn.execute("UPDATE person SET cover_face_id=NULL WHERE id=?1", [person_id])?;
+            conn.execute(
+                "UPDATE person SET cover_face_id=NULL WHERE id=?1",
+                [person_id],
+            )?;
         }
         return Ok(());
     }
@@ -909,13 +947,17 @@ pub fn get_face(conn: &Connection, id: i64) -> Result<Face> {
     conn.query_row(&format!("{FACE_SELECT} WHERE f.id=?1"), [id], face_row)
         .map(|r| r.0)
         .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => CoreError::not_found(format!("face {id} not found")),
+            rusqlite::Error::QueryReturnedNoRows => {
+                CoreError::not_found(format!("face {id} not found"))
+            }
             e => e.into(),
         })
 }
 
 pub fn faces_of_photo(conn: &Connection, photo_id: i64) -> Result<Vec<Face>> {
-    let mut st = conn.prepare(&format!("{FACE_SELECT} WHERE f.photo_id=?1 ORDER BY f.idx, f.id"))?;
+    let mut st = conn.prepare(&format!(
+        "{FACE_SELECT} WHERE f.photo_id=?1 ORDER BY f.idx, f.id"
+    ))?;
     let v = st
         .query_map([photo_id], face_row)?
         .map(|r| r.map(|x| x.0))
@@ -931,13 +973,18 @@ pub fn face_crop_ref(conn: &Connection, id: i64) -> Result<(i64, [f64; 4])> {
         |r| Ok((r.get(0)?, [r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?])),
     )
     .map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => CoreError::not_found(format!("face {id} not found")),
+        rusqlite::Error::QueryReturnedNoRows => {
+            CoreError::not_found(format!("face {id} not found"))
+        }
         e => e.into(),
     })
 }
 
 pub fn analysis_detail(conn: &Connection, photo_id: i64) -> Result<AnalysisDetail> {
-    let exists: i64 = conn.query_row("SELECT COUNT(*) FROM photo WHERE id=?1", [photo_id], |r| r.get(0))?;
+    let exists: i64 =
+        conn.query_row("SELECT COUNT(*) FROM photo WHERE id=?1", [photo_id], |r| {
+            r.get(0)
+        })?;
     if exists == 0 {
         return Err(CoreError::not_found(format!("photo {photo_id} not found")));
     }
@@ -1002,7 +1049,9 @@ pub fn analysis_detail(conn: &Connection, photo_id: i64) -> Result<AnalysisDetai
                     if k == "person_id" {
                         if let Some(pid) = v.as_i64() {
                             let name: Option<String> = conn
-                                .query_row("SELECT name FROM person WHERE id=?1", [pid], |r| r.get(0))
+                                .query_row("SELECT name FROM person WHERE id=?1", [pid], |r| {
+                                    r.get(0)
+                                })
                                 .optional()
                                 .ok()
                                 .flatten()
@@ -1045,9 +1094,15 @@ pub fn analysis_detail(conn: &Connection, photo_id: i64) -> Result<AnalysisDetai
 }
 
 pub fn groups_of_session(conn: &Connection, session_id: i64) -> Result<GroupsOut> {
-    let exists: i64 = conn.query_row("SELECT COUNT(*) FROM session WHERE id=?1", [session_id], |r| r.get(0))?;
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM session WHERE id=?1",
+        [session_id],
+        |r| r.get(0),
+    )?;
     if exists == 0 {
-        return Err(CoreError::not_found(format!("session {session_id} not found")));
+        return Err(CoreError::not_found(format!(
+            "session {session_id} not found"
+        )));
     }
     // photos of the session grouped by burst, best first
     let mut st = conn.prepare(
@@ -1088,8 +1143,16 @@ pub fn groups_of_session(conn: &Connection, session_id: i64) -> Result<GroupsOut
             .push(pid);
     }
     let mut scene_info: HashMap<i64, (i64, i64)> = HashMap::new();
-    let mut st = conn.prepare("SELECT id, COALESCE(start_at,0), COALESCE(end_at,0) FROM scene WHERE session_id=?1")?;
-    for r in st.query_map([session_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))? {
+    let mut st = conn.prepare(
+        "SELECT id, COALESCE(start_at,0), COALESCE(end_at,0) FROM scene WHERE session_id=?1",
+    )?;
+    for r in st.query_map([session_id], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })? {
         let (id, s, e) = r?;
         scene_info.insert(id, (s, e));
     }
@@ -1122,7 +1185,10 @@ pub fn groups_of_session(conn: &Connection, session_id: i64) -> Result<GroupsOut
 }
 
 pub fn burst_faces(conn: &Connection, burst_id: i64) -> Result<BurstFacesOut> {
-    let exists: i64 = conn.query_row("SELECT COUNT(*) FROM burst WHERE id=?1", [burst_id], |r| r.get(0))?;
+    let exists: i64 =
+        conn.query_row("SELECT COUNT(*) FROM burst WHERE id=?1", [burst_id], |r| {
+            r.get(0)
+        })?;
     if exists == 0 {
         return Err(CoreError::not_found(format!("burst {burst_id} not found")));
     }
@@ -1130,7 +1196,9 @@ pub fn burst_faces(conn: &Connection, burst_id: i64) -> Result<BurstFacesOut> {
         let mut st = conn.prepare(
             "SELECT id FROM photo WHERE burst_id=?1 ORDER BY COALESCE(rank_in_burst,1000000), id",
         )?;
-        let v = st.query_map([burst_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
+        let v = st
+            .query_map([burst_id], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<i64>>>()?;
         v
     };
     let mut st = conn.prepare(&format!(
@@ -1141,7 +1209,10 @@ pub fn burst_faces(conn: &Connection, burst_id: i64) -> Result<BurstFacesOut> {
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut by_track: BTreeMap<i64, Vec<Face>> = BTreeMap::new();
     for (f, t) in faces {
-        by_track.entry(t.unwrap_or(1_000_000 + f.id)).or_default().push(f);
+        by_track
+            .entry(t.unwrap_or(1_000_000 + f.id))
+            .or_default()
+            .push(f);
     }
     let mut tracks = Vec::new();
     for (tid, faces) in by_track {
@@ -1151,7 +1222,9 @@ pub fn burst_faces(conn: &Connection, burst_id: i64) -> Result<BurstFacesOut> {
                 *votes.entry((p, f.person_name.clone())).or_insert(0) += 1;
             }
         }
-        let top = votes.into_iter().max_by_key(|((p, _), n)| (*n, std::cmp::Reverse(*p)));
+        let top = votes
+            .into_iter()
+            .max_by_key(|((p, _), n)| (*n, std::cmp::Reverse(*p)));
         let mut cells: BTreeMap<String, Option<Face>> =
             photo_ids.iter().map(|p| (p.to_string(), None)).collect();
         let mut ranked: Vec<&Face> = faces.iter().collect();
@@ -1203,7 +1276,11 @@ fn refresh_burst_stats(conn: &Connection, burst_id: i64) -> Result<()> {
 }
 
 fn refresh_scene_bounds(conn: &Connection, scene_id: i64) -> Result<()> {
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM burst WHERE scene_id=?1", [scene_id], |r| r.get(0))?;
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM burst WHERE scene_id=?1",
+        [scene_id],
+        |r| r.get(0),
+    )?;
     if n == 0 {
         conn.execute("DELETE FROM scene WHERE id=?1", [scene_id])?;
     } else {
@@ -1231,7 +1308,9 @@ pub fn split_burst(conn: &mut Connection, burst_id: i64, at_photo_id: i64) -> Re
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => CoreError::not_found(format!("burst {burst_id} not found")),
+            rusqlite::Error::QueryReturnedNoRows => {
+                CoreError::not_found(format!("burst {burst_id} not found"))
+            }
             e => e.into(),
         })?;
     let photos = burst_photos_by_time(&tx, burst_id)?;
@@ -1250,7 +1329,10 @@ pub fn split_burst(conn: &mut Connection, burst_id: i64, at_photo_id: i64) -> Re
     )?;
     let new_id = tx.last_insert_rowid();
     for (pid, _) in &photos[idx..] {
-        tx.execute("UPDATE photo SET burst_id=?2 WHERE id=?1", params![pid, new_id])?;
+        tx.execute(
+            "UPDATE photo SET burst_id=?2 WHERE id=?1",
+            params![pid, new_id],
+        )?;
     }
     tx.execute("UPDATE burst SET manual=1 WHERE id=?1", [burst_id])?;
     refresh_burst_stats(&tx, burst_id)?;
@@ -1276,7 +1358,9 @@ pub fn merge_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<MergeOut
     ids.sort_unstable();
     ids.dedup();
     if ids.len() < 2 {
-        return Err(CoreError::bad_request("give at least two distinct burst_ids"));
+        return Err(CoreError::bad_request(
+            "give at least two distinct burst_ids",
+        ));
     }
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     struct B {
@@ -1301,13 +1385,17 @@ pub fn merge_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<MergeOut
                 },
             )
             .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => CoreError::not_found(format!("burst {id} not found")),
+                rusqlite::Error::QueryReturnedNoRows => {
+                    CoreError::not_found(format!("burst {id} not found"))
+                }
                 e => e.into(),
             })?;
         bursts.push(b);
     }
     if bursts.iter().any(|b| b.session != bursts[0].session) {
-        return Err(CoreError::bad_request("bursts belong to different sessions"));
+        return Err(CoreError::bad_request(
+            "bursts belong to different sessions",
+        ));
     }
     bursts.sort_by_key(|b| (b.start, b.id));
     let target = &bursts[0];
@@ -1316,16 +1404,25 @@ pub fn merge_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<MergeOut
     scenes.dedup();
     let target_scene = target.scene.or_else(|| scenes.first().copied());
     for b in &bursts[1..] {
-        tx.execute("UPDATE photo SET burst_id=?2 WHERE burst_id=?1", params![b.id, target.id])?;
+        tx.execute(
+            "UPDATE photo SET burst_id=?2 WHERE burst_id=?1",
+            params![b.id, target.id],
+        )?;
         tx.execute("DELETE FROM burst WHERE id=?1", [b.id])?;
     }
     if let Some(ts) = target_scene {
         // everything of the other scenes involved joins the target scene
         for s in scenes.iter().filter(|s| **s != ts) {
-            tx.execute("UPDATE burst SET scene_id=?2 WHERE scene_id=?1", params![s, ts])?;
+            tx.execute(
+                "UPDATE burst SET scene_id=?2 WHERE scene_id=?1",
+                params![s, ts],
+            )?;
             tx.execute("DELETE FROM scene WHERE id=?1", [s])?;
         }
-        tx.execute("UPDATE burst SET scene_id=?2 WHERE id=?1", params![target.id, ts])?;
+        tx.execute(
+            "UPDATE burst SET scene_id=?2 WHERE id=?1",
+            params![target.id, ts],
+        )?;
     }
     tx.execute("UPDATE burst SET manual=1 WHERE id=?1", [target.id])?;
     refresh_burst_stats(&tx, target.id)?;
@@ -1342,7 +1439,9 @@ pub fn merge_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<MergeOut
 
 pub fn burst_photo_ids(conn: &Connection, burst_id: i64) -> Result<Vec<i64>> {
     let mut st = conn.prepare("SELECT id FROM photo WHERE burst_id=?1")?;
-    let v = st.query_map([burst_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
+    let v = st
+        .query_map([burst_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
     Ok(v)
 }
 
@@ -1389,7 +1488,9 @@ pub fn get_person(conn: &Connection, id: i64) -> Result<Person> {
         person_row,
     )
     .map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => CoreError::not_found(format!("person {id} not found")),
+        rusqlite::Error::QueryReturnedNoRows => {
+            CoreError::not_found(format!("person {id} not found"))
+        }
         e => e.into(),
     })
 }
@@ -1403,7 +1504,9 @@ pub fn sessions_of_people(conn: &Connection, person_ids: &[i64]) -> Result<Vec<i
          WHERE f.person_id IN ({})",
         ids_sql(person_ids)
     ))?;
-    let v = st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
+    let v = st
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
     Ok(v)
 }
 
@@ -1428,22 +1531,32 @@ pub fn sessions_of_photos(conn: &Connection, photo_ids: &[i64]) -> Result<Vec<i6
 
 pub fn photos_of_person(conn: &Connection, person_id: i64) -> Result<Vec<i64>> {
     let mut st = conn.prepare("SELECT DISTINCT photo_id FROM face WHERE person_id=?1")?;
-    let v = st.query_map([person_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
+    let v = st
+        .query_map([person_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
     Ok(v)
 }
 
 pub fn patch_person(conn: &mut Connection, id: i64, patch: &PersonPatch) -> Result<Person> {
     if patch.name.is_none() && patch.hidden.is_none() {
-        return Err(CoreError::bad_request("nothing to update: give name or hidden"));
+        return Err(CoreError::bad_request(
+            "nothing to update: give name or hidden",
+        ));
     }
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     get_person(&tx, id)?;
     if let Some(name) = &patch.name {
-        let name = name.as_ref().map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        let name = name
+            .as_ref()
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty());
         tx.execute("UPDATE person SET name=?2 WHERE id=?1", params![id, name])?;
     }
     if let Some(h) = patch.hidden {
-        tx.execute("UPDATE person SET hidden=?2 WHERE id=?1", params![id, h as i64])?;
+        tx.execute(
+            "UPDATE person SET hidden=?2 WHERE id=?1",
+            params![id, h as i64],
+        )?;
     }
     let p = get_person(&tx, id)?;
     tx.commit()?;
@@ -1456,14 +1569,20 @@ pub fn merge_people(conn: &mut Connection, ids: &[i64], into: i64) -> Result<Per
     get_person(&tx, into)?;
     let others: Vec<i64> = ids.iter().copied().filter(|i| *i != into).collect();
     if others.is_empty() {
-        return Err(CoreError::bad_request("ids must contain at least one person other than `into`"));
+        return Err(CoreError::bad_request(
+            "ids must contain at least one person other than `into`",
+        ));
     }
     let mut inherit_name: Option<String> = None;
     for o in &others {
         let (name,): (Option<String>,) = tx
-            .query_row("SELECT name FROM person WHERE id=?1", [o], |r| Ok((r.get(0)?,)))
+            .query_row("SELECT name FROM person WHERE id=?1", [o], |r| {
+                Ok((r.get(0)?,))
+            })
             .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => CoreError::not_found(format!("person {o} not found")),
+                rusqlite::Error::QueryReturnedNoRows => {
+                    CoreError::not_found(format!("person {o} not found"))
+                }
                 e => e.into(),
             })?;
         if inherit_name.is_none() {
@@ -1492,7 +1611,11 @@ pub fn merge_people(conn: &mut Connection, ids: &[i64], into: i64) -> Result<Per
 }
 
 /// Assigns a face to a person (`None` = "not this person": a new single-face person).
-pub fn set_face_person(conn: &mut Connection, face_id: i64, person_id: Option<i64>) -> Result<(Face, i64, Vec<i64>)> {
+pub fn set_face_person(
+    conn: &mut Connection,
+    face_id: i64,
+    person_id: Option<i64>,
+) -> Result<(Face, i64, Vec<i64>)> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let (photo_id, old): (i64, Option<i64>) = tx
         .query_row(
@@ -1501,7 +1624,9 @@ pub fn set_face_person(conn: &mut Connection, face_id: i64, person_id: Option<i6
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => CoreError::not_found(format!("face {face_id} not found")),
+            rusqlite::Error::QueryReturnedNoRows => {
+                CoreError::not_found(format!("face {face_id} not found"))
+            }
             e => e.into(),
         })?;
     let target = match person_id {
@@ -1583,7 +1708,10 @@ pub fn purge_session_groups(conn: &Connection, session_id: i64) -> Result<()> {
          WHERE burst_id IN (SELECT id FROM burst WHERE session_id=?1)",
         [session_id],
     )?;
-    conn.execute("UPDATE burst SET scene_id=NULL WHERE session_id=?1", [session_id])?;
+    conn.execute(
+        "UPDATE burst SET scene_id=NULL WHERE session_id=?1",
+        [session_id],
+    )?;
     conn.execute("DELETE FROM burst WHERE session_id=?1", [session_id])?;
     conn.execute("DELETE FROM scene WHERE session_id=?1", [session_id])?;
     Ok(())
@@ -1597,4 +1725,3 @@ pub fn purge_orphan_people(conn: &Connection) -> Result<()> {
     )?;
     Ok(())
 }
-

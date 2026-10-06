@@ -58,7 +58,9 @@ pub fn assign_tracks(faces: &[TrackFace]) -> Vec<usize> {
     let mut tracks: Vec<Track> = Vec::new();
     let max_frame = faces.iter().map(|f| f.frame).max().unwrap_or(0);
     for frame in 0..=max_frame {
-        let idx: Vec<usize> = (0..faces.len()).filter(|&i| faces[i].frame == frame).collect();
+        let idx: Vec<usize> = (0..faces.len())
+            .filter(|&i| faces[i].frame == frame)
+            .collect();
         if idx.is_empty() {
             continue;
         }
@@ -71,7 +73,9 @@ pub fn assign_tracks(faces: &[TrackFace]) -> Vec<usize> {
                     _ => None,
                 };
                 let ok = match cos {
-                    Some(c) => c >= TRACK_STRONG_COS as f64 || (ov >= 0.15 && c >= TRACK_COS as f64),
+                    Some(c) => {
+                        c >= TRACK_STRONG_COS as f64 || (ov >= 0.15 && c >= TRACK_COS as f64)
+                    }
                     None => ov >= 0.4,
                 };
                 if ok {
@@ -457,10 +461,10 @@ mod tests {
     #[test]
     fn existing_people_are_reused_and_locks_win() {
         let tracks = vec![
-            tr(Some(v(5.0)), &[1], None),             // close to person 10
-            tr(Some(v(95.0)), &[2], None),            // close to person 20
-            tr(Some(v(5.0)), &[3, 4], Some(20)),      // user says this is person 20 despite looking like 10
-            tr(Some(v(250.0)), &[8], None),           // unknown, one photo
+            tr(Some(v(5.0)), &[1], None),        // close to person 10
+            tr(Some(v(95.0)), &[2], None),       // close to person 20
+            tr(Some(v(5.0)), &[3, 4], Some(20)), // user says this is person 20 despite looking like 10
+            tr(Some(v(250.0)), &[8], None),      // unknown, one photo
         ];
         let seeds = vec![(10, v(0.0)), (20, v(90.0))];
         let a = cluster_tracks(&tracks, &seeds, PERSON_COS);
@@ -489,6 +493,9 @@ mod tests {
         assert!(cluster_tracks(&tracks, &seeds, PERSON_COS).is_empty());
         let tracks = vec![tr(Some(v(5.0)), &[1], None)];
         let a = cluster_tracks(&tracks, &seeds, PERSON_COS);
-        assert!(matches!(a[0], Assignment::Person(1) | Assignment::Person(2)));
+        assert!(matches!(
+            a[0],
+            Assignment::Person(1) | Assignment::Person(2)
+        ));
     }
 }

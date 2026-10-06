@@ -22,10 +22,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use analysis::types::*;
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};
 pub use imaging::{Imaging, RealImaging};
-pub use analysis::types::*;
 pub use model::*;
 
 use db::Db;

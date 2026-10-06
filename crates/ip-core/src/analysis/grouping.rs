@@ -263,7 +263,11 @@ mod tests {
                 phash: None,
                 emb: None,
             });
-            t += if i % 2 == 0 { 400 + (i % 5) * 20 } else { 8_000 };
+            t += if i % 2 == 0 {
+                400 + (i % 5) * 20
+            } else {
+                8_000
+            };
         }
         let tb = adaptive_t_burst_ms(&items);
         assert!((1_000..=5_000).contains(&tb), "{tb}");
@@ -281,8 +285,8 @@ mod tests {
         };
         let units = vec![
             u(0, 5, 0.0),
-            u(60, 70, 20.0),       // 1 min later, cos 0.94 -> same scene
-            u(100, 110, 80.0),     // dissimilar -> new scene
+            u(60, 70, 20.0),           // 1 min later, cos 0.94 -> same scene
+            u(100, 110, 80.0),         // dissimilar -> new scene
             u(100 + 3600, 4000, 80.0), // an hour later -> new scene
         ];
         let s = segment_scenes(&units, &GroupParams::default());

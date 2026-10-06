@@ -50,14 +50,15 @@ impl Default for WorkerConfig {
 impl WorkerConfig {
     /// Honours `IMAGEPICKER_WORKER_CMD`, `IMAGEPICKER_WORKER_DIR` and `IMAGEPICKER_MODELS_DIR`.
     pub fn from_env() -> Self {
-        let mut c = Self::default();
-        c.cmd = std::env::var(process::ENV_WORKER_CMD)
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        c.models_dir = std::env::var_os("IMAGEPICKER_MODELS_DIR")
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from);
-        c
+        Self {
+            cmd: std::env::var(process::ENV_WORKER_CMD)
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
+            models_dir: std::env::var_os("IMAGEPICKER_MODELS_DIR")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from),
+            ..Self::default()
+        }
     }
 }
 
@@ -201,9 +202,10 @@ impl ManagedWorker {
             if count >= self.cfg.max_failures {
                 match last_at {
                     Some(t) if t.elapsed() < self.cfg.cooldown => {
-                        return Err(WorkerError::Unavailable(last_err.unwrap_or_else(|| {
-                            "the AI worker failed repeatedly".to_string()
-                        })));
+                        return Err(WorkerError::Unavailable(
+                            last_err
+                                .unwrap_or_else(|| "the AI worker failed repeatedly".to_string()),
+                        ));
                     }
                     _ => self.shared.reset_failures(),
                 }
@@ -220,10 +222,7 @@ impl ManagedWorker {
                     *guard = Some(conn);
                     self.shared.set_state(WorkerState::Ready, None);
                     // best effort: tier / hardware for the UI
-                    if let Ok(v) = client
-                        .call("system.info", json!({}), None, None)
-                        .await
-                    {
+                    if let Ok(v) = client.call("system.info", json!({}), None, None).await {
                         if let Ok(info) = serde_json::from_value::<SystemInfo>(v) {
                             self.shared.set_info(info);
                         }
@@ -238,7 +237,8 @@ impl ManagedWorker {
                         f.last_at = Some(Instant::now());
                         f.last_error = Some(msg.clone());
                         // a missing launcher will not fix itself between retries
-                        f.count = if matches!(&e, WorkerError::Unavailable(m) if m.contains("not found")) {
+                        f.count = if matches!(&e, WorkerError::Unavailable(m) if m.contains("not found"))
+                        {
                             self.cfg.max_failures
                         } else {
                             f.count + 1

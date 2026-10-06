@@ -89,9 +89,11 @@ pub async fn analysis_status(
 ) -> ApiResult<Json<Value>> {
     let sid = require_session(&p)?;
     st.core.session(sid).await?;
-    Ok(Json(serde_json::to_value(st.core.analysis_status(sid)).map_err(
-        |e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()),
-    )?))
+    Ok(Json(
+        serde_json::to_value(st.core.analysis_status(sid)).map_err(|e| {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string())
+        })?,
+    ))
 }
 
 pub async fn photo_analysis(
@@ -176,7 +178,9 @@ pub async fn people(
     State(st): State<AppState>,
     ApiQuery(p): ApiQuery<SessionParams>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "people": st.core.people(p.session_id).await? })))
+    Ok(Json(
+        json!({ "people": st.core.people(p.session_id).await? }),
+    ))
 }
 
 pub async fn patch_person(
@@ -184,7 +188,9 @@ pub async fn patch_person(
     ApiPath(id): ApiPath<i64>,
     ApiJson(patch): ApiJson<PersonPatch>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "person": st.core.patch_person(id, patch).await? })))
+    Ok(Json(
+        json!({ "person": st.core.patch_person(id, patch).await? }),
+    ))
 }
 
 pub async fn merge_people(
@@ -199,5 +205,7 @@ pub async fn set_face_person(
     ApiPath(id): ApiPath<i64>,
     ApiJson(req): ApiJson<SetFacePersonRequest>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!({ "face": st.core.set_face_person(id, req.person_id).await? })))
+    Ok(Json(
+        json!({ "face": st.core.set_face_person(id, req.person_id).await? }),
+    ))
 }

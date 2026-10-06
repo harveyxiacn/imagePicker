@@ -6,6 +6,8 @@
 //! `--sleeper` runs a process that only sleeps; with `--grandchild` the worker spawns one
 //! and reports its pid in `system.info` (to test killing the whole process tree).
 
+#![allow(clippy::result_large_err)]
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -85,7 +87,8 @@ async fn main() {
                 let id = v.get("id").and_then(Value::as_u64);
                 let reply = |result: Value| {
                     if let Some(id) = id {
-                        let _ = tx.send(json!({"jsonrpc":"2.0","id":id,"result":result}).to_string());
+                        let _ =
+                            tx.send(json!({"jsonrpc":"2.0","id":id,"result":result}).to_string());
                     }
                 };
                 match method {
@@ -115,11 +118,16 @@ async fn main() {
                         }
                     }
                     "analyze.batch" => {
-                        let n = v["params"]["items"].as_array().map(|a| a.len()).unwrap_or(0);
+                        let n = v["params"]["items"]
+                            .as_array()
+                            .map(|a| a.len())
+                            .unwrap_or(0);
                         if let Some(id) = id {
                             let _ = tx.send(json!({"jsonrpc":"2.0","method":"progress","params":{"req":id,"kind":"analyze","done":n,"total":n}}).to_string());
                         }
-                        reply(json!({"items": [], "steps": [], "skipped_steps": [], "warnings": []}));
+                        reply(
+                            json!({"items": [], "steps": [], "skipped_steps": [], "warnings": []}),
+                        );
                     }
                     _ => {}
                 }

@@ -65,6 +65,7 @@ pub fn encode_f16(v: &[f32]) -> Vec<u8> {
     out
 }
 
+#[allow(clippy::chunks_exact_to_as_chunks)]
 pub fn decode_f16(b: &[u8]) -> Vec<f32> {
     b.chunks_exact(2)
         .map(|c| f16_to_f32(u16::from_le_bytes([c[0], c[1]])))
@@ -121,6 +122,7 @@ fn bad(msg: &str) -> CoreError {
 }
 
 /// Parses `.npy` v1-v3 holding little-endian float16 or float32, C order.
+#[allow(clippy::chunks_exact_to_as_chunks)]
 pub fn parse_npy(bytes: &[u8]) -> Result<Npy> {
     if bytes.len() < 10 || &bytes[..6] != b"\x93NUMPY" {
         return Err(bad("bad magic"));
@@ -219,7 +221,16 @@ mod tests {
 
     #[test]
     fn f16_roundtrip() {
-        for x in [0.0f32, 1.0, -1.0, 0.5, 0.333251953125, 65504.0, 6.1e-5, -2.5e-7] {
+        for x in [
+            0.0f32,
+            1.0,
+            -1.0,
+            0.5,
+            0.333_251_95,
+            65504.0,
+            6.1e-5,
+            -2.5e-7,
+        ] {
             let h = f32_to_f16(x);
             let y = f16_to_f32(h);
             assert!((x - y).abs() <= x.abs() * 1e-3 + 1e-7, "{x} -> {y}");
