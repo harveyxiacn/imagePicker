@@ -9,7 +9,8 @@ Python AI worker of imagePicker. The Rust core spawns it and talks to it over We
 cd ai-worker
 uv sync --extra cuda --extra mediapipe     # NVIDIA GPU (onnxruntime-gpu + CUDA 13 libs from wheels, driver >= 580)
 uv sync --extra cpu --extra mediapipe      # CPU only
-# extras: cpu | cuda (mutually exclusive), mediapipe (face blendshapes/pose), torch (transformers fallback + ONNX export)
+# extras: cpu | cuda (mutually exclusive), mediapipe (face blendshapes/pose), torch (transformers fallback + ONNX export),
+#   llm-cuda (pairs with cuda) | llm (pairs with cpu): local assistant, onnxruntime-genai
 ```
 
 ## Run
@@ -31,6 +32,10 @@ Authenticate with `Authorization: Bearer <token>` or `ws://host:port/?token=<tok
 | `models.list` | registry + installed/loaded/recommended flags |
 | `models.ensure` `{ids:[..]}` | downloads (HF official -> `HF_ENDPOINT` -> hf-mirror), streams `progress` `{req,kind:"model.download",model,file,phase,done,total}` |
 | `models.unload` `{id?}` | free VRAM |
+| `models.delete` `{id}` | remove a downloaded model's files (unloads it first) -> `{deleted:true, freed_bytes}`; unknown id -> -32602 |
+| `llm.plan` | `{message, tools:[JSON schema], context?, locale?}` -> `{reply, calls:[{tool,args}]}` (assistant section below) |
+| `vlm.suggest` | `{photo:{photo_id,path,orientation?}, context?:{histogram,scores,scene_type}, locale?}` -> `{problems, adjust, reason}` |
+| `vlm.describe` | `{photo, locale?}` -> `{caption, keywords}` |
 | `analyze.batch` | `{items:[{photo_id,path,orientation?}], profile?:"fast"\|"standard", steps?:[..], analysis_size, out_dir, allow_download?}`; `progress` `{req,kind:"analyze",done,total}` |
 | `mask.generate` | `{photo:{photo_id,path,orientation?}, targets:[..], person_bbox?:[x,y,w,h], size, out_dir, allow_download?}` -> `{masks,models,skipped}`; `progress` `{req,kind:"mask",done,total}` when more than one target runs (see below) |
 | `beauty.prepare` | `{photo:{photo_id,path,orientation?}, faces?:[{face_id,bbox}], size, out_dir, allow_download?}` -> `{people,models,skipped,timings}` (below) |
@@ -143,6 +148,56 @@ misfit on the seam ring, occlusion (face-skin fraction < 0.5, oval outside the f
 | face_restore | `gfpgan-v1.4` (Apache-2.0, 325 MB) + `mediapipe-face-landmarker` | FFHQ 5-point 512 alignment, oval feathered paste, `strength` (default 0.8) blended; large faces keep the photo's own detail band, faces < 48 px are skipped (`skipped` list) |
 | upscale | `realesrgan-x2[-fp16]`, `realesrgan-x4[-fp16]` (BSD-3-Clause, 66 / 34 MB) | fp16 on GPU; 512 tiles + 16 px context; output <= 400 MP; `strength` blends with bicubic |
 
+## Local AI assistant (`llm.plan`, `vlm.suggest`, `vlm.describe`, contract `docs/api-contract-m6.md` A.3)
+
+Runtime: **onnxruntime-genai** (`uv sync --extra cuda --extra llm-cuda`, CPU: `--extra cpu --extra llm`). It ships
+wheels for Windows / Linux / macOS (CUDA: Windows / Linux), needs no compiler, no torch, and
+`onnxruntime-genai-cuda` depends on `onnxruntime-gpu`, so it shares the venv with the `cuda` extra (the extras
+are declared as conflicting pairs because the wheels share the `onnxruntime` package name). It also provides
+llguidance-based JSON-schema constrained decoding. The `llm-cuda` wheels pick up the CUDA 13 libraries of the `cuda`
+extra through `onnxruntime.preload_dlls()`.
+
+| role | registry id | model | size | licence | notes |
+|---|---|---|---|---|---|
+| LLM (default, CUDA) | `phi-4-mini-genai-int4-cuda` | Phi-4-mini-instruct 3.8B int4 (Microsoft ONNX export) | 3.35 GB | MIT | fp16 CUDA build, ~250 tokens/s |
+| LLM (CPU build, better Chinese) | `qwen3-4b-instruct-genai-int4` | Qwen3-4B-Instruct-2507 int4 (`robinsmits/qwen3-4b-instruct-2507-onnx-int4`) | 2.45 GB | Apache-2.0 | fp32 CPU build: ~18 tokens/s even through the CUDA EP; used for translation and as the non-CUDA LLM |
+| VLM (CUDA) | `phi-3.5-vision-genai-int4-cuda` | Phi-3.5-vision-instruct 4.2B int4 (Microsoft ONNX export) | 2.45 GB | MIT | |
+| VLM (CPU) | `phi-3.5-vision-genai-int4-cpu` | same, CPU build | 3.05 GB | MIT | slow, see below |
+
+All are `optional: true`, `required_for: [assistant, ...]`, exclusive group `diffusion` (never resident together with
+SDXL or each other). `models.list` returns `assistant_models: {"llm": [id], "vlm": [id]}` (what `models.ensure` has to
+fetch on this machine; `[]` below the tier), `system.info` returns `llm_available` / `vlm_available` (+ `assistant`
+with `runtime`, `llm_model`, `vlm_model`). Tiers: LLM T2+ (T1 only with a GPU), VLM T2+ (`IMAGEPICKER_ASSISTANT_ANY_TIER=1`
+overrides). Missing extra / tier / model -> `-32010` with `error.data.detail = {models:[ids], reason:
+runtime_missing | tier_too_low | not_installed}`; `allow_download: true` fetches on demand. Optional params:
+`model` (force a registry id), `timeout_s` (generation deadline, default 60 s LLM / 120 s VLM, hard cap 600 / 900),
+`max_tokens`. Timeout -> `-32013`, unusable output / load failure -> `-32014`.
+
+* `llm.plan`: system prompt = rules + compact signatures of the supplied tools + context (filter, selection ids,
+  current photo) + zh/en few-shot turns (only those that validate against the supplied schemas) + Chinese glossary.
+  Output is grammar-constrained to `{"calls":[{"tool":<const>,"args":<tool schema>}],"reply"}` (one `anyOf` branch per
+  tool), parsed with a repairing JSON extractor, validated against the tool schemas, one repair retry with the
+  validation errors, optional free-text arguments the user never wrote (e.g. a made-up `dest`) are dropped.
+  Unknown tools / invalid args never leave the worker. Nothing is executed. Extra result fields: `model`,
+  `repaired`, `warnings`, `latency_ms`.
+* `vlm.suggest`: 768 px image + measured luma / clipping / colour statistics + the caller's context. The 3-4B VLM
+  fills sliders with filler values and misses colour casts, so the measurable parts are rule-based: `problems`
+  about exposure / contrast / casts and the main sliders come from the measurements (`facts.baseline_adjust`), the
+  VLM adds other problems (noise, blur, haze, ...), a slider only when it asks for >= 15 units, and the reason.
+  `adjust` has the 12 scalar fields of `ip-render` `Adjust` (exposure -5..5 EV, temp -3000..3000 K, rest
+  -100..100; clamped), `source: "ai_vlm@1"`; `curve` / `hsl` / `grading` are never suggested.
+* `vlm.describe`: the VLM answers in English; for another locale the text LLM translates (Qwen3 preferred; zh output
+  is grammar-forced to start with CJK). Without an LLM the English result is returned with `locale: "en"`
+  (result field `locale` states the language actually returned).
+* Decoding is greedy (temperature 0, top-k 1), bounded by `max_tokens` and the deadline (checked per token).
+
+Measured on RTX 4090 / driver 616 / Windows 11 (CUDA 13, onnxruntime-genai 0.17.1): `llm.plan` Phi-4-mini avg 0.28-0.32 s
+(max 0.6 s) over the 15 commands, 13/15 expected tool calls (Qwen3-4B: 14/15, avg 11.9 s); `vlm.suggest` 1.1-1.3 s,
+`vlm.describe` en 0.6 s, zh 7 s (VLM -> Qwen3 translation incl. both model swaps); VRAM (nvidia-smi delta incl. CUDA
+context) Phi-4-mini ~6.0 GB, Phi-3.5-vision ~8.5 GB, Qwen3 ~5.5 GB. CPU only: `vlm.suggest` / `describe` take 40-90 s
+(2.6k image tokens through the CPU build), `llm.plan` with Qwen3 exceeds 60 s because of the ~1.7k-token prompt: usable
+for on-demand descriptions, not for interactive planning (Core falls back to its rule engine).
+
 ## Develop
 
 ```bash
@@ -151,6 +206,7 @@ uv run pytest -m models      # needs model weights (downloaded into .models/ on 
 uv run ruff check . && uv run ruff format .
 uv run python scripts/bench_analyze.py --synth 200 [--device cpu] [--profile fast|standard] [--portrait some_face.jpg]
 uv run python scripts/bench_beauty.py a.jpg b.jpg [--device cpu] [--side-by-side]   # ms per face of beauty.prepare
+uv run python scripts/bench_assistant.py [--llm ID] [--vlm ID] [--device cpu]   # llm.plan x15 commands, vlm.suggest/describe
 uv run python scripts/bench_m5.py [--device cpu] [--runs 3]   # ms: besttake, inpaint 512 mask, denoise, face_restore, upscale x2
 uv run python scripts/export_siglip2_onnx.py --out .models/export/x   # only for models without an ONNX export
 ```

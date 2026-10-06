@@ -45,6 +45,14 @@ torch = ["torch>=2.4", "transformers>=4.49", "sentencepiece", "protobuf", "onnx"
 # torch yourself if the default wheel is CPU-only; without this extra `sdxl` answers -32010.
 pro = ["torch>=2.4", "diffusers>=0.30", "transformers>=4.49", "accelerate>=0.33", "safetensors>=0.4"]
 
+# Local LLM / VLM assistant (`llm.plan`, `vlm.suggest`, `vlm.describe`): onnxruntime-genai, which
+# runs int4 ONNX builds of Qwen3 / Phi-3.5-vision with no torch and no compiler. It needs the same
+# `onnxruntime` package family as the base install, so pair it like this:
+#   uv sync --extra cuda --extra llm-cuda     (NVIDIA; onnxruntime-genai-cuda shares onnxruntime-gpu)
+#   uv sync --extra cpu  --extra llm          (CPU / macOS)
+llm = ["onnxruntime-genai>=0.17"]
+llm-cuda = ["onnxruntime-genai-cuda>=0.17; sys_platform != 'darwin'"]
+
 [project.scripts]
 imagepicker-ai = "imagepicker_ai.cli:main"
 
@@ -52,7 +60,12 @@ imagepicker-ai = "imagepicker_ai.cli:main"
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
 
 [tool.uv]
-conflicts = [[{ extra = "cpu" }, { extra = "cuda" }]]
+conflicts = [
+    [{ extra = "cpu" }, { extra = "cuda" }],
+    [{ extra = "cuda" }, { extra = "llm" }],
+    [{ extra = "cpu" }, { extra = "llm-cuda" }],
+    [{ extra = "llm" }, { extra = "llm-cuda" }],
+]
 # mediapipe hard-depends on opencv-contrib-python, which would clash with the
 # headless wheel we already ship; drop it (mediapipe's Tasks API does not need cv2).
 override-dependencies = ["opencv-contrib-python; sys_platform == 'never'"]
