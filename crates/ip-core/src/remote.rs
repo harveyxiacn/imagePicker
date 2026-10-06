@@ -189,6 +189,13 @@ pub struct RemoteStatus {
     pub connected: bool,
     pub host_tier: Option<String>,
     pub last_error: Option<String>,
+    /// A token for `host_url` is stored (independent of `enabled`).
+    pub paired: bool,
+    /// Same as `host_url` (the mobile UI reads `url`).
+    pub url: String,
+    pub host_name: Option<String>,
+    /// Unix seconds of the last successful contact (0 = never).
+    pub last_seen: i64,
 }
 
 /// Remote-AI state of a [`Core`].
@@ -294,6 +301,15 @@ impl Core {
             connected: false,
             host_tier: None,
             last_error: None,
+            paired: !s.remote_ai.host_url.is_empty()
+                && self
+                    .remote
+                    .secret
+                    .load()
+                    .is_some_and(|x| x.host_url == s.remote_ai.host_url),
+            url: s.remote_ai.host_url.clone(),
+            host_name: None,
+            last_seen: 0,
         };
         if !st.enabled {
             return st;
@@ -332,8 +348,16 @@ impl Core {
             let _ = tokio::time::timeout(Duration::from_secs(10), w.system_info()).await;
         }
         st.host_tier = w.host_tier();
+        st.host_name = w.host_name();
+        st.last_seen = w.last_ok();
         if !st.connected {
-            st.last_error = w.last_error();
+            st.last_error = w.last_error().map(|e| {
+                if e.contains("cannot reach") {
+                    "host_unreachable".to_string()
+                } else {
+                    e
+                }
+            });
         }
         st
     }

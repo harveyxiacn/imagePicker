@@ -81,3 +81,10 @@ Android 11+ 允许持有 `READ_MEDIA_IMAGES`（13+）/ `READ_EXTERNAL_STORAGE`�
 - `analyze.batch` 单请求上传超过 48 MB 时自动拆成多个请求并合并结果；无法解码/不存在的照片返回逐项错误（`kind: decode_failed`），其余照片照常分析；每个子请求完成后向 `progress` 通道发送 `{"kind":"analyze","done","total"}`。响应里的 `width/height` 是上传副本的尺寸（核心不使用）。
 - 白名单外的 RPC（`llm.plan`、`vlm.*`、`models.delete`、`models.ensure`）在手机侧直接返回 `Unavailable`；模型只能在主机上安装。
 - 断线：连接失败按 0.5/1/2 秒退避重试 3 次（请求体尚未送达，可安全重试），仍失败则 `Unavailable`；`kill()` 对远程 worker 无效（主机的 worker 不归手机管）。
+
+### C 附录修订（与移动端 UI 对齐，以本节为准）
+
+- `POST /api/remote/connect` 请求体用 `{url, code, device_name?}`（`host_url` 作为 `url` 的别名同样接受）。
+- `GET /api/remote/status`（及 connect 的响应）：`{paired, connected, url, host_name, host_tier:"T0".."T3"|null, last_error, last_seen /*unix 秒，0=从未*/}`；为兼容另保留 `enabled`、`host_url`。`paired` = 已存有属于该地址的令牌；`last_error` 连不上时为 `host_unreachable`，否则为说明文字。
+- 错误码（`error.code`）：`invalid_code`（配对码错误/已用，替代 `invalid_pairing_code`）、`pair_expired`（配对码超过 5 分钟）、`host_unreachable`、`too_many_requests`（429）。主机 `pair/complete` 同样返回 `invalid_code` / `pair_expired`。
+- `pair/start` 的 `expires_at` 改为 unix 秒（替代上文附录的毫秒）。`GET /api/remote/ping` 另返回 `host_name`。

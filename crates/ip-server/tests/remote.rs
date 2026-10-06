@@ -273,7 +273,7 @@ async fn phone_analyses_through_the_host() {
     let (s, v, _) = send(
         http()
             .post(format!("{}/api/remote/connect", p.url))
-            .json(&json!({"host_url": h.url, "code": code, "device_name": "Test Phone"})),
+            .json(&json!({"url": h.url, "code": code, "device_name": "Test Phone"})),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");
@@ -380,6 +380,10 @@ async fn phone_analyses_through_the_host() {
     let (_, st, _) = send(http().get(format!("{}/api/remote/status", p.url))).await;
     assert_eq!(st["connected"], true);
     assert_eq!(st["host_tier"], "T3");
+    assert_eq!(st["paired"], true);
+    assert_eq!(st["url"], h.url);
+    assert!(st["host_name"].is_string());
+    assert!(st["last_seen"].as_i64().unwrap() > 1_600_000_000);
     let (s2, _, _) = send(
         http()
             .patch(format!("{}/api/settings", p.url))
@@ -419,7 +423,7 @@ async fn connect_reports_clear_errors() {
     };
     let (s, v, _) = post(json!({"host_url": h.url, "code": "123456", "device_name": "x"})).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED, "{v}");
-    assert_eq!(v["error"]["code"], "invalid_pairing_code");
+    assert_eq!(v["error"]["code"], "invalid_code");
     let (s, v, _) = post(json!({"host_url": "http://127.0.0.1:9", "code": "123456"})).await;
     assert_eq!(s, StatusCode::BAD_GATEWAY, "{v}");
     assert_eq!(v["error"]["code"], "host_unreachable");
@@ -1019,7 +1023,7 @@ async fn pairing_codes_are_single_use_expire_and_are_rate_limited() {
     assert_eq!(hd.get("cache-control").unwrap(), "no-store");
     let (s, v, _) = complete(&h, &code, "Again").await;
     assert_eq!(s, StatusCode::UNAUTHORIZED, "single use");
-    assert_eq!(v["error"]["code"], "invalid_pairing_code");
+    assert_eq!(v["error"]["code"], "invalid_code");
     let (s, _, _) = complete(&h, "", "Phone").await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
     let code = pair_code(&h).await;
@@ -1045,14 +1049,18 @@ async fn pairing_codes_are_single_use_expire_and_are_rate_limited() {
         .unwrap()
         .ends_with(&format!("&code={}", v["code"].as_str().unwrap())));
     assert!(v["qr_svg"].as_str().unwrap().contains("<svg"));
-    assert!(v["expires_at"].as_i64().unwrap() > 0);
+    assert!(
+        (1_600_000_000..4_000_000_000).contains(&v["expires_at"].as_i64().unwrap()),
+        "unix seconds"
+    );
 
     // expiry
     let h2 = host_with(|o| o.remote.pairing_ttl = Duration::from_millis(150)).await;
     let code = pair_code(&h2).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let (s, _, _) = complete(&h2, &code, "Late").await;
+    let (s, v, _) = complete(&h2, &code, "Late").await;
     assert_eq!(s, StatusCode::UNAUTHORIZED, "expired");
+    assert_eq!(v["error"]["code"], "pair_expired");
 
     // brute force: the fourth wrong attempt of the window is locked out, even with the right code
     let h3 = host_with(|o| {

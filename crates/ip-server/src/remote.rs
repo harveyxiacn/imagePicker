@@ -288,7 +288,8 @@ async fn pair_start(
     let qr = crate::auth::qr_svg(&link);
     let mut resp = Json(json!({
         "code": pc.code,
-        "expires_at": pc.expires_at,
+        // unix seconds
+        "expires_at": pc.expires_at / 1000,
         "qr_svg": qr,
         "url": link,
         "urls": urls,
@@ -336,13 +337,20 @@ async fn pair_complete(
             "device_name must be 1..64 characters",
         ));
     }
-    if a.pairing().complete(&b.code).is_err() {
+    if let Err(why) = a.pairing().complete(&b.code) {
         a.pair_record_failure(peer.ip);
-        return Err(ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "invalid_pairing_code",
-            "wrong, expired or already used pairing code",
-        ));
+        return Err(match why {
+            ip_core::auth::PairingInvalid::Expired => ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "pair_expired",
+                "the pairing code has expired; start pairing again on the host",
+            ),
+            ip_core::auth::PairingInvalid::Invalid => ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "invalid_code",
+                "wrong or already used pairing code",
+            ),
+        });
     }
     a.pair_clear_failures(peer.ip);
     let (info, token) = a.store().add_device(name)?;
@@ -384,6 +392,7 @@ async fn ping(State(st): State<AppState>) -> Json<Value> {
     Json(json!({
         "ok": true,
         "tier": tier,
+        "host_name": default_device_name_or("imagePicker host"),
         "worker_state": s.state.as_str(),
     }))
 }
@@ -975,18 +984,23 @@ async fn file(
 
 #[derive(Deserialize)]
 struct ConnectBody {
+    #[serde(alias = "url")]
     host_url: String,
     code: String,
     #[serde(default)]
     device_name: String,
 }
 
-fn default_device_name() -> String {
+fn default_device_name_or(fallback: &str) -> String {
     std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "imagePicker device".into())
+        .unwrap_or_else(|| fallback.into())
+}
+
+fn default_device_name() -> String {
+    default_device_name_or("imagePicker device")
 }
 
 async fn connect(
@@ -1004,9 +1018,8 @@ async fn connect(
     let outcome = ip_worker_client::pair(&host, &b.code, &name)
         .await
         .map_err(|e| match e {
-            PairError::InvalidCode(m) => {
-                ApiError::new(StatusCode::UNAUTHORIZED, "invalid_pairing_code", m)
-            }
+            PairError::InvalidCode(m) => ApiError::new(StatusCode::UNAUTHORIZED, "invalid_code", m),
+            PairError::Expired(m) => ApiError::new(StatusCode::UNAUTHORIZED, "pair_expired", m),
             PairError::RateLimited(w) => {
                 let mut err = ApiError::new(
                     StatusCode::TOO_MANY_REQUESTS,

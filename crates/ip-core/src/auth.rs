@@ -448,9 +448,14 @@ pub struct PairingCode {
     pub expires_at: i64,
 }
 
-/// No code is pending, it was burnt, it expired or it does not match.
+/// Why a pairing code was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PairingInvalid;
+pub enum PairingInvalid {
+    /// No code is pending, it was burnt, or it does not match.
+    Invalid,
+    /// The pending code outlived its 5 minutes.
+    Expired,
+}
 
 struct Pending {
     code: String,
@@ -511,11 +516,11 @@ impl PairingStore {
     pub fn complete(&self, code: &str) -> std::result::Result<(), PairingInvalid> {
         let mut g = self.lock();
         let Some(p) = g.as_mut() else {
-            return Err(PairingInvalid);
+            return Err(PairingInvalid::Invalid);
         };
         if std::time::Instant::now() >= p.expires {
             *g = None;
-            return Err(PairingInvalid);
+            return Err(PairingInvalid::Expired);
         }
         if ct_eq(&p.code, code.trim()) {
             *g = None;
@@ -525,7 +530,7 @@ impl PairingStore {
         if p.failures >= PAIRING_MAX_FAILURES {
             *g = None;
         }
-        Err(PairingInvalid)
+        Err(PairingInvalid::Invalid)
     }
 
     /// Drops the pending code.

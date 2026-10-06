@@ -162,6 +162,7 @@ struct Upload {
 pub struct HostPing {
     pub tier: Option<String>,
     pub worker_state: Option<String>,
+    pub host_name: Option<String>,
 }
 
 /// Result of a successful pairing.
@@ -175,6 +176,8 @@ pub struct PairOutcome {
 pub enum PairError {
     /// Wrong, expired or already used code (401).
     InvalidCode(String),
+    /// The code outlived its 5 minutes (401 `pair_expired`).
+    Expired(String),
     /// Too many attempts (429); seconds to wait when the host said so.
     RateLimited(Option<u64>),
     /// The host cannot be reached.
@@ -185,7 +188,7 @@ pub enum PairError {
 impl std::fmt::Display for PairError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidCode(m) => write!(f, "{m}"),
+            Self::InvalidCode(m) | Self::Expired(m) => write!(f, "{m}"),
             Self::RateLimited(Some(s)) => write!(f, "too many attempts; retry in {s} s"),
             Self::RateLimited(None) => write!(f, "too many attempts; try again later"),
             Self::Unreachable(m) => write!(f, "cannot reach the host: {m}"),
@@ -252,6 +255,9 @@ pub async fn pair(
                 _ => Err(PairError::Other("the host sent an invalid answer".into())),
             }
         }
+        401 if body.pointer("/error/code").and_then(Value::as_str) == Some("pair_expired") => {
+            Err(PairError::Expired(msg))
+        }
         401 => Err(PairError::InvalidCode(if msg.is_empty() {
             "wrong or expired pairing code".into()
         } else {
@@ -286,6 +292,8 @@ pub struct RemoteWorker {
     http: reqwest::Client,
     tx: watch::Sender<WorkerStatus>,
     last_error: Mutex<Option<String>>,
+    last_ok: std::sync::atomic::AtomicI64,
+    host_name: Mutex<Option<String>>,
 }
 
 impl RemoteWorker {
@@ -302,6 +310,8 @@ impl RemoteWorker {
             http,
             tx,
             last_error: Mutex::new(None),
+            last_ok: std::sync::atomic::AtomicI64::new(0),
+            host_name: Mutex::new(None),
         })
     }
 
@@ -314,11 +324,27 @@ impl RemoteWorker {
         self.tx.borrow().tier.clone()
     }
 
+    /// Unix seconds of the last successful contact (0 = never).
+    pub fn last_ok(&self) -> i64 {
+        self.last_ok.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn host_name(&self) -> Option<String> {
+        self.host_name.lock().unwrap().clone()
+    }
+
     pub fn last_error(&self) -> Option<String> {
         self.last_error.lock().unwrap().clone()
     }
 
     fn record_ok(&self) {
+        self.last_ok.store(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         *self.last_error.lock().unwrap() = None;
         self.tx.send_modify(|s| {
             s.state = WorkerState::Ready;
@@ -352,6 +378,9 @@ impl RemoteWorker {
         match &r {
             Ok(p) => {
                 self.record_ok();
+                if p.host_name.is_some() {
+                    *self.host_name.lock().unwrap() = p.host_name.clone();
+                }
                 if p.tier.is_some() {
                     self.tx.send_modify(|s| s.tier = p.tier.clone());
                 }
@@ -384,6 +413,10 @@ impl RemoteWorker {
         }
         Ok(HostPing {
             tier: body.get("tier").and_then(Value::as_str).map(str::to_string),
+            host_name: body
+                .get("host_name")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             worker_state: body
                 .get("worker_state")
                 .and_then(Value::as_str)
