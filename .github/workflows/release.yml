@@ -1,0 +1,359 @@
+name: Release
+
+# Tag `vX.Y.Z` (see scripts/bump-version.sh) -> build installers on all platforms -> DRAFT GitHub Release
+# with SHA256SUMS.txt and git-cliff release notes. Builds are unsigned unless the optional signing
+# secrets exist (see docs/release.md). Manual runs default to a dry run: everything is built and the
+# release bundle is uploaded as a workflow artifact, but no GitHub Release is created.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: build everything but do not create a GitHub Release"
+        type: boolean
+        default: true
+  # Smoke-test this pipeline when it (or the bundle config) changes. Always a dry run.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "apps/desktop/src-tauri/tauri.conf.json"
+      - "scripts/bump-version.sh"
+      - "cliff.toml"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    name: Prepare (version, notes)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      dry_run: ${{ steps.meta.outputs.dry_run }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git-cliff needs full history and tags
+
+      - name: Resolve version and mode
+        id: meta
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          version="$(bash scripts/bump-version.sh --print)"
+          dry_run=true
+          if [ "$EVENT" = "push" ] && [ "$REF_TYPE" = "tag" ]; then
+            # Real release: the tag must match every manifest.
+            dry_run=false
+            bash scripts/bump-version.sh --check "$REF_NAME"
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ "$INPUT_DRY_RUN" = "false" ]; then
+            dry_run=false
+            bash scripts/bump-version.sh --check
+          else
+            bash scripts/bump-version.sh --check
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "dry_run=$dry_run"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release v$version (dry_run=$dry_run, prerelease=$prerelease)"
+
+      # Tag push: notes for the range since the previous tag. Otherwise: everything unreleased, labelled as the tag.
+      - name: Release notes (tagged)
+        if: github.ref_type == 'tag'
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Release notes (untagged)
+        if: github.ref_type != 'tag'
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --unreleased --tag ${{ steps.meta.outputs.tag }} --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Add install notes
+        run: |
+          {
+            echo
+            echo "---"
+            echo "Installers are **unsigned** unless noted otherwise. Verify downloads against \`SHA256SUMS.txt\`."
+            echo "See [docs/release.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/release.md) for install hints."
+          } >> RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: RELEASE_NOTES.md
+          if-no-files-found: error
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            family: windows
+            tauri_args: --bundles nsis,msi
+            rust_targets: ""
+            expect: "*-setup.exe *.msi"
+          - name: macOS universal
+            os: macos-latest
+            family: macos
+            tauri_args: --target universal-apple-darwin --bundles dmg
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            expect: "*.dmg"
+          - name: Linux x64
+            os: ubuntu-22.04 # oldest supported runner: keeps the glibc requirement low
+            family: linux
+            tauri_args: --bundles appimage,deb
+            rust_targets: ""
+            expect: "*.AppImage *.deb"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      # Optional signing: each flag is true only when the corresponding secrets exist.
+      HAS_WIN_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != '' }}
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+      HAS_APPLE_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+      HAS_TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system dependencies
+        if: matrix.family == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev libxdo-dev patchelf file
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            apps/desktop/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.family }}
+
+      # --- web/dist first (also rebuilt by tauri's beforeBuildCommand; cheap and fails early) ---
+      - name: Build web SPA
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Install desktop dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      # --- bundled resources (uv + ai-worker); script is added by a separate change, so it is optional ---
+      - name: Fetch bundled resources (uv)
+        shell: bash
+        env:
+          FETCH_UV_TARGET: ${{ matrix.family == 'macos' && 'universal-apple-darwin' || '' }}
+        run: |
+          set -euo pipefail
+          dir=apps/desktop/scripts
+          if   [ -f "$dir/fetch-uv.sh" ];  then bash "$dir/fetch-uv.sh"
+          elif [ -f "$dir/fetch-uv.mjs" ]; then node "$dir/fetch-uv.mjs"
+          elif [ -f "$dir/fetch-uv.ps1" ]; then pwsh -NoProfile -File "$dir/fetch-uv.ps1"
+          else echo "no fetch-uv script present; skipping"
+          fi
+
+      # --- optional signing hooks (skipped entirely when the secrets are absent) ---
+      - name: Windows code signing certificate
+        if: matrix.family == 'windows' && env.HAS_WIN_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $pw = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          Remove-Item $pfx
+          $cfg = Join-Path $env:RUNNER_TEMP 'signing.json'
+          @{ bundle = @{ windows = @{
+              certificateThumbprint = $cert.Thumbprint
+              digestAlgorithm = 'sha256'
+              timestampUrl = 'http://timestamp.digicert.com' } } } | ConvertTo-Json -Depth 5 | Set-Content $cfg
+          "SIGN_CONFIG=$cfg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Apple signing and notarization settings
+        if: matrix.family == 'macos' && env.HAS_APPLE_CERT == 'true'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          {
+            echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE"
+            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
+            if [ "$HAS_APPLE_NOTARY" = "true" ]; then
+              echo "APPLE_ID=$APPLE_ID"
+              echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+            fi
+          } >> "$GITHUB_ENV"
+
+      - name: Tauri updater signing key
+        if: env.HAS_TAURI_KEY == 'true'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<EOF_TSK"
+            echo "$TAURI_SIGNING_PRIVATE_KEY"
+            echo "EOF_TSK"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Build installers
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          TAURI_ARGS: ${{ matrix.tauri_args }}
+          APPIMAGE_EXTRACT_AND_RUN: "1" # no FUSE on runners
+          NO_STRIP: "true"
+        run: |
+          set -euo pipefail
+          args=($TAURI_ARGS)
+          if [ -n "${SIGN_CONFIG:-}" ]; then args+=(--config "$SIGN_CONFIG"); fi
+          pnpm tauri build "${args[@]}"
+
+      - name: Collect installers
+        shell: bash
+        env:
+          EXPECT: ${{ matrix.expect }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find target -type f -path '*/release/bundle/*' \
+            \( -name '*-setup.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.sig' \) \
+            -exec cp -v {} release-assets/ \;
+          for pattern in $EXPECT; do
+            if ! compgen -G "release-assets/$pattern" > /dev/null; then
+              echo "::error::expected installer matching '$pattern' was not produced"
+              exit 1
+            fi
+          done
+          ls -la release-assets
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.family }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish (draft release)
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      DRY_RUN: ${{ needs.prepare.outputs.dry_run }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: bundle
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: SHA256SUMS.txt
+        working-directory: bundle
+        run: |
+          set -euo pipefail
+          ls -la
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Dry run summary
+        if: env.DRY_RUN == 'true'
+        run: |
+          {
+            echo "### Release dry run for ${TAG}"
+            echo "No GitHub Release was created. Files that would be attached:"
+            echo '```'
+            (cd bundle && ls -1)
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep dry-run bundle
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle-dry-run
+          path: |
+            bundle/*
+            RELEASE_NOTES.md
+          retention-days: 7
+
+      - name: Create draft GitHub Release
+        if: env.DRY_RUN != 'true'
+        run: |
+          set -euo pipefail
+          flags=(--draft --title "imagePicker ${TAG}" --notes-file RELEASE_NOTES.md --target "$GITHUB_SHA")
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG exists; replacing assets"
+            gh release upload "$TAG" bundle/* --clobber
+          else
+            gh release create "$TAG" bundle/* "${flags[@]}"
+          fi
+          echo "Draft release created: review and publish it at https://github.com/${GITHUB_REPOSITORY}/releases" >> "$GITHUB_STEP_SUMMARY"
