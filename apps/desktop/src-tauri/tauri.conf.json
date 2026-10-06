@@ -12,17 +12,37 @@
   "app": {
     "withGlobalTauri": false,
     "windows": [],
-    "security": { "csp": null }
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
+    }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi", "dmg", "appimage", "deb"],
+    "targets": [
+      "nsis",
+      "msi",
+      "dmg",
+      "appimage",
+      "deb"
+    ],
     "category": "Photography",
     "shortDescription": "Local-first AI photo culling",
     "longDescription": "imagePicker: fast, local-first photo culling with AI assistance.",
     "copyright": "Apache-2.0",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
-    "externalBin": ["binaries/uv"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/uv"
+    ],
     "resources": {
       "../../../web/dist": "web",
       "../../../ai-worker/pyproject.toml": "ai-worker/pyproject.toml",
@@ -31,11 +51,22 @@
       "../../../ai-worker/imagepicker_ai": "ai-worker/imagepicker_ai"
     },
     "windows": {
-      "nsis": { "installMode": "currentUser", "languages": ["SimpChinese", "English"] }
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ]
+      }
     },
-    "macOS": { "minimumSystemVersion": "11.0" },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
     "linux": {
-      "deb": { "section": "graphics", "priority": "optional" }
+      "deb": {
+        "section": "graphics",
+        "priority": "optional"
+      }
     }
   }
 }
