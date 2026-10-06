@@ -1,29 +1,31 @@
-//! Implementation stubs — to be filled in by the render-engine work package.
+//! Implementation entry points; the work lives in the sibling modules.
 use super::*;
 
-struct Stub;
-
-impl Renderer for Stub {
-    fn backend(&self) -> Backend {
-        Backend::Cpu
+pub fn create_renderer(prefer_gpu: bool) -> Box<dyn Renderer> {
+    if prefer_gpu {
+        if let Some(g) = gpu::GpuRenderer::probe() {
+            return Box::new(g);
+        }
     }
-    fn render(&self, _req: &RenderRequest<'_>) -> Result<RgbImage> {
-        anyhow::bail!("render: not implemented")
-    }
+    Box::new(cpu::CpuRenderer)
 }
 
-pub fn create_renderer(_prefer_gpu: bool) -> Box<dyn Renderer> {
-    Box::new(Stub)
+pub fn gpu_adapter_name() -> Option<String> {
+    gpu::GpuRenderer::probe().map(|g| g.adapter_name())
 }
 
-pub fn parse_cube(_text: &str) -> Result<Lut3d> {
-    anyhow::bail!("parse_cube: not implemented")
+pub fn parse_cube(text: &str) -> Result<Lut3d> {
+    cube::parse_cube(text)
 }
 
-pub fn auto_adjust(_source: &RgbImage, _ctx: &AutoContext, _mode: AutoMode) -> Adjust {
-    Adjust::default()
+pub fn auto_adjust(source: &RgbImage, ctx: &AutoContext, mode: AutoMode) -> Adjust {
+    auto::auto_adjust(source, ctx, mode)
 }
 
 pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
-    Vec::new()
+    presets::builtin_presets()
+}
+
+pub fn builtin_lut(id: &str) -> Option<Lut3d> {
+    presets::builtin_lut(id)
 }

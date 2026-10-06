@@ -8,3 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rayon.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+bytemuck.workspace = true
