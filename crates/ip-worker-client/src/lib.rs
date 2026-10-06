@@ -11,6 +11,7 @@ pub mod process;
 pub mod protocol;
 mod protocol_m4;
 mod protocol_m5;
+mod protocol_m6;
 pub mod timeout;
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,7 @@ pub use managed::{ManagedWorker, WorkerConfig};
 pub use protocol::*;
 pub use protocol_m4::*;
 pub use protocol_m5::*;
+pub use protocol_m6::*;
 pub use timeout::{TimeoutHandle, TimeoutWorker, WorkerTimeouts};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +133,33 @@ pub trait AiWorker: Send + Sync {
             "this AI worker does not support enhance.run".into(),
         ))
     }
+    /// Language-model planning (`llm.plan`). Workers that predate M6 report `Unavailable`.
+    async fn llm_plan(&self, _req: &LlmPlanRequest) -> Result<LlmPlanResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support llm.plan".into(),
+        ))
+    }
+    /// VLM edit suggestion (`vlm.suggest`).
+    async fn vlm_suggest(&self, _req: &VlmSuggestRequest) -> Result<VlmSuggestResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support vlm.suggest".into(),
+        ))
+    }
+    /// VLM caption + keywords (`vlm.describe`).
+    async fn vlm_describe(&self, _req: &VlmDescribeRequest) -> Result<VlmDescribeResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support vlm.describe".into(),
+        ))
+    }
+    /// Deletes a downloaded model (`models.delete`). Workers without the method answer
+    /// `Unavailable`; the core then removes the model directory itself.
+    async fn models_delete(&self, _id: &str) -> Result<()> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support models.delete".into(),
+        ))
+    }
+    /// Sets process-level options (models dir, environment); they apply from the next start.
+    fn configure(&self, _opts: &WorkerOptions) {}
     /// Stops the worker process (gracefully, then by killing the process tree).
     async fn shutdown(&self);
     /// Kills an unresponsive worker immediately (no polite shutdown request). The next request

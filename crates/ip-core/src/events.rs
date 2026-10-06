@@ -73,6 +73,25 @@ pub enum Event {
         ok: bool,
         reason: Option<String>,
     },
+    /// M6: an assistant plan finished (`results`, and `undo` for one history entry).
+    #[serde(rename = "assistant.done")]
+    AssistantDone {
+        plan_id: String,
+        ok: bool,
+        results: Vec<serde_json::Value>,
+        undo: serde_json::Value,
+    },
+    /// M6: settings changed.
+    #[serde(rename = "settings.updated")]
+    SettingsUpdated { settings: serde_json::Value },
+    /// M6: a sidecar changed outside the app and differs from the catalog.
+    #[serde(rename = "xmp.conflict")]
+    XmpConflict {
+        session_id: i64,
+        photo_id: i64,
+        sidecar: serde_json::Value,
+        catalog: serde_json::Value,
+    },
     #[serde(rename = "worker.status")]
     WorkerStatus {
         state: String,
@@ -127,6 +146,7 @@ pub struct Coalescer {
     taste: Option<Event>,
     collections: bool,
     worker: Option<Event>,
+    settings: Option<Event>,
     /// `*.done` events: delivered one by one, in order.
     done: Vec<Event>,
 }
@@ -147,6 +167,7 @@ enum Key {
     Taste,
     Collections,
     Worker,
+    Settings,
     Done,
 }
 
@@ -238,9 +259,15 @@ impl Coalescer {
                 self.note(Key::Worker);
                 self.worker = Some(ev);
             }
+            ev @ Event::SettingsUpdated { .. } => {
+                self.note(Key::Settings);
+                self.settings = Some(ev);
+            }
             ev @ (Event::BestTakeDone { .. }
             | Event::InpaintDone { .. }
-            | Event::EnhanceDone { .. }) => {
+            | Event::EnhanceDone { .. }
+            | Event::AssistantDone { .. }
+            | Event::XmpConflict { .. }) => {
                 self.note(Key::Done);
                 self.done.push(ev);
             }
@@ -328,6 +355,11 @@ impl Coalescer {
                 }
                 Key::Worker => {
                     if let Some(ev) = self.worker.take() {
+                        out.push(ev);
+                    }
+                }
+                Key::Settings => {
+                    if let Some(ev) = self.settings.take() {
                         out.push(ev);
                     }
                 }

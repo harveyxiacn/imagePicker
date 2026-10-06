@@ -7,6 +7,7 @@ pub mod m2;
 pub mod m3;
 pub mod m4;
 pub mod m5;
+pub mod m6;
 pub mod routes;
 pub mod ws;
 
@@ -186,6 +187,21 @@ pub fn build_router_auth(
         .route("/assets/{photo_id}/{asset}", get(m5::asset))
         .route("/taste", get(m4::taste))
         .route("/taste/reset", post(m4::taste_reset))
+        .route("/assistant/status", get(m6::assistant_status))
+        .route("/assistant/plan", post(m6::assistant_plan))
+        .route("/assistant/execute", post(m6::assistant_execute))
+        .route("/assistant/describe", post(m6::assistant_describe))
+        .route("/assistant/suggest", post(m6::assistant_suggest))
+        .route("/settings", get(m6::get_settings).patch(m6::patch_settings))
+        .route("/cache", get(m6::get_cache))
+        .route("/cache/clear", post(m6::clear_cache))
+        .route("/models/{id}", delete(m6::delete_model))
+        .route("/onboarding", get(m6::onboarding))
+        .route("/onboarding/done", post(m6::onboarding_done))
+        .route("/faces", delete(m6::clear_faces))
+        .route("/xmp/sync", post(m6::xmp_sync))
+        .route("/photos/{id}/tags", get(m6::photo_tags))
+        .route("/photos/tags", post(m6::set_tags))
         .route("/events", get(ws::events))
         .merge(auth::routes())
         .fallback(routes::api_not_found)

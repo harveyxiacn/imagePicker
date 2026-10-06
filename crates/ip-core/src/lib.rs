@@ -1,6 +1,8 @@
 //! Catalog (SQLite), import, thumbnail scheduling, tasks and events.
 
+pub mod admin;
 pub mod analysis;
+pub mod assistant;
 pub mod auth;
 pub mod catalog;
 pub mod collections;
@@ -17,8 +19,10 @@ pub mod jsonfix;
 pub mod model;
 pub mod paths;
 pub mod roots;
+pub mod settings;
 pub mod taste;
 pub mod thumbs;
+pub mod xmp;
 
 #[cfg(any(test, feature = "testutil"))]
 pub mod fake_renderer;
@@ -45,12 +49,14 @@ pub use generate::{
 pub use imaging::{Imaging, RealImaging};
 pub use ip_render;
 pub use model::*;
+pub use settings::Settings;
 
 use db::Db;
 use ip_worker_client::{
     AiWorker, ManagedWorker, TimeoutHandle, TimeoutWorker, WorkerConfig, WorkerTimeouts,
 };
 use paths::DataDirs;
+use settings::SettingsStore;
 use thumbs::Thumbs;
 
 pub struct CoreConfig {
@@ -91,6 +97,12 @@ pub struct Core {
     /// Adjustable per-method worker timeouts (defaults + `IMAGEPICKER_WORKER_TIMEOUT*`).
     pub worker_timeouts: TimeoutHandle,
     pub render: Arc<RenderService>,
+    /// Persisted settings (`docs/api-contract-m6.md` section D).
+    pub settings: SettingsStore,
+    /// Assistant plans (in memory, 30 minute TTL).
+    pub assistant: assistant::AssistantState,
+    pub(crate) xmp: xmp::XmpState,
+    pub(crate) evicting: std::sync::atomic::AtomicBool,
     task_seq: AtomicU64,
     pub(crate) runs: std::sync::Mutex<std::collections::HashMap<i64, analysis::RunInfo>>,
     pub(crate) analysis_gate: tokio::sync::Semaphore,
@@ -105,6 +117,7 @@ impl Core {
         db.with(|c| catalog::settle_stale_sessions(c))?;
         let tasks: i64 =
             db.with(|c| Ok(c.query_row("SELECT COUNT(*) FROM task", [], |r| r.get(0))?))?;
+        let settings = SettingsStore::load(&dirs.root);
         let events = EventBus::new();
         let workers = cfg.thumb_workers.unwrap_or_else(|| {
             std::thread::available_parallelism()
@@ -138,7 +151,10 @@ impl Core {
                 let cpu_env = std::env::var("IMAGEPICKER_RENDER")
                     .map(|v| v.trim().eq_ignore_ascii_case("cpu"))
                     .unwrap_or(false);
-                Arc::from(ip_render::create_renderer(!(cfg.force_cpu || cpu_env)))
+                let cpu_setting = settings.get().render.backend == "cpu";
+                Arc::from(ip_render::create_renderer(
+                    !(cfg.force_cpu || cpu_env || cpu_setting),
+                ))
             }
         };
         let render = Arc::new(RenderService::new(edit::service::ServiceParts {
@@ -162,12 +178,18 @@ impl Core {
             worker,
             worker_timeouts,
             render,
+            settings,
+            assistant: Default::default(),
+            xmp: Default::default(),
+            evicting: std::sync::atomic::AtomicBool::new(false),
             task_seq: AtomicU64::new(tasks as u64),
             runs: Default::default(),
             analysis_gate: tokio::sync::Semaphore::new(1),
             taste_lock: tokio::sync::Mutex::new(()),
         });
         Core::spawn_worker_status_forwarder(&core);
+        core.apply_settings(None, &core.settings());
+        Core::spawn_cache_janitor(&core);
         Ok(core)
     }
 
@@ -254,7 +276,9 @@ impl Core {
         self.taste_after_labels(labels);
         let n = updates.len();
         if n > 0 {
+            let ids: Vec<i64> = updates.iter().map(|u| u.id).collect();
             self.events.emit(Event::PhotosUpdated { items: updates });
+            self.xmp_touch(&ids);
         }
         Ok(n)
     }
@@ -313,3 +337,5 @@ mod tests_m3;
 mod tests_m4;
 #[cfg(test)]
 mod tests_m5;
+#[cfg(test)]
+mod tests_m6;

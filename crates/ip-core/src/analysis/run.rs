@@ -10,7 +10,6 @@ use ip_worker_client::{
 };
 use serde_json::{json, Value};
 
-use super::grouping::GroupParams;
 use super::store::{self, IngestItem};
 use super::types::*;
 use super::vecs::{decode_f16, normalize, parse_npy};
@@ -173,6 +172,7 @@ impl Core {
                 .ok_or_else(|| CoreError::bad_request(format!("unknown model id {id:?}")))?;
             size.insert(id.clone(), m.size_mb * 1024.0 * 1024.0);
         }
+        self.require_network("downloading models")?;
         let task_id = format!("models-{}", self.next_task_seq());
         let core = self.clone();
         let tid = task_id.clone();
@@ -228,6 +228,7 @@ impl Core {
             let (d, t) = sum(&totals);
             match res {
                 Ok(Ok(())) => {
+                    core.assistant.invalidate_info();
                     // portrait geometry built while a model was missing is stale now
                     if let Err(e) = core.refresh_partial_beauty(None).await {
                         tracing::warn!(error = %e, "refreshing partial portrait geometry failed");
@@ -311,6 +312,9 @@ impl Core {
             return Err(CoreError::Conflict(format!(
                 "an analysis of session {sid} is already running"
             )));
+        }
+        if req.allow_download {
+            self.require_network("downloading models")?;
         }
         let level = req.profile.level();
         let (explicit, force) = (req.photo_ids.clone(), req.force);
@@ -448,6 +452,8 @@ impl Core {
         let out_dir = self.dirs.root.join("cache").join("analysis").join(&task_id);
         let _ = std::fs::create_dir_all(&out_dir);
         let total = refs.len() as i64;
+        // faces disabled in the settings: no detection, no identity embeddings
+        let steps = self.analysis_steps(req.profile).await;
         let mut done: i64 = 0;
         let mut failed: Vec<String> = Vec::new();
         let mut fatal: Option<String> = None;
@@ -468,7 +474,7 @@ impl Core {
                     })
                     .collect(),
                 profile: Some(req.profile.as_str().to_string()),
-                steps: None,
+                steps: steps.clone(),
                 analysis_size: ANALYSIS_SIZE,
                 out_dir: out_dir.to_string_lossy().into_owned(),
                 allow_download: req.allow_download,
@@ -654,10 +660,11 @@ impl Core {
             self.emit_run(sid, task_id, &st);
         };
         stage("grouping");
+        let group_params = self.settings().group_params();
         let t = Instant::now();
         let burst_ids = self
             .db
-            .call(move |c| store::regroup_session(c, sid, &GroupParams::default()))
+            .call(move |c| store::regroup_session(c, sid, &group_params))
             .await?;
         tracing::info!(
             ms = t.elapsed().as_millis() as u64,
@@ -738,6 +745,9 @@ impl Core {
         if let Some(s) = session_id {
             self.session(s).await?;
         }
+        if !self.settings().faces.enabled {
+            return Ok(Vec::new());
+        }
         self.db
             .call(move |c| store::list_people(c, session_id, include_singletons))
             .await
@@ -802,9 +812,40 @@ impl Core {
         self.taste_after_labels(labels);
         let n = updates.len();
         if n > 0 {
+            let ids: Vec<i64> = updates.iter().map(|u| u.id).collect();
             self.events.emit(Event::PhotosUpdated { items: updates });
+            self.xmp_touch(&ids);
         }
         Ok(n)
+    }
+
+    /// Explicit worker steps of `profile` when the settings switch faces off (`None` = the
+    /// worker's own profile).
+    async fn analysis_steps(&self, profile: Profile) -> Option<Vec<String>> {
+        if self.settings().faces.enabled {
+            return None;
+        }
+        let fallback: &[&str] = match profile {
+            Profile::Fast => &["phash", "quality"],
+            Profile::Standard => &["phash", "quality", "embed", "aesthetic", "iqa", "scene"],
+        };
+        let listed = self
+            .worker
+            .models_list()
+            .await
+            .ok()
+            .and_then(|l| l.profiles.get(profile.as_str()).map(|p| p.steps.clone()))
+            .filter(|s| !s.is_empty());
+        let steps: Vec<String> = match listed {
+            Some(s) => s,
+            None => fallback.iter().map(|s| s.to_string()).collect(),
+        };
+        Some(
+            steps
+                .into_iter()
+                .filter(|s| s != "faces" && s != "identity")
+                .collect(),
+        )
     }
 
     // ------------------------------------------------------------ people

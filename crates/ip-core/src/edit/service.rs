@@ -352,7 +352,7 @@ fn map_render_err(e: anyhow::Error) -> CoreError {
 type Cell = Arc<OnceCell<std::result::Result<Option<PathBuf>, String>>>;
 
 pub struct RenderService {
-    pub renderer: Arc<dyn Renderer>,
+    renderer: std::sync::RwLock<Arc<dyn Renderer>>,
     pub luts: Arc<LutLibrary>,
     pub masks: Arc<MaskStore>,
     pub beauty: Arc<super::beauty::BeautyStore>,
@@ -388,7 +388,7 @@ impl RenderService {
     pub fn new(p: ServiceParts) -> Self {
         let masks = Arc::new(MaskStore::new(p.db.clone(), p.worker.clone(), p.masks_dir));
         Self {
-            renderer: p.renderer,
+            renderer: std::sync::RwLock::new(p.renderer),
             luts: Arc::new(LutLibrary::new(p.luts_dir)),
             beauty: Arc::new(super::beauty::BeautyStore::new(
                 p.db.clone(),
@@ -412,7 +412,17 @@ impl RenderService {
     }
 
     pub fn backend(&self) -> Backend {
-        self.renderer.backend()
+        self.renderer().backend()
+    }
+
+    /// The renderer in use.
+    pub fn renderer(&self) -> Arc<dyn Renderer> {
+        self.renderer.read().unwrap().clone()
+    }
+
+    /// Switches the renderer (settings `render.backend`); renders in flight finish on the old one.
+    pub fn set_renderer(&self, r: Arc<dyn Renderer>) {
+        *self.renderer.write().unwrap() = r;
     }
 
     fn cache_for(&self, size: u32) -> &ThumbCache {
@@ -497,7 +507,7 @@ impl RenderService {
         };
         self.renders.fetch_add(1, Ordering::SeqCst);
         let image = self
-            .renderer
+            .renderer()
             .render(&RenderRequest {
                 source: &src,
                 stack,

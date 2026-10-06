@@ -9,7 +9,7 @@ use ip_imaging::{EncodedImage, ImageFormat, Metadata, ScannedFile, ThumbSource};
 pub use crate::fake_renderer::FakeRenderer;
 pub use crate::fake_worker::{
     person, unit, FakeFace, FakeSpec, FakeWorker, BEAUTY_MODEL, BESTTAKE_MODEL, ENHANCE_MODEL,
-    INPAINT_MODEL,
+    INPAINT_MODEL, LLM_MODEL, VLM_MODEL,
 };
 use crate::imaging::Imaging;
 

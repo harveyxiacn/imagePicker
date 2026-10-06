@@ -201,6 +201,22 @@ CREATE TABLE taste_state (
 ALTER TABLE person ADD COLUMN singleton INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE beauty_geometry ADD COLUMN partial INTEGER NOT NULL DEFAULT 0;
 "#,
+    // v8: M6 (docs/api-contract-m6.md section C): keywords (XMP `dc:subject`) and what the
+    // XMP sync last saw of each photo's sidecar (for conflict detection by mtime).
+    r#"
+CREATE TABLE photo_tag (
+  photo_id INTEGER NOT NULL REFERENCES photo(id) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  PRIMARY KEY(photo_id, tag)
+);
+CREATE INDEX idx_photo_tag_tag ON photo_tag(tag);
+CREATE TABLE xmp_state (
+  photo_id INTEGER PRIMARY KEY REFERENCES photo(id) ON DELETE CASCADE,
+  sidecar_path TEXT,
+  sidecar_mtime INTEGER NOT NULL DEFAULT 0,   -- ms, as of the last read/write by the app
+  synced_at INTEGER
+);
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.

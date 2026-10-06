@@ -139,6 +139,8 @@ pub struct FakeWorker {
     /// Milliseconds each batch takes (to test cancellation / progress).
     pub delay_ms: AtomicUsize,
     pub last_profile: Mutex<Option<String>>,
+    /// Explicit `steps` of the last `analyze.batch` request.
+    pub last_steps: Mutex<Option<Vec<String>>>,
     pub last_allow_download: Mutex<Option<bool>>,
     /// Number of upcoming batches that fail with `Disconnected` (simulated crashes).
     pub crash_batches: AtomicUsize,
@@ -186,6 +188,19 @@ pub struct FakeWorker {
     pub beauty_partial: std::sync::atomic::AtomicBool,
     /// `models.list` fails as if the worker could not start.
     pub models_unavailable: std::sync::atomic::AtomicBool,
+    /// M6: what `llm.plan` answers (`None` = no language model installed).
+    llm_response: Mutex<Option<LlmPlanResponse>>,
+    pub llm_calls: AtomicUsize,
+    pub last_llm_request: Mutex<Option<LlmPlanRequest>>,
+    /// M6: `(caption, keywords, problems, adjust, reason)` of the VLM (`None` = not installed).
+    vlm: Mutex<Option<VlmScript>>,
+    pub vlm_calls: AtomicUsize,
+    /// Model ids deleted through `models.delete`.
+    pub deleted_models: Mutex<Vec<String>>,
+    /// The last `configure` call (models dir / environment).
+    pub last_options: Mutex<Option<WorkerOptions>>,
+    /// Makes `models.delete` answer like a worker that predates it.
+    pub delete_unsupported: std::sync::atomic::AtomicBool,
 }
 
 impl Default for FakeWorker {
@@ -200,6 +215,7 @@ impl Default for FakeWorker {
             batch_sizes: Mutex::new(vec![]),
             delay_ms: AtomicUsize::new(0),
             last_profile: Mutex::new(None),
+            last_steps: Mutex::new(None),
             last_allow_download: Mutex::new(None),
             crash_batches: AtomicUsize::new(0),
             mask_calls: AtomicUsize::new(0),
@@ -227,9 +243,24 @@ impl Default for FakeWorker {
             enhance_requests: Mutex::new(Vec::new()),
             beauty_partial: std::sync::atomic::AtomicBool::new(false),
             models_unavailable: std::sync::atomic::AtomicBool::new(false),
+            llm_response: Mutex::new(None),
+            llm_calls: AtomicUsize::new(0),
+            last_llm_request: Mutex::new(None),
+            vlm: Mutex::new(None),
+            vlm_calls: AtomicUsize::new(0),
+            deleted_models: Mutex::new(Vec::new()),
+            last_options: Mutex::new(None),
+            delete_unsupported: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
+
+/// `(caption, keywords, problems, adjust, reason)` of the fake VLM.
+type VlmScript = (String, Vec<String>, Vec<String>, serde_json::Value, String);
+
+/// Ids of the fake M6 models (`task: ["llm"]` / `["vlm"]`).
+pub const LLM_MODEL: &str = "fake-qwen-llm";
+pub const VLM_MODEL: &str = "fake-qwen-vl";
 
 fn hash(s: &str) -> u64 {
     let h = blake3::hash(s.as_bytes());
@@ -258,6 +289,27 @@ impl FakeWorker {
     /// Faces `faces.embed` reports for any image (embeddings are L2-normalised on the way out).
     pub fn set_embed_faces(&self, faces: Vec<([f64; 4], Vec<f32>)>) {
         *self.embed_faces.lock().unwrap() = faces;
+    }
+    /// Installs a language model that answers every `llm.plan` with `resp`.
+    pub fn enable_llm(&self, resp: LlmPlanResponse) {
+        *self.llm_response.lock().unwrap() = Some(resp);
+    }
+    /// Installs a vision-language model.
+    pub fn enable_vlm(
+        &self,
+        caption: &str,
+        keywords: &[&str],
+        problems: &[&str],
+        adjust: serde_json::Value,
+        reason: &str,
+    ) {
+        *self.vlm.lock().unwrap() = Some((
+            caption.to_string(),
+            keywords.iter().map(|s| s.to_string()).collect(),
+            problems.iter().map(|s| s.to_string()).collect(),
+            adjust,
+            reason.to_string(),
+        ));
     }
     pub fn set_skipped(&self, steps: &[&str]) {
         *self.skipped.lock().unwrap() = steps.iter().map(|s| s.to_string()).collect();
@@ -387,22 +439,39 @@ impl AiWorker for FakeWorker {
             },
         );
         // like the real worker: an optional "pro" SDXL pack that must never block LaMa
+        let mut extra_models = Vec::new();
+        if self.llm_response.lock().unwrap().is_some() {
+            let mut llm = m(LLM_MODEL, 1800.0, &[]);
+            llm.task = vec!["llm".into()];
+            llm.recommended = false;
+            llm.optional = true;
+            extra_models.push(llm);
+        }
+        if self.vlm.lock().unwrap().is_some() {
+            let mut vlm = m(VLM_MODEL, 3200.0, &[]);
+            vlm.task = vec!["vlm".into()];
+            vlm.recommended = false;
+            vlm.optional = true;
+            extra_models.push(vlm);
+        }
         let mut sdxl = m(SDXL_MODEL, 6700.0, &["inpaint", "pro"]);
         sdxl.recommended = false;
         sdxl.optional = true;
         let mut beauty = m(BEAUTY_MODEL, 12.0, &["beauty"]);
         beauty.recommended = false;
         beauty.optional = true;
+        let mut models = vec![
+            m("yunet", 0.3, &["faces"]),
+            m("siglip2-base", 178.0, &["embed"]),
+            beauty,
+            m(BESTTAKE_MODEL, 20.0, &["besttake"]),
+            m(INPAINT_MODEL, 200.0, &["inpaint"]),
+            m(ENHANCE_MODEL, 300.0, &["enhance"]),
+            sdxl,
+        ];
+        models.extend(extra_models);
         Ok(ModelsListing {
-            models: vec![
-                m("yunet", 0.3, &["faces"]),
-                m("siglip2-base", 178.0, &["embed"]),
-                beauty,
-                m(BESTTAKE_MODEL, 20.0, &["besttake"]),
-                m(INPAINT_MODEL, 200.0, &["inpaint"]),
-                m(ENHANCE_MODEL, 300.0, &["enhance"]),
-                sdxl,
-            ],
+            models,
             profiles,
             beauty_models: json!([BEAUTY_MODEL]),
             extra: [(
@@ -438,6 +507,7 @@ impl AiWorker for FakeWorker {
         self.analyze_calls.fetch_add(1, Ordering::SeqCst);
         self.batch_sizes.lock().unwrap().push(req.items.len());
         *self.last_profile.lock().unwrap() = req.profile.clone();
+        *self.last_steps.lock().unwrap() = req.steps.clone();
         *self.last_allow_download.lock().unwrap() = Some(req.allow_download);
         if take_one(&self.crash_batches) {
             self.set_state(WorkerState::Crashed);
@@ -835,6 +905,63 @@ impl AiWorker for FakeWorker {
     async fn kill(&self) {
         self.kills.fetch_add(1, Ordering::SeqCst);
         self.set_state(WorkerState::Stopped);
+    }
+    async fn llm_plan(&self, req: &LlmPlanRequest) -> Result<LlmPlanResponse> {
+        self.llm_calls.fetch_add(1, Ordering::SeqCst);
+        *self.last_llm_request.lock().unwrap() = Some(req.clone());
+        self.nap().await;
+        self.set_state(WorkerState::Ready);
+        match self.llm_response.lock().unwrap().clone() {
+            Some(r) => Ok(r),
+            None => Err(WorkerError::Unavailable(
+                "this AI worker has no language model".into(),
+            )),
+        }
+    }
+    async fn vlm_describe(&self, _req: &VlmDescribeRequest) -> Result<VlmDescribeResponse> {
+        self.vlm_calls.fetch_add(1, Ordering::SeqCst);
+        self.nap().await;
+        match self.vlm.lock().unwrap().clone() {
+            Some((caption, keywords, ..)) => Ok(VlmDescribeResponse { caption, keywords }),
+            None => Err(WorkerError::Unavailable("no VLM".into())),
+        }
+    }
+    async fn vlm_suggest(&self, _req: &VlmSuggestRequest) -> Result<VlmSuggestResponse> {
+        self.vlm_calls.fetch_add(1, Ordering::SeqCst);
+        self.nap().await;
+        match self.vlm.lock().unwrap().clone() {
+            Some((_, _, problems, adjust, reason)) => Ok(VlmSuggestResponse {
+                problems,
+                adjust,
+                reason,
+            }),
+            None => Err(WorkerError::Unavailable("no VLM".into())),
+        }
+    }
+    async fn models_delete(&self, id: &str) -> Result<()> {
+        if self.delete_unsupported.load(Ordering::SeqCst) {
+            return Err(WorkerError::Unavailable(
+                "this AI worker does not support models.delete".into(),
+            ));
+        }
+        let known = self.models_list().await?.models.iter().any(|m| m.id == id);
+        if !known {
+            return Err(WorkerError::Rpc {
+                code: -32602,
+                message: format!("unknown model {id}"),
+                kind: None,
+                detail: None,
+            });
+        }
+        self.deleted_models.lock().unwrap().push(id.to_string());
+        let mut missing = self.missing.lock().unwrap();
+        if !missing.iter().any(|m| m == id) {
+            missing.push(id.to_string());
+        }
+        Ok(())
+    }
+    fn configure(&self, opts: &WorkerOptions) {
+        *self.last_options.lock().unwrap() = Some(opts.clone());
     }
     async fn shutdown(&self) {
         self.set_state(WorkerState::Stopped);

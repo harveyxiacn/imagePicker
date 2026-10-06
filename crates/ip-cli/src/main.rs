@@ -123,6 +123,22 @@ enum Command {
         #[arg(long)]
         data_dir: Option<PathBuf>,
     },
+    /// Ask the assistant: print the plan for a natural-language request (zh-CN or English);
+    /// with `--execute` run it too.
+    Ask {
+        message: String,
+        /// Library session id.
+        #[arg(long)]
+        session: i64,
+        /// Run the plan after printing it (destructive steps included).
+        #[arg(long)]
+        execute: bool,
+        /// `auto` (default from the settings), `rules` or `llm`.
+        #[arg(long)]
+        engine: Option<String>,
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
+    },
     /// Show what the personalised scoring has learned (labels, accuracy, fusion weight).
     Taste {
         /// Train now instead of waiting for the next 50 labels.
@@ -225,6 +241,68 @@ async fn inpaint_headless(core: &Arc<Core>, photo_id: i64, body: InpaintBody) ->
     tokio::time::timeout(GEN_WAIT, wait)
         .await
         .context("timed out waiting for inpaint.done")?
+}
+
+fn print_plan_out(p: &ip_core::assistant::PlanOut) {
+    println!("engine:        {}", p.engine);
+    println!("reply:         {}", p.reply);
+    if let Some(u) = &p.unsupported {
+        println!("unsupported:   {u}");
+    }
+    for (i, s) in p.steps.iter().enumerate() {
+        println!(
+            "step {}:        {} {}{}",
+            i + 1,
+            s.tool,
+            s.args,
+            if s.destructive { "  [destructive]" } else { "" }
+        );
+        println!("               {} ({} photos)", s.summary, s.affects);
+    }
+    if p.needs_confirmation {
+        println!("confirmation:  needed (pass --execute to run it)");
+    }
+}
+
+/// Plans a request and, with `execute`, runs the plan and waits for `assistant.done`.
+async fn ask_headless(
+    core: &Arc<Core>,
+    session: i64,
+    message: &str,
+    execute: bool,
+    engine: Option<String>,
+) -> Result<(ip_core::assistant::PlanOut, Option<Event>)> {
+    let plan = core
+        .assistant_plan(ip_core::assistant::PlanRequest {
+            session_id: session,
+            message: message.to_string(),
+            context: Default::default(),
+            engine,
+        })
+        .await?;
+    if !execute || plan.unsupported.is_some() || plan.steps.is_empty() {
+        return Ok((plan, None));
+    }
+    let mut rx = core.events.subscribe();
+    core.assistant_execute(&plan.plan_id).await?;
+    let wait = async {
+        loop {
+            match rx.recv().await {
+                Ok(ev @ Event::AssistantDone { .. }) => {
+                    if matches!(&ev, Event::AssistantDone { plan_id, .. } if *plan_id == plan.plan_id)
+                    {
+                        return Ok(ev);
+                    }
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(e) => anyhow::bail!("event stream closed: {e}"),
+            }
+        }
+    };
+    let done = tokio::time::timeout(GEN_WAIT, wait)
+        .await
+        .context("timed out waiting for assistant.done")??;
+    Ok((plan, Some(done)))
 }
 
 fn print_taste(t: &ip_core::taste::TasteOut) {
@@ -756,6 +834,28 @@ async fn main() -> Result<()> {
             println!("inpainted photo {photo_id}; the patch is part of its edit stack");
             Ok(())
         }
+        Command::Ask {
+            message,
+            session,
+            execute,
+            engine,
+            data_dir,
+        } => {
+            init_tracing("warn");
+            let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
+            let (plan, done) = ask_headless(&core, session, &message, execute, engine).await?;
+            print_plan_out(&plan);
+            if let Some(Event::AssistantDone { ok, results, .. }) = done {
+                println!("executed:      {}", if ok { "ok" } else { "with errors" });
+                for r in results {
+                    println!("  {r}");
+                }
+                if !ok {
+                    anyhow::bail!("the plan did not run completely");
+                }
+            }
+            Ok(())
+        }
         Command::Taste { retrain, data_dir } => {
             init_tracing("warn");
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
@@ -795,6 +895,98 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
     use ip_core::testutil::{make_photos, FakeImaging};
+
+    #[test]
+    fn parses_ask() {
+        let cli = Cli::try_parse_from([
+            "imagepicker",
+            "ask",
+            "只看小明的4星以上照片",
+            "--session",
+            "3",
+            "--execute",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Ask {
+                message,
+                session,
+                execute,
+                engine,
+                ..
+            } => {
+                assert_eq!(message, "只看小明的4星以上照片");
+                assert_eq!(session, 3);
+                assert!(execute && engine.is_none());
+            }
+            _ => panic!("wrong command"),
+        }
+        assert!(
+            Cli::try_parse_from(["imagepicker", "ask", "x"]).is_err(),
+            "--session is required"
+        );
+    }
+
+    #[tokio::test]
+    async fn ask_plans_and_executes() {
+        let data = tempfile::tempdir().unwrap();
+        let src = tempfile::tempdir().unwrap();
+        make_photos(src.path(), 3);
+        let core = Core::open(CoreConfig {
+            imaging: std::sync::Arc::new(FakeImaging::new()),
+            worker: Some(std::sync::Arc::new(ip_core::testutil::FakeWorker::new())),
+            renderer: Some(std::sync::Arc::new(ip_core::testutil::FakeRenderer::new(
+                ip_core::ip_render::Backend::Cpu,
+            ))),
+            ..CoreConfig::new(Some(data.path().to_path_buf()))
+        })
+        .unwrap();
+        let st = import_headless(&core, src.path().to_path_buf(), true, None)
+            .await
+            .unwrap();
+        // plan only
+        let (plan, done) = ask_headless(&core, st.session_id, "给所有照片打4星", false, None)
+            .await
+            .unwrap();
+        assert_eq!(plan.steps[0].tool, "set_rating");
+        assert!(done.is_none());
+        assert!(plan.needs_confirmation);
+        let page = core
+            .photos(PhotoQuery {
+                session_id: st.session_id,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(
+            page.photos.iter().all(|p| p.user_rating.is_none()),
+            "planning changes nothing"
+        );
+        // execute
+        let (_, done) = ask_headless(&core, st.session_id, "give all photos 4 stars", true, None)
+            .await
+            .unwrap();
+        match done {
+            Some(Event::AssistantDone { ok, results, .. }) => {
+                assert!(ok, "{results:?}");
+                assert_eq!(results[0]["affected"], 3);
+            }
+            other => panic!("{other:?}"),
+        }
+        let page = core
+            .photos(PhotoQuery {
+                session_id: st.session_id,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(page.photos.iter().all(|p| p.user_rating == Some(4)));
+        // unsupported: nothing runs
+        let (plan, done) = ask_headless(&core, st.session_id, "sing", true, None)
+            .await
+            .unwrap();
+        assert!(plan.unsupported.is_some() && done.is_none());
+    }
 
     #[test]
     fn parses_serve_defaults() {

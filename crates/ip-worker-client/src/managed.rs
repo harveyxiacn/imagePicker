@@ -17,6 +17,7 @@ use crate::process;
 use crate::protocol::*;
 use crate::protocol_m4::*;
 use crate::protocol_m5::*;
+use crate::protocol_m6::*;
 use crate::{AiWorker, WorkerState, WorkerStatus};
 
 #[derive(Debug, Clone)]
@@ -153,6 +154,7 @@ impl Drop for Busy {
 
 pub struct ManagedWorker {
     cfg: WorkerConfig,
+    options: Mutex<WorkerOptions>,
     shared: Arc<Shared>,
     conn: AsyncMutex<Option<Conn>>,
 }
@@ -162,6 +164,7 @@ impl ManagedWorker {
         let (tx, _) = watch::channel(WorkerStatus::stopped());
         Self {
             cfg,
+            options: Mutex::new(WorkerOptions::default()),
             shared: Arc::new(Shared {
                 tx,
                 generation: AtomicU64::new(0),
@@ -260,14 +263,19 @@ impl ManagedWorker {
         let token = Self::random_token();
         let dir = self.cfg.dir.clone().or_else(process::find_worker_dir);
         let cmd = self.cfg.cmd.clone();
+        let opts = self.options.lock().unwrap().clone();
+        let models_dir = opts
+            .models_dir
+            .clone()
+            .or_else(|| self.cfg.models_dir.clone());
         let argv = process::build_argv(
             cmd.as_deref(),
             &token,
             std::process::id(),
-            self.cfg.models_dir.as_deref(),
+            models_dir.as_deref(),
         );
         tracing::info!(argv = %argv[0], dir = ?dir, "starting AI worker");
-        let mut child = process::spawn(&argv, dir.as_deref(), &token).map_err(|e| {
+        let mut child = process::spawn_with_env(&argv, dir.as_deref(), &token, &opts.env).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 WorkerError::Unavailable(format!(
                     "`{}` not found (install uv, or set IMAGEPICKER_WORKER_CMD / IMAGEPICKER_WORKER_DIR): {e}",
@@ -509,6 +517,44 @@ impl AiWorker for ManagedWorker {
             .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
         let v = self.rpc("enhance.run", params, None, None).await?;
         parse(v, "enhance.run")
+    }
+
+    async fn llm_plan(&self, req: &LlmPlanRequest) -> Result<LlmPlanResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("llm.plan", params, None, None).await?;
+        parse(v, "llm.plan")
+    }
+
+    async fn vlm_suggest(&self, req: &VlmSuggestRequest) -> Result<VlmSuggestResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("vlm.suggest", params, None, None).await?;
+        parse(v, "vlm.suggest")
+    }
+
+    async fn vlm_describe(&self, req: &VlmDescribeRequest) -> Result<VlmDescribeResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("vlm.describe", params, None, None).await?;
+        parse(v, "vlm.describe")
+    }
+
+    async fn models_delete(&self, id: &str) -> Result<()> {
+        match self
+            .rpc("models.delete", json!({"id": id}), None, None)
+            .await
+        {
+            // a worker that predates the method: let the core remove the directory itself
+            Err(WorkerError::Rpc { code, .. }) if code == CODE_METHOD_NOT_FOUND => Err(
+                WorkerError::Unavailable("this AI worker does not support models.delete".into()),
+            ),
+            other => other.map(|_| ()),
+        }
+    }
+
+    fn configure(&self, opts: &WorkerOptions) {
+        *self.options.lock().unwrap() = opts.clone();
     }
 
     async fn kill(&self) {
