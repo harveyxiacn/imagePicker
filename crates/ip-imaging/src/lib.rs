@@ -78,6 +78,9 @@ pub struct Metadata {
     /// Capture time in ms since Unix epoch, including SubSecTimeOriginal.
     /// If OffsetTimeOriginal is missing, the naive local time is interpreted as UTC.
     pub taken_at_ms: Option<i64>,
+    /// Capture-time UTC offset in minutes (from OffsetTimeOriginal); `None` if unknown,
+    /// in which case `taken_at_ms` holds the naive wall-clock time as if it were UTC.
+    pub taken_at_offset_min: Option<i32>,
     pub camera_make: Option<String>,
     pub camera_model: Option<String>,
     pub camera_serial: Option<String>,

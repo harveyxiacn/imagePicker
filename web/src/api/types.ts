@@ -15,6 +15,8 @@ export interface Photo {
   width: number | null
   height: number | null
   taken_at: number | null
+  /** UTC offset at capture (minutes); null = unknown, taken_at is then naive wall-clock as UTC */
+  taken_at_offset_min: number | null
   camera: string | null
   lens: string | null
   focal_mm: number | null

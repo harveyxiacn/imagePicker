@@ -15,6 +15,9 @@ pub struct Photo {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub taken_at: Option<i64>,
+    /// UTC offset at capture in minutes; `None` = unknown (then `taken_at` is the naive
+    /// wall-clock time encoded as UTC). Wall clock = `taken_at + offset` rendered as UTC.
+    pub taken_at_offset_min: Option<i32>,
     pub camera: Option<String>,
     pub lens: Option<String>,
     pub focal_mm: Option<f64>,

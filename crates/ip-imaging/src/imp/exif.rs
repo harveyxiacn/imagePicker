@@ -47,16 +47,20 @@ pub fn parse_exif_datetime(dt: &str, subsec: Option<&str>, offset: Option<&str>)
             ms += v;
         }
     }
-    if let Some(off) = offset {
-        let o = off.trim().as_bytes();
-        if o.len() >= 6 && (o[0] == b'+' || o[0] == b'-') && o[3] == b':' {
-            if let (Some(oh), Some(om)) = (num(&o[1..3]), num(&o[4..6])) {
-                let secs = oh * 3600 + om * 60;
-                ms -= if o[0] == b'-' { -secs } else { secs } * 1000;
-            }
-        }
+    if let Some(min) = offset.and_then(parse_exif_offset) {
+        ms -= i64::from(min) * 60_000;
     }
     Some(ms)
+}
+
+/// Parse an EXIF `OffsetTime*` value (`+HH:MM` / `-HH:MM`) into minutes east of UTC.
+pub fn parse_exif_offset(off: &str) -> Option<i32> {
+    let o = off.trim().as_bytes();
+    if o.len() < 6 || !(o[0] == b'+' || o[0] == b'-') || o[3] != b':' {
+        return None;
+    }
+    let min = (num(&o[1..3])? * 60 + num(&o[4..6])?) as i32;
+    Some(if o[0] == b'-' { -min } else { min })
 }
 
 fn get_str(t: &Tiff, ifd: &Ifd, tag: u16) -> Option<String> {
@@ -96,6 +100,7 @@ pub fn fill_exif(md: &mut Metadata, t: &Tiff, ifd: &Ifd) {
                 (get_str(t, ifd, 0x9292), get_str(t, ifd, 0x9012))
             };
             md.taken_at_ms = parse_exif_datetime(&dt, sub.as_deref(), off.as_deref());
+            md.taken_at_offset_min = off.as_deref().and_then(parse_exif_offset);
         }
     }
     set_if_none(&mut md.camera_serial, get_str(t, ifd, 0xA431));
@@ -212,5 +217,26 @@ mod tests {
             Some(1_709_634_030_000 - 8 * 3_600_000)
         );
         assert_eq!(parse_exif_datetime("    :  :     :  :  ", None, None), None);
+    }
+}
+
+#[cfg(test)]
+mod offset_tests {
+    use super::*;
+
+    #[test]
+    fn parses_offsets() {
+        assert_eq!(parse_exif_offset("+08:00"), Some(480));
+        assert_eq!(parse_exif_offset("-03:00"), Some(-180));
+        assert_eq!(parse_exif_offset("+05:45"), Some(345));
+        assert_eq!(parse_exif_offset("   "), None);
+        assert_eq!(parse_exif_offset("0800"), None);
+    }
+
+    #[test]
+    fn offset_shifts_to_utc() {
+        let naive = parse_exif_datetime("2025:05:13 15:50:43", Some("930"), None).unwrap();
+        let west = parse_exif_datetime("2025:05:13 15:50:43", Some("930"), Some("-03:00")).unwrap();
+        assert_eq!(west - naive, 3 * 3600 * 1000);
     }
 }

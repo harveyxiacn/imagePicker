@@ -100,7 +100,7 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor }: Props
               <Row k={t('exif.format')} v={photo.format.toUpperCase()} />
               <Row k={t('exif.size')} v={formatBytes(photo.file_size)} />
               <Row k={t('exif.dimensions')} v={formatDims(photo.width, photo.height)} />
-              <Row k={t('exif.taken')} v={formatDate(photo.taken_at, i18n.language)} />
+              <Row k={t('exif.taken')} v={formatDate(photo.taken_at, i18n.language, photo.taken_at_offset_min)} />
               <Row k={t('exif.camera')} v={photo.camera ?? '—'} />
               <Row k={t('exif.lens')} v={photo.lens ?? '—'} />
               <Row k={t('exif.focal')} v={photo.focal_mm !== null ? `${photo.focal_mm} mm` : '—'} />

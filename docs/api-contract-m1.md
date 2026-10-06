@@ -25,9 +25,10 @@ interface Photo {
   file_name: string;
   format: ImageFormat;
   file_size: number;
-  width: number | null;         // 已按朝向旋转后的显示宽高
+  width: number | null;         // 已按朝向旋转后的显示宽高（EXIF 朝向 5–8 已交换宽高）
   height: number | null;
-  taken_at: number | null;      // ms
+  taken_at: number | null;      // ms（UTC 瞬间；无时区信息时为按 UTC 编码的拍摄地墙上时间）
+  taken_at_offset_min: number | null; // 拍摄时 UTC 偏移（分钟，EXIF OffsetTimeOriginal）；UI 显示 taken_at+offset 的 UTC 渲染，即拍摄地当地时间
   camera: string | null;        // "SONY ILCE-7M4"
   lens: string | null;
   focal_mm: number | null;
@@ -40,7 +41,7 @@ interface Photo {
   color_label: ColorLabel;
   burst_id: number | null;      // M1 恒为 null
   thumb_ready: boolean;         // 256 网格缩略图已生成
-  thumb_version: string;        // 缓存破坏用，拼到 URL 上 ?v=
+  thumb_version: string;        // 缓存破坏用，拼到 URL 上 ?v=（当前为 fast_key 前 8 位）
 }
 
 interface Session {
@@ -91,14 +92,23 @@ interface Session {
 
 > 前端会一次性按 5000 分页把整个会话的 ID 与字段拉完（2 万张以内），客户端虚拟化渲染。
 
+## 行为澄清（实现后补充）
+
+- `user_rating`：`null` = 未评分，`0` = 明确评为 0 星（与 null 不同）。`PATCH` 中字段缺省 = 不修改，显式 `null` = 清除；没有任何可修改字段时返回 400；未知 id 忽略。
+- `GET /api/photos`：缺 `session_id` → 400，会话不存在 → 404；`-taken_at` 降序且 null 在后；`rating` 降序且未评分在后；`name` 不区分大小写。
+- `GET /api/fs/list`：`dirs` 为**绝对路径**；缺省 `path` = 用户主目录；相对路径 → 400；跳过隐藏项。`/api/fs/roots`：主目录、图片目录、Windows 盘符（其他系统为 `/`）。
+- `/api/thumb`：未生成时同步生成（插队、同一张并发请求去重）；前端仍以 `thumb_ready`/`thumbs.ready` 控制骨架屏，并通过 `viewport` 提升优先级。
+- 导出：`task_id` 形如 `export-N`；模板变量 `{name}`、`{seq}`（4 位补零）、`{date}`（`YYYYMMDD`，取拍摄时间→修改时间→`nodate`）；非法字符替换为 `_`；目标文件存在时追加 `_1`、`_2`；部分失败时 `state=done` 且带 `error`，全部失败为 `failed`。
+- `import_state`：scanning → thumbnailing → ready；服务重启时未完成的会话标为 ready，缩略图按需补生成。
+
 ## WebSocket：`GET /api/events`
 
 服务端 → 客户端，JSON 文本帧；服务端对同类事件**每 100ms 合并**一次发送。
 
 ```jsonc
 { "type": "session.updated", "session": Session }
-{ "type": "photos.added",    "session_id": 1, "count": 512 }        // 客户端随后重新拉取
-{ "type": "thumbs.ready",    "items": [{ "id": 12, "v": "a1b2c3" }] }
+{ "type": "photos.added",    "session_id": 1, "count": 512 }        // 新增行或元数据补全后都会发送；客户端随后重新拉取
+{ "type": "thumbs.ready",    "items": [{ "id": 12, "v": "a1b2c3" }] }  // 仅 256 网格缩略图
 { "type": "photos.updated",  "items": [{ "id": 12, "user_rating": 4, "flag": 1, "color_label": null }] }
 { "type": "task.progress",   "task_id": "export-1", "kind": "export", "done": 10, "total": 40, "state": "running" | "done" | "failed", "error"?: string }
 ```

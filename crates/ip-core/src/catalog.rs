@@ -337,7 +337,7 @@ pub fn apply_metadata(conn: &mut Connection, updates: &[MetaUpdate]) -> Result<(
         tx.execute(
             "UPDATE photo SET width=?2, height=?3, orientation=?4, taken_at=?5, taken_at_raw=?5, device_id=?6,
                camera=?7, lens=?8, focal=?9, aperture=?10, shutter=?11, iso=?12, gps_lat=?13, gps_lon=?14,
-               content_key=COALESCE(?15, content_key), meta_done=1
+               content_key=COALESCE(?15, content_key), taken_at_offset_min=?16, meta_done=1
              WHERE id=?1",
             params![
                 u.id,
@@ -348,13 +348,14 @@ pub fn apply_metadata(conn: &mut Connection, updates: &[MetaUpdate]) -> Result<(
                 device_id,
                 camera_string(m.camera_make.as_deref(), m.camera_model.as_deref()),
                 m.lens,
-                m.focal_mm.map(f64::from),
-                m.aperture.map(f64::from),
-                m.shutter_s.map(f64::from),
+                m.focal_mm.map(clean_f64),
+                m.aperture.map(clean_f64),
+                m.shutter_s.map(clean_f64),
                 m.iso.map(i64::from),
                 m.gps_lat,
                 m.gps_lon,
                 u.content_key,
+                m.taken_at_offset_min,
             ],
         )?;
     }
@@ -450,16 +451,20 @@ pub fn ids_needing_grid(conn: &Connection, ids: &[i64]) -> Result<Vec<i64>> {
 
 const PHOTO_COLS: &str = "p.id, r.path, p.rel_path, p.file_name, COALESCE(p.format,''), COALESCE(p.file_size,0),
     p.width, p.height, p.taken_at, p.camera, p.lens, p.focal, p.aperture, p.shutter, p.iso,
-    p.user_rating, p.ai_rating, COALESCE(p.flag,0), p.color_label, p.burst_id, COALESCE(p.thumb_state,0), p.fast_key";
+    p.user_rating, p.ai_rating, COALESCE(p.flag,0), p.color_label, p.burst_id, COALESCE(p.thumb_state,0), p.fast_key, p.taken_at_offset_min";
 
-/// Column 22 (after PHOTO_COLS) is the session id.
+/// Number of columns in `PHOTO_COLS`; queries append the session id at this index and the
+/// sort key (for cursors) right after it. Update when adding columns.
+const PHOTO_COL_COUNT: usize = 23;
+
+/// Column `PHOTO_COL_COUNT` (after PHOTO_COLS) is the session id.
 fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
     let root: String = r.get(1)?;
     let rel: String = r.get(2)?;
     let fast_key: String = r.get(21)?;
     Ok(Photo {
         id: r.get(0)?,
-        session_id: r.get::<_, Option<i64>>(22)?.unwrap_or(0),
+        session_id: r.get::<_, Option<i64>>(PHOTO_COL_COUNT)?.unwrap_or(0),
         path: join_rel(&root, &rel).to_string_lossy().into_owned(),
         file_name: r.get(3)?,
         format: r.get(4)?,
@@ -467,6 +472,7 @@ fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
         width: r.get(6)?,
         height: r.get(7)?,
         taken_at: r.get(8)?,
+        taken_at_offset_min: r.get(22)?,
         camera: r.get(9)?,
         lens: r.get(10)?,
         focal_mm: r.get(11)?,
@@ -595,9 +601,9 @@ pub fn query_photos(conn: &Connection, q: &PhotoQuery) -> Result<PhotosPage> {
         .query_map(params_from_iter(page_args.iter()), |r| {
             let photo = photo_row(r)?;
             let key = if text_key {
-                serde_json::Value::String(r.get::<_, String>(23)?)
+                serde_json::Value::String(r.get::<_, String>(PHOTO_COL_COUNT + 1)?)
             } else {
-                serde_json::Value::from(r.get::<_, i64>(23)?)
+                serde_json::Value::from(r.get::<_, i64>(PHOTO_COL_COUNT + 1)?)
             };
             Ok((photo, key))
         })?
@@ -728,5 +734,38 @@ pub fn rel_path(root: &Path, file: &Path) -> Option<String> {
         None
     } else {
         Some(parts.join("/"))
+    }
+}
+
+/// Widen an EXIF `f32` without exposing binary noise (6.3f32 -> 6.3, not 6.300000190734863).
+fn clean_f64(x: f32) -> f64 {
+    x.to_string().parse().unwrap_or(f64::from(x))
+}
+
+#[cfg(test)]
+mod col_count_tests {
+    #[test]
+    fn photo_col_count_matches_select_list() {
+        let mut depth = 0i32;
+        let mut cols = 1;
+        for ch in super::PHOTO_COLS.chars() {
+            match ch {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                ',' if depth == 0 => cols += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(cols, super::PHOTO_COL_COUNT);
+    }
+}
+
+#[cfg(test)]
+mod clean_f64_tests {
+    #[test]
+    fn widens_without_noise() {
+        assert_eq!(super::clean_f64(6.3), 6.3);
+        assert_eq!(super::clean_f64(1.7), 1.7);
+        assert_eq!(super::clean_f64(1.0 / 30.0), 0.033333335);
     }
 }

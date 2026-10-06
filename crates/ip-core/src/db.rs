@@ -81,6 +81,10 @@ CREATE TABLE task (
 CREATE INDEX idx_session_photo_photo ON session_photo(photo_id);
 CREATE INDEX idx_photo_name ON photo(file_name COLLATE NOCASE);
 "#,
+    // v3: capture-time UTC offset, so the UI can show the wall-clock time where the photo was taken.
+    r#"
+ALTER TABLE photo ADD COLUMN taken_at_offset_min INTEGER;
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.

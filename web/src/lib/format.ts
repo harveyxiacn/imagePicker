@@ -16,9 +16,18 @@ export function formatShutter(s: number | null): string {
   return `1/${Math.round(1 / s)}s`
 }
 
-export function formatDate(ms: number | null, locale?: string): string {
+/**
+ * Capture time as the wall clock where the photo was taken (not the viewer's time zone).
+ * `offsetMin` is the UTC offset recorded in EXIF; when unknown, `ms` already encodes the
+ * naive wall-clock time as UTC. Either way, render in UTC after applying the offset.
+ */
+export function formatDate(ms: number | null, locale?: string, offsetMin?: number | null): string {
   if (ms === null) return '—'
-  return new Date(ms).toLocaleString(locale, { hour12: false })
+  const wall = new Date(ms + (offsetMin ?? 0) * 60_000).toLocaleString(locale, { hour12: false, timeZone: 'UTC' })
+  if (offsetMin == null) return wall
+  const sign = offsetMin < 0 ? '−' : '+'
+  const a = Math.abs(offsetMin)
+  return `${wall} (UTC${sign}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')})`
 }
 
 export function formatDims(w: number | null, h: number | null): string {

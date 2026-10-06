@@ -116,6 +116,7 @@ export function generatePhotos(
       width: w,
       height: h,
       taken_at: Math.round(t),
+      taken_at_offset_min: 480,
       camera: hasExif ? CAMERAS[Math.floor(i / 400) % CAMERAS.length] : null,
       lens: hasExif ? pick(LENSES) : null,
       focal_mm: hasExif ? pick([24, 35, 50, 70, 85, 135]) : null,

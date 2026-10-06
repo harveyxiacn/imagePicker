@@ -14,6 +14,7 @@ const photo = (id: number, over: Partial<Photo> = {}): Photo => ({
   width: 100,
   height: 100,
   taken_at: id,
+  taken_at_offset_min: null,
   camera: null,
   lens: null,
   focal_mm: null,
