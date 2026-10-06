@@ -1,6 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { useToasts } from '@/stores/toasts'
+import { planAcceptAi } from './ai'
 import { findCachedPhotos, patchPhotosInCache, qk } from './cache'
 import {
   computeChanges,
@@ -48,4 +49,38 @@ export async function redo(qc: QueryClient): Promise<HistoryEntry | undefined> {
   const e = useHistory.getState().redo()
   if (e) await commit(qc, e.changes, 'after')
   return e
+}
+
+/** Apply several different patches as ONE undo step (e.g. keep best + reject the rest). */
+export async function editPhotoGroups(
+  qc: QueryClient,
+  groups: { ids: number[]; patch: EditablePatch }[],
+  label: string,
+): Promise<void> {
+  const changes: Change[] = []
+  for (const g of groups) changes.push(...computeChanges(findCachedPhotos(qc, g.ids), g.patch))
+  if (changes.length === 0) return
+  useHistory.getState().push({ label, changes })
+  await commit(qc, changes, 'after')
+}
+
+/**
+ * Accept AI ratings as user ratings (undoable via the shared history). The server write goes through
+ * POST /api/photos/accept-ai; undo/redo use the regular PATCH path.
+ */
+export async function acceptAiRatings(qc: QueryClient, ids: number[], label: string): Promise<number> {
+  const changes = planAcceptAi(findCachedPhotos(qc, ids))
+  if (changes.length === 0) return 0
+  useHistory.getState().push({ label, changes })
+  patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c.after])))
+  try {
+    await api.acceptAi(changes.map((c) => c.id))
+  } catch (err) {
+    patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c.before])))
+    void qc.invalidateQueries({ queryKey: qk.photosAll })
+    useHistory.getState().drop(changes)
+    useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+    return 0
+  }
+  return changes.length
 }

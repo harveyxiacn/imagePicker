@@ -1,0 +1,39 @@
+import type { Photo } from '@/api/types'
+
+/** Photo factory for unit tests (all M1 + M2 fields present). */
+export function makePhoto(id: number, over: Partial<Photo> = {}): Photo {
+  return {
+    id,
+    session_id: 1,
+    path: `/p/${id}.jpg`,
+    file_name: `${id}.jpg`,
+    format: 'jpeg',
+    file_size: 1,
+    width: 100,
+    height: 100,
+    taken_at: id * 1000,
+    taken_at_offset_min: null,
+    camera: null,
+    lens: null,
+    focal_mm: null,
+    aperture: null,
+    shutter_s: null,
+    iso: null,
+    user_rating: null,
+    ai_rating: null,
+    flag: 0,
+    color_label: null,
+    burst_id: null,
+    thumb_ready: false,
+    thumb_version: 'v0',
+    ai_score: null,
+    issues: [],
+    rank_in_burst: null,
+    burst_size: null,
+    scene_type: null,
+    face_count: null,
+    subject_face_count: null,
+    analyzed: false,
+    ...over,
+  }
+}

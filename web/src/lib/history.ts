@@ -61,6 +61,8 @@ interface HistoryState {
   /** Pops the newest redo entry (moving it back to undo). */
   redo: () => HistoryEntry | undefined
   clear: () => void
+  /** Remove the entry holding exactly these changes (rollback of a failed write). */
+  drop: (changes: Change[]) => void
 }
 
 export const useHistory = create<HistoryState>((set, get) => ({
@@ -83,4 +85,5 @@ export const useHistory = create<HistoryState>((set, get) => ({
     return e
   },
   clear: () => set({ undoStack: [], redoStack: [] }),
+  drop: (changes) => set((s) => ({ undoStack: s.undoStack.filter((e) => e.changes !== changes) })),
 }))

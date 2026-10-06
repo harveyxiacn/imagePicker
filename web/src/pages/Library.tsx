@@ -1,23 +1,30 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router-dom'
-import { useSession, usePhotos } from '@/api/queries'
+import { useGroups, usePhotos, useSession } from '@/api/queries'
 import { Compare } from '@/components/Compare'
 import { ExportDialog } from '@/components/ExportDialog'
 import { FilterBar } from '@/components/FilterBar'
 import { Grid } from '@/components/Grid'
+import { GroupView } from '@/components/GroupView'
 import { HelpOverlay } from '@/components/HelpOverlay'
 import { Inspector } from '@/components/Inspector'
 import { Loupe } from '@/components/Loupe'
+import { Modal } from '@/components/Modal'
+import { ModelConsentDialog } from '@/components/ModelConsentDialog'
 import { StatusBar } from '@/components/StatusBar'
 import { TopBar } from '@/components/TopBar'
-import { editPhotos } from '@/lib/actions'
+import { acceptAiRatings, editPhotos } from '@/lib/actions'
+import { canAccept } from '@/lib/ai'
 import { useHistory } from '@/lib/history'
 import { pruneSelection } from '@/lib/selection'
+import { buildGridItems, toggleInSet, visiblePhotos } from '@/lib/stacks'
+import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { compareSlots, useController } from './useController'
+import { useGroup } from './useGroup'
 import { useShortcuts } from './useShortcuts'
 
 export function Library() {
@@ -35,41 +42,68 @@ export function Library() {
   const syncZoom = useUi((s) => s.syncZoom)
   const inspectorOpen = useUi((s) => s.inspectorOpen)
   const exportOpen = useUi((s) => s.exportOpen)
+  const grouped = useUi((s) => s.grouped)
+  const expandAll = useUi((s) => s.expandAll)
+  const expandedStacks = useUi((s) => s.expandedStacks)
+  const collapsedScenes = useUi((s) => s.collapsedScenes)
+  const acceptAllOpen = useUi((s) => s.acceptAllOpen)
 
   const session = useSession(sessionId)
   const photosQ = usePhotos(sessionId, filter)
   const photos = useMemo(() => photosQ.data?.photos ?? [], [photosQ.data])
+  const scenesQ = useGroups(sessionId)
 
   // Fresh transient state for each session.
+  // (The ref makes this idempotent under StrictMode's double effect, which would otherwise discard a pending filter.)
+  const resetFor = useRef<number | null>(null)
   useEffect(() => {
+    if (resetFor.current === sessionId) return
+    resetFor.current = sessionId
     useUi.getState().resetSessionState()
     useHistory.getState().clear()
   }, [sessionId])
 
-  const ctrl = useController(photos)
+  // Grouped mode: scene headers (time order only) + bursts collapsed to their best shot.
+  const withHeaders = filter.sort === 'taken_at' || filter.sort === '-taken_at'
+  const items = useMemo(
+    () => buildGridItems(photos, { grouped, expandAll, expanded: expandedStacks, collapsedScenes, scenes: scenesQ.data, withHeaders }),
+    [photos, grouped, expandAll, expandedStacks, collapsedScenes, scenesQ.data, withHeaders],
+  )
+  const gridPhotos = useMemo(() => visiblePhotos(items), [items])
+
+  const group = useGroup(sessionId)
+  // Navigation / actions operate on what the current view shows.
+  const listPhotos = view === 'group' ? group.photos : gridPhotos
+  const ctrl = useController(listPhotos, { groupGo: group.go, groupPick: group.pickA })
   useShortcuts(ctrl)
 
-  // Keep the cursor valid as the list changes (filters, live updates).
+  // Keep the cursor valid as the list changes (filters, live updates, collapsed stacks).
   useEffect(() => {
-    if (!photos.length) return
+    if (!listPhotos.length) return
     const ui = useUi.getState()
-    if (ui.activeId === null || !photos.some((p) => p.id === ui.activeId)) ui.setActive(photos[0].id)
-    const ids = photos.map((p) => p.id)
-    const pruned = pruneSelection(ui.selection, ids)
+    if (ui.activeId === null || !listPhotos.some((p) => p.id === ui.activeId)) {
+      // A photo hidden inside a collapsed stack: move to the stack's cover.
+      const hidden = photos.find((p) => p.id === ui.activeId)
+      const cover = hidden?.burst_id != null ? listPhotos.find((p) => p.burst_id === hidden.burst_id) : undefined
+      ui.setActive((cover ?? listPhotos[0]).id)
+    }
+    const pruned = pruneSelection(ui.selection, gridPhotos.map((p) => p.id))
     if (pruned !== ui.selection) ui.setSelection(pruned)
-  }, [photos])
+  }, [listPhotos, gridPhotos, photos])
 
-  const activeIndex = activeId === null ? -1 : photos.findIndex((p) => p.id === activeId)
-  const active = activeIndex >= 0 ? photos[activeIndex] : undefined
-  const slots = useMemo(() => compareSlots(photos, compareA, activeId, compareCount), [photos, compareA, activeId, compareCount])
+  const activeIndex = activeId === null ? -1 : listPhotos.findIndex((p) => p.id === activeId)
+  const active = activeIndex >= 0 ? listPhotos[activeIndex] : undefined
+  const slots = useMemo(() => compareSlots(listPhotos, compareA, activeId, compareCount), [listPhotos, compareA, activeId, compareCount])
+  const groupSlots = useMemo(() => compareSlots(group.photos, compareA, activeId, 2), [group.photos, compareA, activeId])
+  const acceptable = useMemo(() => photos.filter(canAccept).length, [photos])
 
   const selectedIds = useMemo(() => [...selection.ids], [selection])
-  const allIds = useMemo(() => photos.map((p) => p.id), [photos])
+  const allIds = useMemo(() => gridPhotos.map((p) => p.id), [gridPhotos])
   const targetCount = view === 'grid' && selection.ids.size > 1 ? selection.ids.size : 1
 
   const pick = (id: number) => {
     const ui = useUi.getState()
-    if (ui.view === 'compare' && id === ui.compareA) return
+    if ((ui.view === 'compare' || ui.view === 'group') && id === ui.compareA) return
     ui.setActive(id)
   }
 
@@ -86,8 +120,13 @@ export function Library() {
 
   return (
     <div className="flex h-full flex-col">
-      <TopBar session={session.data} onView={ctrl.setView} />
-      <FilterBar shown={photosQ.data?.total ?? 0} total={session.data?.photo_count ?? photosQ.data?.total ?? 0} showSize={view === 'grid'} />
+      <TopBar sessionId={sessionId} session={session.data} onView={ctrl.setView} />
+      <FilterBar
+        sessionId={sessionId}
+        shown={photosQ.data?.total ?? 0}
+        total={session.data?.photo_count ?? photosQ.data?.total ?? 0}
+        showSize={view === 'grid'}
+      />
 
       <div className="relative flex min-h-0 flex-1">
         <main className="min-w-0 flex-1">
@@ -104,22 +143,43 @@ export function Library() {
               </button>
             </div>
           ) : view === 'grid' ? (
-            <Grid photos={photos} onOpen={(id) => {
-              useUi.getState().setActive(id)
-              ctrl.setView('loupe')
-            }} />
+            <Grid
+              items={items}
+              onOpen={(id) => {
+                useUi.getState().setActive(id)
+                ctrl.setView('loupe')
+              }}
+              onToggleStack={(id) => {
+                const ui = useUi.getState()
+                ui.setStacks(
+                  ui.expandAll ? { expandAll: false, expanded: new Set() } : { expandAll: false, expanded: toggleInSet(ui.expandedStacks, id) },
+                )
+              }}
+              onToggleScene={(id) => {
+                const ui = useUi.getState()
+                ui.setCollapsedScenes(toggleInSet(ui.collapsedScenes, id))
+              }}
+            />
           ) : view === 'loupe' ? (
             <Loupe
-              photos={photos}
+              photos={listPhotos}
               photo={active}
               index={activeIndex}
               onMove={(d) => ctrl.move(d)}
               onPick={pick}
               onRate={(n) => ctrl.rate(n ?? 0)}
             />
+          ) : view === 'group' ? (
+            <GroupView
+              group={group}
+              slots={groupSlots}
+              onPick={pick}
+              onSwap={ctrl.swapCompare}
+              onRate={(id, n) => void editPhotos(qc, [id], { user_rating: n }, t('history.rating'))}
+            />
           ) : (
             <Compare
-              photos={photos}
+              photos={listPhotos}
               slots={slots}
               activeId={activeId}
               compareA={compareA}
@@ -145,13 +205,46 @@ export function Library() {
               onRate={(n) => ctrl.rate(n ?? 0)}
               onFlag={ctrl.setFlag}
               onColor={ctrl.setColor}
+              onAcceptAi={() => void ctrl.acceptAi()}
             />
           </aside>
         )}
       </div>
 
-      <StatusBar session={session.data} photos={photos} />
+      <StatusBar sessionId={sessionId} session={session.data} photos={photos} />
       <HelpOverlay />
+      <ModelConsentDialog />
+      <Modal
+        open={acceptAllOpen}
+        onOpenChange={useUi.getState().setAcceptAllOpen}
+        title={t('ai.acceptAllTitle')}
+        description={t('ai.acceptAllDesc', { n: acceptable })}
+        width="max-w-md"
+        footer={
+          <>
+            <button className="btn" onClick={() => useUi.getState().setAcceptAllOpen(false)}>
+              {t('common.cancel')}
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={acceptable === 0}
+              data-testid="accept-all-confirm"
+              onClick={() => {
+                useUi.getState().setAcceptAllOpen(false)
+                void acceptAiRatings(
+                  qc,
+                  photos.map((p) => p.id),
+                  t('history.acceptAi'),
+                ).then((n) => useToasts.getState().push('info', n > 0 ? t('ai.accepted', { n }) : t('ai.nothingToAccept'), 2500))
+              }}
+            >
+              {t('ai.acceptAllConfirm', { n: acceptable })}
+            </button>
+          </>
+        }
+      >
+        <div className="text-muted">{t('ai.acceptAllHint')}</div>
+      </Modal>
       <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={selectedIds} allIds={allIds} />
     </div>
   )

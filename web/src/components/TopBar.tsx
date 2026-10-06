@@ -1,22 +1,25 @@
-import { ChevronLeft, Columns2, Download, HelpCircle, LayoutGrid, PanelRight, Search, Sparkles, Square } from 'lucide-react'
+import { ChevronLeft, Columns2, Download, GalleryHorizontal, HelpCircle, LayoutGrid, PanelRight, Search, Square, Users } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import type { Session } from '@/api/types'
 import { useUi, type View } from '@/stores/ui'
+import { AnalyzeControl, WorkerChip } from './AnalyzeControl'
 import { HeaderControls } from './HeaderControls'
 
 const VIEWS: { v: View; icon: typeof LayoutGrid; key: string }[] = [
   { v: 'grid', icon: LayoutGrid, key: 'G' },
   { v: 'loupe', icon: Square, key: 'E' },
   { v: 'compare', icon: Columns2, key: 'C' },
+  { v: 'group', icon: GalleryHorizontal, key: 'B' },
 ]
 
 interface Props {
+  sessionId: number
   session: Session | undefined
   onView: (v: View) => void
 }
 
-export function TopBar({ session, onView }: Props) {
+export function TopBar({ sessionId, session, onView }: Props) {
   const { t } = useTranslation()
   const view = useUi((s) => s.view)
   const inspectorOpen = useUi((s) => s.inspectorOpen)
@@ -55,10 +58,12 @@ export function TopBar({ session, onView }: Props) {
       </div>
 
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
-        <button className="btn btn-ai" disabled title={t('top.analyzeSoon')}>
-          <Sparkles size={14} />
-          <span className="hidden sm:inline">{t('top.analyze')}</span>
-        </button>
+        <WorkerChip />
+        <AnalyzeControl sessionId={sessionId} photoCount={session?.photo_count ?? 0} />
+        <Link to={`/s/${sessionId}/people`} className="btn" title={t('people.title')} data-testid="people-link">
+          <Users size={14} />
+          <span className="hidden lg:inline">{t('people.title')}</span>
+        </Link>
         <button className="btn" onClick={() => setExportOpen(true)} title={`${t('top.export')} (Ctrl+E)`}>
           <Download size={14} />
           <span className="hidden sm:inline">{t('top.export')}</span>

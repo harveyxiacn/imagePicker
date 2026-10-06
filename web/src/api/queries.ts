@@ -17,14 +17,72 @@ export function useSession(id: number) {
 }
 
 export function usePhotos(sessionId: number, filter: FilterState) {
-  const { ratingGte, flag, color, sort } = filter
-  const query = useMemo(
-    () => buildPhotosQuery(sessionId, { ratingGte, flag, color, sort }),
-    [sessionId, ratingGte, flag, color, sort],
-  )
+  const query = useMemo(() => buildPhotosQuery(sessionId, filter), [sessionId, filter])
   return useQuery({
     queryKey: qk.photos(sessionId, query),
     queryFn: () => fetchAllPhotos(query),
     placeholderData: keepPreviousData,
+  })
+}
+
+/** All photos of one burst (group view), independent of the library filters. */
+export function useBurstPhotos(sessionId: number, burstId: number | null) {
+  return useQuery({
+    queryKey: qk.photos(sessionId, { session_id: sessionId, burst_id: burstId ?? -1 }),
+    queryFn: () => fetchAllPhotos({ session_id: sessionId, burst_id: burstId ?? -1 }),
+    enabled: burstId !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useHardware() {
+  return useQuery({ queryKey: qk.hardware, queryFn: api.hardware, select: (d) => d.worker, staleTime: 30_000 })
+}
+
+export function useModels(enabled = true) {
+  return useQuery({ queryKey: qk.models, queryFn: api.models, select: (d) => d.models, enabled, staleTime: 0 })
+}
+
+export function useAnalysisStatus(sessionId: number) {
+  return useQuery({
+    queryKey: qk.analysisStatus(sessionId),
+    queryFn: () => api.analysisStatus(sessionId),
+    staleTime: Infinity,
+  })
+}
+
+export function usePhotoAnalysis(photoId: number | undefined) {
+  return useQuery({
+    queryKey: qk.analysis(photoId ?? -1),
+    queryFn: () => api.photoAnalysis(photoId!),
+    enabled: photoId !== undefined,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useGroups(sessionId: number) {
+  return useQuery({
+    queryKey: qk.groups(sessionId),
+    queryFn: () => api.groups(sessionId),
+    select: (d) => d.scenes,
+    staleTime: 30_000,
+  })
+}
+
+export function useBurstFaces(burstId: number | null) {
+  return useQuery({
+    queryKey: qk.burstFaces(burstId ?? -1),
+    queryFn: () => api.burstFaces(burstId!),
+    enabled: burstId !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function usePeople(sessionId?: number) {
+  return useQuery({
+    queryKey: qk.people(sessionId),
+    queryFn: () => api.people(sessionId),
+    select: (d) => d.people,
+    staleTime: 15_000,
   })
 }

@@ -4,7 +4,9 @@ import { useTranslation } from 'react-i18next'
 import { previewUrl, thumbUrl } from '@/api/client'
 import type { ColorLabel, Flag, Photo } from '@/api/types'
 import { formatBytes, formatDate, formatDims, formatShutter } from '@/lib/format'
-import { AiRatingSlot, ColorDots, FlagButtons, StarRating } from './controls'
+import { usePhotoAnalysis } from '@/api/queries'
+import { FaceStrip, ScoreBreakdown } from './ScoreBreakdown'
+import { AiStars, ColorDots, FlagButtons, StarRating } from './controls'
 
 interface Props {
   photo: Photo | undefined
@@ -13,6 +15,7 @@ interface Props {
   onRate: (n: number | null) => void
   onFlag: (f: Flag) => void
   onColor: (c: ColorLabel) => void
+  onAcceptAi: () => void
 }
 
 function Row({ k, v }: { k: string; v: ReactNode }) {
@@ -24,10 +27,12 @@ function Row({ k, v }: { k: string; v: ReactNode }) {
   )
 }
 
-export function Inspector({ photo, targetCount, onRate, onFlag, onColor }: Props) {
+export function Inspector({ photo, targetCount, onRate, onFlag, onColor, onAcceptAi }: Props) {
   const { t, i18n } = useTranslation()
   const [exifOpen, setExifOpen] = useState(true)
   const [broken, setBroken] = useState<number | null>(null)
+  const analysis = usePhotoAnalysis(photo?.id)
+  const a = analysis.data && analysis.data.photo_id === photo?.id ? analysis.data : undefined
 
   if (!photo) {
     return <div className="p-4 text-muted">{t('inspector.none')}</div>
@@ -72,7 +77,18 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor }: Props
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="text-muted">{t('inspector.aiRating')}</span>
-          <AiRatingSlot value={photo.ai_rating} />
+          <div className="flex items-center gap-1.5">
+            <AiStars value={photo.ai_rating} />
+            <button
+              className="btn !h-6 !px-1.5 text-xs text-ai"
+              disabled={photo.ai_rating === null}
+              onClick={onAcceptAi}
+              title={`${t('ai.accept')} (A)`}
+              data-testid="accept-ai"
+            >
+              {t('ai.acceptShort')}
+            </button>
+          </div>
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="text-muted">{t('inspector.flag')}</span>
@@ -83,6 +99,24 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor }: Props
           <ColorDots value={photo.color_label} onChange={onColor} />
         </div>
       </section>
+
+      {a?.analyzed && (
+        <section className="flex flex-col gap-2.5" data-testid="inspector-analysis">
+          <div className="flex items-center justify-between">
+            <span className="font-medium">{t('inspector.breakdown')}</span>
+            {a.scene_type && <span className="rounded bg-panel px-1.5 py-0.5 text-xs text-muted">{t(`scene_type.${a.scene_type}`)}</span>}
+          </div>
+          <ScoreBreakdown a={a} />
+          {a.faces.length > 0 && (
+            <div>
+              <div className="mb-1 text-muted">{t('inspector.faces', { n: a.faces.length })}</div>
+              <FaceStrip faces={a.faces} />
+              <div className="mt-1 text-[11px] text-faint">{t('face.hint')}</div>
+            </div>
+          )}
+        </section>
+      )}
+      {!a?.analyzed && photo && !photo.analyzed && <div className="text-xs text-faint">{t('inspector.notAnalyzed')}</div>}
 
       <section>
         <button

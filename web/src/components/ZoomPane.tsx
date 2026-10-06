@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { memo, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import { previewUrl, thumbUrl } from '@/api/client'
 import type { Photo } from '@/api/types'
 import { useElementSize } from '@/lib/hooks'
@@ -27,6 +27,8 @@ interface Props {
   toggleSignal?: number
   /** Show the zoom badge (Fit / NN%). */
   showZoom?: boolean
+  /** Drawn on top of the image, in its coordinate space (normalized 0-1 children via %). */
+  overlay?: ReactNode
 }
 
 /** Layer that fades in when its image has loaded. */
@@ -48,7 +50,7 @@ function Layer({ src, rect, className }: { src: string; rect: React.CSSPropertie
  * Zoomable/pannable image surface. Progressive: 256 thumb -> 2048 preview -> 4096 when zoomed in.
  * Wheel zooms around the cursor; drag pans; double-click toggles fit/100%.
  */
-export const ZoomPane = memo(function ZoomPane({ photo, view, onViewChange, hold, onHover, onSwipe, toggleSignal = 0, showZoom = true }: Props) {
+export const ZoomPane = memo(function ZoomPane({ photo, view, onViewChange, hold, onHover, onSwipe, toggleSignal = 0, showZoom = true, overlay }: Props) {
   const [ref, size] = useElementSize<HTMLDivElement>()
   const img = { w: photo.width ?? 3000, h: photo.height ?? 2000 }
   const effective = hold ? viewAt100(hold.nx, hold.ny, size, img) : clampView(view, size, img)
@@ -153,6 +155,11 @@ export const ZoomPane = memo(function ZoomPane({ photo, view, onViewChange, hold
           <Layer key={`t${photo.id}`} src={thumbUrl(photo, 256)} rect={rectStyle} className="[image-rendering:auto]" />
           <Layer key={`p${photo.id}`} src={previewUrl(photo.id, 2048)} rect={rectStyle} />
           {needHi && <Layer key={`h${photo.id}`} src={previewUrl(photo.id, 4096)} rect={rectStyle} />}
+          {overlay && (
+            <div className="pointer-events-none absolute" style={rectStyle}>
+              {overlay}
+            </div>
+          )}
         </>
       )}
     </div>

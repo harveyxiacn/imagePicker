@@ -2,9 +2,10 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ConnectionStatus } from '@/api/events'
 import { DEFAULT_FILTER, type FilterState } from '@/lib/filter'
+import type { GridRow } from '@/lib/stacks'
 import { EMPTY_SELECTION, type SelectionState } from '@/lib/selection'
 
-export type View = 'grid' | 'loupe' | 'compare'
+export type View = 'grid' | 'loupe' | 'compare' | 'group'
 export type Theme = 'dark' | 'light' | 'system'
 export type Lang = 'zh-CN' | 'en'
 
@@ -17,6 +18,19 @@ interface UiState {
   compareCount: 2 | 4
   syncZoom: boolean
   filter: FilterState
+  /** Filter to apply when the next library mounts (e.g. coming from the People page). */
+  pendingFilter: Partial<FilterState> | null
+  /** Group view (B): burst being reviewed. */
+  groupBurstId: number | null
+  /** Stacks: expanded bursts / all, collapsed scene headers. */
+  expandAll: boolean
+  expandedStacks: ReadonlySet<number>
+  collapsedScenes: ReadonlySet<number>
+  /** Rows currently laid out by the grid (for row-aware arrow navigation). */
+  gridRows: GridRow[]
+  showFaces: boolean
+  personFilterOpen: boolean
+  acceptAllOpen: boolean
   helpOpen: boolean
   exportOpen: boolean
   connection: ConnectionStatus
@@ -31,7 +45,18 @@ interface UiState {
   inspectorOpen: boolean
   theme: Theme
   lang: Lang
+  /** Library shows scene headers + collapsed stacks (true) or a flat list (false). */
+  grouped: boolean
 
+  setGroupBurst: (id: number | null) => void
+  setStacks: (s: { expandAll: boolean; expanded: ReadonlySet<number> }) => void
+  setCollapsedScenes: (s: ReadonlySet<number>) => void
+  setGridRows: (r: GridRow[]) => void
+  setShowFaces: (b: boolean) => void
+  setPersonFilterOpen: (b: boolean) => void
+  setAcceptAllOpen: (b: boolean) => void
+  setGrouped: (b: boolean) => void
+  openWithFilter: (f: Partial<FilterState>) => void
   setView: (v: View) => void
   setActive: (id: number | null) => void
   setSelection: (s: SelectionState) => void
@@ -64,6 +89,16 @@ export const useUi = create<UiState>()(
       compareCount: 2,
       syncZoom: true,
       filter: DEFAULT_FILTER,
+      pendingFilter: null,
+      groupBurstId: null,
+      expandAll: false,
+      expandedStacks: new Set<number>(),
+      collapsedScenes: new Set<number>(),
+      gridRows: [],
+      showFaces: false,
+      personFilterOpen: false,
+      acceptAllOpen: false,
+      grouped: true,
       helpOpen: false,
       exportOpen: false,
       connection: 'connecting',
@@ -75,6 +110,15 @@ export const useUi = create<UiState>()(
       theme: 'dark',
       lang: 'zh-CN',
 
+      setGroupBurst: (groupBurstId) => set({ groupBurstId }),
+      setStacks: ({ expandAll, expanded }) => set({ expandAll, expandedStacks: expanded }),
+      setCollapsedScenes: (collapsedScenes) => set({ collapsedScenes }),
+      setGridRows: (gridRows) => set({ gridRows }),
+      setShowFaces: (showFaces) => set({ showFaces }),
+      setPersonFilterOpen: (personFilterOpen) => set({ personFilterOpen }),
+      setAcceptAllOpen: (acceptAllOpen) => set({ acceptAllOpen }),
+      setGrouped: (grouped) => set({ grouped }),
+      openWithFilter: (f) => set({ pendingFilter: f }),
       setView: (view) => set({ view }),
       setActive: (activeId) => set({ activeId }),
       setSelection: (selection) => set({ selection }),
@@ -92,15 +136,23 @@ export const useUi = create<UiState>()(
       setTheme: (theme) => set({ theme }),
       setLang: (lang) => set({ lang }),
       resetSessionState: () =>
-        set({
+        set((s) => ({
           view: 'grid',
           activeId: null,
           selection: EMPTY_SELECTION,
           compareA: null,
-          filter: DEFAULT_FILTER,
+          filter: { ...DEFAULT_FILTER, ...s.pendingFilter },
+          pendingFilter: null,
+          groupBurstId: null,
+          expandAll: false,
+          expandedStacks: new Set<number>(),
+          collapsedScenes: new Set<number>(),
+          gridRows: [],
+          personFilterOpen: false,
+          acceptAllOpen: false,
           helpOpen: false,
           exportOpen: false,
-        }),
+        })),
     }),
     {
       name: 'imagepicker.ui',
@@ -111,6 +163,8 @@ export const useUi = create<UiState>()(
         lang: s.lang,
         syncZoom: s.syncZoom,
         compareCount: s.compareCount,
+        grouped: s.grouped,
+        showFaces: s.showFaces,
       }),
     },
   ),

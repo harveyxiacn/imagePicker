@@ -4,6 +4,7 @@ import { memo, useEffect, useRef } from 'react'
 import { thumbUrl } from '@/api/client'
 import type { Photo } from '@/api/types'
 import { colorVar } from '@/lib/colors'
+import { issueBadges } from '@/lib/ai'
 
 const ITEM = 72
 const GAP = 4
@@ -13,10 +14,12 @@ interface Props {
   activeId: number | null
   /** Extra highlighted ids (compare mode candidates). */
   markedIds?: number[]
-  onPick: (id: number) => void
+  /** Show 1-based shot numbers (group view). */
+  numbered?: boolean
+  onPick: (id: number, e?: React.MouseEvent) => void
 }
 
-const Thumb = memo(function Thumb({ photo, active, marked, onPick }: { photo: Photo; active: boolean; marked: boolean; onPick: (id: number) => void }) {
+const Thumb = memo(function Thumb({ photo, index, active, marked, onPick }: { photo: Photo; index: number | null; active: boolean; marked: boolean; onPick: (id: number, e?: React.MouseEvent) => void }) {
   return (
     <button
       className="relative h-full w-full overflow-hidden rounded-[2px] bg-bg"
@@ -24,7 +27,7 @@ const Thumb = memo(function Thumb({ photo, active, marked, onPick }: { photo: Ph
         outline: active ? '2px solid var(--accent)' : marked ? '2px solid var(--faint)' : 'none',
         outlineOffset: -2,
       }}
-      onClick={() => onPick(photo.id)}
+      onClick={(e) => onPick(photo.id, e)}
       aria-label={photo.file_name}
       aria-current={active}
     >
@@ -39,7 +42,7 @@ const Thumb = memo(function Thumb({ photo, active, marked, onPick }: { photo: Ph
       ) : (
         <div className="skeleton h-full w-full" />
       )}
-      <div className="absolute top-0.5 left-0.5 flex gap-0.5">
+      <div className={`absolute left-0.5 flex gap-0.5 ${index !== null ? 'top-4' : 'top-0.5'}`}>
         {photo.flag === 1 && <FlagIcon size={11} className="text-success" fill="currentColor" />}
         {photo.flag === -1 && <Ban size={11} className="text-danger" />}
       </div>
@@ -48,13 +51,24 @@ const Thumb = memo(function Thumb({ photo, active, marked, onPick }: { photo: Ph
       )}
       {photo.user_rating ? (
         <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-accent">★{photo.user_rating}</span>
+      ) : photo.ai_rating !== null ? (
+        <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-ai">☆{photo.ai_rating.toFixed(1)}</span>
       ) : null}
+      {issueBadges(photo.issues).length > 0 && (
+        <span className="absolute right-0 bottom-0 rounded-tl bg-black/60 px-0.5 text-[10px]">{issueBadges(photo.issues).slice(0, 2).map((b) => b.glyph).join('')}</span>
+      )}
+      {index !== null && (
+        <span className="absolute top-0 left-0 rounded-br bg-black/60 px-1 text-[10px] text-white/90">
+          #{index}
+          {photo.rank_in_burst === 0 && <span className="ml-0.5 text-ai">✓</span>}
+        </span>
+      )}
     </button>
   )
 })
 
 /** Horizontal virtualized thumbnail strip; keeps the active photo in view. */
-export function Filmstrip({ photos, activeId, markedIds, onPick }: Props) {
+export function Filmstrip({ photos, activeId, markedIds, numbered, onPick }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const virt = useVirtualizer({
     horizontal: true,
@@ -76,7 +90,7 @@ export function Filmstrip({ photos, activeId, markedIds, onPick }: Props) {
           const p = photos[v.index]
           return (
             <div key={p.id} className="absolute top-2" style={{ left: v.start + GAP, width: ITEM, height: ITEM }}>
-              <Thumb photo={p} active={p.id === activeId} marked={!!markedIds?.includes(p.id)} onPick={onPick} />
+              <Thumb photo={p} index={numbered ? v.index + 1 : null} active={p.id === activeId} marked={!!markedIds?.includes(p.id)} onPick={onPick} />
             </div>
           )
         })}

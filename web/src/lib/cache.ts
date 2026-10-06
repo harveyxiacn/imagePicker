@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
-import type { Photo, ServerEvent, Session } from '@/api/types'
+import { api } from '@/api/client'
+import type { AnalysisStatus, HardwareInfo, Photo, ServerEvent, Session } from '@/api/types'
 import type { PhotosListQuery } from './filter'
 
 export const qk = {
@@ -7,6 +8,36 @@ export const qk = {
   session: (id: number) => ['session', id] as const,
   photosAll: ['photos'] as const,
   photos: (sessionId: number, q: PhotosListQuery) => ['photos', sessionId, q] as const,
+  hardware: ['hardware'] as const,
+  models: ['models'] as const,
+  analysisStatus: (sid: number) => ['analysis', 'status', sid] as const,
+  analysis: (photoId: number) => ['analysis', 'photo', photoId] as const,
+  groups: (sid: number) => ['groups', sid] as const,
+  burstFaces: (burstId: number) => ['burstFaces', burstId] as const,
+  peopleAll: ['people'] as const,
+  people: (sid: number | undefined) => ['people', sid ?? 'all'] as const,
+}
+
+/** Photo fields owned by the analysis pipeline (never user-editable, safe to overwrite from the server). */
+export const AI_FIELDS = [
+  'ai_score',
+  'ai_rating',
+  'issues',
+  'burst_id',
+  'rank_in_burst',
+  'burst_size',
+  'scene_type',
+  'face_count',
+  'subject_face_count',
+  'analyzed',
+  'thumb_ready',
+  'thumb_version',
+] as const satisfies readonly (keyof Photo)[]
+
+export function aiPatchOf(p: Photo): PhotoPatch {
+  const out: Record<string, unknown> = {}
+  for (const k of AI_FIELDS) out[k] = p[k]
+  return out as PhotoPatch
 }
 
 export interface PhotosData {
@@ -34,8 +65,43 @@ export function patchPhotosInCache(qc: QueryClient, patches: Map<number, PhotoPa
 
 export type TaskEvent = Extract<ServerEvent, { type: 'task.progress' }>
 
+export interface ApplyDeps {
+  /** Fetch one photo (defaults to the API); injectable for tests. */
+  fetchPhoto?: (id: number) => Promise<Photo>
+  onAnalysis?: (e: Extract<ServerEvent, { type: 'analysis.progress' }>) => void
+}
+
+/** Up to this many `analysis.updated` ids are re-fetched individually; more triggers a throttled list refetch. */
+export const ANALYSIS_DIRECT_FETCH_MAX = 40
+const LIST_REFETCH_MS = 1500
+const listTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+/** At most one background list refetch per session per window (trailing), so streaming results never thrash the grid. */
+function scheduleListRefetch(qc: QueryClient, sid: number): void {
+  if (listTimers.has(sid)) return
+  listTimers.set(
+    sid,
+    setTimeout(() => {
+      listTimers.delete(sid)
+      void qc.invalidateQueries({ queryKey: ['photos', sid] })
+    }, LIST_REFETCH_MS),
+  )
+}
+
+async function refetchAnalysed(qc: QueryClient, ids: number[], deps: ApplyDeps): Promise<void> {
+  const fetchPhoto = deps.fetchPhoto ?? ((id: number) => api.photo(id).then((r) => r.photo))
+  const patches = new Map<number, PhotoPatch>()
+  for (let i = 0; i < ids.length; i += 8) {
+    const batch = await Promise.all(ids.slice(i, i + 8).map((id) => fetchPhoto(id).catch(() => null)))
+    for (const p of batch) if (p) patches.set(p.id, aiPatchOf(p))
+  }
+  patchPhotosInCache(qc, patches)
+}
+
 export interface ApplyResult {
   patchedIds: number
+  /** Distinct photo ids named by analysis.updated, per session. */
+  analysisIds: Record<number, number[]>
   invalidatedSessions: number[]
   sessions: number
   tasks: number
@@ -52,11 +118,17 @@ export function applyEvents(
   qc: QueryClient,
   events: ServerEvent[],
   onTask?: (e: TaskEvent) => void,
+  deps: ApplyDeps = {},
 ): ApplyResult {
   const patches = new Map<number, PhotoPatch>()
   const added = new Set<number>()
   const sessions = new Map<number, Session>()
   const tasks = new Map<string, TaskEvent>()
+  const analysisIds = new Map<number, Set<number>>()
+  const progress = new Map<number, Extract<ServerEvent, { type: 'analysis.progress' }>>()
+  const groupsChanged = new Set<number>()
+  let peopleChanged = false
+  let worker: Extract<ServerEvent, { type: 'worker.status' }> | null = null
 
   for (const ev of events) {
     switch (ev.type) {
@@ -75,6 +147,24 @@ export function applyEvents(
         break
       case 'task.progress':
         tasks.set(ev.task_id, ev)
+        break
+      case 'analysis.updated': {
+        const set = analysisIds.get(ev.session_id) ?? new Set<number>()
+        for (const id of ev.ids) set.add(id)
+        analysisIds.set(ev.session_id, set)
+        break
+      }
+      case 'analysis.progress':
+        progress.set(ev.session_id, ev)
+        break
+      case 'groups.updated':
+        groupsChanged.add(ev.session_id)
+        break
+      case 'people.updated':
+        peopleChanged = true
+        break
+      case 'worker.status':
+        worker = ev
         break
     }
   }
@@ -99,10 +189,48 @@ export function applyEvents(
     void qc.invalidateQueries({ queryKey: qk.session(sid) })
   }
 
+  for (const [sid, ids] of analysisIds) {
+    const list = [...ids]
+    if (list.length <= ANALYSIS_DIRECT_FETCH_MAX) void refetchAnalysed(qc, list, deps)
+    else scheduleListRefetch(qc, sid)
+    const set = ids
+    void qc.invalidateQueries({
+      predicate: (q) => q.queryKey[0] === 'analysis' && q.queryKey[1] === 'photo' && set.has(q.queryKey[2] as number),
+    })
+  }
+
+  for (const [sid, ev] of progress) {
+    qc.setQueryData<AnalysisStatus>(qk.analysisStatus(sid), (old) => ({
+      profile: old?.profile ?? null,
+      error: null,
+      ...old,
+      state: ev.state,
+      stage: ev.stage,
+      done: ev.done,
+      total: ev.total,
+    }))
+    deps.onAnalysis?.(ev)
+  }
+
+  for (const sid of groupsChanged) {
+    void qc.invalidateQueries({ queryKey: qk.groups(sid) })
+    void qc.invalidateQueries({ queryKey: ['burstFaces'] })
+    scheduleListRefetch(qc, sid)
+  }
+  if (peopleChanged) void qc.invalidateQueries({ queryKey: qk.peopleAll })
+
+  if (worker) {
+    const w = worker
+    qc.setQueryData<HardwareInfo>(qk.hardware, (old) =>
+      old ? { worker: { ...old.worker, state: w.state, tier: w.tier ?? old.worker.tier, error: w.error } } : old,
+    )
+  }
+
   if (onTask) for (const t of tasks.values()) onTask(t)
 
   return {
     patchedIds: patches.size,
+    analysisIds: Object.fromEntries([...analysisIds].map(([sid, ids]) => [sid, [...ids]])),
     invalidatedSessions: [...added],
     sessions: sessions.size,
     tasks: tasks.size,

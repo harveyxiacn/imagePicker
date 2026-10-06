@@ -3,8 +3,8 @@
  * and `dispatchKey` resolves keyboard events to action ids.
  */
 
-export type Scope = 'grid' | 'loupe' | 'compare'
-export type Group = 'rate' | 'flag' | 'nav' | 'view' | 'zoom' | 'edit' | 'misc'
+export type Scope = 'grid' | 'loupe' | 'compare' | 'group'
+export type Group = 'rate' | 'flag' | 'nav' | 'view' | 'zoom' | 'edit' | 'ai' | 'misc'
 
 export interface Binding {
   /** Action id handled by the UI (e.g. `rate.3`). */
@@ -22,8 +22,8 @@ export interface Binding {
   hidden?: boolean
 }
 
-const ALL: Scope[] = ['grid', 'loupe', 'compare']
-const NAV: Scope[] = ['grid', 'loupe', 'compare']
+const ALL: Scope[] = ['grid', 'loupe', 'compare', 'group']
+const NAV: Scope[] = ['grid', 'loupe', 'compare', 'group']
 
 export const COLOR_KEYS = { '6': 'red', '7': 'yellow', '8': 'green', '9': 'blue' } as const
 
@@ -58,18 +58,29 @@ export const BINDINGS: Binding[] = [
   { id: 'view.grid', keys: ['g'], scopes: ALL, group: 'view', desc: 'viewGrid' },
   { id: 'view.loupe', keys: ['e'], scopes: ALL, group: 'view', desc: 'viewLoupe' },
   { id: 'view.compare', keys: ['c'], scopes: ALL, group: 'view', desc: 'viewCompare' },
+  { id: 'view.group', keys: ['b'], scopes: ALL, group: 'view', desc: 'viewGroup' },
   { id: 'view.fullscreen', keys: ['f'], scopes: ALL, group: 'view', desc: 'fullscreen' },
   { id: 'view.sidebar', keys: ['tab'], scopes: ['grid', 'loupe'], group: 'view', desc: 'sidebar' },
-  { id: 'compare.swap', keys: ['tab'], scopes: ['compare'], group: 'view', desc: 'swap' },
-  { id: 'compare.sync', keys: ['s'], scopes: ['compare'], group: 'view', desc: 'sync' },
-  { id: 'zoom.toggle', keys: ['space'], scopes: ['loupe', 'compare'], group: 'zoom', desc: 'zoomToggle' },
+  { id: 'compare.swap', keys: ['tab'], scopes: ['compare', 'group'], group: 'view', desc: 'swap' },
+  { id: 'compare.sync', keys: ['s'], scopes: ['compare', 'group'], group: 'view', desc: 'sync' },
+  { id: 'zoom.toggle', keys: ['space'], scopes: ['loupe', 'compare', 'group'], group: 'zoom', desc: 'zoomToggle' },
   { id: 'zoom.open', keys: ['space'], scopes: ['grid'], group: 'zoom', desc: 'open', hidden: true },
-  { id: 'zoom.hold', keys: ['z'], scopes: ['loupe', 'compare'], group: 'zoom', desc: 'zoomHold', hold: true },
+  { id: 'zoom.hold', keys: ['z'], scopes: ['loupe', 'compare', 'group'], group: 'zoom', desc: 'zoomHold', hold: true },
 
   { id: 'edit.undo', keys: ['mod+z'], scopes: ALL, group: 'edit', desc: 'undo' },
   { id: 'edit.redo', keys: ['mod+shift+z'], scopes: ALL, group: 'edit', desc: 'redo' },
   { id: 'edit.redo', keys: ['mod+y'], scopes: ALL, group: 'edit', desc: 'redo', hidden: true },
   { id: 'select.all', keys: ['mod+a'], scopes: ['grid'], group: 'edit', desc: 'selectAll' },
+  { id: 'ai.accept', keys: ['a'], scopes: ALL, group: 'ai', desc: 'aiAccept' },
+  { id: 'ai.acceptAll', keys: ['mod+shift+a'], scopes: ALL, group: 'ai', desc: 'aiAcceptAll' },
+  { id: 'stacks.toggle', keys: ['s'], scopes: ['grid'], group: 'ai', desc: 'stackToggle' },
+  { id: 'stacks.toggleAll', keys: ['shift+s'], scopes: ['grid'], group: 'ai', desc: 'stackToggleAll' },
+  { id: 'group.prev', keys: [','], scopes: ['grid', 'group'], group: 'ai', desc: 'groupPrev' },
+  { id: 'group.next', keys: ['.'], scopes: ['grid', 'group'], group: 'ai', desc: 'groupNext' },
+  { id: 'group.pick', keys: ['enter'], scopes: ['group'], group: 'ai', desc: 'groupPick' },
+  { id: 'group.pickNext', keys: ['shift+enter'], scopes: ['group'], group: 'ai', desc: 'groupPickNext' },
+  { id: 'faces.toggle', keys: ['shift+f'], scopes: ['loupe', 'compare', 'group'], group: 'ai', desc: 'facesToggle' },
+  { id: 'personFilter.open', keys: ['shift+p'], scopes: ALL, group: 'ai', desc: 'personFilter' },
   { id: 'export.open', keys: ['mod+e'], scopes: ALL, group: 'misc', desc: 'export' },
   { id: 'help.toggle', keys: ['?'], scopes: ALL, group: 'misc', desc: 'help' },
 ]
@@ -156,7 +167,7 @@ export function formatSpec(spec: string): string[] {
 
 /** Registry grouped for the help overlay (hidden aliases removed, same actions merged). */
 export function helpGroups(): { group: Group; items: { desc: string; keys: string[][]; scopes: Scope[] }[] }[] {
-  const order: Group[] = ['rate', 'flag', 'nav', 'view', 'zoom', 'edit', 'misc']
+  const order: Group[] = ['rate', 'flag', 'nav', 'view', 'zoom', 'edit', 'ai', 'misc']
   return order
     .map((group) => {
       const items: { desc: string; keys: string[][]; scopes: Scope[] }[] = []

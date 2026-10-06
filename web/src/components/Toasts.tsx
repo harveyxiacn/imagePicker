@@ -1,5 +1,6 @@
 import { AlertCircle, CheckCircle2, Download, Info, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
 
 export function Toasts() {
@@ -8,6 +9,7 @@ export function Toasts() {
   const tasks = useToasts((s) => s.tasks)
   const dismiss = useToasts((s) => s.dismiss)
   const dismissTask = useToasts((s) => s.dismissTask)
+  const consentOpen = useAnalysisUi((s) => s.consent !== null)
 
   return (
     <div
@@ -15,7 +17,9 @@ export function Toasts() {
       role="status"
       aria-live="polite"
     >
-      {Object.values(tasks).map((task) => {
+      {Object.values(tasks)
+        .filter((task) => !(task.kind === 'model_download' && consentOpen))
+        .map((task) => {
         const pct = task.total > 0 ? Math.round((task.done / task.total) * 100) : 0
         return (
           <div key={task.task_id} className="anim-pop pointer-events-auto rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]">
@@ -28,14 +32,20 @@ export function Toasts() {
                 <Download size={16} className="text-accent" />
               )}
               <span className="flex-1 font-medium">
-                {task.state === 'done'
-                  ? t('export.done', { n: task.total })
-                  : task.state === 'failed'
-                    ? t('export.failed')
-                    : t('export.running')}
+                {task.kind === 'model_download'
+                  ? task.state === 'done'
+                    ? t('models.ready')
+                    : task.state === 'failed'
+                      ? t('models.failed')
+                      : t('models.downloading')
+                  : task.state === 'done'
+                    ? t('export.done', { n: task.total })
+                    : task.state === 'failed'
+                      ? t('export.failed')
+                      : t('export.running')}
               </span>
               <span className="tnum text-muted">
-                {task.done}/{task.total}
+                {task.kind === 'model_download' ? `${Math.round(task.total > 0 ? (task.done / task.total) * 100 : 0)}%` : `${task.done}/${task.total}`}
               </span>
               <button className="btn btn-ghost btn-icon !h-6 !w-6" aria-label={t('common.close')} onClick={() => dismissTask(task.task_id)}>
                 <X size={14} />
