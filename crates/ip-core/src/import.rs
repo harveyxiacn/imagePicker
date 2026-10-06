@@ -185,6 +185,7 @@ impl Core {
             self.db
                 .call(move |c| catalog::apply_metadata(c, &updates))
                 .await?;
+            self.xmp_import(ids.clone()).await;
             self.thumbs.enqueue(&ids, Some(&tracker), false);
         }
         if total_meta > 0 {
@@ -197,6 +198,22 @@ impl Core {
 
         // 4. wait for the grid thumbnails of this import
         tracker.wait_idle().await;
+        // 5. settings: analyse right away
+        let st = self.settings();
+        if st.analysis.auto_analyze_on_import && total_meta > 0 {
+            if let Some(profile) = crate::Profile::parse(&st.analysis.default_profile) {
+                let req = crate::AnalysisRunRequest {
+                    session_id,
+                    profile,
+                    photo_ids: None,
+                    force: false,
+                    allow_download: false,
+                };
+                if let Err(e) = self.analysis_run(req).await {
+                    tracing::info!(session = session_id, error = %e, "auto analysis not started");
+                }
+            }
+        }
         Ok(())
     }
 }

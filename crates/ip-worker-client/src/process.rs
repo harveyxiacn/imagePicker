@@ -140,6 +140,16 @@ pub fn find_worker_dir() -> Option<PathBuf> {
 
 /// Spawns the worker with piped stdout/stderr.
 pub fn spawn(argv: &[String], dir: Option<&Path>, token: &str) -> std::io::Result<Child> {
+    spawn_with_env(argv, dir, token, &[])
+}
+
+/// [`spawn`] with extra environment variables (model source, offline mode).
+pub fn spawn_with_env(
+    argv: &[String],
+    dir: Option<&Path>,
+    token: &str,
+    env: &[(String, String)],
+) -> std::io::Result<Child> {
     let (prog, args) = argv
         .split_first()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty command"))?;
@@ -148,6 +158,7 @@ pub fn spawn(argv: &[String], dir: Option<&Path>, token: &str) -> std::io::Resul
         .env("IP_WORKER_TOKEN", token)
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONUTF8", "1")
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

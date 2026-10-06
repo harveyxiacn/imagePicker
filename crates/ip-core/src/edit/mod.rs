@@ -87,6 +87,11 @@ fn check_curve(name: &str, pts: &[[f32; 2]]) -> Result<()> {
     Ok(())
 }
 
+/// Range check of an [`Adjust`] from outside the edit module (VLM suggestions).
+pub(crate) fn check_adjust_public(a: &Adjust) -> Result<()> {
+    check_adjust(a)
+}
+
 fn check_adjust(a: &Adjust) -> Result<()> {
     range("exposure", a.exposure, -5.0, 5.0)?;
     range("temp", a.temp, -3000.0, 3000.0)?;

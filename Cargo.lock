@@ -2234,6 +2234,7 @@ dependencies = [
  "ip-render",
  "ip-worker-client",
  "rayon",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

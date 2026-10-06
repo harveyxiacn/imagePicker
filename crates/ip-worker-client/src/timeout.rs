@@ -35,6 +35,10 @@ impl Default for WorkerTimeouts {
             ("besttake.compose", secs(120)),
             ("inpaint.run", secs(300)),
             ("enhance.run", secs(300)),
+            ("llm.plan", secs(120)),
+            ("vlm.suggest", secs(180)),
+            ("vlm.describe", secs(180)),
+            ("models.delete", secs(60)),
             // batch / download calls: governed by their cancel tokens, not by a wall clock
             ("analyze.batch", None),
             ("models.ensure", None),
@@ -207,6 +211,24 @@ impl AiWorker for TimeoutWorker {
     async fn enhance_run(&self, req: &EnhanceRequest) -> Result<EnhanceResponse> {
         self.limited("enhance.run", self.inner.enhance_run(req))
             .await
+    }
+    async fn llm_plan(&self, req: &LlmPlanRequest) -> Result<LlmPlanResponse> {
+        self.limited("llm.plan", self.inner.llm_plan(req)).await
+    }
+    async fn vlm_suggest(&self, req: &VlmSuggestRequest) -> Result<VlmSuggestResponse> {
+        self.limited("vlm.suggest", self.inner.vlm_suggest(req))
+            .await
+    }
+    async fn vlm_describe(&self, req: &VlmDescribeRequest) -> Result<VlmDescribeResponse> {
+        self.limited("vlm.describe", self.inner.vlm_describe(req))
+            .await
+    }
+    async fn models_delete(&self, id: &str) -> Result<()> {
+        self.limited("models.delete", self.inner.models_delete(id))
+            .await
+    }
+    fn configure(&self, opts: &WorkerOptions) {
+        self.inner.configure(opts);
     }
     async fn shutdown(&self) {
         self.inner.shutdown().await;

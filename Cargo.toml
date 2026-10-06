@@ -40,6 +40,7 @@ getrandom = "0.4"
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "dx12", "metal", "vulkan", "wgsl"] }
 pollster = "1"
 bytemuck = { version = "1", features = ["derive"] }
+regex = "1"
 
 [profile.release]
 lto = "thin"
