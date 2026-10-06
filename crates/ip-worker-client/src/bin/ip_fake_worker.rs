@@ -3,7 +3,7 @@
 //! Speaks just enough of the protocol: ready line, bearer-token auth, `system.info`,
 //! `system.ping`, `system.shutdown`, `models.list`, `analyze.batch` (progress + empty items),
 //! `hang` (waits for `cancel`), `crash` (exits) and `pid`.
-//! `--sleeper` runs a process that only sleeps; with `FAKE_WORKER_GRANDCHILD=1` the worker spawns one
+//! `--sleeper` runs a process that only sleeps; with `--grandchild` the worker spawns one
 //! and reports its pid in `system.info` (to test killing the whole process tree).
 
 use std::collections::HashMap;
@@ -29,7 +29,7 @@ async fn main() {
         .map(|w| w[1].clone())
         .expect("--token required");
     let mut grandchild: Option<u32> = None;
-    if std::env::var("FAKE_WORKER_GRANDCHILD").is_ok() {
+    if args.iter().any(|a| a == "--grandchild") {
         let exe = std::env::current_exe().unwrap();
         let child = std::process::Command::new(exe)
             .arg("--sleeper")

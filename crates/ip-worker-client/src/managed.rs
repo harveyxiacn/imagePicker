@@ -281,9 +281,6 @@ impl ManagedWorker {
         let guard = ChildGuard { pid };
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        tokio::spawn(async move {
-            let _ = child.wait().await;
-        });
 
         let tail: Arc<Mutex<VecDeque<String>>> = Arc::default();
         if let Some(err) = stderr {
@@ -314,41 +311,53 @@ impl ManagedWorker {
 
         let stdout = stdout.ok_or_else(|| WorkerError::Protocol("no stdout".into()))?;
         let mut lines = BufReader::new(stdout).lines();
-        let port = tokio::time::timeout(self.cfg.start_timeout, async {
+        let read_ready = async {
             loop {
                 match lines.next_line().await {
                     Ok(Some(l)) => {
                         if let Ok(v) = serde_json::from_str::<Value>(l.trim()) {
                             if v.get("event").and_then(Value::as_str) == Some("ready") {
                                 if let Some(p) = v.get("port").and_then(Value::as_u64) {
-                                    return Ok(p as u16);
+                                    return Some(p as u16);
                                 }
                             }
                         }
                     }
-                    Ok(None) | Err(_) => return Err(()),
+                    Ok(None) | Err(_) => return None,
                 }
+            }
+        };
+        // Pipe EOF alone is unreliable on Windows (stray handle inheritance), so also watch the child.
+        let outcome = tokio::time::timeout(self.cfg.start_timeout, async {
+            tokio::select! {
+                p = read_ready => p.ok_or(()),
+                _ = child.wait() => Err(()),
             }
         })
         .await;
-        let port = match port {
+        let port = match outcome {
             Ok(Ok(p)) => p,
             Ok(Err(())) => {
                 // give the stderr reader a moment to flush
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 return Err(WorkerError::Protocol(format!(
-                    "worker exited before it was ready:\n{}",
+                    "worker exited before it was ready:
+{}",
                     tail_text(&tail)
                 )));
             }
             Err(_) => {
                 return Err(WorkerError::Timeout(format!(
-                    "worker did not become ready within {:?}:\n{}",
+                    "worker did not become ready within {:?}:
+{}",
                     self.cfg.start_timeout,
                     tail_text(&tail)
                 )))
             }
         };
+        tokio::spawn(async move {
+            let _ = child.wait().await;
+        });
         // keep draining stdout so the pipe never fills
         tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
 
@@ -425,9 +434,9 @@ impl AiWorker for ManagedWorker {
         Ok(info)
     }
 
-    async fn models_list(&self) -> Result<Vec<WorkerModel>> {
+    async fn models_list(&self) -> Result<ModelsListing> {
         let v = self.rpc("models.list", json!({}), None, None).await?;
-        parse(v.get("models").cloned().unwrap_or(Value::Null), "models.list")
+        parse(v, "models.list")
     }
 
     async fn models_ensure(

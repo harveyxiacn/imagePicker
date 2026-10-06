@@ -17,7 +17,12 @@ pub struct AnalyzeRequestItem {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AnalyzeRequest {
     pub items: Vec<AnalyzeRequestItem>,
-    pub steps: Vec<String>,
+    /// `fast` | `standard`; the worker expands it into its step list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// Explicit steps (win over `profile`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steps: Option<Vec<String>>,
     pub analysis_size: u32,
     pub out_dir: String,
     pub allow_download: bool,
@@ -84,6 +89,7 @@ pub struct AnalyzeItem {
     pub embedding_file: Option<String>,
     pub embedding_model: Option<String>,
     pub identity_file: Option<String>,
+    pub identity_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -133,4 +139,21 @@ pub struct WorkerModel {
     pub recommended: bool,
     pub optional: bool,
     pub tiers: Vec<String>,
+    pub required_for: Vec<String>,
+}
+
+/// `profiles[name]` of `models.list`: the steps and exactly the model ids needed on this machine.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ProfileInfo {
+    pub steps: Vec<String>,
+    pub models: Vec<String>,
+}
+
+/// `models.list`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ModelsListing {
+    pub models: Vec<WorkerModel>,
+    pub profiles: std::collections::BTreeMap<String, ProfileInfo>,
 }

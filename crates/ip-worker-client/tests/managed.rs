@@ -35,7 +35,8 @@ fn req(n: usize) -> AnalyzeRequest {
                 orientation: 1,
             })
             .collect(),
-        steps: vec!["phash".into()],
+        profile: Some("fast".into()),
+        steps: None,
         analysis_size: 1024,
         out_dir: "out".into(),
         allow_download: false,
@@ -97,10 +98,10 @@ async fn crash_is_reported_and_next_call_restarts() {
 
 #[tokio::test]
 async fn process_tree_is_killed_on_drop() {
-    std::env::set_var("FAKE_WORKER_GRANDCHILD", "1");
-    let w = ManagedWorker::new(cfg());
+    let mut c = cfg();
+    c.cmd = Some(format!("{} --grandchild", fake_cmd()));
+    let w = ManagedWorker::new(c);
     let info = w.raw_call("system.info", json!({})).await.unwrap();
-    std::env::remove_var("FAKE_WORKER_GRANDCHILD");
     let pid = info["pid"].as_u64().unwrap() as u32;
     let grand = info["grandchild_pid"].as_u64().unwrap() as u32;
     assert!(pid_alive(pid) && pid_alive(grand));
@@ -126,7 +127,7 @@ async fn unavailable_when_launcher_is_missing() {
 async fn repeated_start_failures_become_unavailable() {
     // Starts, but dies before printing the ready line (no --token => the fake worker panics).
     let w = ManagedWorker::new(WorkerConfig {
-        cmd: Some(format!("\"{}\"", env!("CARGO_BIN_EXE_ip-fake-worker"))),
+        cmd: Some(format!("\"{}\" --nope {{token}}", env!("CARGO_BIN_EXE_ip-fake-worker"))),
         ..cfg()
     });
     let e = w.system_info().await.unwrap_err();

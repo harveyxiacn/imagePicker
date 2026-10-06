@@ -69,7 +69,7 @@ pub trait AiWorker: Send + Sync {
     fn subscribe(&self) -> watch::Receiver<WorkerStatus>;
     /// Starts the worker if needed and returns `system.info`.
     async fn system_info(&self) -> Result<SystemInfo>;
-    async fn models_list(&self) -> Result<Vec<WorkerModel>>;
+    async fn models_list(&self) -> Result<ModelsListing>;
     /// Downloads the given models. `progress` gets the raw `progress` params
     /// (`{kind:"model.download", model, done, total, ...}`).
     async fn models_ensure(
