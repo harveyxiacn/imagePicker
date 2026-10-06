@@ -313,7 +313,7 @@ mod tests {
             json!({"type":"crop","rect":[0,0,1,1]}),
             json!({"type":"global","exposure":1.0}),
             json!({"type":"lut","file":"a"}),
-            json!({"type":"warp","x":1}),
+            json!({"type":"future_op","x":1}),
         ];
         let s = vec![
             json!({"type":"global","exposure":-1.0}),
@@ -322,7 +322,7 @@ mod tests {
         ];
         let m = merge_ops(&t, &s, &[SyncKind::Global, SyncKind::Local]);
         let types: Vec<_> = m.iter().map(|o| op_type(o).unwrap()).collect();
-        assert_eq!(types, ["crop", "global", "local", "lut", "warp"]);
+        assert_eq!(types, ["crop", "global", "local", "lut", "future_op"]);
         assert_eq!(m[1]["exposure"], -1.0);
         assert_eq!(m[3]["file"], "a"); // lut untouched
         let none = merge_ops(&t, &s, &[SyncKind::Crop]);
