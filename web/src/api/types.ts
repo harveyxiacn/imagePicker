@@ -457,3 +457,10 @@ export interface PreviewResult {
   renderMs: number | null
   backend: 'gpu' | 'cpu' | null
 }
+
+/** `GET /api/luts`: built-ins (`name` is an i18n key `lut.<id>`) and imported `.cube` files. */
+export interface LutInfo {
+  id: string
+  name: string
+  builtin: boolean
+}

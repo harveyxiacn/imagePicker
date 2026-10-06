@@ -115,6 +115,28 @@ impl LutLibrary {
         Ok(None)
     }
 
+    /// Built-in ids (name = i18n key `lut.<id>`) followed by imported files, as
+    /// `(id, name, builtin)`; imported entries are sorted by id.
+    pub fn list(&self) -> Vec<(String, String, bool)> {
+        let mut out: Vec<(String, String, bool)> = ip_render::builtin_lut_ids()
+            .iter()
+            .map(|id| (id.to_string(), format!("lut.{id}"), true))
+            .collect();
+        let mut imported: Vec<(String, String, bool)> = std::fs::read_dir(&self.dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| is_cube(p))
+            .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .filter(|id| valid_id(id) && !is_builtin(id))
+            .map(|id| (id.clone(), id, false))
+            .collect();
+        imported.sort();
+        out.extend(imported);
+        out
+    }
+
     /// Copies a `.cube` file into the library and returns `(id, name)`.
     pub fn import(&self, src: &str) -> Result<(String, String)> {
         let src = src.trim();

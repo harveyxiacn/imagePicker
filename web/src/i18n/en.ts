@@ -500,6 +500,10 @@ export const en: Messages = {
     dehaze: 'Dehaze',
   },
   lut: {
+    bw_classic: 'Classic B&W',
+    fade: 'Faded',
+    vivid: 'Vivid',
+    cinematic: 'Cinematic',
     film_warm: 'Warm film',
     film_cool: 'Cool film',
     teal_orange: 'Teal & orange',
@@ -507,6 +511,12 @@ export const en: Messages = {
     bw: 'Black & white',
   },
   preset: {
+    natural: 'Natural',
+    japanese_clean: 'Japanese clean',
+    cinematic: 'Cinematic',
+    bw_classic: 'Classic B&W',
+    portrait_soft: 'Soft portrait',
+    landscape_pop: 'Landscape pop',
     film_warm: 'Warm film',
     film_cool: 'Cool film',
     vivid: 'Vivid',

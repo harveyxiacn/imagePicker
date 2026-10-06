@@ -103,6 +103,10 @@ pub struct LutBody {
     path: String,
 }
 
+pub async fn list_luts(State(st): State<AppState>) -> ApiResult<Json<Value>> {
+    Ok(Json(json!({ "luts": st.core.luts().await? })))
+}
+
 pub async fn import_lut(
     State(st): State<AppState>,
     ApiJson(b): ApiJson<LutBody>,

@@ -562,7 +562,21 @@ async fn lut_import_succeeds_and_is_usable() {
     .await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.json()["name"], "Teal");
-    assert!(!r.json()["id"].as_str().unwrap().is_empty());
+    let id = r.json()["id"].as_str().unwrap().to_string();
+    assert!(!id.is_empty());
+
+    let r = call(&app, Method::GET, "/api/luts", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let luts = r.json()["luts"].as_array().unwrap().clone();
+    let builtin_ids: Vec<&str> = luts
+        .iter()
+        .filter(|l| l["builtin"] == true)
+        .map(|l| l["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(builtin_ids, ip_render::builtin_lut_ids());
+    assert!(luts
+        .iter()
+        .any(|l| l["id"] == id.as_str() && l["builtin"] == false && l["name"] == id.as_str()));
 }
 
 #[tokio::test]

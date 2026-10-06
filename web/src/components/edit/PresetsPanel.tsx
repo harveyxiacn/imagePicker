@@ -3,7 +3,7 @@ import { FileUp, Save, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
-import { usePresets } from '@/api/queries'
+import { useLuts, usePresets } from '@/api/queries'
 import type { Preset } from '@/api/types'
 import { qk } from '@/lib/cache'
 import { applyPreset, getLut, setLut, stackKey } from '@/lib/edit'
@@ -15,7 +15,6 @@ import { Section } from './Section'
 import { Slider } from './Slider'
 
 /** Built-in LUT ids understood by the renderer (`{type:"lut", file}`); imported ones are added at runtime. */
-const BUILTIN_LUTS = ['film_warm', 'film_cool', 'teal_orange', 'matte', 'bw']
 
 function PresetCard({ photoId, preset, label, onApply, onDelete }: { photoId: number; preset: Preset; label: string; onApply: () => void; onDelete?: () => void }) {
   const { t } = useTranslation()
@@ -58,7 +57,7 @@ function LutBlock() {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const stack = useEdit((s) => s.stack)
-  const imported = useEdit((s) => s.importedLuts)
+  const luts = useLuts().data ?? []
   const lut = getLut(stack)
   const [path, setPath] = useState('')
   const [busy, setBusy] = useState(false)
@@ -69,7 +68,7 @@ function LutBlock() {
     setBusy(true)
     try {
       const res = await api.importLut(path.trim())
-      useEdit.getState().addLut(res)
+      await qc.invalidateQueries({ queryKey: qk.luts })
       setPath('')
       choose(res.id)
       useToasts.getState().push('success', t('edit.lutImported', { name: res.name }), 2500)
@@ -86,14 +85,9 @@ function LutBlock() {
       <div className="flex items-center gap-1.5">
         <select className="field min-w-0 flex-1" value={lut?.file ?? ''} onChange={(e) => choose(e.target.value)} aria-label={t('edit.lut')} data-testid="lut-select">
           <option value="">{t('edit.lutNone')}</option>
-          {BUILTIN_LUTS.map((id) => (
-            <option key={id} value={id}>
-              {t(`lut.${id}`)}
-            </option>
-          ))}
-          {imported.map((l) => (
+          {luts.map((l) => (
             <option key={l.id} value={l.id}>
-              {l.name}
+              {l.builtin ? t(l.name) : l.name}
             </option>
           ))}
         </select>

@@ -26,6 +26,7 @@ import type {
   PreviewResult,
   SyncBody,
   Adjust,
+  LutInfo,
 } from './types'
 
 export class ApiError extends Error {
@@ -177,6 +178,7 @@ export const api = {
   presets: () => request<{ presets: Preset[] }>('GET', '/presets'),
   savePreset: (name: string, stack: EditStack) => request<{ preset: Preset }>('POST', '/presets', { name, stack }),
   deletePreset: (id: string) => request<void>('DELETE', `/presets/${encodeURIComponent(id)}`),
+  luts: () => request<{ luts: LutInfo[] }>('GET', '/luts'),
   importLut: (path: string) => request<{ id: string; name: string }>('POST', '/luts/import', { path }),
   fsRoots: () => request<{ roots: string[] }>('GET', '/fs/roots'),
   fsList: (path?: string) =>

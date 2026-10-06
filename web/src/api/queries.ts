@@ -87,6 +87,10 @@ export function usePeople(sessionId?: number) {
   })
 }
 
+export function useLuts() {
+  return useQuery({ queryKey: qk.luts, queryFn: api.luts, select: (d) => d.luts, staleTime: 60_000 })
+}
+
 export function usePresets() {
   return useQuery({ queryKey: qk.presets, queryFn: api.presets, select: (d) => d.presets, staleTime: 60_000 })
 }

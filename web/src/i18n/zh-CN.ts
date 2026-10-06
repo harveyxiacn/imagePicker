@@ -498,6 +498,10 @@ export const zhCN = {
     dehaze: '去朦胧',
   },
   lut: {
+    bw_classic: '经典黑白',
+    fade: '褪色',
+    vivid: '鲜艳',
+    cinematic: '电影感',
     film_warm: '暖调胶片',
     film_cool: '冷调胶片',
     teal_orange: '青橙',
@@ -505,6 +509,12 @@ export const zhCN = {
     bw: '黑白',
   },
   preset: {
+    natural: '自然',
+    japanese_clean: '日系清新',
+    cinematic: '电影感',
+    bw_classic: '经典黑白',
+    portrait_soft: '柔和人像',
+    landscape_pop: '风景鲜明',
     film_warm: '暖调胶片',
     film_cool: '冷调胶片',
     vivid: '鲜艳',

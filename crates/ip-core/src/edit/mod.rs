@@ -311,6 +311,14 @@ pub struct LutOut {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct LutInfo {
+    pub id: String,
+    /// i18n key (`lut.<id>`) for built-ins, the file stem for imported LUTs.
+    pub name: String,
+    pub builtin: bool,
+}
+
 fn user_preset_id(n: i64) -> String {
     format!("user_{n}")
 }
@@ -743,6 +751,18 @@ impl Core {
     }
 
     // ------------------------------------------------------------ LUTs & masks
+
+    /// `GET /api/luts`: built-in looks and imported `.cube` files.
+    pub async fn luts(&self) -> Result<Vec<LutInfo>> {
+        let svc = self.render.clone();
+        let list = tokio::task::spawn_blocking(move || svc.luts.list())
+            .await
+            .map_err(|e| CoreError::Internal(anyhow::anyhow!("lut listing failed: {e}")))?;
+        Ok(list
+            .into_iter()
+            .map(|(id, name, builtin)| LutInfo { id, name, builtin })
+            .collect())
+    }
 
     pub async fn import_lut(&self, path: String) -> Result<LutOut> {
         let svc = self.render.clone();

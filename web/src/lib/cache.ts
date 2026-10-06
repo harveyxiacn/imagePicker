@@ -16,6 +16,7 @@ export const qk = {
   editsAll: ['edits'] as const,
   edits: (photoId: number) => ['edits', photoId] as const,
   presets: ['presets'] as const,
+  luts: ['luts'] as const,
   mask: (photoId: number, target: string, personId?: number) => ['mask', photoId, target, personId ?? null] as const,
   burstFaces: (burstId: number) => ['burstFaces', burstId] as const,
   peopleAll: ['people'] as const,

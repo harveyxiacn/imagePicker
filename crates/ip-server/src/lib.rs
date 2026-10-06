@@ -91,6 +91,7 @@ pub fn build_router(core: Arc<Core>, web_dir: Option<PathBuf>) -> Router {
         .route("/render/preview", post(m3::render_preview))
         .route("/presets", get(m3::list_presets).post(m3::create_preset))
         .route("/presets/{id}", delete(m3::delete_preset))
+        .route("/luts", get(m3::list_luts))
         .route("/luts/import", post(m3::import_lut))
         .route("/masks/{id}", get(m3::mask))
         .route("/events", get(ws::events))

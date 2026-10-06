@@ -20,6 +20,8 @@ interface Saved {
 const saved = new Map<number, Saved>()
 const baseVersion = new Map<number, string>()
 
+const importedLuts: { id: string; name: string; builtin: boolean }[] = []
+
 export const savedStack = (id: number): EditStack => saved.get(id)?.stack ?? emptyStack()
 
 /** Thumb version that changes with the edit stack (contract B: "includes the edit-stack hash"). */
@@ -220,12 +222,20 @@ export const editHandlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
+  http.get('/api/luts', async () => {
+    await lat()
+    const builtin = ['film_warm', 'film_cool', 'teal_orange', 'matte', 'bw'].map((id) => ({ id, name: `lut.${id}`, builtin: true }))
+    return HttpResponse.json({ luts: [...builtin, ...importedLuts] })
+  }),
+
   http.post('/api/luts/import', async ({ request }) => {
     await lat()
     const { path } = (await request.json()) as { path: string }
     if (!path || !/\.cube$/i.test(path)) return err(400, 'bad_request', 'expected a .cube file path')
     const name = path.split(/[\\/]/).pop()!.replace(/\.cube$/i, '')
-    return HttpResponse.json({ id: `lut_${(hashString(path) & 0xffff).toString(16)}`, name })
+    const id = `lut_${(hashString(path) & 0xffff).toString(16)}`
+    if (!importedLuts.some((l) => l.id === id)) importedLuts.push({ id, name, builtin: false })
+    return HttpResponse.json({ id, name })
   }),
 
   http.get('/api/masks/:id', async ({ params, request }) => {
