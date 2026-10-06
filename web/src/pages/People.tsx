@@ -1,14 +1,18 @@
-import { useQueryClient } from '@tanstack/react-query'
-import { Check, ChevronLeft, Eye, EyeOff, Loader2, Merge, Pencil, Users } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Check, ChevronLeft, Download, Eye, EyeOff, LayoutGrid, Loader2, Merge, Pencil, ScanFace, Star, Trophy, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api, faceCropUrl } from '@/api/client'
+import { api, faceCropUrl, fetchAllPhotos, thumbUrl } from '@/api/client'
 import { usePeople, useSession } from '@/api/queries'
 import type { Person } from '@/api/types'
+import { ExportDialog } from '@/components/ExportDialog'
+import { FaceSearchDialog } from '@/components/FaceSearchDialog'
 import { Modal } from '@/components/Modal'
 import { HeaderControls } from '@/components/HeaderControls'
+import { buildBestSections, sectionsToFolders } from '@/lib/bestN'
 import { qk } from '@/lib/cache'
+import { applyProfilesToPhotos } from '@/lib/editActions'
 import { DEFAULT_PERSON_FILTER } from '@/lib/filter'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -69,11 +73,25 @@ export function People() {
   const [showHidden, setShowHidden] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
   const [into, setInto] = useState<number | null>(null)
+  const [view, setView] = useState<'cards' | 'best'>('cards')
+  const [bestN, setBestN] = useState(3)
+  const [exportFolders, setExportFolders] = useState<Record<string, number[]> | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const push = useToasts((s) => s.push)
 
   const list = useMemo(() => (people.data ?? []).filter((p) => showHidden || !p.hidden), [people.data, showHidden])
   const hiddenCount = (people.data ?? []).filter((p) => p.hidden).length
   const chosen = list.filter((p) => selected.has(p.id))
+
+  // "Best N per person" works on the selection, or on everyone shown when nothing is selected.
+  const bestIds = useMemo(() => (chosen.length ? chosen : list).map((p) => p.id), [chosen, list])
+  const best = useQuery({
+    queryKey: qk.best(sessionId, bestIds, bestN),
+    queryFn: () => api.bestPeople(sessionId, bestIds, bestN),
+    enabled: view === 'best' && bestIds.length > 0,
+    staleTime: 30_000,
+  })
+  const sections = useMemo(() => buildBestSections(list, best.data, bestIds, bestN), [list, best.data, bestIds, bestN])
 
   const refresh = () => void qc.invalidateQueries({ queryKey: qk.peopleAll })
   const fail = (err: unknown) => push('error', err instanceof Error ? err.message : String(err))
@@ -95,6 +113,43 @@ export function People() {
   const openLibrary = (p: Person) => {
     useUi.getState().openWithFilter({ person: { ...DEFAULT_PERSON_FILTER, include: [p.id] } })
     navigate(`/s/${sessionId}`)
+  }
+
+  /** "View photos together": library filtered with persons AND. */
+  const openTogether = () => {
+    useUi.getState().openWithFilter({ person: { ...DEFAULT_PERSON_FILTER, include: chosen.map((p) => p.id), mode: 'all' } })
+    navigate(`/s/${sessionId}`)
+  }
+
+  /** Export by person: best N of every chosen person into a sub-folder named after them. */
+  const exportByPerson = async () => {
+    setBusy('export')
+    try {
+      const ids = bestIds
+      const resp = await qc.fetchQuery({ queryKey: qk.best(sessionId, ids, bestN), queryFn: () => api.bestPeople(sessionId, ids, bestN), staleTime: 30_000 })
+      const folders = sectionsToFolders(buildBestSections(list, resp, ids, bestN))
+      if (Object.keys(folders).length === 0) push('info', t('best.empty'), 2500)
+      else setExportFolders(folders)
+    } catch (err) {
+      fail(err)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /** Apply the saved beauty profiles of the chosen people to every photo they appear in. */
+  const applyProfiles = async () => {
+    setBusy('profiles')
+    try {
+      const all = await fetchAllPhotos({ session_id: sessionId, persons: chosen.map((p) => p.id), person_mode: 'any', include_background: true })
+      const ids = all.photos.map((p) => p.id)
+      const n = await applyProfilesToPhotos(qc, ids, t('history.applyProfiles', { n: ids.length }))
+      push(n > 0 ? 'success' : 'info', n > 0 ? t('beauty.profilesApplied', { n }) : t('beauty.profilesNone'), 3000)
+    } catch (err) {
+      fail(err)
+    } finally {
+      setBusy(null)
+    }
   }
 
   const toggle = (id: number) =>
@@ -142,6 +197,9 @@ export function People() {
               {t('people.showHidden', { n: hiddenCount })}
             </button>
           )}
+          <button className="btn" onClick={() => useUi.getState().setFaceSearchOpen(true)} data-testid="people-face-search">
+            <span aria-hidden>📷</span> {t('faceSearch.button')}
+          </button>
           <button className="btn btn-primary" disabled={chosen.length < 2} onClick={startMerge} data-testid="people-merge">
             <Merge size={14} />
             {t('people.merge', { n: chosen.length })}
@@ -149,6 +207,50 @@ export function People() {
           <HeaderControls />
         </div>
       </header>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-1.5" data-testid="people-toolbar">
+        <div className="flex rounded-control border border-line p-0.5" role="tablist" aria-label={t('people.view')}>
+          {(['cards', 'best'] as const).map((v) => (
+            <button
+              key={v}
+              role="tab"
+              aria-selected={view === v}
+              className={`flex h-6 items-center gap-1.5 rounded px-2 transition-colors ${view === v ? 'bg-accent text-accent-fg' : 'text-muted hover:text-fg'}`}
+              onClick={() => setView(v)}
+              data-testid={`people-view-${v}`}
+            >
+              {v === 'cards' ? <LayoutGrid size={13} /> : <Trophy size={13} />}
+              {t(`people.view_${v}`)}
+            </button>
+          ))}
+        </div>
+        <label className="flex items-center gap-1.5">
+          <span className="text-muted">{t('best.perPerson')}</span>
+          <select className="field !px-1.5" value={bestN} onChange={(e) => setBestN(Number(e.target.value))} aria-label={t('best.count')} data-testid="best-n">
+            {[1, 3, 5, 10].map((n) => (
+              <option key={n} value={n}>
+                {t('best.n', { n })}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="mx-1 h-4 border-l border-line" />
+        <span className="tnum text-muted" data-testid="people-selected">
+          {t('people.selected', { n: chosen.length })}
+        </span>
+        <button className="btn" disabled={chosen.length < 2} onClick={openTogether} title={chosen.length < 2 ? t('people.togetherNeedsTwo') : undefined} data-testid="people-together">
+          <Users size={13} />
+          {t('people.together')}
+        </button>
+        <button className="btn" disabled={busy !== null || list.length === 0} onClick={() => void exportByPerson()} data-testid="people-export">
+          {busy === 'export' ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          {t('people.exportByPerson')}
+        </button>
+        <button className="btn" disabled={busy !== null || chosen.length === 0} onClick={() => void applyProfiles()} data-testid="people-apply-profiles">
+          {busy === 'profiles' ? <Loader2 size={13} className="animate-spin" /> : <ScanFace size={13} />}
+          {t('beauty.applyProfilesToSelectedPeople')}
+        </button>
+      </div>
 
       <main className="min-h-0 flex-1 overflow-y-auto p-4">
         {people.isPending ? (
@@ -170,6 +272,48 @@ export function People() {
             <Link to={`/s/${sessionId}`} className="btn">
               {t('people.goAnalyze')}
             </Link>
+          </div>
+        ) : view === 'best' ? (
+          <div className="flex flex-col gap-6" data-testid="best-view">
+            {best.isPending && (
+              <div className="flex items-center justify-center gap-2 py-10 text-muted">
+                <Loader2 className="animate-spin" size={18} />
+                {t('library.loading')}
+              </div>
+            )}
+            {best.isError && <div className="text-danger">{(best.error as Error).message}</div>}
+            {best.isSuccess && sections.length === 0 && <div className="py-10 text-center text-muted">{t('best.empty')}</div>}
+            {sections.map((sec) => (
+              <section key={sec.person.id} data-testid="best-section" aria-label={sec.person.name ?? String(sec.person.id)}>
+                <div className="mb-2 flex items-center gap-3">
+                  <img src={faceCropUrl(sec.person.cover_face_id, 128)} alt="" className="h-9 w-9 rounded-full object-cover" draggable={false} />
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{sec.person.name ?? `${t('person.unnamed')} ${sec.person.id}`}</div>
+                    <div className="tnum text-xs text-muted">{t('best.shown', { n: sec.photos.length, total: sec.person.photo_count })}</div>
+                  </div>
+                  <button className="btn btn-ghost ml-auto" onClick={() => openLibrary(sec.person)}>
+                    {t('people.openLibrary')}
+                  </button>
+                </div>
+                <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+                  {sec.photos.map((ph, i) => (
+                    <Link
+                      key={ph.photoId}
+                      to={`/s/${sessionId}/edit/${ph.photoId}`}
+                      className="group relative block aspect-[4/3] overflow-hidden rounded-control border border-line bg-bg"
+                      title={t('best.open')}
+                      data-testid="best-photo"
+                    >
+                      <img src={thumbUrl({ id: ph.photoId, thumb_version: 'b' }, 256)} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" loading="lazy" draggable={false} />
+                      <span className="tnum absolute bottom-1 left-1 flex items-center gap-0.5 rounded bg-black/65 px-1 text-[11px] leading-4 text-white">
+                        {i === 0 && <Star size={10} className="text-accent" fill="currentColor" />}
+                        {Math.round(ph.score * 100)}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            ))}
           </div>
         ) : (
           <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }} data-testid="people-grid">
@@ -213,6 +357,8 @@ export function People() {
         )}
       </main>
 
+      <FaceSearchDialog sessionId={sessionId} />
+      <ExportDialog open={exportFolders !== null} onOpenChange={(o) => !o && setExportFolders(null)} selectedIds={[]} allIds={[]} folders={exportFolders ?? undefined} />
       <Modal
         open={mergeOpen}
         onOpenChange={setMergeOpen}

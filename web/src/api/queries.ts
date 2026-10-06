@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
+import { queryToFilter } from '@/lib/collections'
 import { buildPhotosQuery, type FilterState } from '@/lib/filter'
 import { qk } from '@/lib/cache'
 import { api, fetchAllPhotos } from './client'
@@ -93,4 +94,35 @@ export function useLuts() {
 
 export function usePresets() {
   return useQuery({ queryKey: qk.presets, queryFn: api.presets, select: (d) => d.presets, staleTime: 60_000 })
+}
+
+/** People detected in one photo + whether their geometry is prepared (M4 portrait panel). */
+export function usePhotoPeople(photoId: number | undefined, poll = false) {
+  return useQuery({
+    queryKey: qk.photoPeople(photoId ?? -1),
+    queryFn: () => api.photoPeople(photoId!),
+    enabled: photoId !== undefined,
+    staleTime: 0,
+    // Safety net while geometry is being prepared: `beauty.ready` normally arrives first.
+    refetchInterval: poll ? 2500 : false,
+  })
+}
+
+export function useCollections() {
+  return useQuery({ queryKey: qk.collections, queryFn: api.collections, select: (d) => d.collections, staleTime: 30_000 })
+}
+
+/** Photo count of a collection query inside one session (lazy: only fetched while the row is mounted). */
+export function useCollectionCount(sessionId: number, query: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.collectionCount(sessionId, query),
+    queryFn: () => api.photos({ ...buildPhotosQuery(sessionId, queryToFilter(query)), limit: 1 }),
+    select: (d) => d.total,
+    enabled,
+    staleTime: 30_000,
+  })
+}
+
+export function useTaste() {
+  return useQuery({ queryKey: qk.taste, queryFn: api.taste, staleTime: 15_000 })
 }

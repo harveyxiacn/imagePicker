@@ -21,6 +21,7 @@ interface Props {
   testId?: string
   /** suffix such as `°` or `%` */
   unit?: string
+  disabled?: boolean
 }
 
 const WHEEL_IDLE_MS = 380
@@ -31,7 +32,7 @@ function fmt(v: number, decimals: number, signed: boolean): string {
 }
 
 /** Lightroom-style slider: double-click resets, wheel / arrows fine-tune, numeric input, Alt-drag clipping stub. */
-export const Slider = memo(function Slider({ label, value, min, max, step, decimals = 0, def = 0, onLive, onCommit, track, flash, testId, unit }: Props) {
+export const Slider = memo(function Slider({ label, value, min, max, step, decimals = 0, def = 0, onLive, onCommit, track, flash, testId, unit, disabled }: Props) {
   const [draft, setDraft] = useState<string | null>(null)
   const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -88,7 +89,7 @@ export const Slider = memo(function Slider({ label, value, min, max, step, decim
   }
 
   return (
-    <div className={`flex items-center gap-2 py-[3px] ${flash ? 'anim-flash' : ''}`} data-testid={testId}>
+    <div className={`flex items-center gap-2 py-[3px] ${flash ? 'anim-flash' : ''} ${disabled ? 'pointer-events-none opacity-40' : ''}`} data-testid={testId} aria-disabled={disabled || undefined}>
       <button
         type="button"
         tabIndex={-1}
@@ -107,6 +108,7 @@ export const Slider = memo(function Slider({ label, value, min, max, step, decim
         step={step}
         value={value}
         data-changed={changed}
+        disabled={disabled}
         aria-label={label}
         style={{ ['--track' as string]: track ?? fill }}
         onChange={(e) => onLive(Number(e.target.value))}
@@ -132,6 +134,7 @@ export const Slider = memo(function Slider({ label, value, min, max, step, decim
       <input
         className="lr-num"
         inputMode="decimal"
+        disabled={disabled}
         aria-label={`${label} (${unit ?? '#'})`}
         value={draft ?? fmt(value, decimals, signed) + (unit ?? '')}
         onFocus={(e) => {

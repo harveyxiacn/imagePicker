@@ -27,6 +27,12 @@ import type {
   SyncBody,
   Adjust,
   LutInfo,
+  BeautyProfile,
+  BestPeopleResponse,
+  Collection,
+  FaceSearchResponse,
+  PhotoPeopleResponse,
+  Taste,
 } from './types'
 
 export class ApiError extends Error {
@@ -65,6 +71,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError(res.status, code, message, body)
   }
   if (res.status === 204) return undefined as T
+  return (await res.json()) as T
+}
+
+/** multipart/form-data request (the browser sets the boundary header). */
+async function requestForm<T>(method: string, path: string, body: FormData): Promise<T> {
+  const res = await fetch(BASE + path, { method, body })
+  if (!res.ok) throw await toApiError(res)
   return (await res.json()) as T
 }
 
@@ -130,6 +143,7 @@ export function photosQueryString(q: PhotosQuery): string {
   if (q.include_background) p.set('include_background', '1')
   if (q.faces_min !== undefined) p.set('faces_min', String(q.faces_min))
   if (q.faces_max !== undefined) p.set('faces_max', String(q.faces_max))
+  if (q.has_edits) p.set('has_edits', '1')
   if (q.sort) p.set('sort', q.sort)
   if (q.cursor) p.set('cursor', q.cursor)
   if (q.limit) p.set('limit', String(q.limit))
@@ -180,6 +194,32 @@ export const api = {
   deletePreset: (id: string) => request<void>('DELETE', `/presets/${encodeURIComponent(id)}`),
   luts: () => request<{ luts: LutInfo[] }>('GET', '/luts'),
   importLut: (path: string) => request<{ id: string; name: string }>('POST', '/luts/import', { path }),
+  // ---- M4 ----
+  photoPeople: (id: number) => request<PhotoPeopleResponse>('GET', `/photos/${id}/people`),
+  beautyPrepare: (id: number) => request<{ task_id: string }>('POST', `/photos/${id}/beauty/prepare`),
+  beautyProfile: (personId: number) => request<{ profile: BeautyProfile | null }>('GET', `/people/${personId}/beauty-profile`),
+  putBeautyProfile: (personId: number, profile: BeautyProfile | null) =>
+    request<{ profile: BeautyProfile | null }>('PUT', `/people/${personId}/beauty-profile`, { profile }),
+  applyProfiles: (photo_ids: number[]) => request<{ updated: number }>('POST', '/edits/apply-profiles', { photo_ids }),
+  bestPeople: (session_id: number, ids: number[], n: number) =>
+    request<BestPeopleResponse>('GET', `/people/best?session_id=${session_id}&ids=${ids.join(',')}&n=${n}`),
+  faceSearch: (input: { image: File } | { face_id: number }, opts: { session_id?: number; face_index?: number } = {}) => {
+    if ('image' in input) {
+      const fd = new FormData()
+      fd.append('image', input.image)
+      if (opts.session_id !== undefined) fd.append('session_id', String(opts.session_id))
+      if (opts.face_index !== undefined) fd.append('face_index', String(opts.face_index))
+      return requestForm<FaceSearchResponse>('POST', '/faces/search', fd)
+    }
+    return request<FaceSearchResponse>('POST', '/faces/search', { ...input, ...opts })
+  },
+  collections: () => request<{ collections: Collection[] }>('GET', '/collections'),
+  createCollection: (name: string, query: string) => request<{ collection: Collection }>('POST', '/collections', { name, query }),
+  patchCollection: (id: string, body: { name?: string; query?: string }) =>
+    request<{ collection: Collection }>('PATCH', `/collections/${encodeURIComponent(id)}`, body),
+  deleteCollection: (id: string) => request<void>('DELETE', `/collections/${encodeURIComponent(id)}`),
+  taste: () => request<Taste>('GET', '/taste'),
+  resetTaste: () => request<void>('POST', '/taste/reset'),
   fsRoots: () => request<{ roots: string[] }>('GET', '/fs/roots'),
   fsList: (path?: string) =>
     request<FsList>('GET', `/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),

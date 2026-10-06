@@ -4,6 +4,7 @@ import { GradingPanel, HslPanel } from './ColorPanels'
 import { CropPanel } from './CropPanel'
 import { CurvesPanel } from './CurvesPanel'
 import { LocalPanel } from './LocalPanel'
+import { PortraitPanel } from './PortraitPanel'
 import { PresetsPanel } from './PresetsPanel'
 
 /** Right column of the edit page (doc 04 section 3.5). */
@@ -16,6 +17,7 @@ export function EditPanel({ photo }: { photo: Photo }) {
       <HslPanel />
       <GradingPanel />
       <LocalPanel photo={photo} />
+      <PortraitPanel key={photo.id} photo={photo} />
       <CropPanel photo={photo} />
       <PresetsPanel photoId={photo.id} />
       <SharpenPanel />

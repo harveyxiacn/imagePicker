@@ -6,6 +6,7 @@ import { Home } from '@/pages/Home'
 import { Edit } from '@/pages/Edit'
 import { Library } from '@/pages/Library'
 import { People } from '@/pages/People'
+import { Taste } from '@/pages/Taste'
 import { Toasts } from '@/components/Toasts'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -57,6 +58,7 @@ function Shell() {
         <Route path="/s/:sessionId" element={<Library />} />
         <Route path="/s/:sessionId/people" element={<People />} />
         <Route path="/s/:sessionId/edit/:photoId" element={<Edit />} />
+        <Route path="/taste" element={<Taste />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <Toasts />

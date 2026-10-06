@@ -33,6 +33,11 @@ interface UiState {
   acceptAllOpen: boolean
   helpOpen: boolean
   exportOpen: boolean
+  /** M4: save-as-smart-collection dialog, face search dialog */
+  saveCollectionOpen: boolean
+  faceSearchOpen: boolean
+  /** Library left sidebar (smart collections) */
+  sidebarOpen: boolean
   connection: ConnectionStatus
   /** Increments when Space asks panes to toggle fit <-> 100%. */
   zoomToggle: number
@@ -67,6 +72,9 @@ interface UiState {
   resetFilter: () => void
   setHelpOpen: (b: boolean) => void
   setExportOpen: (b: boolean) => void
+  setSaveCollectionOpen: (b: boolean) => void
+  setFaceSearchOpen: (b: boolean) => void
+  setSidebarOpen: (b: boolean) => void
   setConnection: (c: ConnectionStatus) => void
   toggleZoom: () => void
   setThumbSize: (n: number) => void
@@ -101,6 +109,9 @@ export const useUi = create<UiState>()(
       grouped: true,
       helpOpen: false,
       exportOpen: false,
+      saveCollectionOpen: false,
+      faceSearchOpen: false,
+      sidebarOpen: !narrow,
       connection: 'connecting',
       zoomToggle: 0,
       gridCols: 6,
@@ -129,6 +140,9 @@ export const useUi = create<UiState>()(
       resetFilter: () => set((s) => ({ filter: { ...DEFAULT_FILTER, sort: s.filter.sort } })),
       setHelpOpen: (helpOpen) => set({ helpOpen }),
       setExportOpen: (exportOpen) => set({ exportOpen }),
+      setSaveCollectionOpen: (saveCollectionOpen) => set({ saveCollectionOpen }),
+      setFaceSearchOpen: (faceSearchOpen) => set({ faceSearchOpen }),
+      setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       setConnection: (connection) => set({ connection }),
       toggleZoom: () => set((s) => ({ zoomToggle: s.zoomToggle + 1 })),
       setThumbSize: (thumbSize) => set({ thumbSize }),
@@ -152,6 +166,8 @@ export const useUi = create<UiState>()(
           acceptAllOpen: false,
           helpOpen: false,
           exportOpen: false,
+          saveCollectionOpen: false,
+          faceSearchOpen: false,
         })),
     }),
     {
@@ -159,6 +175,7 @@ export const useUi = create<UiState>()(
       partialize: (s) => ({
         thumbSize: s.thumbSize,
         inspectorOpen: s.inspectorOpen,
+        sidebarOpen: s.sidebarOpen,
         theme: s.theme,
         lang: s.lang,
         syncZoom: s.syncZoom,

@@ -30,7 +30,7 @@ function versionFor(p: Photo, stack: EditStack): string {
   return isEmptyStack(stack) ? baseVersion.get(p.id)! : `e${(hashString(stackKey(stack)) & 0xffffff).toString(16)}`
 }
 
-function store(p: Photo, stackIn: EditStack): { stack: EditStack; updated_at: number; thumb_version: string } {
+export function store(p: Photo, stackIn: EditStack): { stack: EditStack; updated_at: number; thumb_version: string } {
   const stack = normalizeStack(stackIn)
   const updated_at = Date.now()
   if (isEmptyStack(stack)) saved.delete(p.id)
