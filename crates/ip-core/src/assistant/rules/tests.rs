@@ -7,11 +7,7 @@ use super::*;
 const CURRENT: i64 = 99;
 
 fn people() -> Vec<(i64, String)> {
-    vec![
-        (1, "小明".into()),
-        (2, "小红".into()),
-        (3, "Alice".into()),
-    ]
+    vec![(1, "小明".into()), (2, "小红".into()), (3, "Alice".into())]
 }
 
 fn presets() -> Vec<PresetName> {
@@ -65,7 +61,11 @@ fn check_with(msg: &str, selection: &[i64], current: Option<i64>, want: &[(&str,
         "{msg:?} was not understood: {:?}",
         p.unsupported
     );
-    let got: Vec<String> = p.calls.iter().map(|c| format!("{} {}", c.tool, c.args)).collect();
+    let got: Vec<String> = p
+        .calls
+        .iter()
+        .map(|c| format!("{} {}", c.tool, c.args))
+        .collect();
     assert_eq!(
         p.calls.len(),
         want.len(),
@@ -91,18 +91,37 @@ fn check_with(msg: &str, selection: &[i64], current: Option<i64>, want: &[(&str,
 #[track_caller]
 fn unsupported(msg: &str) -> String {
     let p = ask(msg);
-    assert!(p.calls.is_empty(), "{msg:?} should not produce steps: {:?}", p.calls);
+    assert!(
+        p.calls.is_empty(),
+        "{msg:?} should not produce steps: {:?}",
+        p.calls
+    );
     p.unsupported
         .unwrap_or_else(|| panic!("{msg:?} should be unsupported"))
 }
 
 #[test]
 fn chinese_filters() {
-    check("只看小明的4星以上照片", &[("filter", json!({"persons":[1],"rating_gte":4}))]);
-    check("只看风景照", &[("filter", json!({"scene_type":"landscape"}))]);
-    check("只看模糊的照片", &[("filter", json!({"issues_any":["blurry"]}))]);
-    check("看看过曝的", &[("filter", json!({"issues_any":["overexposed"]}))]);
-    check("显示已淘汰的照片", &[("filter", json!({"flag":"rejected"}))]);
+    check(
+        "只看小明的4星以上照片",
+        &[("filter", json!({"persons":[1],"rating_gte":4}))],
+    );
+    check(
+        "只看风景照",
+        &[("filter", json!({"scene_type":"landscape"}))],
+    );
+    check(
+        "只看模糊的照片",
+        &[("filter", json!({"issues_any":["blurry"]}))],
+    );
+    check(
+        "看看过曝的",
+        &[("filter", json!({"issues_any":["overexposed"]}))],
+    );
+    check(
+        "显示已淘汰的照片",
+        &[("filter", json!({"flag":"rejected"}))],
+    );
     check(
         "只看小明和小红的合影",
         &[("filter", json!({"persons":[1,2],"scene_type":"group"}))],
@@ -111,13 +130,25 @@ fn chinese_filters() {
         "小明或小红的照片",
         &[("filter", json!({"persons":[1,2],"person_mode":"any"}))],
     );
-    check("只看没有问题的照片", &[("filter", json!({"issues_none":true}))]);
+    check(
+        "只看没有问题的照片",
+        &[("filter", json!({"issues_none":true}))],
+    );
     check("只看5星", &[("filter", json!({"rating_gte":5}))]);
-    check("AI评分4星以上的照片", &[("filter", json!({"ai_rating_gte":4.0}))]);
-    check("只看笑的照片", &[("filter", json!({"person_state":["smiling"]}))]);
+    check(
+        "AI评分4星以上的照片",
+        &[("filter", json!({"ai_rating_gte":4.0}))],
+    );
+    check(
+        "只看笑的照片",
+        &[("filter", json!({"person_state":["smiling"]}))],
+    );
     check("按AI评分排序", &[("filter", json!({"sort":"ai"}))]);
     check("只看已修图的", &[("filter", json!({"has_edits":true}))]);
-    check("只看红色标签的照片", &[("filter", json!({"color_label":"red"}))]);
+    check(
+        "只看红色标签的照片",
+        &[("filter", json!({"color_label":"red"}))],
+    );
     check("清除筛选", &[("filter", json!({}))]);
     check("显示全部", &[("filter", json!({}))]);
     check("只看夜景", &[("filter", json!({"scene_type":"night"}))]);
@@ -154,7 +185,10 @@ fn chinese_actions() {
             ("set_flag", json!({"flag":-1})),
         ],
     );
-    check("所有照片接受AI评分", &[("accept_ai", json!({"selection":{"query":""}}))]);
+    check(
+        "所有照片接受AI评分",
+        &[("accept_ai", json!({"selection":{"query":""}}))],
+    );
     check(
         "给京都的照片应用胶片暖调",
         &[(
@@ -172,7 +206,13 @@ fn chinese_actions() {
             ),
         ],
     );
-    check("一键修图", &[("auto_adjust", json!({"mode":"auto","selection":"current_filter"}))]);
+    check(
+        "一键修图",
+        &[(
+            "auto_adjust",
+            json!({"mode":"auto","selection":"current_filter"}),
+        )],
+    );
     check(
         "对人像照片一键修图",
         &[
@@ -180,12 +220,18 @@ fn chinese_actions() {
             ("auto_adjust", json!({"mode":"portrait"})),
         ],
     );
-    check("消除路人", &[("remove_bystanders", json!({"selection":"current_filter"}))]);
+    check(
+        "消除路人",
+        &[("remove_bystanders", json!({"selection":"current_filter"}))],
+    );
     check("应用美颜档案", &[("apply_profiles", json!({}))]);
     check("最佳表情", &[("besttake_auto", json!({}))]);
     check(
         "把前3张评5星",
-        &[("set_rating", json!({"rating":5,"selection":{"query":"limit=3"}}))],
+        &[(
+            "set_rating",
+            json!({"rating":5,"selection":{"query":"limit=3"}}),
+        )],
     );
     check(
         "给小明的照片打5星",
@@ -234,7 +280,10 @@ fn chinese_actions() {
             ),
         ],
     );
-    check("应用我的复古滤镜", &[("apply_preset", json!({"preset_id":"user_7"}))]);
+    check(
+        "应用我的复古滤镜",
+        &[("apply_preset", json!({"preset_id":"user_7"}))],
+    );
 }
 
 #[test]
@@ -258,7 +307,10 @@ fn english_commands() {
             ("set_flag", json!({"flag":-1})),
         ],
     );
-    check("accept AI ratings for all photos", &[("accept_ai", json!({"selection":{"query":""}}))]);
+    check(
+        "accept AI ratings for all photos",
+        &[("accept_ai", json!({"selection":{"query":""}}))],
+    );
     check("auto adjust", &[("auto_adjust", json!({"mode":"auto"}))]);
     check("remove bystanders", &[("remove_bystanders", json!({}))]);
     check(
@@ -268,7 +320,10 @@ fn english_commands() {
             ("export", json!({"preset":"instagram"})),
         ],
     );
-    check("show me only 5 star photos", &[("filter", json!({"rating_gte":5}))]);
+    check(
+        "show me only 5 star photos",
+        &[("filter", json!({"rating_gte":5}))],
+    );
     check(
         "apply the warm film look to landscapes",
         &[
@@ -278,12 +333,24 @@ fn english_commands() {
     );
     check(
         "rate the first three photos 5 stars",
-        &[("set_rating", json!({"rating":5,"selection":{"query":"limit=3"}}))],
+        &[(
+            "set_rating",
+            json!({"rating":5,"selection":{"query":"limit=3"}}),
+        )],
     );
     check("clear the filter", &[("filter", json!({}))]);
-    check("show only edited photos", &[("filter", json!({"has_edits":true}))]);
-    check("show photos without blur", &[("filter", json!({"issues_none":true}))]);
-    check("only show alise photos", &[("filter", json!({"persons":[3]}))]);
+    check(
+        "show only edited photos",
+        &[("filter", json!({"has_edits":true}))],
+    );
+    check(
+        "show photos without blur",
+        &[("filter", json!({"issues_none":true}))],
+    );
+    check(
+        "only show alise photos",
+        &[("filter", json!({"persons":[3]}))],
+    );
     check(
         "Rate Alice's photos 3 stars",
         &[
@@ -291,8 +358,14 @@ fn english_commands() {
             ("set_rating", json!({"rating":3})),
         ],
     );
-    check("show food photos", &[("filter", json!({"scene_type":"food"}))]);
-    check("use the vivid preset", &[("apply_preset", json!({"preset_id":"vivid"}))]);
+    check(
+        "show food photos",
+        &[("filter", json!({"scene_type":"food"}))],
+    );
+    check(
+        "use the vivid preset",
+        &[("apply_preset", json!({"preset_id":"vivid"}))],
+    );
 }
 
 #[test]
@@ -323,8 +396,14 @@ fn selection_and_current_photo() {
         &[("auto_adjust", json!({"selection":{"ids":[7,8,9]}}))],
     );
     check("描述这张照片", &[("describe", json!({"photo_id":CURRENT}))]);
-    check("describe this photo", &[("describe", json!({"photo_id":CURRENT}))]);
-    check("给我一些修图建议", &[("suggest_edits", json!({"photo_id":CURRENT}))]);
+    check(
+        "describe this photo",
+        &[("describe", json!({"photo_id":CURRENT}))],
+    );
+    check(
+        "给我一些修图建议",
+        &[("suggest_edits", json!({"photo_id":CURRENT}))],
+    );
     // missing context
     let p = ask_with("选中的照片全部淘汰", &[], None);
     assert!(p.unsupported.is_some() && p.calls.is_empty());
@@ -346,7 +425,10 @@ fn unsupported_messages_help() {
         "只看小李的照片",
     ] {
         let why = unsupported(msg);
-        assert!(why.contains("只看") || why.contains("show"), "{msg:?}: {why}");
+        assert!(
+            why.contains("只看") || why.contains("show"),
+            "{msg:?}: {why}"
+        );
     }
     assert!(unsupported("只看京都的照片").contains("京都"));
     assert!(unsupported("只看小李的照片").contains("小李"));
@@ -385,7 +467,10 @@ fn people_names_match_fuzzily() {
     let found = match_people(&mut t, &people());
     assert_eq!(found, [3, 1], "in order of appearance");
     let s: String = t.iter().collect();
-    assert!(!s.contains("小明") && !s.contains("alise"), "names are blanked: {s}");
+    assert!(
+        !s.contains("小明") && !s.contains("alise"),
+        "names are blanked: {s}"
+    );
     let mut t: Vec<char> = "someone else".chars().collect();
     assert!(match_people(&mut t, &people()).is_empty());
     // a short word one typo away from a short name is not enough

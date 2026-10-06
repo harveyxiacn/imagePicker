@@ -236,15 +236,24 @@ impl<'a> Parser<'a> {
             }
             if self.starts("<") {
                 if self.starts("<!--") {
-                    let end = self.rest().find("-->").ok_or_else(|| XmpError("unterminated comment".into()))?;
+                    let end = self
+                        .rest()
+                        .find("-->")
+                        .ok_or_else(|| XmpError("unterminated comment".into()))?;
                     out.push(Node::Raw(self.rest()[..end + 3].to_string()));
                     self.pos += end + 3;
                 } else if self.starts("<![CDATA[") {
-                    let end = self.rest().find("]]>").ok_or_else(|| XmpError("unterminated CDATA".into()))?;
+                    let end = self
+                        .rest()
+                        .find("]]>")
+                        .ok_or_else(|| XmpError("unterminated CDATA".into()))?;
                     out.push(Node::Raw(self.rest()[..end + 3].to_string()));
                     self.pos += end + 3;
                 } else if self.starts("<?") {
-                    let end = self.rest().find("?>").ok_or_else(|| XmpError("unterminated processing instruction".into()))?;
+                    let end = self
+                        .rest()
+                        .find("?>")
+                        .ok_or_else(|| XmpError("unterminated processing instruction".into()))?;
                     out.push(Node::Raw(self.rest()[..end + 2].to_string()));
                     self.pos += end + 2;
                 } else if self.starts("<!") {
@@ -467,7 +476,13 @@ impl Xmp {
     }
 
     fn descriptions(&self) -> Vec<Desc> {
-        fn walk(nodes: &[Node], path: &mut Vec<usize>, scope: &Scope, out: &mut Vec<Desc>, depth: usize) {
+        fn walk(
+            nodes: &[Node],
+            path: &mut Vec<usize>,
+            scope: &Scope,
+            out: &mut Vec<Desc>,
+            depth: usize,
+        ) {
             for (i, n) in nodes.iter().enumerate() {
                 let Node::Elem(e) = n else { continue };
                 let sc = scope_with(scope, e);
@@ -584,7 +599,12 @@ impl Xmp {
             return Ok(());
         }
         // add a Description to an existing rdf:RDF
-        fn find_rdf(nodes: &[Node], path: &mut Vec<usize>, scope: &Scope, depth: usize) -> Option<Vec<usize>> {
+        fn find_rdf(
+            nodes: &[Node],
+            path: &mut Vec<usize>,
+            scope: &Scope,
+            depth: usize,
+        ) -> Option<Vec<usize>> {
             for (i, n) in nodes.iter().enumerate() {
                 let Node::Elem(e) = n else { continue };
                 let sc = scope_with(scope, e);
@@ -664,7 +684,13 @@ impl Xmp {
     }
 
     /// Sets (or with `None` removes) a simple property, keeping its current form.
-    pub fn set_simple(&mut self, ns: &str, std_prefix: &str, local: &str, value: Option<&str>) -> Res<()> {
+    pub fn set_simple(
+        &mut self,
+        ns: &str,
+        std_prefix: &str,
+        local: &str,
+        value: Option<&str>,
+    ) -> Res<()> {
         self.ensure_description()?;
         let descs = self.descriptions();
         for d in &descs {
@@ -717,7 +743,13 @@ impl Xmp {
     }
 
     /// Replaces the items of an array property (empty removes it).
-    pub fn set_array(&mut self, ns: &str, std_prefix: &str, local: &str, items: &[String]) -> Res<()> {
+    pub fn set_array(
+        &mut self,
+        ns: &str,
+        std_prefix: &str,
+        local: &str,
+        items: &[String],
+    ) -> Res<()> {
         self.ensure_description()?;
         let descs = self.descriptions();
         let li_node = |rdf_prefix: &str, t: &str| {
@@ -972,7 +1004,8 @@ mod tests {
         let mut y = x.clone();
         y.set_rating(Some(2)).unwrap();
         y.set_label(Some("Green")).unwrap();
-        y.set_keywords(&["a".to_string(), "b <c>".to_string()]).unwrap();
+        y.set_keywords(&["a".to_string(), "b <c>".to_string()])
+            .unwrap();
         let out = y.serialize();
         for keep in [
             "crs:Exposure2012=\"+0.35\"",
@@ -1047,7 +1080,10 @@ mod tests {
 
     #[test]
     fn entities() {
-        assert_eq!(decode_entities("a&amp;b&#65;&#x42;&lt;&bogus;&"), "a&bB<&bogus;&");
+        assert_eq!(
+            decode_entities("a&amp;b&#65;&#x42;&lt;&bogus;&"),
+            "a&bAB<&bogus;&"
+        );
         assert_eq!(escape_text("a<b&c>"), "a&lt;b&amp;c&gt;");
     }
 }

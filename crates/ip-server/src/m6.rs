@@ -114,9 +114,10 @@ pub async fn patch_settings(
                 ("enabled", Value::Bool(b)) => lan.enabled = *b,
                 ("guest_enabled", Value::Bool(b)) => lan.guest_enabled = *b,
                 ("port", Value::Number(n)) => {
-                    let p = n.as_u64().filter(|p| (1..=65535).contains(p)).ok_or_else(|| {
-                        unprocessable("lan.port must be within 1..65535")
-                    })?;
+                    let p = n
+                        .as_u64()
+                        .filter(|p| (1..=65535).contains(p))
+                        .ok_or_else(|| unprocessable("lan.port must be within 1..65535"))?;
                     lan.port = p as u16;
                 }
                 (other, _) => {

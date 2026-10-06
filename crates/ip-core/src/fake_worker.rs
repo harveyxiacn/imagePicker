@@ -193,7 +193,7 @@ pub struct FakeWorker {
     pub llm_calls: AtomicUsize,
     pub last_llm_request: Mutex<Option<LlmPlanRequest>>,
     /// M6: `(caption, keywords, problems, adjust, reason)` of the VLM (`None` = not installed).
-    vlm: Mutex<Option<(String, Vec<String>, Vec<String>, serde_json::Value, String)>>,
+    vlm: Mutex<Option<VlmScript>>,
     pub vlm_calls: AtomicUsize,
     /// Model ids deleted through `models.delete`.
     pub deleted_models: Mutex<Vec<String>>,
@@ -254,6 +254,9 @@ impl Default for FakeWorker {
         }
     }
 }
+
+/// `(caption, keywords, problems, adjust, reason)` of the fake VLM.
+type VlmScript = (String, Vec<String>, Vec<String>, serde_json::Value, String);
 
 /// Ids of the fake M6 models (`task: ["llm"]` / `["vlm"]`).
 pub const LLM_MODEL: &str = "fake-qwen-llm";

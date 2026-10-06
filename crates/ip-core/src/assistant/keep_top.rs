@@ -63,7 +63,11 @@ pub fn keep_in_burst(photos: Vec<Cand>, n: usize) -> KeepTop {
 
 /// Keeps the best `n` photos of a scene made of `bursts`: round-robin over the bursts' ranks.
 pub fn keep_in_scene(bursts: Vec<Vec<Cand>>, n: usize) -> KeepTop {
-    let ranked: Vec<Vec<Cand>> = bursts.into_iter().map(rank).filter(|b| !b.is_empty()).collect();
+    let ranked: Vec<Vec<Cand>> = bursts
+        .into_iter()
+        .map(rank)
+        .filter(|b| !b.is_empty())
+        .collect();
     let depth = ranked.iter().map(Vec::len).max().unwrap_or(0);
     let mut order: Vec<i64> = Vec::new();
     for d in 0..depth {
@@ -152,11 +156,7 @@ impl Core {
         Ok(out)
     }
 
-    async fn apply_keep_top(
-        self: &Arc<Self>,
-        plan: &KeepTop,
-        reject_rest: bool,
-    ) -> Result<()> {
+    async fn apply_keep_top(self: &Arc<Self>, plan: &KeepTop, reject_rest: bool) -> Result<()> {
         if !plan.kept.is_empty() {
             self.patch_photos(PatchRequest {
                 ids: plan.kept.clone(),
@@ -234,10 +234,26 @@ mod tests {
     fn ties_and_missing_scores_are_deterministic() {
         let k = keep_in_burst(
             vec![
-                Cand { id: 5, score: None, rating: Some(4) },
-                Cand { id: 3, score: None, rating: None },
-                Cand { id: 2, score: Some(0.5), rating: None },
-                Cand { id: 1, score: Some(0.5), rating: Some(2) },
+                Cand {
+                    id: 5,
+                    score: None,
+                    rating: Some(4),
+                },
+                Cand {
+                    id: 3,
+                    score: None,
+                    rating: None,
+                },
+                Cand {
+                    id: 2,
+                    score: Some(0.5),
+                    rating: None,
+                },
+                Cand {
+                    id: 1,
+                    score: Some(0.5),
+                    rating: Some(2),
+                },
             ],
             2,
         );
@@ -257,7 +273,11 @@ mod tests {
             ],
             2,
         );
-        assert_eq!(k.kept, [1, 4], "best frames of different bursts, not 1 and 2");
+        assert_eq!(
+            k.kept,
+            [1, 4],
+            "best frames of different bursts, not 1 and 2"
+        );
         assert_eq!(k.rest, [3, 2]);
         // with n = 3 the weakest burst's only frame still beats a second frame
         let k = keep_in_scene(

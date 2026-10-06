@@ -135,10 +135,7 @@ pub fn builtin_preset_names() -> Vec<PresetName> {
             "portrait_soft",
             &["柔和人像", "柔肤", "soft portrait", "portrait soft"],
         ),
-        p(
-            "landscape_pop",
-            &["风景鲜明", "风景增强", "landscape pop"],
-        ),
+        p("landscape_pop", &["风景鲜明", "风景增强", "landscape pop"]),
     ]
 }
 
@@ -322,8 +319,6 @@ fn rx() -> &'static Rx {
     })
 }
 
-
-
 // ------------------------------------------------------------------ normalisation
 
 fn cn_to_num(s: &str) -> Option<u32> {
@@ -387,9 +382,9 @@ pub fn normalize(s: &str) -> String {
             c => c,
         };
         match c {
-            '，' | '。' | '！' | '？' | '、' | '；' | '：' | '（' | '）' | '「' | '」' | '『' | '』'
-            | '“' | '”' | '《' | '》' | ',' | '!' | '?' | ';' | '(' | ')' | '"' | '[' | ']'
-            | '{' | '}' => o.push(' '),
+            '，' | '。' | '！' | '？' | '、' | '；' | '：' | '（' | '）' | '「' | '」' | '『'
+            | '』' | '“' | '”' | '《' | '》' | ',' | '!' | '?' | ';' | '(' | ')' | '"' | '['
+            | ']' | '{' | '}' => o.push(' '),
             '‘' | '’' => o.push('\''),
             c => o.extend(c.to_lowercase()),
         }
@@ -484,7 +479,7 @@ fn find_chars(hay: &[char], needle: &[char]) -> Option<usize> {
     (0..=hay.len() - needle.len()).find(|&i| hay[i..i + needle.len()] == *needle)
 }
 
-fn blank_chars(t: &mut Vec<char>, start: usize, len: usize) {
+fn blank_chars(t: &mut [char], start: usize, len: usize) {
     for c in t.iter_mut().skip(start).take(len) {
         *c = ' ';
     }
@@ -492,7 +487,7 @@ fn blank_chars(t: &mut Vec<char>, start: usize, len: usize) {
 
 /// Matches people named in the text (exact, token or small typo); returns ids in order of
 /// appearance and blanks the matched names out of `t`.
-fn match_people(t: &mut Vec<char>, people: &[(i64, String)]) -> Vec<i64> {
+fn match_people(t: &mut [char], people: &[(i64, String)]) -> Vec<i64> {
     let mut found: Vec<(usize, i64)> = Vec::new();
     for (id, name) in people {
         let n: Vec<char> = normalize(name).chars().collect();
@@ -518,7 +513,10 @@ fn match_people(t: &mut Vec<char>, people: &[(i64, String)]) -> Vec<i64> {
                         cand.chars().count() >= 3
                             && levenshtein(w, cand) <= usize::from(cand.chars().count() >= 5)
                     };
-                    if close(&name_s) || tokens.iter().any(|tok| tok.chars().count() >= 3 && close(tok))
+                    if close(&name_s)
+                        || tokens
+                            .iter()
+                            .any(|tok| tok.chars().count() >= 3 && close(tok))
                     {
                         hit = Some((offset, wl));
                         break;
@@ -537,7 +535,7 @@ fn match_people(t: &mut Vec<char>, people: &[(i64, String)]) -> Vec<i64> {
 }
 
 /// Best preset for the text. `t` is blanked where the match was.
-fn match_preset(t: &mut Vec<char>, presets: &[PresetName]) -> Option<(String, bool)> {
+fn match_preset(t: &mut [char], presets: &[PresetName]) -> Option<(String, bool)> {
     let mut best: Option<(f64, String, usize, usize)> = None;
     let text: String = t.iter().collect();
     for p in presets {
@@ -548,7 +546,7 @@ fn match_preset(t: &mut Vec<char>, presets: &[PresetName]) -> Option<(String, bo
                 continue;
             }
             let nc: Vec<char> = name.chars().collect();
-            let ascii = name.chars().all(|c| c.is_ascii());
+            let ascii = name.is_ascii();
             let mut score = 0.0;
             let mut span = (0, 0);
             if ascii {
@@ -724,7 +722,14 @@ fn extract(t: &str, ents: &mut Ents, view_or_no_action: bool) {
             .or_else(|| x.star_num.find(t))
             .map(|m| m.start())
             .unwrap_or(0);
-        let before: String = t[..star_pos].chars().rev().take(8).collect::<String>().chars().rev().collect();
+        let before: String = t[..star_pos]
+            .chars()
+            .rev()
+            .take(8)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
         if x.ai_word.is_match(before.trim_end()) || before.contains("ai") {
             ents.ai_rating_gte = Some(n as f64);
         } else {
@@ -1011,7 +1016,9 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
                 l,
                 Some(match l {
                     Locale::Zh => "请先打开一张照片，我再来描述或给出建议。".to_string(),
-                    Locale::En => "Open a photo first, then I can describe it or suggest edits.".to_string(),
+                    Locale::En => {
+                        "Open a photo first, then I can describe it or suggest edits.".to_string()
+                    }
                 }),
             ),
         };
@@ -1120,17 +1127,19 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
     let mut unknown_subject: Option<String> = None;
     if ents.persons.is_empty() {
         let vocab = [
-            "所有", "全部", "这些", "这张", "选中", "当前", "精选", "我", "这", "那", "你", "他", "她",
-            "它", "该", "所选", "已", "未", "没", "有",
+            "所有", "全部", "这些", "这张", "选中", "当前", "精选", "我", "这", "那", "你", "他",
+            "她", "它", "该", "所选", "已", "未", "没", "有",
         ];
         let cand = x
             .unknown_zh
             .captures(&text_no_names)
             .map(|c| c[1].to_string())
             .or_else(|| {
-                x.unknown_en
-                    .captures(&text_no_names)
-                    .and_then(|c| c.get(1).or_else(|| c.get(2)).map(|m| m.as_str().to_string()))
+                x.unknown_en.captures(&text_no_names).and_then(|c| {
+                    c.get(1)
+                        .or_else(|| c.get(2))
+                        .map(|m| m.as_str().to_string())
+                })
             });
         if let Some(c) = cand {
             // leading function words belong to the verb, not to the subject
@@ -1150,8 +1159,23 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
                 || x.label.is_match(&c)
                 || matches!(
                     c.as_str(),
-                    "photo" | "photos" | "pictures" | "picture" | "the" | "these" | "my" | "all" | "of"
-                        | "from" | "in" | "at" | "edited" | "selected" | "best" | "good" | "bad"
+                    "photo"
+                        | "photos"
+                        | "pictures"
+                        | "picture"
+                        | "the"
+                        | "these"
+                        | "my"
+                        | "all"
+                        | "of"
+                        | "from"
+                        | "in"
+                        | "at"
+                        | "edited"
+                        | "selected"
+                        | "best"
+                        | "good"
+                        | "bad"
                 )
                 || vocab.iter().any(|v| c.starts_with(v))
                 || c.is_empty()
@@ -1189,13 +1213,45 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         }
         action(ctx, "export", extra, &ents, &mut acc, un, &mut calls);
     } else if is_bystanders {
-        action(ctx, "remove_bystanders", Map::new(), &ents, &mut acc, un, &mut calls);
+        action(
+            ctx,
+            "remove_bystanders",
+            Map::new(),
+            &ents,
+            &mut acc,
+            un,
+            &mut calls,
+        );
     } else if is_besttake {
-        action(ctx, "besttake_auto", Map::new(), &ents, &mut acc, un, &mut calls);
+        action(
+            ctx,
+            "besttake_auto",
+            Map::new(),
+            &ents,
+            &mut acc,
+            un,
+            &mut calls,
+        );
     } else if is_profiles {
-        action(ctx, "apply_profiles", Map::new(), &ents, &mut acc, un, &mut calls);
+        action(
+            ctx,
+            "apply_profiles",
+            Map::new(),
+            &ents,
+            &mut acc,
+            un,
+            &mut calls,
+        );
     } else if is_accept_ai {
-        action(ctx, "accept_ai", Map::new(), &ents, &mut acc, un, &mut calls);
+        action(
+            ctx,
+            "accept_ai",
+            Map::new(),
+            &ents,
+            &mut acc,
+            un,
+            &mut calls,
+        );
     } else if (per_scene || per_group)
         && (keep || reject || ents.count.is_some())
         && !(view && !keep)
@@ -1242,11 +1298,7 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         let mut extra = Map::new();
         extra.insert("flag".into(), json!(-1));
         action(ctx, "set_flag", extra, &ents, &mut acc, un, &mut calls);
-    } else if pick && !view {
-        let mut extra = Map::new();
-        extra.insert("flag".into(), json!(1));
-        action(ctx, "set_flag", extra, &ents, &mut acc, un, &mut calls);
-    } else if keep && !view && ents.has_scope() {
+    } else if !view && (pick || (keep && ents.has_scope())) {
         let mut extra = Map::new();
         extra.insert("flag".into(), json!(1));
         action(ctx, "set_flag", extra, &ents, &mut acc, un, &mut calls);
@@ -1265,7 +1317,8 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
                 acc.hints.push(match l {
                     Locale::Zh => "筛选无法限制数量，已按条件显示全部匹配的照片。".to_string(),
                     Locale::En => {
-                        "A filter cannot limit the number of photos; showing every match.".to_string()
+                        "A filter cannot limit the number of photos; showing every match."
+                            .to_string()
                     }
                 });
             }

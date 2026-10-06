@@ -88,14 +88,11 @@ pub struct XmpValues {
 
 pub fn values_of(x: &Xmp) -> XmpValues {
     let rating = x.rating().map(|r| r.clamp(-1, 5));
-    let label = x
-        .label()
-        .and_then(|l| label_from_xmp(&l))
-        .or_else(|| {
-            x.darktable_labels()
-                .first()
-                .and_then(|i| label_from_darktable(*i))
-        });
+    let label = x.label().and_then(|l| label_from_xmp(&l)).or_else(|| {
+        x.darktable_labels()
+            .first()
+            .and_then(|i| label_from_darktable(*i))
+    });
     let mut keywords = x.keywords();
     if keywords.is_empty() {
         // leaves of the hierarchy: `Places|Japan|Kyoto` -> `Kyoto`
@@ -186,7 +183,10 @@ pub fn apply_catalog(x: &mut Xmp, c: &CatalogValues) -> Result<bool, XmpError> {
             })
             .collect();
         for t in &c.tags {
-            if !h.iter().any(|k| k.rsplit('|').next().map(str::trim) == Some(t.as_str())) {
+            if !h
+                .iter()
+                .any(|k| k.rsplit('|').next().map(str::trim) == Some(t.as_str()))
+            {
                 h.push(t.clone());
             }
         }
@@ -245,7 +245,11 @@ mod tests {
         let v = values_of(&x);
         assert_eq!(v.rating, Some(5), "clamped");
         assert_eq!(v.label, Some("purple"));
-        assert_eq!(v.keywords, ["Kyoto"], "leaf of the hierarchy, de-duplicated");
+        assert_eq!(
+            v.keywords,
+            ["Kyoto"],
+            "leaf of the hierarchy, de-duplicated"
+        );
     }
 
     #[test]
@@ -272,7 +276,10 @@ mod tests {
             tags: vec!["a".into(), "b".into()],
         };
         assert!(apply_catalog(&mut x, &c).unwrap());
-        assert!(!apply_catalog(&mut x, &c).unwrap(), "second pass changes nothing");
+        assert!(
+            !apply_catalog(&mut x, &c).unwrap(),
+            "second pass changes nothing"
+        );
         let v = values_of(&x);
         assert_eq!((v.rating, v.label), (Some(3), Some("blue")));
         assert_eq!(v.keywords, ["a", "b"]);
@@ -285,7 +292,9 @@ mod tests {
         // "3.0" counts as 3
         let mut y = Xmp::empty();
         y.set_rating(Some(3)).unwrap();
-        let s = y.serialize().replace("xmp:Rating=\"3\"", "xmp:Rating=\"3.0\"");
+        let s = y
+            .serialize()
+            .replace("xmp:Rating=\"3\"", "xmp:Rating=\"3.0\"");
         let mut y = Xmp::parse(&s).unwrap();
         let only_rating = CatalogValues {
             user_rating: Some(3),

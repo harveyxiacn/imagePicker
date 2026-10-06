@@ -293,9 +293,11 @@ impl Core {
                     CoreError::Internal(anyhow::anyhow!("cannot delete {}: {e}", dir.display()))
                 })?;
             }
-            Err(WorkerError::Rpc { code: -32602, message, .. }) => {
-                return Err(CoreError::not_found(message))
-            }
+            Err(WorkerError::Rpc {
+                code: -32602,
+                message,
+                ..
+            }) => return Err(CoreError::not_found(message)),
             Err(e) => return Err(map_worker_err(e)),
         }
         self.assistant.invalidate_info();
@@ -347,12 +349,11 @@ impl Core {
     /// `GET /api/onboarding`.
     pub async fn onboarding(&self) -> Result<Value> {
         let first_run = !self.onboarding_marker().exists();
-        let hw: WorkerOut = match tokio::time::timeout(Duration::from_secs(20), self.hardware(true))
-            .await
-        {
-            Ok(Ok(h)) => h,
-            _ => self.hardware(false).await?,
-        };
+        let hw: WorkerOut =
+            match tokio::time::timeout(Duration::from_secs(20), self.hardware(true)).await {
+                Ok(Ok(h)) => h,
+                _ => self.hardware(false).await?,
+            };
         let tier = hw.tier.clone().unwrap_or_else(|| "T0".to_string());
         // what the standard analysis would still have to download
         let mut mb: Option<f64> = None;

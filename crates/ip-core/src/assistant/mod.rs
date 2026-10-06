@@ -142,9 +142,7 @@ impl AssistantState {
     /// Test hook: pretends the plan was created `age` ago.
     pub fn age_plan(&self, id: &str, age: Duration) {
         if let Some(p) = self.plans.lock().unwrap().get_mut(id) {
-            p.created = Instant::now()
-                .checked_sub(age)
-                .unwrap_or_else(Instant::now);
+            p.created = Instant::now().checked_sub(age).unwrap_or_else(Instant::now);
         }
     }
 
@@ -291,10 +289,7 @@ impl Core {
             let args = validate_call(&c.tool, &c.args).map_err(|e| {
                 CoreError::Unprocessable(format!("invalid model output for {}: {e}", c.tool))
             })?;
-            calls.push(Call {
-                tool: c.tool,
-                args,
-            });
+            calls.push(Call { tool: c.tool, args });
         }
         Ok((resp.reply, calls))
     }
@@ -307,7 +302,9 @@ impl Core {
             return Err(CoreError::bad_request("message must not be empty"));
         }
         if req.message.chars().count() > 2000 {
-            return Err(CoreError::bad_request("message is too long (2000 characters)"));
+            return Err(CoreError::bad_request(
+                "message is too long (2000 characters)",
+            ));
         }
         let settings = self.settings();
         let locale = detect_locale(
@@ -524,7 +521,9 @@ impl Core {
                 };
                 let n = args["n"].as_u64().unwrap_or(1) as usize;
                 let rr = args["reject_rest"].as_bool().unwrap_or(false);
-                let plan = self.keep_top_plan(session_id, scope, sel.as_deref(), n).await?;
+                let plan = self
+                    .keep_top_plan(session_id, scope, sel.as_deref(), n)
+                    .await?;
                 Ok(plan.kept.len() + if rr { plan.rest.len() } else { 0 })
             }
             _ => Ok(self
@@ -545,10 +544,9 @@ impl Core {
             Value::String(s) if s == "current_filter" => {
                 Some(ctx.filter.clone().unwrap_or_default())
             }
-            Value::Object(o) => match o.get("query") {
-                Some(q) => Some(q.as_str().unwrap_or_default().to_string()),
-                None => None,
-            },
+            Value::Object(o) => o
+                .get("query")
+                .map(|q| q.as_str().unwrap_or_default().to_string()),
             _ => None,
         };
         if let Some(q) = query {
@@ -565,9 +563,8 @@ impl Core {
             .call(move |c| {
                 let mut out = Vec::new();
                 let mut seen = std::collections::HashSet::new();
-                let mut st = c.prepare(
-                    "SELECT 1 FROM session_photo WHERE session_id=?1 AND photo_id=?2",
-                )?;
+                let mut st =
+                    c.prepare("SELECT 1 FROM session_photo WHERE session_id=?1 AND photo_id=?2")?;
                 for id in ids {
                     if seen.insert(id) && st.exists(rusqlite::params![session_id, id])? {
                         out.push(id);
@@ -814,7 +811,14 @@ fn filter_summary(args: &Value, l: Locale, names: &Names) -> String {
         });
     }
     if args.get("burst_best_only").and_then(Value::as_bool) == Some(true) {
-        parts.push(if zh { "每组最佳" } else { "best of each burst" }.to_string());
+        parts.push(
+            if zh {
+                "每组最佳"
+            } else {
+                "best of each burst"
+            }
+            .to_string(),
+        );
     }
     if let Some(e) = args.get("has_edits").and_then(Value::as_bool) {
         parts.push(
@@ -877,7 +881,9 @@ fn summarize(tool: &str, args: &Value, affects: usize, l: Locale, names: &Names)
             match (zh, rr) {
                 (true, true) => format!("{zs}保留最好的 {k} 张，其余淘汰（涉及 {n} 张）"),
                 (true, false) => format!("{zs}把最好的 {k} 张标为选用（涉及 {n} 张）"),
-                (false, true) => format!("In {es} keep the best {k} and reject the rest ({n} photos)"),
+                (false, true) => {
+                    format!("In {es} keep the best {k} and reject the rest ({n} photos)")
+                }
                 (false, false) => format!("In {es} pick the best {k} ({n} photos)"),
             }
         }

@@ -4,9 +4,7 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::model::{
-    FlagFilter, PersonMode, PersonState, PhotoQuery, SortKey, COLOR_LABELS,
-};
+use crate::model::{FlagFilter, PersonMode, PersonState, PhotoQuery, SortKey, COLOR_LABELS};
 use crate::Issue;
 
 pub type VResult<T> = std::result::Result<T, String>;
@@ -106,9 +104,7 @@ pub struct ToolSpec {
 
 pub fn registry() -> Vec<ToolSpec> {
     let sel = selection_schema();
-    let obj = |props: Value, required: &[&str]| {
-        json!({"type":"object","additionalProperties":false,"properties":props,"required":required})
-    };
+    let obj = |props: Value, required: &[&str]| json!({"type":"object","additionalProperties":false,"properties":props,"required":required});
     vec![
         ToolSpec {
             name: "filter",
@@ -442,7 +438,9 @@ pub fn parse_photo_query(session_id: i64, q: &str) -> VResult<PhotoQuery> {
         }
         match k.as_str() {
             "limit" => limit = Some(int_in(&Value::String(v), "limit", 1, 5000)?),
-            "session_id" | "cursor" => return Err(format!("{k} is not allowed in a selection query")),
+            "session_id" | "cursor" => {
+                return Err(format!("{k} is not allowed in a selection query"))
+            }
             _ if FILTER_KEYS.contains(&k.as_str()) => {
                 args.insert(k, Value::String(v));
             }
@@ -480,7 +478,9 @@ pub fn photo_query_of(session_id: i64, f: &Value, limit: Option<i64>) -> PhotoQu
             .and_then(Value::as_str)
             .and_then(FlagFilter::parse)
             .unwrap_or_default(),
-        color_label: get("color_label").and_then(Value::as_str).map(str::to_string),
+        color_label: get("color_label")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         sort: get("sort")
             .and_then(Value::as_str)
             .and_then(SortKey::parse)
@@ -495,7 +495,9 @@ pub fn photo_query_of(session_id: i64, f: &Value, limit: Option<i64>) -> PhotoQu
             .collect(),
         burst_best_only: boolean("burst_best_only"),
         burst_id: get("burst_id").and_then(Value::as_i64),
-        scene_type: get("scene_type").and_then(Value::as_str).map(str::to_string),
+        scene_type: get("scene_type")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         persons: ints("persons"),
         person_mode: match get("person_mode").and_then(Value::as_str) {
             Some("any") => PersonMode::Any,
@@ -537,7 +539,9 @@ pub fn norm_selection(v: &Value) -> VResult<Value> {
             }
             Err("selection must have ids or query".into())
         }
-        _ => Err("selection must be {\"ids\":[..]}, {\"query\":\"..\"} or \"current_filter\"".into()),
+        _ => {
+            Err("selection must be {\"ids\":[..]}, {\"query\":\"..\"} or \"current_filter\"".into())
+        }
     }
 }
 
@@ -596,7 +600,10 @@ pub fn validate_call(tool: &str, args: &Value) -> VResult<Value> {
         "set_flag" => {
             only_keys(o, &["selection", "flag"])?;
             with_selection(&mut out, true)?;
-            out.insert("flag".into(), json!(int_in(req(o, "flag")?, "flag", -1, 1)?));
+            out.insert(
+                "flag".into(),
+                json!(int_in(req(o, "flag")?, "flag", -1, 1)?),
+            );
         }
         "accept_ai" | "apply_profiles" | "besttake_auto" | "remove_bystanders" => {
             only_keys(o, &["selection"])?;
@@ -634,7 +641,10 @@ pub fn validate_call(tool: &str, args: &Value) -> VResult<Value> {
             only_keys(o, &["selection", "preset", "dest"])?;
             with_selection(&mut out, true)?;
             if let Some(p) = o.get("preset").filter(|v| !v.is_null()) {
-                out.insert("preset".into(), json!(one_of(p, "preset", &EXPORT_PRESETS)?));
+                out.insert(
+                    "preset".into(),
+                    json!(one_of(p, "preset", &EXPORT_PRESETS)?),
+                );
             }
             if let Some(d) = o.get("dest").filter(|v| !v.is_null()) {
                 let d = as_str(d, "dest")?.trim();
@@ -690,7 +700,9 @@ mod tests {
         assert_eq!(v["issues_none"], true);
         assert_eq!(v["scene_type"], "landscape");
         let q = filter_query(&v);
-        assert!(q.contains("persons=3,4") && q.contains("rating_gte=4") && q.contains("flag=picked"));
+        assert!(
+            q.contains("persons=3,4") && q.contains("rating_gte=4") && q.contains("flag=picked")
+        );
         // round trip through the query parser
         let pq = parse_photo_query(7, &q).unwrap();
         assert_eq!(pq.session_id, 7);
@@ -712,20 +724,41 @@ mod tests {
             ("filter", json!({"ai_rating_gte": 6})),
             ("filter", json!({"issues_any": ["sleepy"]})),
             ("set_rating", json!({"selection":"current_filter"})),
-            ("set_rating", json!({"selection":"current_filter","rating":6})),
+            (
+                "set_rating",
+                json!({"selection":"current_filter","rating":6}),
+            ),
             ("set_rating", json!({"selection":"everything","rating":3})),
-            ("set_rating", json!({"selection":{"ids":[1],"query":""},"rating":3})),
+            (
+                "set_rating",
+                json!({"selection":{"ids":[1],"query":""},"rating":3}),
+            ),
             ("set_rating", json!({"selection":{"ids":["a"]},"rating":3})),
-            ("set_rating", json!({"selection":{"query":"drop=table"},"rating":3})),
-            ("set_rating", json!({"selection":"current_filter","rating":3,"extra":1})),
+            (
+                "set_rating",
+                json!({"selection":{"query":"drop=table"},"rating":3}),
+            ),
+            (
+                "set_rating",
+                json!({"selection":"current_filter","rating":3,"extra":1}),
+            ),
             ("set_flag", json!({"selection":"current_filter","flag":2})),
             ("group_keep_top", json!({"n":0})),
             ("group_keep_top", json!({"n":1000})),
             ("scene_keep_top", json!({"reject_rest":true})),
             ("apply_preset", json!({"selection":"current_filter"})),
-            ("apply_preset", json!({"selection":"current_filter","preset_id":""})),
-            ("auto_adjust", json!({"selection":"current_filter","mode":"cartoon"})),
-            ("export", json!({"selection":"current_filter","preset":"tiktok"})),
+            (
+                "apply_preset",
+                json!({"selection":"current_filter","preset_id":""}),
+            ),
+            (
+                "auto_adjust",
+                json!({"selection":"current_filter","mode":"cartoon"}),
+            ),
+            (
+                "export",
+                json!({"selection":"current_filter","preset":"tiktok"}),
+            ),
             ("export", json!({"selection":"current_filter","dest":""})),
             ("describe", json!({})),
             ("describe", json!({"photo_id":0})),
@@ -750,8 +783,11 @@ mod tests {
         assert_eq!(v["n"], 2);
         assert_eq!(v["reject_rest"], false);
         assert_eq!(v["selection"]["ids"], json!([3, 3, 4]));
-        let v = validate_call("set_rating", &json!({"selection":"current_filter","rating":null}))
-            .unwrap();
+        let v = validate_call(
+            "set_rating",
+            &json!({"selection":"current_filter","rating":null}),
+        )
+        .unwrap();
         assert!(v["rating"].is_null());
         let v = validate_call(
             "set_flag",
@@ -761,8 +797,11 @@ mod tests {
         assert_eq!(v["selection"]["query"], "rating_gte=4&limit=3&sort=ai");
         let v = validate_call("auto_adjust", &json!({"selection":"current_filter"})).unwrap();
         assert_eq!(v["mode"], "auto");
-        let v = validate_call("export", &json!({"selection":"current_filter","preset":"wechat"}))
-            .unwrap();
+        let v = validate_call(
+            "export",
+            &json!({"selection":"current_filter","preset":"wechat"}),
+        )
+        .unwrap();
         assert_eq!(v["preset"], "wechat");
         assert!(validate_call("describe", &json!({"photo_id": 5})).is_ok());
     }

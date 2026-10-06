@@ -18,8 +18,8 @@ pub mod jpegmeta;
 pub mod jsonfix;
 pub mod model;
 pub mod paths;
-pub mod settings;
 pub mod roots;
+pub mod settings;
 pub mod taste;
 pub mod thumbs;
 pub mod xmp;
@@ -337,3 +337,5 @@ mod tests_m3;
 mod tests_m4;
 #[cfg(test)]
 mod tests_m5;
+#[cfg(test)]
+mod tests_m6;

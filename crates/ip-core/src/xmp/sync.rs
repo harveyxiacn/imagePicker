@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    apply_catalog, atomic_write, find_sidecar, jpeg, normalize_tags, sidecar_candidates,
-    values_of, CatalogValues, Xmp, XmpValues,
+    apply_catalog, atomic_write, find_sidecar, jpeg, normalize_tags, sidecar_candidates, values_of,
+    CatalogValues, Xmp, XmpValues,
 };
 use crate::catalog::{self, now_ms};
 use crate::error::{CoreError, Result};
@@ -162,7 +162,7 @@ fn diff(sc: &XmpValues, cat: &CatalogValues) -> Option<(Value, Value)> {
             c.insert("keywords".into(), json!(cat.tags));
         }
     }
-    (!s.is_empty()).then(|| (Value::Object(s), Value::Object(c)))
+    (!s.is_empty()).then_some((Value::Object(s), Value::Object(c)))
 }
 
 /// Makes the catalog row agree with the sidecar (the sidecar wins). Returns the update when the
@@ -247,8 +247,14 @@ fn read_values(path: &Path, format: ImageFormat) -> Option<(XmpValues, Option<(P
 }
 
 enum Outcome {
-    Unchanged { mtime: Option<i64>, path: Option<PathBuf> },
-    Written { mtime: Option<i64>, path: PathBuf },
+    Unchanged {
+        mtime: Option<i64>,
+        path: Option<PathBuf>,
+    },
+    Written {
+        mtime: Option<i64>,
+        path: PathBuf,
+    },
     Conflict {
         sidecar: XmpValues,
         mtime: i64,
@@ -299,7 +305,9 @@ fn write_embedded(path: &Path, cat: &CatalogValues) -> std::result::Result<bool,
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let tmp = dir.join(format!(
         ".{}.ip-tmp-{}",
-        path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+        path.file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default(),
         std::process::id()
     ));
     let res = (|| -> std::io::Result<()> {
@@ -380,7 +388,10 @@ fn write_one(l: &Loaded, embedded: bool, force: bool) -> Outcome {
     }
     let mtime = mtime_ms(&target);
     if wrote {
-        Outcome::Written { mtime, path: target }
+        Outcome::Written {
+            mtime,
+            path: target,
+        }
     } else {
         Outcome::Unchanged {
             mtime,

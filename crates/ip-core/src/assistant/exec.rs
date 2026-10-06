@@ -320,17 +320,20 @@ impl Core {
                 let n = ids.len();
                 let mut rx = self.events.subscribe();
                 let task = self
-                    .export_fit(ExportRequest {
-                        ids,
-                        dest,
-                        folders: None,
-                        long_edge,
-                        quality,
-                        name_template: "{name}".into(),
-                        apply_edits: true,
-                        upscale: None,
-                        strip_gps: false,
-                    }, fit)
+                    .export_fit(
+                        ExportRequest {
+                            ids,
+                            dest,
+                            folders: None,
+                            long_edge,
+                            quality,
+                            name_template: "{name}".into(),
+                            apply_edits: true,
+                            upscale: None,
+                            strip_gps: false,
+                        },
+                        fit,
+                    )
                     .await?;
                 wait_task(&mut rx, &task).await?;
                 done(n)
@@ -348,7 +351,9 @@ impl Core {
                 let s = self.assistant_suggest(id).await?;
                 Ok(StepOk {
                     affected: 1,
-                    data: Some(json!({"problems": s.problems, "adjust": s.adjust, "reason": s.reason})),
+                    data: Some(
+                        json!({"problems": s.problems, "adjust": s.adjust, "reason": s.reason}),
+                    ),
                 })
             }
             other => Err(CoreError::bad_request(format!("unknown tool {other}"))),
@@ -564,10 +569,7 @@ impl Core {
 }
 
 /// Waits until `task_id` reports `done` / `failed` (progress events of one task).
-async fn wait_task(
-    rx: &mut tokio::sync::broadcast::Receiver<Event>,
-    task_id: &str,
-) -> Result<()> {
+async fn wait_task(rx: &mut tokio::sync::broadcast::Receiver<Event>, task_id: &str) -> Result<()> {
     let wait = async {
         loop {
             match rx.recv().await {
