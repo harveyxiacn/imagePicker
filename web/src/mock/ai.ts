@@ -502,7 +502,7 @@ function startRun(sid: number, profile: AnalysisProfile, photoIds?: number[]): s
   runs.set(sid, run)
   const todo = s.photos.filter((p) => (photoIds ? photoIds.includes(p.id) : !p.analyzed))
   run.total = todo.length
-  const chunk = profile === 'fast' ? 150 : 90
+  const chunk = profile !== 'standard' ? 150 : 90
   const batches = chunked(todo, chunk)
   let bi = 0
 

@@ -15,6 +15,10 @@ import { GroupView } from '@/components/GroupView'
 import { HelpOverlay } from '@/components/HelpOverlay'
 import { Inspector } from '@/components/Inspector'
 import { Loupe } from '@/components/Loupe'
+import { CullView } from '@/components/mobile/CullView'
+import { MobileTopBar } from '@/components/mobile/MobileTopBar'
+import { QuickCull } from '@/components/mobile/QuickCull'
+import { Sheet } from '@/components/mobile/Sheet'
 import { Modal } from '@/components/Modal'
 import { ModelConsentDialog } from '@/components/ModelConsentDialog'
 import { usePhotoMenu } from '@/components/PhotoMenu'
@@ -25,9 +29,10 @@ import { acceptAiRatings, editPhotos } from '@/lib/actions'
 import { canAccept } from '@/lib/ai'
 import { useHistory } from '@/lib/history'
 import { pruneSelection } from '@/lib/selection'
+import { useIsMobile } from '@/lib/useLayout'
 import { buildGridItems, toggleInSet, visiblePhotos } from '@/lib/stacks'
 import { useToasts } from '@/stores/toasts'
-import { useUi } from '@/stores/ui'
+import { useUi, type View } from '@/stores/ui'
 import { compareSlots, useController } from './useController'
 import { useGroup } from './useGroup'
 import { useShortcuts } from './useShortcuts'
@@ -40,6 +45,9 @@ export function Library() {
   const navigate = useNavigate()
   const location = useLocation()
   const keepState = useRef(!!(location.state as { keep?: boolean } | null)?.keep)
+  const startView = useRef((location.state as { view?: View } | null)?.view)
+  const isMobile = useIsMobile()
+  const cullMode = useUi((s) => s.cullMode)
 
   const filter = useUi((s) => s.filter)
   const view = useUi((s) => s.view)
@@ -49,6 +57,7 @@ export function Library() {
   const compareCount = useUi((s) => s.compareCount)
   const syncZoom = useUi((s) => s.syncZoom)
   const inspectorOpen = useUi((s) => s.inspectorOpen)
+  const showFaces = useUi((s) => s.showFaces)
   const sidebarOpen = useUi((s) => s.sidebarOpen)
   const photoMenu = usePhotoMenu(sessionId)
   const exportOpen = useUi((s) => s.exportOpen)
@@ -73,6 +82,8 @@ export function Library() {
     if (keepState.current) return
     useUi.getState().resetSessionState()
     useHistory.getState().clear()
+    // Bottom-nav "cull" tab from another page: open straight in the cull view.
+    if (startView.current) useUi.getState().setView(startView.current)
   }, [sessionId])
 
   // Grouped mode: scene headers (time order only) + bursts collapsed to their best shot.
@@ -136,16 +147,28 @@ export function Library() {
 
   return (
     <div className="flex h-full flex-col">
-      <TopBar sessionId={sessionId} session={session.data} onView={ctrl.setView} />
-      <FilterBar
-        sessionId={sessionId}
-        shown={photosQ.data?.total ?? 0}
-        total={session.data?.photo_count ?? photosQ.data?.total ?? 0}
-        showSize={view === 'grid'}
-      />
+      {isMobile && view === 'loupe' ? null : isMobile ? (
+        <MobileTopBar
+          sessionId={sessionId}
+          session={session.data}
+          shown={photosQ.data?.total ?? 0}
+          total={session.data?.photo_count ?? photosQ.data?.total ?? 0}
+          onView={ctrl.setView}
+        />
+      ) : (
+        <>
+          <TopBar sessionId={sessionId} session={session.data} onView={ctrl.setView} />
+          <FilterBar
+            sessionId={sessionId}
+            shown={photosQ.data?.total ?? 0}
+            total={session.data?.photo_count ?? photosQ.data?.total ?? 0}
+            showSize={view === 'grid'}
+          />
+        </>
+      )}
 
       <div className="relative flex min-h-0 flex-1">
-        {sidebarOpen && (
+        {sidebarOpen && !isMobile && (
           <aside className="shrink-0 max-lg:absolute max-lg:top-0 max-lg:left-0 max-lg:bottom-0 max-lg:z-30 max-lg:shadow-[var(--shadow)]">
             <CollectionsSidebar sessionId={sessionId} />
           </aside>
@@ -182,6 +205,24 @@ export function Library() {
                 ui.setCollapsedScenes(toggleInSet(ui.collapsedScenes, id))
               }}
             />
+          ) : view === 'loupe' && isMobile ? (
+            cullMode === 'quick' ? (
+              <QuickCull key={sessionId} photos={photos} onBack={() => useUi.getState().setCullMode('single')} />
+            ) : (
+              <CullView
+                photos={listPhotos}
+                photo={active}
+                index={activeIndex}
+                onMove={(d) => ctrl.move(d)}
+                onFlag={ctrl.setFlag}
+                onRate={(n) => ctrl.rate(n ?? 0)}
+                onEdit={openEdit}
+                onBack={() => ctrl.setView('grid')}
+                onInfo={() => useUi.getState().setInspectorOpen(true)}
+                onQuick={() => useUi.getState().setCullMode('quick')}
+                showFaces={showFaces}
+              />
+            )
           ) : view === 'loupe' ? (
             <Loupe
               photos={listPhotos}
@@ -217,7 +258,7 @@ export function Library() {
           )}
         </main>
 
-        {inspectorOpen && (
+        {inspectorOpen && !isMobile && (
           <aside
             className="w-[300px] shrink-0 overflow-y-auto border-l border-line bg-panel max-lg:absolute max-lg:top-0 max-lg:right-0 max-lg:bottom-0 max-lg:z-30 max-lg:shadow-[var(--shadow)]"
             aria-label={t('top.inspector')}
@@ -234,7 +275,26 @@ export function Library() {
         )}
       </div>
 
-      <StatusBar sessionId={sessionId} session={session.data} photos={photos} />
+      {isMobile && (
+        <>
+          <Sheet open={inspectorOpen} onOpenChange={useUi.getState().setInspectorOpen} title={t('top.inspector')} testId="inspector-sheet">
+            <Inspector
+              photo={active}
+              targetCount={targetCount}
+              onRate={(n) => ctrl.rate(n ?? 0)}
+              onFlag={ctrl.setFlag}
+              onColor={ctrl.setColor}
+              onAcceptAi={() => void ctrl.acceptAi()}
+            />
+          </Sheet>
+          <Sheet open={sidebarOpen} onOpenChange={useUi.getState().setSidebarOpen} title={t('collections.toggle')} testId="collections-sheet">
+            <div className="min-h-[40dvh] [&_nav]:!w-full [&_nav]:!border-r-0">
+              <CollectionsSidebar sessionId={sessionId} />
+            </div>
+          </Sheet>
+        </>
+      )}
+      {!isMobile && <StatusBar sessionId={sessionId} session={session.data} photos={photos} />}
       <HelpOverlay />
       <ModelConsentDialog />
       <AssistantHost sessionId={sessionId} />

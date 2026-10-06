@@ -125,7 +125,7 @@ let settings: Settings = mergeSettings(DEFAULT_SETTINGS, {
 const cacheBytes = { thumbs: 1_840_000_000, previews: 3_210_000_000, masks: 248_000_000, edits: 12_400_000, gen: 655_000_000 }
 
 /** Deterministic QR-looking SVG (finder squares + hash noise). Mock only: it does NOT encode the URL. */
-function fakeQr(text: string): string {
+export function fakeQr(text: string): string {
   const n = 29
   let h = 2166136261
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619)

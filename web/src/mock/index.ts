@@ -4,11 +4,13 @@ import { emit, MockSocket } from './bus'
 import { seedMockDb } from './db'
 import { handlers } from './handlers'
 import { seedM6Mock } from './m6'
+import { seedM8Mock } from './m8'
 
 /** Starts the in-browser mock backend (MSW + fake WebSocket event stream). */
 export async function enableMock(): Promise<void> {
   seedMockDb()
   seedM6Mock()
+  seedM8Mock()
   // test hook: lets browser tests push server events (e.g. a CPU tier `worker.status`)
   ;(globalThis as { __mockEmit?: typeof emit }).__mockEmit = emit
   socketConfig.factory = () => new MockSocket()
