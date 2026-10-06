@@ -108,24 +108,6 @@ impl Default for RenderSettings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct LanSettings {
-    pub enabled: bool,
-    pub port: u16,
-    pub guest_enabled: bool,
-}
-
-impl Default for LanSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            port: 7878,
-            guest_enabled: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
 pub struct AssistantSettings {
     /// `auto` | `rules` | `llm`
     pub engine: String,
@@ -153,8 +135,6 @@ pub struct Settings {
     pub render: RenderSettings,
     /// `off` | `sidecar` | `sidecar_and_embedded`
     pub xmp_mode: String,
-    pub lan: LanSettings,
-    pub roots: Vec<String>,
     pub assistant: AssistantSettings,
 }
 
@@ -170,8 +150,6 @@ impl Default for Settings {
             cache: CacheSettings::default(),
             render: RenderSettings::default(),
             xmp_mode: "off".into(),
-            lan: LanSettings::default(),
-            roots: Vec::new(),
             assistant: AssistantSettings::default(),
         }
     }
@@ -227,25 +205,10 @@ impl Settings {
                 "cache.max_gb must be within 0.1..100000".into(),
             ));
         }
-        if self.lan.port == 0 {
-            return Err(CoreError::Unprocessable(
-                "lan.port must be within 1..65535".into(),
-            ));
-        }
         if self.models.dir.contains('\0') || self.models.dir.len() > 1024 {
             return Err(CoreError::Unprocessable(
                 "models.dir is not a valid path".into(),
             ));
-        }
-        if self.roots.len() > 256 {
-            return Err(CoreError::Unprocessable("at most 256 roots".into()));
-        }
-        for r in &self.roots {
-            if r.trim().is_empty() || r.contains('\0') || r.len() > 1024 {
-                return Err(CoreError::Unprocessable(
-                    "roots must be non-empty paths".into(),
-                ));
-            }
         }
         Ok(())
     }
@@ -400,13 +363,16 @@ impl Core {
         self.settings.get()
     }
 
-    /// `PATCH /api/settings`: merge, validate, persist, apply live effects, broadcast.
+    /// Broadcasts `settings.updated` (the server adds the security-store parts, `lan` / `roots`).
+    pub fn emit_settings_updated(&self, settings: Value) {
+        self.events.emit(Event::SettingsUpdated { settings });
+    }
+
+    /// `PATCH /api/settings` (without `lan` / `roots`, which live in the security store):
+    /// merge, validate, persist, apply live effects.
     pub async fn patch_settings(self: &Arc<Self>, patch: Value) -> Result<Arc<Settings>> {
         let (old, new) = self.settings.patch(&patch)?;
         self.apply_settings(Some(&old), &new);
-        self.events.emit(Event::SettingsUpdated {
-            settings: serde_json::to_value(&*new)?,
-        });
         Ok(new)
     }
 
@@ -486,7 +452,6 @@ mod tests {
         assert_eq!(v["privacy"]["allow_network"], true);
         assert_eq!(v["cache"]["max_gb"], 20.0);
         assert_eq!(v["xmp_mode"], "off");
-        assert_eq!(v["lan"]["port"], 7878);
         assert_eq!(v["assistant"]["engine"], "auto");
         assert_eq!(v["models"]["source"], "auto");
         assert!(v["models"]["dir"].as_str().unwrap().ends_with("models"));
@@ -496,7 +461,7 @@ mod tests {
     fn patch_merges_validates_and_persists() {
         let (d, s) = store();
         let (_, new) = s
-            .patch(&json!({"theme":"dark","faces":{"enabled":false},"roots":["C:/a"]}))
+            .patch(&json!({"theme":"dark","faces":{"enabled":false}}))
             .unwrap();
         assert_eq!(new.theme, "dark");
         assert!(!new.faces.enabled);
@@ -505,11 +470,8 @@ mod tests {
             json!({"theme":"purple"}),
             json!({"cache":{"max_gb":0}}),
             json!({"cache":{"max_gb":-3}}),
-            json!({"lan":{"port":0}}),
-            json!({"lan":{"port":70000}}),
             json!({"xmp_mode":"both"}),
             json!({"render":{"backend":"tpu"}}),
-            json!({"roots":[""]}),
         ] {
             let e = s.patch(&bad).unwrap_err();
             assert!(
@@ -532,7 +494,6 @@ mod tests {
         assert_eq!(s.get().theme, "dark", "failed patches change nothing");
         let again = SettingsStore::load(d.path());
         assert_eq!(again.get().theme, "dark");
-        assert_eq!(again.get().roots, vec!["C:/a".to_string()]);
         s.patch(&json!({"theme": null})).unwrap();
         assert_eq!(s.get().theme, "system");
     }

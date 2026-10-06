@@ -2,46 +2,28 @@
 
 use std::path::{Path, PathBuf};
 
+use axum::extract::State;
+use axum::http::StatusCode;
 use axum::Json;
 use ip_imaging::ImageFormat;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ApiError, ApiQuery, ApiResult};
+use crate::routes::AppState;
 
 #[derive(Serialize)]
 pub struct Roots {
     pub roots: Vec<String>,
 }
 
-pub fn roots() -> Vec<String> {
-    let mut out: Vec<PathBuf> = Vec::new();
-    if let Some(h) = dirs::home_dir() {
-        out.push(h);
-    }
-    if let Some(p) = dirs::picture_dir() {
-        if p.is_dir() {
-            out.push(p);
-        }
-    }
-    #[cfg(windows)]
-    for letter in b'C'..=b'Z' {
-        let p = PathBuf::from(format!("{}:\\", letter as char));
-        if p.exists() {
-            out.push(p);
-        }
-    }
-    #[cfg(not(windows))]
-    out.push(PathBuf::from("/"));
-    let mut seen = std::collections::HashSet::new();
-    out.into_iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .filter(|p| seen.insert(p.clone()))
-        .collect()
-}
-
-pub async fn get_roots() -> Json<Roots> {
+pub async fn get_roots(State(st): State<AppState>) -> Json<Roots> {
+    let roots = st.auth.root_set(&st.core).await;
     Json(Roots {
-        roots: tokio::task::spawn_blocking(roots).await.unwrap_or_default(),
+        roots: roots
+            .display()
+            .into_iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
     })
 }
 
@@ -87,31 +69,39 @@ pub fn list_dir(path: &Path) -> std::io::Result<Listing> {
     })
 }
 
-pub async fn get_list(ApiQuery(q): ApiQuery<ListParams>) -> ApiResult<Json<Listing>> {
-    let path = match q.path.filter(|p| !p.trim().is_empty()) {
-        Some(p) => PathBuf::from(p),
-        None => dirs::home_dir().ok_or_else(|| ApiError::bad_request("path is required"))?,
+pub async fn get_list(
+    State(st): State<AppState>,
+    ApiQuery(q): ApiQuery<ListParams>,
+) -> ApiResult<Json<Listing>> {
+    let raw = match q.path.filter(|p| !p.trim().is_empty()) {
+        Some(p) => p,
+        None => dirs::home_dir()
+            .ok_or_else(|| ApiError::bad_request("path is required"))?
+            .to_string_lossy()
+            .into_owned(),
     };
-    if !path.is_absolute() {
+    if !Path::new(&raw).is_absolute() {
         return Err(ApiError::bad_request("path must be absolute"));
     }
+    let roots = st.auth.root_set(&st.core).await;
     let listing = tokio::task::spawn_blocking(move || {
-        let path: PathBuf = path.components().collect(); // drop trailing separators / `.`
-        list_dir(&path).map_err(|e| {
+        let path = roots
+            .check(&raw)
+            .map_err(|e| ApiError::new(StatusCode::FORBIDDEN, "forbidden_path", e.0))?;
+        let mut listing = list_dir(&path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 ApiError::not_found(format!("directory not found: {}", path.display()))
             } else {
                 ApiError::bad_request(format!("cannot read directory {}: {e}", path.display()))
             }
-        })
+        })?;
+        // "Up" never leaves the whitelist.
+        listing.parent = roots
+            .parent_within(&path)
+            .map(|p| p.to_string_lossy().into_owned());
+        Ok::<_, ApiError>(listing)
     })
     .await
-    .map_err(|e| {
-        ApiError::new(
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            "internal",
-            e.to_string(),
-        )
-    })??;
+    .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))??;
     Ok(Json(listing))
 }

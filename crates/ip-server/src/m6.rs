@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult};
-use crate::routes::AppState;
+use crate::routes::{whitelisted, AppState};
 
 fn accepted(task_id: String) -> Response {
     (StatusCode::ACCEPTED, Json(json!({ "task_id": task_id }))).into_response()
@@ -72,20 +72,102 @@ pub async fn assistant_suggest(
 
 // ------------------------------------------------------------------ settings
 
+/// The core settings plus `lan` / `roots` from the security store (never its password hashes).
+fn full_settings(st: &AppState) -> ApiResult<Value> {
+    let mut v = serde_json::to_value(&*st.core.settings())
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))?;
+    let store = st.auth.store();
+    if let Value::Object(m) = &mut v {
+        m.insert("lan".into(), json!(store.lan()));
+        m.insert("roots".into(), json!(store.roots()));
+    }
+    Ok(v)
+}
+
+fn unprocessable(msg: impl Into<String>) -> ApiError {
+    ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "unprocessable", msg)
+}
+
 pub async fn get_settings(State(st): State<AppState>) -> ApiResult<Json<Value>> {
-    Ok(Json(serde_json::to_value(&*st.core.settings()).map_err(
-        |e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()),
-    )?))
+    Ok(Json(full_settings(&st)?))
 }
 
 pub async fn patch_settings(
     State(st): State<AppState>,
-    ApiJson(patch): ApiJson<Value>,
+    ApiJson(mut patch): ApiJson<Value>,
 ) -> ApiResult<Json<Value>> {
-    let s = st.core.patch_settings(patch).await?;
-    Ok(Json(serde_json::to_value(&*s).map_err(|e| {
-        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string())
-    })?))
+    let Value::Object(obj) = &mut patch else {
+        return Err(ApiError::bad_request("the body must be a JSON object"));
+    };
+    let store = st.auth.store();
+    // `lan` and `roots` live in the security store
+    let lan_patch = obj.remove("lan");
+    let roots_patch = obj.remove("roots");
+    let mut new_lan = None;
+    if let Some(l) = lan_patch.filter(|v| !v.is_null()) {
+        let Value::Object(l) = l else {
+            return Err(ApiError::bad_request("lan must be an object"));
+        };
+        let mut lan = store.lan();
+        for (k, v) in &l {
+            match (k.as_str(), v) {
+                ("enabled", Value::Bool(b)) => lan.enabled = *b,
+                ("guest_enabled", Value::Bool(b)) => lan.guest_enabled = *b,
+                ("port", Value::Number(n)) => {
+                    let p = n.as_u64().filter(|p| (1..=65535).contains(p)).ok_or_else(|| {
+                        unprocessable("lan.port must be within 1..65535")
+                    })?;
+                    lan.port = p as u16;
+                }
+                (other, _) => {
+                    return Err(ApiError::bad_request(format!(
+                        "invalid lan setting {other:?}"
+                    )))
+                }
+            }
+        }
+        if lan.enabled && !store.has_owner_password() {
+            return Err(unprocessable(
+                "set a password (POST /api/auth/password) before enabling LAN access",
+            ));
+        }
+        new_lan = Some(lan);
+    }
+    let mut new_roots = None;
+    if let Some(r) = roots_patch.filter(|v| !v.is_null()) {
+        let list: Vec<String> = serde_json::from_value(r)
+            .map_err(|_| ApiError::bad_request("roots must be a list of paths"))?;
+        if list.len() > 256 || list.iter().any(|p| p.trim().is_empty() || p.contains('\0')) {
+            return Err(unprocessable("roots must be at most 256 non-empty paths"));
+        }
+        new_roots = Some(list);
+    }
+    // a models directory chosen by the client must lie inside the allowed folders
+    if let Some(dir) = obj
+        .get("models")
+        .and_then(|m| m.get("dir"))
+        .and_then(Value::as_str)
+        .filter(|d| !d.trim().is_empty())
+    {
+        if dir != st.core.settings().models.dir {
+            let checked = whitelisted(&st, dir).await?;
+            obj.get_mut("models")
+                .and_then(Value::as_object_mut)
+                .map(|m| m.insert("dir".into(), json!(checked)));
+        }
+    }
+    st.core.patch_settings(patch).await?;
+    if let Some(lan) = new_lan {
+        store
+            .set_lan(lan)
+            .map_err(|e| unprocessable(e.to_string()))?;
+    }
+    if let Some(roots) = new_roots {
+        store.set_roots(roots)?;
+    }
+    let full = full_settings(&st)?;
+    st.core.emit_settings_updated(full.clone());
+    Ok(Json(full))
 }
 
 // ------------------------------------------------------------------ cache

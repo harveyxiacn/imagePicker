@@ -24,6 +24,23 @@ use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult};
 pub struct AppState {
     pub core: Arc<Core>,
     pub web_dir: Option<PathBuf>,
+    pub auth: Arc<crate::auth::AuthState>,
+}
+
+/// Resolves a client path inside the allowed roots (403 `forbidden_path` otherwise).
+pub(crate) async fn whitelisted(st: &AppState, raw: &str) -> ApiResult<String> {
+    if raw.trim().is_empty() {
+        return Ok(raw.to_string()); // the core rejects empty paths with its own 400
+    }
+    if !std::path::Path::new(raw).is_absolute() && !raw.starts_with(['\\', '/']) {
+        return Err(ApiError::bad_request("path must be absolute"));
+    }
+    Ok(st
+        .auth
+        .check_path(&st.core, raw)
+        .await?
+        .to_string_lossy()
+        .into_owned())
 }
 
 pub async fn health() -> Json<Value> {
@@ -32,8 +49,11 @@ pub async fn health() -> Json<Value> {
 
 pub async fn import(
     State(st): State<AppState>,
-    ApiJson(req): ApiJson<ImportRequest>,
+    ApiJson(mut req): ApiJson<ImportRequest>,
 ) -> ApiResult<Response> {
+    if !req.path.trim().is_empty() {
+        req.path = whitelisted(&st, &req.path).await?;
+    }
     let session = st.core.import(req).await?;
     Ok((StatusCode::CREATED, Json(json!({ "session": session }))).into_response())
 }
@@ -371,8 +391,11 @@ pub async fn viewport(
 
 pub async fn export(
     State(st): State<AppState>,
-    ApiJson(req): ApiJson<ExportRequest>,
+    ApiJson(mut req): ApiJson<ExportRequest>,
 ) -> ApiResult<Response> {
+    if !req.dest.trim().is_empty() {
+        req.dest = whitelisted(&st, &req.dest).await?;
+    }
     let task_id = st.core.export(req).await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "task_id": task_id }))).into_response())
 }

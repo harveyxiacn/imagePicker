@@ -1,11 +1,13 @@
 //! HTTP + WebSocket API (axum). Contracts: docs/api-contract-m1.md .. m3.md.
 
+pub mod auth;
 pub mod error;
 pub mod fs;
 pub mod m2;
 pub mod m3;
 pub mod m4;
 pub mod m5;
+pub mod m6;
 pub mod routes;
 pub mod ws;
 
@@ -23,6 +25,8 @@ use tokio::sync::oneshot;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
+pub use auth::{AuthState, ServerOptions};
+pub use ip_core::auth::SecurityStore;
 pub use routes::AppState;
 
 #[derive(Debug, Clone)]
@@ -32,6 +36,32 @@ pub struct ServerConfig {
     pub port: u16,
     pub data_dir: Option<PathBuf>,
     pub web_dir: Option<PathBuf>,
+    /// Desktop session token. `None` = development mode: loopback clients need no credentials.
+    pub session_token: Option<String>,
+    /// LAN mode (bind `0.0.0.0`, password login). Requires a password in the security store.
+    /// Also enabled by `lan.enabled` in `<data_dir>/security.json`.
+    pub lan: bool,
+    /// Allow the Vite dev origins through CORS (also: env `IMAGEPICKER_DEV_CORS=1`).
+    pub dev_cors: bool,
+    /// Extra allowed filesystem roots (in addition to home, Pictures, removable drives,
+    /// imported roots and `security.json` roots).
+    pub extra_roots: Vec<PathBuf>,
+    /// Set (or change) the owner password in the security store before starting.
+    pub password: Option<String>,
+    /// Set the guest password together with `password` (`Some("")` removes it).
+    pub guest_password: Option<String>,
+}
+
+impl ServerConfig {
+    fn options(&self, lan: bool) -> ServerOptions {
+        ServerOptions {
+            session_token: self.session_token.clone(),
+            lan,
+            dev_cors: self.dev_cors || ServerOptions::default().dev_cors,
+            extra_roots: self.extra_roots.clone(),
+            ..ServerOptions::default()
+        }
+    }
 }
 
 impl Default for ServerConfig {
@@ -41,13 +71,44 @@ impl Default for ServerConfig {
             port: 7878,
             data_dir: None,
             web_dir: None,
+            session_token: None,
+            lan: false,
+            dev_cors: false,
+            extra_roots: Vec::new(),
+            password: None,
+            guest_password: None,
         }
     }
 }
 
-/// The full application router (`/api/*` plus SPA fallback).
+/// The router in development mode (no token, loopback only) for tests and embedding. The
+/// system temp dir is an additional allowed root here so tests can import temp folders on every
+/// OS; the production entry points (`spawn*`, `serve_listener_with`) never add it.
 pub fn build_router(core: Arc<Core>, web_dir: Option<PathBuf>) -> Router {
-    let state = AppState { core, web_dir };
+    let opts = ServerOptions {
+        extra_roots: vec![std::env::temp_dir()],
+        ..ServerOptions::default()
+    };
+    build_router_with(core, web_dir, opts)
+}
+
+pub fn build_router_with(core: Arc<Core>, web_dir: Option<PathBuf>, opts: ServerOptions) -> Router {
+    let auth = AuthState::new(&core, opts);
+    build_router_auth(core, web_dir, auth)
+}
+
+/// The full application router (`/api/*` plus SPA fallback) behind the auth middleware.
+pub fn build_router_auth(
+    core: Arc<Core>,
+    web_dir: Option<PathBuf>,
+    auth: Arc<AuthState>,
+) -> Router {
+    let dev_cors = auth.dev_cors();
+    let state = AppState {
+        core,
+        web_dir,
+        auth: auth.clone(),
+    };
     let api = Router::new()
         .route("/health", get(routes::health))
         .route("/import", post(routes::import))
@@ -126,14 +187,55 @@ pub fn build_router(core: Arc<Core>, web_dir: Option<PathBuf>) -> Router {
         .route("/assets/{photo_id}/{asset}", get(m5::asset))
         .route("/taste", get(m4::taste))
         .route("/taste/reset", post(m4::taste_reset))
+        .route("/assistant/status", get(m6::assistant_status))
+        .route("/assistant/plan", post(m6::assistant_plan))
+        .route("/assistant/execute", post(m6::assistant_execute))
+        .route("/assistant/describe", post(m6::assistant_describe))
+        .route("/assistant/suggest", post(m6::assistant_suggest))
+        .route("/settings", get(m6::get_settings).patch(m6::patch_settings))
+        .route("/cache", get(m6::get_cache))
+        .route("/cache/clear", post(m6::clear_cache))
+        .route("/models/{id}", delete(m6::delete_model))
+        .route("/onboarding", get(m6::onboarding))
+        .route("/onboarding/done", post(m6::onboarding_done))
+        .route("/faces", delete(m6::clear_faces))
+        .route("/xmp/sync", post(m6::xmp_sync))
+        .route("/photos/{id}/tags", get(m6::photo_tags))
+        .route("/photos/tags", post(m6::set_tags))
         .route("/events", get(ws::events))
+        .merge(auth::routes())
         .fallback(routes::api_not_found)
         .method_not_allowed_fallback(routes::method_not_allowed);
+    // Same-origin only: without the dev flag the allow-list is empty, so no
+    // `Access-Control-Allow-Origin` header is ever emitted.
+    let origins: Vec<axum::http::HeaderValue> = if dev_cors {
+        auth::DEV_ORIGINS
+            .iter()
+            .map(|o| axum::http::HeaderValue::from_static(o))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let cors = CorsLayer::new()
+        .allow_origin(origins)
+        .allow_credentials(dev_cors)
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::PATCH,
+            axum::http::Method::DELETE,
+        ])
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+        ]);
     Router::new()
         .nest("/api", api)
         .fallback(routes::fallback)
         .layer(axum::middleware::from_fn(m5::tidy_json))
-        .layer(CorsLayer::permissive())
+        .layer(axum::middleware::from_fn_with_state(auth, auth::middleware))
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -142,6 +244,8 @@ pub fn build_router(core: Arc<Core>, web_dir: Option<PathBuf>) -> Router {
 pub struct RunningServer {
     pub addr: SocketAddr,
     pub core: Arc<Core>,
+    /// Persisted LAN / password / roots settings (shared file with the settings API).
+    pub security: SecurityStore,
     shutdown: Option<oneshot::Sender<()>>,
     task: tokio::task::JoinHandle<std::io::Result<()>>,
 }
@@ -174,19 +278,35 @@ pub fn serve_listener(
     core: Arc<Core>,
     web_dir: Option<PathBuf>,
 ) -> anyhow::Result<RunningServer> {
+    serve_listener_with(listener, core, web_dir, ServerOptions::default())
+}
+
+pub fn serve_listener_with(
+    listener: TcpListener,
+    core: Arc<Core>,
+    web_dir: Option<PathBuf>,
+    opts: ServerOptions,
+) -> anyhow::Result<RunningServer> {
     let addr = listener.local_addr()?;
-    let app = build_router(core.clone(), web_dir);
+    let auth = AuthState::new(&core, opts);
+    auth.set_port(addr.port());
+    let security = auth.store().clone();
+    let app = build_router_auth(core.clone(), web_dir, auth);
     let (tx, rx) = oneshot::channel::<()>();
     let task = tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = rx.await;
-            })
-            .await
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = rx.await;
+        })
+        .await
     });
     Ok(RunningServer {
         addr,
         core,
+        security,
         shutdown: Some(tx),
         task,
     })
@@ -203,10 +323,52 @@ pub async fn spawn_with_core(
     core: Arc<Core>,
     config: &ServerConfig,
 ) -> anyhow::Result<RunningServer> {
-    let listener = TcpListener::bind((config.host.as_str(), config.port))
+    let store = SecurityStore::open(core.data_dir());
+    if let Some(pw) = &config.password {
+        store
+            .set_passwords(pw, config.guest_password.as_deref())
+            .context("set password")?;
+        if let Some(g) = &config.guest_password {
+            let mut lan = store.lan();
+            lan.guest_enabled = !g.is_empty();
+            store.set_lan(lan).context("guest access")?;
+        }
+    }
+    let snap = store.snapshot();
+    let mut lan = config.lan || snap.lan.enabled;
+    if lan && !snap.has_owner_password() {
+        anyhow::ensure!(
+            !config.lan,
+            "LAN mode requires a password: set one first (imagepicker serve --lan --password <p>)"
+        );
+        tracing::warn!("LAN access is enabled in settings but no password is set; staying local");
+        lan = false;
+    }
+    let loopback_host = matches!(config.host.as_str(), "127.0.0.1" | "localhost" | "::1");
+    anyhow::ensure!(
+        lan || loopback_host,
+        "binding to {} exposes the server to the network: use LAN mode (--lan) with a password",
+        config.host
+    );
+    let (host, port) = if lan {
+        let host = if loopback_host {
+            "0.0.0.0"
+        } else {
+            config.host.as_str()
+        };
+        let port = if config.port == 0 {
+            snap.lan.port
+        } else {
+            config.port
+        };
+        (host.to_string(), port)
+    } else {
+        (config.host.clone(), config.port)
+    };
+    let listener = TcpListener::bind((host.as_str(), port))
         .await
-        .with_context(|| format!("bind {}:{}", config.host, config.port))?;
-    serve_listener(listener, core, config.web_dir.clone())
+        .with_context(|| format!("bind {host}:{port}"))?;
+    serve_listener_with(listener, core, config.web_dir.clone(), config.options(lan))
 }
 
 /// Runs until Ctrl-C (or a fatal server error).

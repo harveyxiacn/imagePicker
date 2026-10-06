@@ -261,7 +261,7 @@ async fn json_errors() {
         &e.app,
         Method::POST,
         "/api/import",
-        Some(json!({"path": "/definitely/not/here"})),
+        Some(json!({"path": e.src.path().join("definitely-not-here").to_string_lossy()})),
     )
     .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
