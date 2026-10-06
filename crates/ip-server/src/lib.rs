@@ -2,6 +2,7 @@
 
 pub mod error;
 pub mod fs;
+pub mod m2;
 pub mod routes;
 pub mod ws;
 
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 use ip_core::{Core, CoreConfig};
 use tokio::net::TcpListener;
@@ -63,6 +64,23 @@ pub fn build_router(core: Arc<Core>, web_dir: Option<PathBuf>) -> Router {
         .route("/export", post(routes::export))
         .route("/fs/roots", get(fs::get_roots))
         .route("/fs/list", get(fs::get_list))
+        .route("/system/hardware", get(m2::hardware))
+        .route("/models", get(m2::models))
+        .route("/models/ensure", post(m2::models_ensure))
+        .route("/analysis/run", post(m2::analysis_run))
+        .route("/analysis/cancel", post(m2::analysis_cancel))
+        .route("/analysis/status", get(m2::analysis_status))
+        .route("/photos/{id}/analysis", get(m2::photo_analysis))
+        .route("/photos/accept-ai", post(m2::accept_ai))
+        .route("/groups", get(m2::groups))
+        .route("/groups/split", post(m2::groups_split))
+        .route("/groups/merge", post(m2::groups_merge))
+        .route("/bursts/{id}/faces", get(m2::burst_faces))
+        .route("/faces/{id}/crop", get(m2::face_crop))
+        .route("/faces/{id}/person", post(m2::set_face_person))
+        .route("/people", get(m2::people))
+        .route("/people/merge", post(m2::merge_people))
+        .route("/people/{id}", patch(m2::patch_person))
         .route("/events", get(ws::events))
         .fallback(routes::api_not_found)
         .method_not_allowed_fallback(routes::method_not_allowed);

@@ -9,7 +9,8 @@ use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ip_core::{
-    Core, ExportRequest, FlagFilter, ImportRequest, PatchRequest, PhotoQuery, SortKey, COLOR_LABELS,
+    Core, ExportRequest, FlagFilter, ImportRequest, Issue, PatchRequest, PersonMode, PersonState,
+    PhotoQuery, SortKey, COLOR_LABELS,
 };
 use ip_imaging::ImageFormat;
 use serde::Deserialize;
@@ -65,6 +66,42 @@ pub struct PhotosParams {
     sort: Option<String>,
     cursor: Option<String>,
     limit: Option<i64>,
+    // ---- M2 (docs/api-contract-m2.md C.4)
+    ai_rating_gte: Option<f64>,
+    issues_none: Option<String>,
+    issues_any: Option<String>,
+    burst_best_only: Option<String>,
+    burst_id: Option<i64>,
+    scene_type: Option<String>,
+    persons: Option<String>,
+    person_mode: Option<String>,
+    exclude_persons: Option<String>,
+    person_state: Option<String>,
+    include_background: Option<String>,
+    faces_min: Option<i64>,
+    faces_max: Option<i64>,
+}
+
+fn flag_of(name: &str, v: &Option<String>) -> Result<bool, ApiError> {
+    match v.as_deref().filter(|s| !s.is_empty()) {
+        None => Ok(false),
+        Some("1") | Some("true") => Ok(true),
+        Some("0") | Some("false") => Ok(false),
+        Some(_) => Err(ApiError::bad_request(format!("{name} must be 1/0/true/false"))),
+    }
+}
+
+fn csv_ids(name: &str, v: &Option<String>) -> Result<Vec<i64>, ApiError> {
+    v.as_deref()
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            s.parse::<i64>()
+                .map_err(|_| ApiError::bad_request(format!("{name} must be comma separated ids")))
+        })
+        .collect()
 }
 
 pub async fn list_photos(
@@ -87,13 +124,57 @@ pub async fn list_photos(
     };
     let sort = match p.sort.as_deref().filter(|s| !s.is_empty()) {
         None => SortKey::TakenAt,
-        Some(s) => SortKey::parse(s)
-            .ok_or_else(|| ApiError::bad_request("sort must be taken_at|-taken_at|name|rating"))?,
+        Some(s) => SortKey::parse(s).ok_or_else(|| {
+            ApiError::bad_request("sort must be taken_at|-taken_at|name|rating|ai")
+        })?,
     };
     let color_label = p.color_label.filter(|s| !s.is_empty());
     if let Some(c) = &color_label {
         if !COLOR_LABELS.contains(&c.as_str()) {
             return Err(ApiError::bad_request("unknown color_label"));
+        }
+    }
+    if let Some(n) = p.ai_rating_gte {
+        if !(0.0..=5.0).contains(&n) {
+            return Err(ApiError::bad_request("ai_rating_gte must be 0..5"));
+        }
+    }
+    let issues_any = p
+        .issues_any
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            Issue::parse(s).ok_or_else(|| {
+                ApiError::bad_request(
+                    "issues_any must list closed_eyes|blurry|overexposed|underexposed|noisy|tilted",
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let person_mode = match p.person_mode.as_deref().filter(|s| !s.is_empty()) {
+        None | Some("all") => PersonMode::All,
+        Some("any") => PersonMode::Any,
+        Some(_) => return Err(ApiError::bad_request("person_mode must be all|any")),
+    };
+    let person_state = p
+        .person_state
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            PersonState::parse(s).ok_or_else(|| {
+                ApiError::bad_request("person_state must list eyes_open|smiling|looking|subject")
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    for (name, v) in [("faces_min", p.faces_min), ("faces_max", p.faces_max)] {
+        if v.map(|n| n < 0).unwrap_or(false) {
+            return Err(ApiError::bad_request(format!("{name} must be >= 0")));
         }
     }
     let page = st
@@ -106,6 +187,19 @@ pub async fn list_photos(
             sort,
             cursor: p.cursor.filter(|s| !s.is_empty()),
             limit: p.limit,
+            ai_rating_gte: p.ai_rating_gte,
+            issues_none: flag_of("issues_none", &p.issues_none)?,
+            issues_any,
+            burst_best_only: flag_of("burst_best_only", &p.burst_best_only)?,
+            burst_id: p.burst_id,
+            scene_type: p.scene_type.filter(|s| !s.is_empty()),
+            persons: csv_ids("persons", &p.persons)?,
+            person_mode,
+            exclude_persons: csv_ids("exclude_persons", &p.exclude_persons)?,
+            person_state,
+            include_background: flag_of("include_background", &p.include_background)?,
+            faces_min: p.faces_min,
+            faces_max: p.faces_max,
         })
         .await?;
     Ok(Json(json!({
