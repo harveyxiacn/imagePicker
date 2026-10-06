@@ -1,0 +1,272 @@
+{
+ "bright_640x480": {
+  "height": 480,
+  "phash": "ae1bdb646a19234d",
+  "quality": {
+   "clipped_highlights": 0.19638,
+   "crushed_shadows": 0.0,
+   "exposure": 0.0,
+   "laplacian_var": 2.55498,
+   "mean_luminance": 0.89237,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.08902,
+   "sharpness_center": 0.08902,
+   "sharpness_face": null,
+   "tenengrad": 256.14661
+  },
+  "width": 640
+ },
+ "checker_256x192": {
+  "height": 192,
+  "phash": "a840fd407d51fd55",
+  "quality": {
+   "clipped_highlights": 0.00838,
+   "crushed_shadows": 0.0,
+   "exposure": 0.78507,
+   "laplacian_var": 33.28079,
+   "mean_luminance": 0.56747,
+   "noise": 0.02059,
+   "noise_sigma": 0.2471,
+   "sharpness": 0.61919,
+   "sharpness_center": 0.61919,
+   "sharpness_face": null,
+   "tenengrad": 8352.17383
+  },
+  "width": 256
+ },
+ "dark_640x480": {
+  "height": 480,
+  "phash": "d803fe2c29d51fc8",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.23637,
+   "laplacian_var": 0.12203,
+   "mean_luminance": 0.07818,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.00336,
+   "sharpness_center": 0.00336,
+   "sharpness_face": null,
+   "tenengrad": 8.58736
+  },
+  "width": 640
+ },
+ "noise_only_480x360": {
+  "height": 360,
+  "phash": "ca9c388e66dcb156",
+  "quality": {
+   "clipped_highlights": 0.00025,
+   "crushed_shadows": 9e-05,
+   "exposure": 0.92203,
+   "laplacian_var": 599.82367,
+   "mean_luminance": 0.49899,
+   "noise": 0.10296,
+   "noise_sigma": 1.2355,
+   "sharpness": 0.99663,
+   "sharpness_center": 0.99663,
+   "sharpness_face": null,
+   "tenengrad": 20133.39062
+  },
+  "width": 480
+ },
+ "portrait_768x1024": {
+  "height": 1024,
+  "phash": "dea45a4343d3a743",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.96361,
+   "laplacian_var": 4.8847,
+   "mean_luminance": 0.4782,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.10817,
+   "sharpness_center": 0.10817,
+   "sharpness_face": null,
+   "tenengrad": 291.20258
+  },
+  "width": 768
+ },
+ "scene_100x75": {
+  "height": 75,
+  "phash": "960e6cecf3748654",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.83802,
+   "laplacian_var": 0.24669,
+   "mean_luminance": 0.54099,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.05263,
+   "sharpness_center": 0.05263,
+   "sharpness_face": null,
+   "tenengrad": 163.38319
+  },
+  "width": 100
+ },
+ "scene_1024x768": {
+  "height": 768,
+  "phash": "cd853c34cf6e124d",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.82569,
+   "laplacian_var": 8.23166,
+   "mean_luminance": 0.54716,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.16909,
+   "sharpness_center": 0.16909,
+   "sharpness_face": null,
+   "tenengrad": 475.92297
+  },
+  "width": 1024
+ },
+ "scene_1024x768_blur": {
+  "height": 768,
+  "phash": "cd853c34cf6e124d",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.8255,
+   "laplacian_var": 0.1755,
+   "mean_luminance": 0.54725,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.04745,
+   "sharpness_center": 0.04745,
+   "sharpness_face": null,
+   "tenengrad": 147.14905
+  },
+  "width": 1024
+ },
+ "scene_1024x768_noise": {
+  "height": 768,
+  "phash": "cd853c34cf6e124d",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.82974,
+   "laplacian_var": 75.68916,
+   "mean_luminance": 0.54513,
+   "noise": 0.77219,
+   "noise_sigma": 9.26625,
+   "sharpness": 0.48226,
+   "sharpness_center": 0.48226,
+   "sharpness_face": null,
+   "tenengrad": 1029.89954
+  },
+  "width": 1024
+ },
+ "scene_1500x1000": {
+  "height": 1000,
+  "phash": "c29ea5975a6959a1",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.95436,
+   "laplacian_var": 2.20783,
+   "mean_luminance": 0.48282,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.07123,
+   "sharpness_center": 0.07123,
+   "sharpness_face": null,
+   "tenengrad": 198.99156
+  },
+  "width": 1500
+ },
+ "scene_20x20": {
+  "height": 20,
+  "phash": "c93eb8c9364b0fd0",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.84608,
+   "laplacian_var": 0.07252,
+   "mean_luminance": 0.53696,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.01314,
+   "sharpness_center": 0.01314,
+   "sharpness_face": null,
+   "tenengrad": 39.01969
+  },
+  "width": 20
+ },
+ "scene_333x250": {
+  "height": 250,
+  "phash": "c638d36bb4e11656",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.89159,
+   "laplacian_var": 1.08119,
+   "mean_luminance": 0.51421,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.06782,
+   "sharpness_center": 0.06782,
+   "sharpness_face": null,
+   "tenengrad": 203.1658
+  },
+  "width": 333
+ },
+ "scene_40x30": {
+  "height": 30,
+  "phash": "9b3f0381e5c0e59d",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.89287,
+   "laplacian_var": 0.07363,
+   "mean_luminance": 0.51357,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.02013,
+   "sharpness_center": 0.02013,
+   "sharpness_face": null,
+   "tenengrad": 60.67622
+  },
+  "width": 40
+ },
+ "scene_512x512": {
+  "height": 512,
+  "phash": "98e61168b73d6ae4",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.92723,
+   "laplacian_var": 2.76713,
+   "mean_luminance": 0.49638,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.11484,
+   "sharpness_center": 0.11484,
+   "sharpness_face": null,
+   "tenengrad": 347.68347
+  },
+  "width": 512
+ },
+ "scene_700x500": {
+  "height": 500,
+  "phash": "cce462dab417339c",
+  "quality": {
+   "clipped_highlights": 0.0,
+   "crushed_shadows": 0.0,
+   "exposure": 0.85319,
+   "laplacian_var": 9.48998,
+   "mean_luminance": 0.53341,
+   "noise": 0.0,
+   "noise_sigma": 0.0,
+   "sharpness": 0.2533,
+   "sharpness_center": 0.2533,
+   "sharpness_face": null,
+   "tenengrad": 844.68445
+  },
+  "width": 700
+ }
+}

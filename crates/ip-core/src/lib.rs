@@ -17,6 +17,7 @@ pub mod import;
 pub mod jpegmeta;
 pub mod jsonfix;
 pub mod lazy_renderer;
+pub mod lite;
 pub mod model;
 pub mod paths;
 pub mod remote;
@@ -56,17 +57,20 @@ pub use settings::Settings;
 
 use db::Db;
 use ip_worker_client::{
-    AiWorker, ManagedWorker, TimeoutHandle, TimeoutWorker, WorkerConfig, WorkerTimeouts,
+    AiWorker, ManagedWorker, TimeoutHandle, TimeoutWorker, UnavailableWorker, WorkerConfig,
+    WorkerTimeouts,
 };
 use paths::DataDirs;
 use settings::SettingsStore;
 use thumbs::Thumbs;
 
 pub struct CoreConfig {
-    /// `None` resolves via `IMAGEPICKER_DATA_DIR` / platform default.
+    /// `None` resolves via `IMAGEPICKER_DATA_DIR` / platform default. **Android has no
+    /// platform default**: the shell passes the app's private files dir here (or sets
+    /// `IMAGEPICKER_DATA_DIR`), otherwise [`Core::open`] fails.
     pub data_dir: Option<PathBuf>,
     pub imaging: Arc<dyn Imaging>,
-    /// Thumbnail worker threads; `None` = number of CPU cores.
+    /// Thumbnail worker threads; `None` = number of CPU cores (at most 4 on Android).
     pub thumb_workers: Option<usize>,
     /// `None` = the real Python worker (started lazily on first use).
     pub worker: Option<Arc<dyn AiWorker>>,
@@ -97,6 +101,8 @@ pub struct Core {
     pub dirs: DataDirs,
     /// The AI worker, behind per-call timeouts ([`Core::worker_timeouts`]).
     pub worker: Arc<dyn AiWorker>,
+    /// The on-device `lite` analysis backend (always available, see [`lite::LiteWorker`]).
+    pub lite: Arc<dyn AiWorker>,
     /// Adjustable per-method worker timeouts (defaults + `IMAGEPICKER_WORKER_TIMEOUT*`).
     pub worker_timeouts: TimeoutHandle,
     pub render: Arc<RenderService>,
@@ -118,6 +124,12 @@ pub struct Core {
 
 impl Core {
     pub fn open(cfg: CoreConfig) -> Result<Arc<Core>> {
+        if !paths::data_dir_resolvable(cfg.data_dir.as_deref()) {
+            return Err(CoreError::Internal(anyhow::anyhow!(
+                "no data directory: on Android the shell must pass CoreConfig::data_dir \
+                 (or set IMAGEPICKER_DATA_DIR)"
+            )));
+        }
         let dirs = DataDirs::new(paths::resolve_data_dir(cfg.data_dir.as_deref()));
         dirs.create()?;
         let db = Db::open(&dirs.catalog)?;
@@ -127,10 +139,19 @@ impl Core {
         let settings = SettingsStore::load(&dirs.root);
         let events = EventBus::new();
         let workers = cfg.thumb_workers.unwrap_or_else(|| {
-            std::thread::available_parallelism()
+            let n = std::thread::available_parallelism()
                 .map(|n| n.get())
-                .unwrap_or(4)
+                .unwrap_or(4);
+            if cfg!(target_os = "android") {
+                n.clamp(1, 4)
+            } else {
+                n
+            }
         });
+        let lite: Arc<dyn AiWorker> = Arc::new(lite::LiteWorker::new(
+            cfg.imaging.clone(),
+            lite::default_threads(),
+        ));
         let thumbs = Thumbs::new(
             db.clone(),
             cfg.imaging.clone(),
@@ -143,6 +164,9 @@ impl Core {
         let runtime = runtime::RuntimeManager::new(&dirs.root, dirs.logs.clone());
         let worker: Arc<dyn AiWorker> = match cfg.worker {
             Some(w) => w,
+            None if ip_worker_client::worker_unsupported() => Arc::new(UnavailableWorker::new(
+                "the AI worker is not available on this device; use the lite profile or a remote AI host",
+            )),
             None => {
                 let mut wc = WorkerConfig::from_env();
                 wc.runtime = Some(ip_worker_client::RuntimeLaunch {
@@ -188,6 +212,7 @@ impl Core {
             thumbs,
             dirs,
             worker,
+            lite,
             worker_timeouts,
             render,
             settings,
@@ -346,6 +371,8 @@ impl Core {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_lite;
 #[cfg(test)]
 mod tests_m2;
 #[cfg(test)]

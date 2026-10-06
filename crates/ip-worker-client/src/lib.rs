@@ -15,6 +15,7 @@ mod protocol_m5;
 mod protocol_m6;
 pub mod remote;
 pub mod timeout;
+pub mod unavailable;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -35,6 +36,7 @@ pub use remote::{
     REMOTE_METHODS,
 };
 pub use timeout::{TimeoutHandle, TimeoutWorker, WorkerTimeouts};
+pub use unavailable::{worker_unsupported, UnavailableWorker, ENV_NO_WORKER};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

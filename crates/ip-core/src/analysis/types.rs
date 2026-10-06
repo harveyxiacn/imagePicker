@@ -10,6 +10,9 @@ use super::scoring::{Contribution, Issue};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Profile {
+    /// On-device analysis without the AI worker (`docs/api-contract-m8.md` section B):
+    /// pHash + sharpness/exposure/noise only, no faces or embeddings.
+    Lite,
     Fast,
     Standard,
 }
@@ -17,6 +20,7 @@ pub enum Profile {
 impl Profile {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Lite => "lite",
             Self::Fast => "fast",
             Self::Standard => "standard",
         }
@@ -24,7 +28,9 @@ impl Profile {
     /// Stored in `photo.analysis_version`.
     pub fn level(self) -> i64 {
         match self {
-            Self::Fast => 1,
+            // same level as `fast`: a later `fast` run still re-analyses lite results (the
+            // run query checks `analysis.profile`), a `lite` run skips anything analysed
+            Self::Lite | Self::Fast => 1,
             Self::Standard => 2,
         }
     }
@@ -37,6 +43,7 @@ impl Profile {
     }
     pub fn parse(s: &str) -> Option<Self> {
         match s {
+            "lite" => Some(Self::Lite),
             "fast" => Some(Self::Fast),
             "standard" => Some(Self::Standard),
             _ => None,

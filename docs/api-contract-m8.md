@@ -24,6 +24,15 @@ Android 11+ 允许持有 `READ_MEDIA_IMAGES`（13+）/ `READ_EXTERNAL_STORAGE`�
 - 可选 `ip-infer`（Rust `ort` + ONNX Runtime Android 库）运行 YuNet 人脸检测与 SigLIP2 int8 嵌入；若集成成本过高，M8 先交付 LiteAnalyzer + 远程 AI，`ip-infer` 列为 M8.1。
 - 分析档位在手机上显示为「快速（本机）」与「标准（远程 AI）」。
 
+### B.1 `lite` 档位（API 追加，已实现）
+
+- `POST /api/analysis/run` 的 `profile` 新增取值 `"lite"`（`fast` / `standard` 不变）；`GET /api/analysis/status` 的 `profile` 回显 `"lite"`。`models_missing`（409）永不会因 `lite` 触发，`allow_download` 对其无意义。
+- `lite` 在**所有平台**可用（桌面无 Python 运行时的 T0 机器也可用）：纯 Rust `LiteAnalyzer`（`ip-lite` + `ip-core::lite::LiteWorker`）在 analysis 尺寸（长边 1024）上计算 `phash`、`sharpness`/`exposure`/`noise`（及 `mean_luminance`、`clipped_highlights`、`crushed_shadows`），**不含**人脸、嵌入、`iqa`、`aesthetic`、`scene_type`；之后的分组（时间线 + pHash 相似度）、评分（按可用分项重新归一）、星级映射与 `fast`/`standard` 完全相同。
+  - 与 worker `phash.py`/`quality.py` 同公式：pHash 位级一致（跨语言夹具测试 `crates/ip-lite/tests/parity.rs`），质量指标在 float32 误差内一致（相对 ≤ 0.4%）。人脸清晰度分支（`sharpness_face`）不适用。
+  - 结果存库时 `analysis.profile = "lite"`、`photo.analysis_version = 1`（与 `fast` 同级）。`fast`/`standard` 运行会重新分析仅有 `lite` 结果的照片；`lite` 运行跳过任何已分析的照片（`force=true` 除外）。`GET /api/photos/{id}/analysis` 的 `profile` 为 `"lite"`，`scores.iqa/aesthetic/face` 为 `null`，`faces` 为空。
+- `GET /api/system/hardware` 追加字段 `lite: true`（恒为 `true`）。无法运行 Python worker 时（Android，或 `IMAGEPICKER_NO_WORKER=1`）：`{"worker": {"state": "unavailable", "error": "…", …}, "lite": true}`；`?probe=1` 在此情形不再报错而是照常返回该状态。此时 `fast`/`standard` 档位的运行返回与 worker 不可用相同的错误，`/api/runtime/install` 返回 409（`reason` 说明平台不支持）。
+- Android 默认值：路径白名单默认根为 `/storage/emulated/0/{DCIM,Pictures,Download}`（外壳可经 `extra_roots` 追加 `list_albums` 的路径）；数据目录必须由外壳传入（`ServerConfig.data_dir` / `CoreConfig.data_dir`）；渲染后端 `auto` → 存在 Vulkan 硬件适配器用 wgpu，否则 CPU；缩略图/分析线程 ≤ 4。详见 [android-build.md](android-build.md)。
+
 ## C. 远程 AI（手机 → 家中主机）
 
 主机（桌面版或 `imagepicker serve --lan`，已开启局域网模式）向配对设备开放其 AI worker：

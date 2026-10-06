@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ip-imaging", "crates/ip-worker-client", "crates/ip-core", "crates/ip-server", "crates/ip-cli", "apps/desktop/src-tauri", "apps/desktop/plugins/imagepicker-media", "crates/ip-render"]
+members = ["crates/ip-lite", "crates/ip-imaging", "crates/ip-worker-client", "crates/ip-core", "crates/ip-server", "crates/ip-cli", "apps/desktop/src-tauri", "apps/desktop/plugins/imagepicker-media", "crates/ip-render"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,7 @@ repository = "https://github.com/harveyxiacn/imagePicker"
 
 [workspace.dependencies]
 ip-imaging = { path = "crates/ip-imaging" }
+ip-lite = { path = "crates/ip-lite" }
 ip-core = { path = "crates/ip-core" }
 ip-worker-client = { path = "crates/ip-worker-client" }
 ip-server = { path = "crates/ip-server" }

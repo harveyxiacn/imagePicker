@@ -56,26 +56,40 @@ struct Shared {
     dev: OnceLock<std::result::Result<Device, String>>,
 }
 
+fn probe_shared() -> Option<Shared> {
+    #[allow(unused_mut)]
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+    // Android: Vulkan only (the GLES backend is not compiled in); devices without a Vulkan
+    // driver fall back to the CPU renderer.
+    #[cfg(target_os = "android")]
+    {
+        desc.backends = wgpu::Backends::VULKAN;
+    }
+    let instance = wgpu::Instance::new(desc);
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        force_fallback_adapter: false,
+        compatible_surface: None,
+        apply_limit_buckets: false,
+    }))
+    .ok()?;
+    // software rasterisers (llvmpipe, SwiftShader on emulators) are slower than the CPU path
+    if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
+        return None;
+    }
+    Some(Shared {
+        _instance: instance,
+        adapter,
+        dev: OnceLock::new(),
+    })
+}
+
 /// Process-wide adapter (and lazily, device + pipelines), shared by every renderer.
 fn shared() -> Option<&'static Shared> {
     static S: OnceLock<Option<Shared>> = OnceLock::new();
     S.get_or_init(|| {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-            apply_limit_buckets: false,
-        }))
-        .ok()?;
-        if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
-            return None;
-        }
-        Some(Shared {
-            _instance: instance,
-            adapter,
-            dev: OnceLock::new(),
-        })
+        // A missing / broken Vulkan loader must read as "no GPU", never abort the process.
+        std::panic::catch_unwind(probe_shared).ok().flatten()
     })
     .as_ref()
 }

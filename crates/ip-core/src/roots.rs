@@ -156,8 +156,20 @@ pub fn removable_roots() -> Vec<PathBuf> {
     out
 }
 
-/// Built-in roots: user home, Pictures and removable drives.
+/// Android shared-storage roots of `docs/api-contract-m8.md` section A (album folders reported
+/// by the media plugin arrive through `ServerOptions::extra_roots`).
+pub fn android_roots() -> Vec<PathBuf> {
+    ["DCIM", "Pictures", "Download"]
+        .iter()
+        .map(|d| PathBuf::from("/storage/emulated/0").join(d))
+        .collect()
+}
+
+/// Built-in roots: user home, Pictures and removable drives (Android: DCIM, Pictures, Download).
 pub fn default_roots() -> Vec<PathBuf> {
+    if cfg!(target_os = "android") {
+        return android_roots();
+    }
     let mut out = Vec::new();
     out.extend(dirs::home_dir());
     out.extend(dirs::picture_dir().filter(|p| p.is_dir()));

@@ -88,6 +88,14 @@ pub fn driver_major(driver: &str) -> Option<u32> {
 
 /// NVIDIA GPU detection via `nvidia-smi` (absent = no NVIDIA driver).
 pub async fn detect_hardware() -> Hardware {
+    // phones have no nvidia-smi (and nothing to spawn it with)
+    if cfg!(target_os = "android") {
+        return Hardware {
+            os: std::env::consts::OS.into(),
+            arch: std::env::consts::ARCH.into(),
+            nvidia: None,
+        };
+    }
     let mut cmd = Command::new("nvidia-smi");
     cmd.args(["--query-gpu=name,driver_version", "--format=csv,noheader"])
         .stdin(Stdio::null())
@@ -565,6 +573,12 @@ impl RuntimeManager {
     }
 
     fn can_install(&self, allow_network: bool) -> std::result::Result<(), String> {
+        if ip_worker_client::worker_unsupported() {
+            return Err(
+                "the on-device AI runtime is not available on this platform (use the lite profile or a remote AI host)"
+                    .into(),
+            );
+        }
         if !allow_network {
             return Err("network access is disabled (settings: privacy.allow_network)".into());
         }

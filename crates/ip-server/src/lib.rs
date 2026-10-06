@@ -36,6 +36,8 @@ pub struct ServerConfig {
     pub host: String,
     /// `0` binds an ephemeral port.
     pub port: u16,
+    /// Catalog / cache directory. **Required on Android** (the shell passes the app's private
+    /// files dir; there is no platform default there).
     pub data_dir: Option<PathBuf>,
     pub web_dir: Option<PathBuf>,
     /// Desktop session token. `None` = development mode: loopback clients need no credentials.

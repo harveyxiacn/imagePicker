@@ -91,7 +91,11 @@ impl Core {
     /// Current worker state; `probe` starts the worker (if needed) to learn tier and hardware.
     pub async fn hardware(&self, probe: bool) -> Result<WorkerOut> {
         if probe {
-            self.worker.system_info().await.map_err(map_worker_err)?;
+            // "unavailable" (Android, no runtime) is a state to report, not an error
+            match self.worker.system_info().await {
+                Ok(_) | Err(WorkerError::Unavailable(_)) => {}
+                Err(e) => return Err(map_worker_err(e)),
+            }
         }
         let st = self.worker.status();
         let info = st.info.clone();
@@ -317,6 +321,7 @@ impl Core {
             self.require_network("downloading models")?;
         }
         let level = req.profile.level();
+        let req_profile = req.profile;
         let (explicit, force) = (req.photo_ids.clone(), req.force);
         let refs = self
             .db
@@ -337,11 +342,15 @@ impl Core {
                     None => {
                         let mut st = c.prepare(
                             "SELECT p.id FROM photo p JOIN session_photo sp ON sp.photo_id=p.id AND sp.session_id=?1
-                             WHERE (?3 OR COALESCE(p.analysis_version,0) < ?2)
+                             WHERE (?3 OR COALESCE(p.analysis_version,0) < ?2
+                                    OR (?4 AND EXISTS(SELECT 1 FROM analysis a
+                                                      WHERE a.photo_id=p.id AND a.profile='lite')))
                              ORDER BY COALESCE(p.taken_at, p.mtime), p.id",
                         )?;
+                        // a lite result does not count as `fast`/`standard` analysis
+                        let upgrade = req_profile != Profile::Lite;
                         let v = st
-                            .query_map(rusqlite::params![sid, level, force], |r| r.get(0))?
+                            .query_map(rusqlite::params![sid, level, force, upgrade], |r| r.get(0))?
                             .collect::<rusqlite::Result<Vec<i64>>>()?;
                         v
                     }
@@ -350,7 +359,7 @@ impl Core {
             })
             .await?;
 
-        if !refs.is_empty() {
+        if !refs.is_empty() && req.profile != Profile::Lite {
             self.check_models(req.profile, req.allow_download).await?;
         }
 
@@ -494,7 +503,11 @@ impl Core {
                         }
                     }
                 });
-                let r = self.worker.analyze_batch(&areq, Some(ptx), &cancel).await;
+                let r = if req.profile == Profile::Lite {
+                    self.lite.analyze_batch(&areq, Some(ptx), &cancel).await
+                } else {
+                    self.worker.analyze_batch(&areq, Some(ptx), &cancel).await
+                };
                 let _ = fwd.await;
                 match r {
                     Err(WorkerError::Disconnected)
@@ -822,11 +835,11 @@ impl Core {
     /// Explicit worker steps of `profile` when the settings switch faces off (`None` = the
     /// worker's own profile).
     async fn analysis_steps(&self, profile: Profile) -> Option<Vec<String>> {
-        if self.settings().faces.enabled {
+        if profile == Profile::Lite || self.settings().faces.enabled {
             return None;
         }
         let fallback: &[&str] = match profile {
-            Profile::Fast => &["phash", "quality"],
+            Profile::Lite | Profile::Fast => &["phash", "quality"],
             Profile::Standard => &["phash", "quality", "embed", "aesthetic", "iqa", "scene"],
         };
         let listed = self

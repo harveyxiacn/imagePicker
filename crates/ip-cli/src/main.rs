@@ -62,7 +62,7 @@ enum Command {
     Analyze {
         /// Session id, or a folder to import and analyse.
         target: String,
-        /// `fast` or `standard`.
+        /// `lite` (on-device, no Python), `fast` or `standard`.
         #[arg(long, default_value = "standard")]
         profile: String,
         #[arg(long)]
@@ -773,7 +773,7 @@ async fn main() -> Result<()> {
         } => {
             init_tracing("warn");
             let profile = Profile::parse(&profile)
-                .ok_or_else(|| anyhow::anyhow!("--profile must be fast or standard"))?;
+                .ok_or_else(|| anyhow::anyhow!("--profile must be lite, fast or standard"))?;
             if let Some(d) = models_dir {
                 std::env::set_var("IMAGEPICKER_MODELS_DIR", d);
             }

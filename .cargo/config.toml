@@ -1,0 +1,13 @@
+# Android cross-compilation (see docs/android-build.md).
+#
+# The clang/ar names below are resolved through PATH; `source scripts/android-env.sh` (or
+# `scripts/cargo-android.sh <cargo args>`) puts the NDK's toolchain on PATH and additionally exports
+# CARGO_TARGET_<TRIPLE>_LINKER / CC_<triple> / AR_<triple> with the exact (host-specific) binaries,
+# which take precedence over this file. No absolute user paths are committed.
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android24-clang"
+ar = "llvm-ar"
+
+[target.x86_64-linux-android]
+linker = "x86_64-linux-android24-clang"
+ar = "llvm-ar"
