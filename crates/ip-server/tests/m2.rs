@@ -852,3 +852,89 @@ async fn cancel_and_events_over_websocket() {
 fn server_app(e: &Env) -> Router {
     e.app.clone()
 }
+
+/// `lite` profile over HTTP with a worker that can never run (Android): analysis works,
+/// `/api/system/hardware` says `{worker: unavailable, lite: true}`.
+#[tokio::test]
+async fn lite_profile_over_http_without_a_worker() {
+    let data = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir().unwrap();
+    let core = Core::open(CoreConfig {
+        data_dir: Some(data.path().to_path_buf()),
+        imaging: Arc::new(FakeImaging::new()),
+        thumb_workers: Some(2),
+        worker: Some(Arc::new(ip_worker_client::UnavailableWorker::new(
+            "no worker here",
+        ))),
+        renderer: None,
+        force_cpu: false,
+    })
+    .unwrap();
+    let app = build_router(core.clone(), None);
+    for (n, t) in [("a.jpg", 0), ("b.jpg", 1), ("c.jpg", 5000)] {
+        photo(src.path(), n, t);
+    }
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/import",
+        Some(json!({"path": src.path().to_string_lossy()})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let sid = r.json()["session"]["id"].as_i64().unwrap();
+    core.wait_session_ready(sid, Duration::from_secs(30))
+        .await
+        .unwrap();
+
+    let hw = call(&app, Method::GET, "/api/system/hardware?probe=1", None)
+        .await
+        .json();
+    assert_eq!(hw["worker"]["state"], "unavailable");
+    assert_eq!(hw["lite"], true);
+
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/analysis/run",
+        Some(json!({"session_id": sid, "profile": "lite"})),
+    )
+    .await;
+    assert_eq!(
+        r.status,
+        StatusCode::ACCEPTED,
+        "{}",
+        String::from_utf8_lossy(&r.body)
+    );
+    let mut last = Value::Null;
+    for _ in 0..400 {
+        last = call(
+            &app,
+            Method::GET,
+            &format!("/api/analysis/status?session_id={sid}"),
+            None,
+        )
+        .await
+        .json();
+        if last["state"] != "running" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(last["state"], "done", "{last}");
+    assert_eq!(last["profile"], "lite");
+    assert_eq!(last["done"], 3);
+    // the standard profile still reports the missing worker as an error
+    let r = call(
+        &app,
+        Method::POST,
+        "/api/analysis/run",
+        Some(json!({"session_id": sid, "profile": "standard"})),
+    )
+    .await;
+    assert!(
+        !r.status.is_success(),
+        "{}",
+        String::from_utf8_lossy(&r.body)
+    );
+}

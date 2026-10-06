@@ -4,6 +4,10 @@ use std::path::{Path, PathBuf};
 
 pub const ENV_DATA_DIR: &str = "IMAGEPICKER_DATA_DIR";
 
+/// On Android there is no platform data dir to ask for: the shell (Tauri plugin) passes the app's
+/// private files dir as `CoreConfig::data_dir` / `ServerConfig::data_dir` (or sets
+/// `IMAGEPICKER_DATA_DIR`); [`data_dir_resolvable`] lets callers fail fast otherwise.
+///
 /// Priority: explicit argument > `IMAGEPICKER_DATA_DIR` > platform default
 /// (`%APPDATA%\imagePicker`, `~/Library/Application Support/imagePicker`, `$XDG_DATA_HOME/imagePicker`).
 pub fn resolve_data_dir(explicit: Option<&Path>) -> PathBuf {
@@ -16,6 +20,13 @@ pub fn resolve_data_dir(explicit: Option<&Path>) -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("imagePicker")
+}
+
+/// `false` only on Android when neither an explicit dir nor `IMAGEPICKER_DATA_DIR` is given.
+pub fn data_dir_resolvable(explicit: Option<&Path>) -> bool {
+    !cfg!(target_os = "android")
+        || explicit.is_some()
+        || std::env::var_os(ENV_DATA_DIR).is_some_and(|v| !v.is_empty())
 }
 
 #[derive(Debug, Clone)]

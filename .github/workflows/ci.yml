@@ -27,6 +27,26 @@ jobs:
       - run: cargo clippy --workspace --exclude ip-desktop --all-targets -- -D warnings
       - run: cargo test --workspace --exclude ip-desktop
 
+  # The Rust core must keep cross-compiling for Android (docs/android-build.md). The ubuntu
+  # runner image ships the Android SDK + NDK (ANDROID_NDK_HOME); scripts/android-env.sh wires up
+  # the per-target clang / ar.
+  android:
+    name: Android check (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-linux-android, x86_64-linux-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: bash scripts/cargo-android.sh check -p ip-server -p ip-cli --target ${{ matrix.target }}
+
   web:
     name: Web
     runs-on: ubuntu-latest

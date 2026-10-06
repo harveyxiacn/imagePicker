@@ -154,6 +154,13 @@ pub fn spawn_with_env(
     token: &str,
     env: &[(String, String)],
 ) -> std::io::Result<Child> {
+    if cfg!(target_os = "android") {
+        // no Python worker on phones (see `UnavailableWorker`)
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "the AI worker cannot run on Android",
+        ));
+    }
     let (prog, args) = argv
         .split_first()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty command"))?;
@@ -171,13 +178,15 @@ pub fn spawn_with_env(
     }
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "android")))]
     cmd.process_group(0);
     cmd.spawn()
 }
 
 /// Kills `pid` and all its descendants (the `uv` launcher shim spawns the real Python child).
 pub fn kill_tree(pid: u32) {
+    #[cfg(target_os = "android")]
+    let _ = pid; // no worker process is ever spawned on Android
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -189,7 +198,7 @@ pub fn kill_tree(pid: u32) {
             .creation_flags(CREATE_NO_WINDOW)
             .status();
     }
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "android")))]
     {
         // The worker leads its own process group (see `spawn`).
         let _ = std::process::Command::new("kill")
@@ -215,7 +224,12 @@ pub fn pid_alive(pid: u32) -> bool {
         out.map(|o| String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")))
             .unwrap_or(false)
     }
-    #[cfg(unix)]
+    #[cfg(target_os = "android")]
+    {
+        let _ = pid;
+        false
+    }
+    #[cfg(all(unix, not(target_os = "android")))]
     {
         std::process::Command::new("kill")
             .args(["-0", &pid.to_string()])

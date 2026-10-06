@@ -10,6 +10,7 @@ testutil = []
 
 [dependencies]
 ip-imaging.workspace = true
+ip-lite.workspace = true
 ip-worker-client.workspace = true
 ip-render.workspace = true
 anyhow.workspace = true

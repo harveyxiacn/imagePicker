@@ -26,7 +26,10 @@ pub async fn hardware(
     ApiQuery(p): ApiQuery<HardwareParams>,
 ) -> ApiResult<Json<Value>> {
     let probe = matches!(p.probe.as_deref(), Some("1") | Some("true"));
-    Ok(Json(json!({ "worker": st.core.hardware(probe).await? })))
+    // `lite`: the on-device analysis profile works without a worker (docs/api-contract-m8.md B)
+    Ok(Json(
+        json!({ "worker": st.core.hardware(probe).await?, "lite": true }),
+    ))
 }
 
 pub async fn models(State(st): State<AppState>) -> ApiResult<Json<Value>> {

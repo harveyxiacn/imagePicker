@@ -244,16 +244,29 @@ pub fn migrate_to(conn: &mut Connection, target: usize) -> Result<usize> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? as usize)
 }
 
+/// Memory-related pragmas: desktop maps up to 256 MiB; phones (flash storage, little RAM) use no
+/// mmap, a small page cache and file-backed temp tables.
+pub fn memory_pragmas(mobile: bool) -> &'static str {
+    if mobile {
+        "PRAGMA mmap_size=0;
+         PRAGMA cache_size=-8192;
+         PRAGMA temp_store=FILE;
+         PRAGMA wal_autocheckpoint=500;"
+    } else {
+        "PRAGMA mmap_size=268435456;
+         PRAGMA cache_size=-32768;
+         PRAGMA temp_store=MEMORY;"
+    }
+}
+
 fn configure(conn: &Connection) -> Result<()> {
     conn.busy_timeout(Duration::from_secs(15))?;
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA synchronous=NORMAL;
-         PRAGMA foreign_keys=ON;
-         PRAGMA mmap_size=268435456;
-         PRAGMA cache_size=-32768;
-         PRAGMA temp_store=MEMORY;",
+         PRAGMA foreign_keys=ON;",
     )?;
+    conn.execute_batch(memory_pragmas(cfg!(target_os = "android")))?;
     Ok(())
 }
 
@@ -286,7 +299,8 @@ impl Drop for Guard<'_> {
     }
 }
 
-const POOL_SIZE: usize = 6;
+/// Connections per catalog (fewer on phones: each one holds its own page cache).
+const POOL_SIZE: usize = if cfg!(target_os = "android") { 3 } else { 6 };
 
 impl Db {
     pub fn open(path: &Path) -> Result<Db> {

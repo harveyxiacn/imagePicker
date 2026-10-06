@@ -1,0 +1,13 @@
+[package]
+name = "ip-lite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Dependency-free on-device image analysis (pHash, sharpness, exposure, noise): ports of the AI worker's classic steps"
+
+[dependencies]
+
+[dev-dependencies]
+serde_json.workspace = true
+
+image.workspace = true

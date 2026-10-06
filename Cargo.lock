@@ -2356,6 +2356,7 @@ dependencies = [
  "getrandom 0.4.3",
  "image",
  "ip-imaging",
+ "ip-lite",
  "ip-render",
  "ip-worker-client",
  "rayon",
@@ -2403,6 +2404,14 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "ip-lite"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "serde_json",
 ]
 
 [[package]]

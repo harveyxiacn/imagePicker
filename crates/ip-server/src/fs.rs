@@ -75,7 +75,9 @@ pub async fn get_list(
 ) -> ApiResult<Json<Listing>> {
     let raw = match q.path.filter(|p| !p.trim().is_empty()) {
         Some(p) => p,
+        // no home directory on Android: start in the first shared-storage root
         None => dirs::home_dir()
+            .or_else(|| ip_core::roots::default_roots().into_iter().next())
             .ok_or_else(|| ApiError::bad_request("path is required"))?
             .to_string_lossy()
             .into_owned(),
