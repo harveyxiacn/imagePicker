@@ -73,7 +73,7 @@ pub async fn assistant_suggest(
 // ------------------------------------------------------------------ settings
 
 /// The core settings plus `lan` / `roots` from the security store (never its password hashes).
-fn full_settings(st: &AppState) -> ApiResult<Value> {
+pub(crate) fn full_settings(st: &AppState) -> ApiResult<Value> {
     let mut v = serde_json::to_value(&*st.core.settings())
         .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))?;
     let store = st.auth.store();

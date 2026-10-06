@@ -41,6 +41,9 @@ wgpu = { version = "30", default-features = false, features = ["std", "parking_l
 pollster = "1"
 bytemuck = { version = "1", features = ["derive"] }
 regex = "1"
+# Remote AI client: rustls only (no OpenSSL) so the crate cross-compiles for Android.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "multipart", "json"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [profile.release]
 lto = "thin"

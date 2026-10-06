@@ -19,6 +19,7 @@ pub mod jsonfix;
 pub mod lazy_renderer;
 pub mod model;
 pub mod paths;
+pub mod remote;
 pub mod roots;
 pub mod runtime;
 pub mod settings;
@@ -105,6 +106,8 @@ pub struct Core {
     pub assistant: assistant::AssistantState,
     /// The installable AI runtime (M7).
     pub runtime: runtime::RuntimeManager,
+    /// Remote AI (phone -> home PC), M8.
+    pub remote: remote::RemoteAi,
     pub(crate) xmp: xmp::XmpState,
     pub(crate) evicting: std::sync::atomic::AtomicBool,
     task_seq: AtomicU64,
@@ -152,6 +155,8 @@ impl Core {
                 Arc::new(ManagedWorker::new(wc))
             }
         };
+        let remote = remote::RemoteAi::new(&dirs.root);
+        let worker = remote.wrap(worker);
         let worker: Arc<dyn AiWorker> =
             Arc::new(TimeoutWorker::new(worker, worker_timeouts.clone()));
         let renderer: Arc<dyn ip_render::Renderer> = match cfg.renderer {
@@ -188,6 +193,7 @@ impl Core {
             settings,
             assistant: Default::default(),
             runtime,
+            remote,
             xmp: Default::default(),
             evicting: std::sync::atomic::AtomicBool::new(false),
             task_seq: AtomicU64::new(tasks as u64),

@@ -25,6 +25,7 @@ pub struct AppState {
     pub core: Arc<Core>,
     pub web_dir: Option<PathBuf>,
     pub auth: Arc<crate::auth::AuthState>,
+    pub remote: Arc<crate::remote::RemoteHost>,
 }
 
 /// Resolves a client path inside the allowed roots (403 `forbidden_path` otherwise).

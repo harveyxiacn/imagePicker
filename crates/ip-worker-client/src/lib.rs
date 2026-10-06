@@ -13,6 +13,7 @@ pub mod protocol;
 mod protocol_m4;
 mod protocol_m5;
 mod protocol_m6;
+pub mod remote;
 pub mod timeout;
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,10 @@ pub use protocol::*;
 pub use protocol_m4::*;
 pub use protocol_m5::*;
 pub use protocol_m6::*;
+pub use remote::{
+    normalize_host_url, pair, HostPing, PairError, PairOutcome, RemoteConfig, RemoteWorker,
+    REMOTE_METHODS,
+};
 pub use timeout::{TimeoutHandle, TimeoutWorker, WorkerTimeouts};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

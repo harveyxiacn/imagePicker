@@ -9,6 +9,7 @@ pub mod m4;
 pub mod m5;
 pub mod m6;
 pub mod m7;
+pub mod remote;
 pub mod routes;
 pub mod ws;
 
@@ -111,7 +112,10 @@ pub fn build_router_auth(
     auth: Arc<AuthState>,
 ) -> Router {
     let dev_cors = auth.dev_cors();
+    let remote = remote::RemoteHost::new(&core, auth.remote_opts().clone());
+    let remote_routes = remote::routes(auth.remote_opts());
     let state = AppState {
+        remote,
         core,
         web_dir,
         auth: auth.clone(),
@@ -214,6 +218,7 @@ pub fn build_router_auth(
         .route("/runtime/cancel", post(m7::cancel_runtime))
         .route("/events", get(ws::events))
         .merge(auth::routes())
+        .merge(remote_routes)
         .fallback(routes::api_not_found)
         .method_not_allowed_fallback(routes::method_not_allowed);
     // Same-origin only: without the dev flag the allow-list is empty, so no

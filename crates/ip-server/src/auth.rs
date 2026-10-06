@@ -52,6 +52,8 @@ pub struct ServerOptions {
     pub session_ttl: Duration,
     pub login_max_failures: usize,
     pub login_window: Duration,
+    /// Remote AI host limits (pairing, uploads, result files).
+    pub remote: crate::remote::RemoteOptions,
 }
 
 impl Default for ServerOptions {
@@ -64,6 +66,7 @@ impl Default for ServerOptions {
             session_ttl: SESSION_TTL,
             login_max_failures: LOGIN_MAX_FAILURES,
             login_window: LOGIN_WINDOW,
+            remote: Default::default(),
         }
     }
 }
@@ -78,6 +81,8 @@ fn env_flag(name: &str) -> bool {
 pub enum Role {
     Owner,
     Guest,
+    /// A paired remote-AI device (docs/api-contract-m8.md section C): the remote endpoints only.
+    Device,
 }
 
 impl Role {
@@ -85,8 +90,20 @@ impl Role {
         match self {
             Role::Owner => "owner",
             Role::Guest => "guest",
+            Role::Device => "device",
         }
     }
+}
+
+/// Request extension: the paired device behind a [`Role::Device`] identity.
+#[derive(Debug, Clone)]
+pub struct DeviceCtx(pub ip_core::auth::DeviceInfo);
+
+/// Paths a [`Role::Device`] may call, and which only a device may call.
+pub fn is_device_path(path: &str) -> bool {
+    path == "/api/remote/rpc"
+        || path == "/api/remote/ping"
+        || path.starts_with("/api/remote/files/")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +146,9 @@ pub struct AuthState {
     store: SecurityStore,
     sessions: Mutex<HashMap<[u8; 32], SessionRec>>,
     failures: Mutex<HashMap<IpAddr, VecDeque<Instant>>>,
+    /// Failed `POST /api/remote/pair/complete` attempts per peer (same policy as login).
+    pair_failures: Mutex<HashMap<IpAddr, VecDeque<Instant>>>,
+    pairing: ip_core::auth::PairingStore,
     port: AtomicU16,
 }
 
@@ -144,11 +164,33 @@ impl AuthState {
     pub fn new(core: &Core, opts: ServerOptions) -> Arc<Self> {
         Arc::new(Self {
             store: SecurityStore::open(core.data_dir()),
+            pairing: ip_core::auth::PairingStore::new(opts.remote.pairing_ttl),
             opts,
             sessions: Mutex::new(HashMap::new()),
             failures: Mutex::new(HashMap::new()),
+            pair_failures: Mutex::new(HashMap::new()),
             port: AtomicU16::new(0),
         })
+    }
+
+    pub fn pairing(&self) -> &ip_core::auth::PairingStore {
+        &self.pairing
+    }
+
+    pub fn remote_opts(&self) -> &crate::remote::RemoteOptions {
+        &self.opts.remote
+    }
+
+    pub fn bound_port(&self) -> u16 {
+        self.port.load(Ordering::Relaxed)
+    }
+
+    /// The paired device whose token is in `Authorization: Bearer`.
+    fn device_of(&self, headers: &HeaderMap) -> Option<ip_core::auth::DeviceInfo> {
+        let tok = bearer_of(headers)?;
+        let d = self.store.find_device(tok)?;
+        self.store.touch_device(&d.device_id);
+        Some(d)
     }
 
     pub fn set_port(&self, port: u16) {
@@ -220,13 +262,7 @@ impl AuthState {
 
     fn identify(&self, headers: &HeaderMap, uri: &Uri, peer: Peer) -> Option<Identity> {
         if let Some(tok) = &self.opts.session_token {
-            let bearer = headers
-                .get(header::AUTHORIZATION)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| {
-                    let (scheme, rest) = v.split_once(' ')?;
-                    scheme.eq_ignore_ascii_case("bearer").then(|| rest.trim())
-                });
+            let bearer = bearer_of(headers);
             let query = query_token(uri);
             if bearer.is_some_and(|b| ct_eq(b, tok)) || query.is_some_and(|q| ct_eq(&q, tok)) {
                 return Some(Identity {
@@ -255,8 +291,37 @@ impl AuthState {
     // ---------------------------------------------------------- rate limit
 
     fn retry_after(&self, ip: IpAddr) -> Option<u64> {
+        self.retry_after_in(&self.failures, ip)
+    }
+
+    fn record_failure(&self, ip: IpAddr) {
+        self.record_failure_in(&self.failures, ip)
+    }
+
+    fn clear_failures(&self, ip: IpAddr) {
+        lock(&self.failures).remove(&ip);
+    }
+
+    /// Pairing attempts: seconds until `ip` may try again, if it is locked out.
+    pub fn pair_retry_after(&self, ip: IpAddr) -> Option<u64> {
+        self.retry_after_in(&self.pair_failures, ip)
+    }
+
+    pub fn pair_record_failure(&self, ip: IpAddr) {
+        self.record_failure_in(&self.pair_failures, ip)
+    }
+
+    pub fn pair_clear_failures(&self, ip: IpAddr) {
+        lock(&self.pair_failures).remove(&ip);
+    }
+
+    fn retry_after_in(
+        &self,
+        map: &Mutex<HashMap<IpAddr, VecDeque<Instant>>>,
+        ip: IpAddr,
+    ) -> Option<u64> {
         let now = Instant::now();
-        let mut f = lock(&self.failures);
+        let mut f = lock(map);
         let q = f.get_mut(&ip)?;
         while q
             .front()
@@ -278,18 +343,14 @@ impl AuthState {
         None
     }
 
-    fn record_failure(&self, ip: IpAddr) {
+    fn record_failure_in(&self, map: &Mutex<HashMap<IpAddr, VecDeque<Instant>>>, ip: IpAddr) {
         let now = Instant::now();
-        let mut f = lock(&self.failures);
+        let mut f = lock(map);
         if f.len() > 4096 {
             let w = self.opts.login_window;
             f.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) < w));
         }
         f.entry(ip).or_default().push_back(now);
-    }
-
-    fn clear_failures(&self, ip: IpAddr) {
-        lock(&self.failures).remove(&ip);
     }
 
     // ------------------------------------------------------ path whitelist
@@ -323,6 +384,16 @@ impl AuthState {
 }
 
 // ------------------------------------------------------------------ helpers
+
+pub(crate) fn bearer_of(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| {
+            let (scheme, rest) = v.split_once(' ')?;
+            scheme.eq_ignore_ascii_case("bearer").then(|| rest.trim())
+        })
+}
 
 fn query_token(uri: &Uri) -> Option<String> {
     let q = uri.query()?;
@@ -434,7 +505,8 @@ fn guest_allows(method: &Method, path: &str, query: Option<&str>) -> bool {
         .split('/')
         .filter(|s| !s.is_empty())
         .collect();
-    const DENIED_ROOT: [&str; 15] = [
+    const DENIED_ROOT: [&str; 16] = [
+        "remote",
         "runtime",
         "people",
         "faces",
@@ -537,20 +609,63 @@ pub async fn middleware(State(a): State<Arc<AuthState>>, mut req: Request, next:
         return next.run(req).await;
     }
 
-    let exempt = path == "/api/health" || path == "/api/auth" || path.starts_with("/api/auth/");
+    let exempt = path == "/api/health"
+        || path == "/api/auth"
+        || path.starts_with("/api/auth/")
+        // the pairing code is the credential; the handler rate-limits attempts
+        || path == "/api/remote/pair/complete";
+    let device = if path == "/api/health" {
+        None
+    } else {
+        a.device_of(req.headers())
+    };
     let ident = if path == "/api/health" {
         None
+    } else if device.is_some() {
+        Some(Identity {
+            role: Role::Device,
+            source: Source::Token,
+        })
     } else {
         a.identify(req.headers(), req.uri(), peer)
     };
     if !exempt {
-        let Some(id) = ident else {
-            return unauthorized().into_response();
-        };
-        if id.role == Role::Guest && !guest_allows(req.method(), &path, req.uri().query()) {
-            return forbidden("forbidden", "guests have read-only access to photos")
+        if is_device_path(&path) {
+            // device endpoints: a paired device and nobody else
+            if device.is_none() {
+                let has_bearer = bearer_of(req.headers()).is_some();
+                return match ident {
+                    // an owner / guest is refused outright; an unknown or revoked device token
+                    // and anonymous local access are plain "unauthorized"
+                    Some(id)
+                        if id.source != Source::LocalOpen
+                            && !(has_bearer && id.source != Source::Token) =>
+                    {
+                        forbidden("forbidden", "this endpoint is for paired devices only")
+                            .into_response()
+                    }
+                    _ => unauthorized().into_response(),
+                };
+            }
+        } else {
+            let Some(id) = ident else {
+                return unauthorized().into_response();
+            };
+            if id.role == Role::Device {
+                return forbidden(
+                    "forbidden",
+                    "device tokens only reach the remote AI endpoints",
+                )
                 .into_response();
+            }
+            if id.role == Role::Guest && !guest_allows(req.method(), &path, req.uri().query()) {
+                return forbidden("forbidden", "guests have read-only access to photos")
+                    .into_response();
+            }
         }
+    }
+    if let Some(d) = device {
+        req.extensions_mut().insert(DeviceCtx(d));
     }
     req.extensions_mut().insert(peer);
     req.extensions_mut().insert(MaybeIdentity(ident));
