@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The SPA is served by the embedded HTTP server (127.0.0.1:<ephemeral port>) or by Vite in dev, so it is a remote origin for Tauri.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*/*", "http://localhost:*/*"]
+  },
+  "permissions": ["core:default"]
+}

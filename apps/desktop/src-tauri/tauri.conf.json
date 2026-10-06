@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "imagePicker",
+  "version": "0.1.0",
+  "identifier": "io.github.harveyxiacn.imagepicker",
+  "build": {
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../../../web/dist",
+    "beforeDevCommand": "pnpm --dir ../../web dev",
+    "beforeBuildCommand": "pnpm --dir ../../web install --frozen-lockfile && pnpm --dir ../../web build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "dmg", "appimage", "deb"],
+    "category": "Photography",
+    "shortDescription": "Local-first AI photo culling",
+    "longDescription": "imagePicker: fast, local-first photo culling with AI assistance.",
+    "copyright": "Apache-2.0",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": { "../../../web/dist": "web" },
+    "windows": {
+      "nsis": { "installMode": "currentUser", "languages": ["SimpChinese", "English"] }
+    },
+    "macOS": { "minimumSystemVersion": "11.0" }
+  }
+}

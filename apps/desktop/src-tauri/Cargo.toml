@@ -1,0 +1,25 @@
+[package]
+name = "ip-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "imagePicker desktop shell (Tauri 2)"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+ip-server = { workspace = true }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+getrandom = "0.3"

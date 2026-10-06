@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { previewUrl, thumbUrl } from '@/api/client'
 import type { ColorLabel, Flag, Photo } from '@/api/types'
+import { getPlatform } from '@/platform'
 import { formatBytes, formatDate, formatDims, formatShutter } from '@/lib/format'
 import { AiRatingSlot, ColorDots, FlagButtons, StarRating } from './controls'
 
@@ -27,6 +28,7 @@ function Row({ k, v }: { k: string; v: ReactNode }) {
 export function Inspector({ photo, targetCount, onRate, onFlag, onColor }: Props) {
   const { t, i18n } = useTranslation()
   const [exifOpen, setExifOpen] = useState(true)
+  const reveal = getPlatform().revealInFolder
   const [broken, setBroken] = useState<number | null>(null)
 
   if (!photo) {
@@ -96,7 +98,18 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor }: Props
         {exifOpen && (
           <table className="w-full text-xs">
             <tbody>
-              <Row k={t('exif.path')} v={photo.path} />
+              <Row
+                k={t('exif.path')}
+                v={
+                  reveal ? (
+                    <button className="text-left underline decoration-dotted hover:text-accent" title="Reveal in file manager" onClick={() => void reveal(photo.path)}>
+                      {photo.path}
+                    </button>
+                  ) : (
+                    photo.path
+                  )
+                }
+              />
               <Row k={t('exif.format')} v={photo.format.toUpperCase()} />
               <Row k={t('exif.size')} v={formatBytes(photo.file_size)} />
               <Row k={t('exif.dimensions')} v={formatDims(photo.width, photo.height)} />
