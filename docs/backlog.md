@@ -14,14 +14,13 @@
 
 | 优先级 | 项 | 来源 |
 |---|---|---|
-| P0 | 导出已编辑照片时保留 EXIF / ICC | M3 core |
-| P0 | Worker RPC 超时（卡住的 `mask.generate` 会让预览请求一直挂起） | M3 core |
 | P1 | HEIC/HEIF 缩略图（系统解码器：WIC / ImageIO / libheif） | M1 imaging |
 | P1 | 倾斜检测、构图分 | M2 |
-| P1 | 删除会话时清理已编辑缩略图缓存 | M3 core |
-| P1 | 安装模型后刷新「部分缺失」的人像几何缓存 | M4 core |
 | P1 | RAW 预览在真实相机文件上验证（目前仅合成样本） | M1 imaging |
 | P2 | 以脸搜脸「这是新的人」 | M4 web |
+| P1 | RAW/HEIC 导出只合成 EXIF（未复制原始 EXIF）；XMP/IPTC 丢失；非 sRGB 源未做色彩转换 | M5 core |
+| P2 | 生成任务没有取消接口、没有持久化任务记录 | M5 |
+| P2 | 一键全员最佳总以组内最佳为底片 | M5 core |
 | P2 | 身体形变后的生成式背景补全 | M4 render |
 | P2 | 皮肤蒙版回退方案未扣除眉毛 | M4 render |
 
@@ -37,3 +36,4 @@
 - 网格场景标题 key 重复导致重叠（M2）
 - 前端写死 LUT id → `GET /api/luts`（M3）
 - 内置 LUT 两套来源 → 统一由 ip-render 提供（M3）
+- 导出保留 EXIF + 嵌入 sRGB ICC；Worker 调用超时（504）+ 自动重启；删除会话清理编辑缓存；部分几何在模型安装后刷新；单张人物可被选中；API 浮点噪声统一清理（M5）
