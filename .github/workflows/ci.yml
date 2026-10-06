@@ -30,7 +30,7 @@ jobs:
   # The Rust core must keep cross-compiling for Android (docs/android-build.md). The ubuntu
   # runner image ships the Android SDK + NDK (ANDROID_NDK_HOME); scripts/android-env.sh wires up
   # the per-target clang / ar.
-  android:
+  android-check:
     name: Android check (${{ matrix.target }})
     strategy:
       fail-fast: false
