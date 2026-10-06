@@ -27,6 +27,8 @@ struct Params {
     misc: [f32; 4],
     luts: [[f32; 4]; 4],
     sig: [f32; 4],
+    wrp: [u32; 4],
+    rect: [f32; 4],
 }
 
 struct Device {
@@ -38,6 +40,9 @@ struct Device {
     p_proxy: wgpu::ComputePipeline,
     p_layer_a: wgpu::ComputePipeline,
     p_layer_b: wgpu::ComputePipeline,
+    p_beauty_a: wgpu::ComputePipeline,
+    p_beauty_b: wgpu::ComputePipeline,
+    p_beauty_c: wgpu::ComputePipeline,
     max_binding: u64,
     max_buffer: u64,
     /// GPU work is serialised: buffers are per-call, but this keeps memory pressure bounded.
@@ -216,6 +221,9 @@ impl Device {
             p_proxy: mk(&bgl_main, &sm_render, "proxy_main"),
             p_layer_a: mk(&bgl_layer, &sm_layers, "layer_a"),
             p_layer_b: mk(&bgl_layer, &sm_layers, "layer_b"),
+            p_beauty_a: mk(&bgl_layer, &sm_layers, "beauty_a"),
+            p_beauty_b: mk(&bgl_layer, &sm_layers, "beauty_b"),
+            p_beauty_c: mk(&bgl_layer, &sm_layers, "beauty_c"),
             bgl_main,
             bgl_layer,
             max_binding: limits.max_storage_buffer_binding_size,
@@ -300,13 +308,25 @@ impl Device {
         }
         let ops_buf = self.storage("ops", bytemuck::cast_slice(&ops_f), 16);
         let proxy_px = plan.layer_len() as u64;
-        let layers_bytes = plan.layer_ops.len() as u64 * proxy_px * 16;
+        let layers_bytes = plan.layer_slots as u64 * proxy_px * 16;
         anyhow::ensure!(
             layers_bytes <= self.max_binding,
             "layers exceed storage binding size"
         );
         let layers_buf = self.scratch("layers", layers_bytes, wgpu::BufferUsages::empty());
-        let planes_buf = self.storage("planes", bytemuck::cast_slice(&plan.planes), 16);
+        // Planes = AI/skin planes, feature maps, blemishes, then the warp field.
+        let warp_off = plan.planes.len() as u32;
+        let mut planes_all: Vec<f32> =
+            Vec::with_capacity(plan.planes.len() + plan.warp.as_ref().map_or(0, |w| w.data.len()));
+        planes_all.extend_from_slice(&plan.planes);
+        let (warp_w, warp_h, warp_on) = match &plan.warp {
+            Some(w) => {
+                planes_all.extend_from_slice(&w.data);
+                (w.gw, w.gh, 1)
+            }
+            None => (0, 0, 0),
+        };
+        let planes_buf = self.storage("planes", bytemuck::cast_slice(&planes_all), 16);
         let mut tables = Vec::with_capacity(256 + plan.curves.len());
         tables.extend_from_slice(dec_lut());
         tables.extend_from_slice(&plan.curves);
@@ -334,6 +354,8 @@ impl Device {
                 misc: [plan.sharpen, 0.0, 0.0, 0.0],
                 luts: lut_meta,
                 sig: [sig_hs, sig_cl, sig_d, 0.0],
+                wrp: [warp_off, warp_w, warp_h, warp_on],
+                rect: [0.0; 4],
             }
         };
 
@@ -379,25 +401,49 @@ impl Device {
             let pg = plan.proxy_geo();
             let proxy_buf = self.scratch("proxy", proxy_px * 16, wgpu::BufferUsages::empty());
             let tmp_buf = self.scratch("tmp", proxy_px * 16, wgpu::BufferUsages::empty());
-            for (i, &k) in plan.layer_ops.iter().enumerate() {
+            let lo_buf = self.scratch("lo", proxy_px * 16, wgpu::BufferUsages::empty());
+            for &k in plan.layer_ops.iter() {
+                let rec = &plan.ops[k];
                 let mut p = base(&pg, k as u32);
                 p.row1 = [0, 0, pw, ph];
-                p.row3[1] = (i as u64 * proxy_px) as u32;
+                p.row3[1] = rec[prep::r::LAYER_OFF] as u32;
                 let bg = main_bg(&p, &proxy_buf);
                 dispatch(&mut enc, &self.p_proxy, &bg, pw, ph);
-                let ub = self.uniform(&p);
-                let la = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("layer_a"),
-                    layout: &self.bgl_layer,
-                    entries: &[bind(0, &ub), bind(1, &proxy_buf), bind(2, &tmp_buf)],
-                });
-                dispatch(&mut enc, &self.p_layer_a, &la, pw, ph);
-                let lb = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("layer_b"),
-                    layout: &self.bgl_layer,
-                    entries: &[bind(0, &ub), bind(1, &tmp_buf), bind(2, &layers_buf)],
-                });
-                dispatch(&mut enc, &self.p_layer_b, &lb, pw, ph);
+                let pass = |enc: &mut wgpu::CommandEncoder,
+                            ub: &wgpu::Buffer,
+                            pipe: &wgpu::ComputePipeline,
+                            i: &wgpu::Buffer,
+                            o: &wgpu::Buffer| {
+                    let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("layer"),
+                        layout: &self.bgl_layer,
+                        entries: &[bind(0, ub), bind(1, i), bind(2, o)],
+                    });
+                    dispatch(enc, pipe, &bg, pw, ph);
+                };
+                if rec[prep::r::KIND] == prep::r::KIND_BEAUTY {
+                    use prep::r;
+                    p.sig = [
+                        rec[r::B_SIGLO],
+                        rec[r::B_RAD],
+                        rec[r::B_RANGE],
+                        (rec[r::B_RAD] * 0.5).max(1.0),
+                    ];
+                    p.rect = [
+                        rec[r::B_RECT],
+                        rec[r::B_RECT + 1],
+                        rec[r::B_RECT + 2],
+                        rec[r::B_RECT + 3],
+                    ];
+                    let ub = self.uniform(&p);
+                    pass(&mut enc, &ub, &self.p_beauty_a, &proxy_buf, &tmp_buf);
+                    pass(&mut enc, &ub, &self.p_beauty_b, &tmp_buf, &lo_buf);
+                    pass(&mut enc, &ub, &self.p_beauty_c, &lo_buf, &layers_buf);
+                } else {
+                    let ub = self.uniform(&p);
+                    pass(&mut enc, &ub, &self.p_layer_a, &proxy_buf, &tmp_buf);
+                    pass(&mut enc, &ub, &self.p_layer_b, &tmp_buf, &layers_buf);
+                }
             }
         }
 

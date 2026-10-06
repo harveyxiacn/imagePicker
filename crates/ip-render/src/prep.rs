@@ -4,6 +4,7 @@
 
 use crate::color::{enc_guide, wb_matrix};
 use crate::geom::{self, Geo};
+use crate::portrait::{self, WarpField};
 use crate::*;
 
 /// Floats per op record (16 vec4).
@@ -39,6 +40,39 @@ pub mod r {
     pub const KIND_AI: f32 = 1.0;
     pub const KIND_RADIAL: f32 = 2.0;
     pub const KIND_LINEAR: f32 = 3.0;
+    /// Portrait retouching; the record layout below replaces the adjust fields.
+    pub const KIND_BEAUTY: f32 = 4.0;
+
+    // Beauty record fields (kind == KIND_BEAUTY). AMOUNT/INVERT/M0.. as for AI masks
+    // (the skin plane), LAYER_OFF = first of two layer slots (low-pass, smoothed low band).
+    pub const B_SMOOTH: usize = 4;
+    pub const B_WHITEN: usize = 5;
+    pub const B_EYE: usize = 6;
+    pub const B_TEETH: usize = 7;
+    pub const B_DARK: usize = 8;
+    pub const B_FEAT_OFF: usize = 9;
+    pub const B_FEAT_W: usize = 10;
+    pub const B_FEAT_H: usize = 11;
+    pub const B_BL_OFF: usize = 12;
+    pub const B_BL_N: usize = 13;
+    /// L-space extent of the frame (ow/long, oh/long).
+    pub const B_ASX: usize = 14;
+    pub const B_ASY: usize = 15;
+    /// Blemish ring padding (fraction of the long edge).
+    pub const B_RING: usize = 16;
+    /// Low-pass sigma, bilateral radius and range sigma on the proxy grid.
+    pub const B_SIGLO: usize = 17;
+    pub const B_RAD: usize = 18;
+    pub const B_RANGE: usize = 19;
+    /// Normalised proxy rect x0, y0, x1, y1 outside which no smoothing layer is computed.
+    pub const B_RECT: usize = 20;
+
+    pub const FB_SMOOTH: u32 = 1;
+    pub const FB_WHITEN: u32 = 2;
+    pub const FB_BLEM: u32 = 4;
+    pub const FB_EYE: u32 = 8;
+    pub const FB_TEETH: u32 = 16;
+    pub const FB_DARK: u32 = 32;
 
     pub const F_WB: u32 = 1;
     pub const F_EV: u32 = 2;
@@ -81,6 +115,10 @@ pub struct Plan {
     pub planes: Vec<f32>,
     pub luts: Vec<LutUse>,
     pub sharpen: f32,
+    /// Warp stage: backward displacement field (None = no warp).
+    pub warp: Option<WarpField>,
+    /// Number of proxy-sized layer slots (beauty ops use two).
+    pub layer_slots: usize,
 }
 
 impl Plan {
@@ -92,6 +130,14 @@ impl Plan {
     }
     pub fn layer_len(&self) -> usize {
         (self.proxy.0 * self.proxy.1) as usize
+    }
+    /// Warp displacement at normalised output coordinates (zero without a warp).
+    #[inline]
+    pub fn warp_disp(&self, u: f32, v: f32) -> [f32; 2] {
+        match &self.warp {
+            Some(w) => w.sample(u, v),
+            None => [0.0, 0.0],
+        }
     }
 }
 
@@ -317,31 +363,39 @@ fn adjust_record(a: &Adjust, curves: &mut Vec<f32>) -> [f32; REC] {
 
 // ---------------------------------------------------------------- AI mask planes
 
-fn box_mean(src: &[f32], w: usize, h: usize, rad: usize) -> Vec<f32> {
-    // Separable clipped-window mean via f64 prefix sums.
+pub(crate) fn box_mean(src: &[f32], w: usize, h: usize, rad: usize) -> Vec<f32> {
+    use rayon::prelude::*;
+    // Separable clipped-window mean via f64 prefix sums (rows in parallel).
     let mut tmp = vec![0.0f32; w * h];
-    let mut pre = vec![0.0f64; w.max(h) + 1];
-    for y in 0..h {
+    tmp.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        let mut pre = vec![0.0f64; w + 1];
         for x in 0..w {
             pre[x + 1] = pre[x] + src[y * w + x] as f64;
         }
-        for x in 0..w {
+        for (x, o) in row.iter_mut().enumerate() {
             let lo = x.saturating_sub(rad);
             let hi = (x + rad + 1).min(w);
-            tmp[y * w + x] = ((pre[hi] - pre[lo]) / (hi - lo) as f64) as f32;
+            *o = ((pre[hi] - pre[lo]) / (hi - lo) as f64) as f32;
+        }
+    });
+    // Column prefix sums (row-major, vectorisable), then rows in parallel.
+    let mut pre = vec![0.0f64; (h + 1) * w];
+    for y in 0..h {
+        let (a, b) = pre.split_at_mut((y + 1) * w);
+        let prev = &a[y * w..];
+        for x in 0..w {
+            b[x] = prev[x] + tmp[y * w + x] as f64;
         }
     }
     let mut out = vec![0.0f32; w * h];
-    for x in 0..w {
-        for y in 0..h {
-            pre[y + 1] = pre[y] + tmp[y * w + x] as f64;
+    out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        let lo = y.saturating_sub(rad);
+        let hi = (y + rad + 1).min(h);
+        let n = (hi - lo) as f64;
+        for (x, o) in row.iter_mut().enumerate() {
+            *o = ((pre[hi * w + x] - pre[lo * w + x]) / n) as f32;
         }
-        for y in 0..h {
-            let lo = y.saturating_sub(rad);
-            let hi = (y + rad + 1).min(h);
-            out[y * w + x] = ((pre[hi] - pre[lo]) / (hi - lo) as f64) as f32;
-        }
-    }
+    });
     out
 }
 
@@ -375,7 +429,7 @@ fn guided_planes(p: &[f32], guide: &[f32], w: usize, h: usize) -> Vec<f32> {
 }
 
 /// Sample an 8-bit mask bilinearly at normalised coordinates.
-fn mask_at(m: &Mask, u: f32, v: f32) -> f32 {
+pub(crate) fn mask_at(m: &Mask, u: f32, v: f32) -> f32 {
     let x = u * m.width as f32 - 0.5;
     let y = v * m.height as f32 - 0.5;
     let (x0, y0) = (x.floor(), y.floor());
@@ -391,12 +445,26 @@ fn mask_at(m: &Mask, u: f32, v: f32) -> f32 {
     t * (1.0 - fy) + b * fy
 }
 
+/// Warp displacement in grid pixels at grid pixel `(x, y)`.
+fn grid_disp(warp: Option<&WarpField>, g: &Geo, x: usize, y: usize) -> (f32, f32) {
+    match warp {
+        Some(w) => {
+            let d = w.sample(
+                (x as f32 + 0.5) / g.ow as f32,
+                (y as f32 + 0.5) / g.oh as f32,
+            );
+            (d[0] * g.ow as f32, d[1] * g.oh as f32)
+        }
+        None => (0.0, 0.0),
+    }
+}
+
 struct MaskGrid {
     geo: Geo,
     guide: Vec<f32>,
 }
 
-fn mask_grid(src: &RgbImage, geo: &Geo) -> MaskGrid {
+fn mask_grid(src: &RgbImage, geo: &Geo, warp: Option<&WarpField>) -> MaskGrid {
     use rayon::prelude::*;
     let long = geo.ow.max(geo.oh);
     let ml = long.min(MASK_LONG);
@@ -409,13 +477,19 @@ fn mask_grid(src: &RgbImage, geo: &Geo) -> MaskGrid {
         .enumerate()
         .for_each(|(y, row)| {
             for (x, o) in row.iter_mut().enumerate() {
-                *o = enc_guide(geom::sample(src, &g, x as u32, y as u32));
+                let (dx, dy) = grid_disp(warp, &g, x, y);
+                *o = enc_guide(geom::sample_off(src, &g, x as u32, y as u32, dx, dy));
             }
         });
     MaskGrid { geo: g, guide }
 }
 
-fn build_ai_planes(src: &RgbImage, grid: &MaskGrid, mask: &Mask) -> Vec<f32> {
+fn build_ai_planes(
+    src: &RgbImage,
+    grid: &MaskGrid,
+    mask: &Mask,
+    warp: Option<&WarpField>,
+) -> Vec<f32> {
     let g = &grid.geo;
     let (w, h) = (g.ow as usize, g.oh as usize);
     let mut p = vec![0.0f32; w * h];
@@ -423,7 +497,8 @@ fn build_ai_planes(src: &RgbImage, grid: &MaskGrid, mask: &Mask) -> Vec<f32> {
         use rayon::prelude::*;
         p.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
             for (x, o) in row.iter_mut().enumerate() {
-                let (sx, sy) = g.map(x as f32 + 0.5, y as f32 + 0.5);
+                let (dx, dy) = grid_disp(warp, g, x, y);
+                let (sx, sy) = g.map(x as f32 + 0.5 + dx, y as f32 + 0.5 + dy);
                 *o = mask_at(mask, sx / src.width as f32, sy / src.height as f32);
             }
         });
@@ -481,9 +556,37 @@ pub fn build(req: &RenderRequest<'_>) -> Result<Plan> {
         planes: vec![],
         luts: vec![],
         sharpen: 0.0,
+        warp: None,
+        layer_slots: 0,
     };
     let mut grid: Option<MaskGrid> = None;
     let mut layer_count = 0usize;
+
+    // Portrait geometry is fetched once per render, only when a portrait op can act.
+    let portrait_ops = req.stack.ops.iter().any(|o| match o {
+        Op::Warp(w) => portrait::warp_active(w),
+        Op::Beauty(b) => beauty_active(b),
+        _ => false,
+    });
+    let people = if portrait_ops {
+        req.masks.people()?
+    } else {
+        Vec::new()
+    };
+    if !people.is_empty() {
+        let warps: Vec<&Warp> = req
+            .stack
+            .ops
+            .iter()
+            .filter_map(|o| match o {
+                Op::Warp(w) if portrait::warp_active(w) => Some(w),
+                _ => None,
+            })
+            .collect();
+        if !warps.is_empty() {
+            plan.warp = portrait::build_warp(src, &plan.geo, &warps, &people);
+        }
+    }
 
     for op in &req.stack.ops {
         match op {
@@ -513,8 +616,9 @@ pub fn build(req: &RenderRequest<'_>) -> Result<Plan> {
                         {
                             continue;
                         }
-                        let g = grid.get_or_insert_with(|| mask_grid(src, &plan.geo));
-                        let planes = build_ai_planes(src, g, &mask);
+                        let g = grid
+                            .get_or_insert_with(|| mask_grid(src, &plan.geo, plan.warp.as_ref()));
+                        let planes = build_ai_planes(src, g, &mask, plan.warp.as_ref());
                         rec[r::KIND] = r::KIND_AI;
                         rec[r::M0] = plan.planes.len() as f32;
                         rec[r::M0 + 1] = g.geo.ow as f32;
@@ -561,8 +665,15 @@ pub fn build(req: &RenderRequest<'_>) -> Result<Plan> {
                 }
             }
             Op::OutputSharpen(s) => plan.sharpen = s.amount.clamp(0.0, 100.0),
-            // TODO(M4): beauty and warp are parsed but not rendered yet.
-            Op::Crop(_) | Op::Beauty(_) | Op::Warp(_) | Op::Unknown => {}
+            Op::Beauty(b) => {
+                if !people.is_empty() {
+                    if let Some(rec) = beauty_record(src, &mut plan, &mut grid, b, &people) {
+                        push_op(&mut plan, rec, &mut layer_count);
+                    }
+                }
+            }
+            // Warp is applied as a plan-level field (built above), right after the crop.
+            Op::Crop(_) | Op::Warp(_) | Op::Unknown => {}
         }
     }
     Ok(plan)
@@ -570,10 +681,171 @@ pub fn build(req: &RenderRequest<'_>) -> Result<Plan> {
 
 fn push_op(plan: &mut Plan, mut rec: [f32; REC], layer_count: &mut usize) {
     let flags = rec[r::FLAGS] as u32;
-    if needs_layers(flags) {
+    let slots = if rec[r::KIND] == r::KIND_BEAUTY {
+        if flags & (r::FB_SMOOTH | r::FB_BLEM) != 0 {
+            2
+        } else {
+            0
+        }
+    } else if needs_layers(flags) {
+        1
+    } else {
+        0
+    };
+    if slots > 0 {
         rec[r::LAYER_OFF] = (*layer_count * plan.layer_len()) as f32;
         plan.layer_ops.push(plan.ops.len());
-        *layer_count += 1;
+        *layer_count += slots;
+        plan.layer_slots = *layer_count;
     }
     plan.ops.push(rec);
+}
+
+fn beauty_active(b: &Beauty) -> bool {
+    b.smooth > 0.0
+        || b.whiten > 0.0
+        || b.blemish
+        || b.eye_brighten > 0.0
+        || b.teeth_whiten > 0.0
+        || b.dark_circles > 0.0
+}
+
+/// Resolve a `Beauty` op into an op record (skin plane, feature map, blemish list,
+/// smoothing parameters). `None` when nothing would change (no matching person, no
+/// usable geometry, zero amounts).
+fn beauty_record(
+    src: &RgbImage,
+    plan: &mut Plan,
+    grid: &mut Option<MaskGrid>,
+    b: &Beauty,
+    people: &[PersonGeometry],
+) -> Option<[f32; REC]> {
+    let sel = portrait::select(people, b.person_id);
+    if sel.is_empty() {
+        return None;
+    }
+    let sp = portrait::Space::new(&plan.geo);
+    let k = b.level.beauty_scale();
+    let amt = |v: f32| (v / 100.0).clamp(0.0, 1.0) * k;
+    let (smooth, whiten) = (amt(b.smooth), amt(b.whiten));
+    let (eye, teeth, dark) = (
+        amt(b.eye_brighten),
+        amt(b.teeth_whiten),
+        amt(b.dark_circles),
+    );
+    let mut flags = 0u32;
+    if smooth > 0.0 {
+        flags |= r::FB_SMOOTH;
+    }
+    if whiten > 0.0 {
+        flags |= r::FB_WHITEN;
+    }
+    if b.blemish {
+        flags |= r::FB_BLEM;
+    }
+    if eye > 0.0 {
+        flags |= r::FB_EYE;
+    }
+    if teeth > 0.0 {
+        flags |= r::FB_TEETH;
+    }
+    if dark > 0.0 {
+        flags |= r::FB_DARK;
+    }
+    let mut rec = [0.0f32; REC];
+    rec[r::KIND] = r::KIND_BEAUTY;
+    rec[r::AMOUNT] = 1.0;
+    let ext = sp.ext();
+    rec[r::B_ASX] = ext[0];
+    rec[r::B_ASY] = ext[1];
+
+    // Skin plane (guided upsampling, like AI masks). Without skin only the landmark
+    // features (eyes, teeth) can act.
+    let skin_flags = r::FB_SMOOTH | r::FB_WHITEN | r::FB_BLEM | r::FB_DARK;
+    let mut rect = [0.0f32, 0.0, 1.0, 1.0];
+    if flags & skin_flags != 0 {
+        let g = grid.get_or_insert_with(|| mask_grid(src, &plan.geo, plan.warp.as_ref()));
+        let (gw, gh) = (g.geo.ow as usize, g.geo.oh as usize);
+        let skp = portrait::skin_plane(&sp, plan.warp.as_ref(), &sel, gw, gh);
+        match skp {
+            Some(p) if p.iter().any(|v| *v > 0.02) => {
+                let (mut x0, mut y0, mut x1, mut y1) = (gw, gh, 0usize, 0usize);
+                for y in 0..gh {
+                    for x in 0..gw {
+                        if p[y * gw + x] > 0.02 {
+                            x0 = x0.min(x);
+                            x1 = x1.max(x);
+                            y0 = y0.min(y);
+                            y1 = y1.max(y);
+                        }
+                    }
+                }
+                let pad = 0.05f32;
+                rect = [
+                    ((x0 as f32 / gw as f32) - pad).max(0.0),
+                    ((y0 as f32 / gh as f32) - pad).max(0.0),
+                    (((x1 + 1) as f32 / gw as f32) + pad).min(1.0),
+                    (((y1 + 1) as f32 / gh as f32) + pad).min(1.0),
+                ];
+                let planes = guided_planes(&p, &g.guide, gw, gh);
+                rec[r::M0] = plan.planes.len() as f32;
+                rec[r::M0 + 1] = gw as f32;
+                rec[r::M0 + 2] = gh as f32;
+                plan.planes.extend_from_slice(&planes);
+            }
+            _ => flags &= !skin_flags,
+        }
+    }
+    // Feature map (eyes / teeth / dark circles).
+    if flags & (r::FB_EYE | r::FB_TEETH | r::FB_DARK) != 0 {
+        let fm = portrait::feature_map(
+            &sp,
+            plan.warp.as_ref(),
+            &sel,
+            flags & r::FB_EYE != 0,
+            flags & r::FB_TEETH != 0,
+            flags & r::FB_DARK != 0,
+        );
+        match fm {
+            Some(fm) => {
+                rec[r::B_FEAT_OFF] = plan.planes.len() as f32;
+                rec[r::B_FEAT_W] = fm.w as f32;
+                rec[r::B_FEAT_H] = fm.h as f32;
+                plan.planes.extend_from_slice(&fm.data);
+            }
+            None => flags &= !(r::FB_EYE | r::FB_TEETH | r::FB_DARK),
+        }
+    }
+    if flags & r::FB_BLEM != 0 {
+        let bl = portrait::blemishes(&sp, plan.warp.as_ref(), &sel);
+        if bl.is_empty() {
+            flags &= !r::FB_BLEM;
+        } else {
+            rec[r::B_BL_OFF] = plan.planes.len() as f32;
+            rec[r::B_BL_N] = bl.len() as f32;
+            for e in &bl {
+                plan.planes.extend_from_slice(e);
+            }
+        }
+    }
+    if flags == 0 {
+        return None;
+    }
+    // Frequency-separation parameters on the proxy grid (radius ~ face size).
+    let pl = plan.proxy.0.max(plan.proxy.1) as f32;
+    let fw = portrait::mean_face_width(&sp, &sel);
+    let face_px = if fw > 0.0 { fw * pl } else { 0.15 * pl };
+    let sig = (face_px / 70.0).clamp(0.8, 4.0);
+    rec[r::B_SIGLO] = sig;
+    rec[r::B_RAD] = (2.5 * sig).ceil().clamp(2.0, 8.0);
+    rec[r::B_RANGE] = 0.09;
+    rec[r::B_RING] = 2.2 * sig / pl;
+    rec[r::B_RECT..r::B_RECT + 4].copy_from_slice(&rect);
+    rec[r::FLAGS] = flags as f32;
+    rec[r::B_SMOOTH] = smooth;
+    rec[r::B_WHITEN] = whiten;
+    rec[r::B_EYE] = eye;
+    rec[r::B_TEETH] = teeth;
+    rec[r::B_DARK] = dark;
+    Some(rec)
 }

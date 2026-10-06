@@ -221,7 +221,7 @@ fn adjust(rec: &[f32; prep::REC], rgb_in: [f32; 3], lay: [f32; 4], curves: &[f32
 
 // ---------------------------------------------------------------- masks & layers
 
-fn bilerp_idx(u: f32, n: u32) -> (usize, usize, f32) {
+pub(crate) fn bilerp_idx(u: f32, n: u32) -> (usize, usize, f32) {
     let x = u * n as f32 - 0.5;
     let x0 = x.floor();
     let f = x - x0;
@@ -231,9 +231,15 @@ fn bilerp_idx(u: f32, n: u32) -> (usize, usize, f32) {
 }
 
 fn layer_at(layer: &Layer, proxy: (u32, u32), u: f32, v: f32) -> [f32; 4] {
+    layer_at_base(layer, 0, proxy, u, v)
+}
+
+/// Bilinear layer sample; `base` is the first pixel of the slot (beauty ops own two slots).
+fn layer_at_base(layer: &Layer, base: usize, proxy: (u32, u32), u: f32, v: f32) -> [f32; 4] {
     let (x0, x1, fx) = bilerp_idx(u, proxy.0);
     let (y0, y1, fy) = bilerp_idx(v, proxy.1);
     let w = proxy.0 as usize;
+    let layer = &layer[base..];
     let mut o = [0.0f32; 4];
     for (k, ov) in o.iter_mut().enumerate() {
         let a = layer[y0 * w + x0][k];
@@ -250,7 +256,9 @@ fn layer_at(layer: &Layer, proxy: (u32, u32), u: f32, v: f32) -> [f32; 4] {
 fn mask_value(rec: &[f32; prep::REC], planes: &[f32], u: f32, v: f32, guide: f32) -> f32 {
     let kind = rec[r::KIND];
     let m0 = &rec[r::M0..r::M0 + 5];
-    let m = if kind == r::KIND_AI {
+    let m = if kind == r::KIND_BEAUTY && m0[1] < 1.0 {
+        0.0 // no skin plane: only the landmark features act
+    } else if kind == r::KIND_AI || kind == r::KIND_BEAUTY {
         let (pw, ph) = (m0[1] as u32, m0[2] as u32);
         let off = m0[0] as usize;
         let (x0, x1, fx) = bilerp_idx(u, pw);
@@ -286,6 +294,14 @@ impl Ctx<'_> {
         let mut c = rgb0;
         for k in 0..nops {
             let rec = &self.plan.ops[k];
+            if rec[r::KIND] == r::KIND_BEAUTY {
+                let m = mask_value(rec, &self.plan.planes, u, v, guide);
+                let fl = rec[r::FLAGS] as u32;
+                if m > 0.0 || fl & (r::FB_EYE | r::FB_TEETH) != 0 {
+                    c = self.beauty_px(rec, c, m, u, v, self.layers[k].as_ref());
+                }
+                continue;
+            }
             let global = rec[r::KIND] == r::KIND_GLOBAL;
             let m = if global {
                 1.0
@@ -323,10 +339,17 @@ fn proxy_base(plan: &Plan, src: &RgbImage) -> Vec<[f32; 3]> {
         .enumerate()
         .for_each(|(y, row)| {
             for (x, o) in row.iter_mut().enumerate() {
-                *o = geom::sample(src, &g, x as u32, y as u32);
+                let d = plan.warp_disp((x as f32 + 0.5) / pw as f32, (y as f32 + 0.5) / ph as f32);
+                *o = geom::sample_off(
+                    src,
+                    &g,
+                    x as u32,
+                    y as u32,
+                    d[0] * pw as f32,
+                    d[1] * ph as f32,
+                );
             }
         });
-    let _ = ph;
     out
 }
 
@@ -439,9 +462,297 @@ fn compute_layers(plan: &Plan, src: &RgbImage) -> Vec<Option<Layer>> {
     let base = proxy_base(plan, src);
     for &k in &plan.layer_ops {
         let img = render_proxy(plan, &base, &layers, k);
-        layers[k] = Some(layers_from(&img, plan.proxy));
+        layers[k] = Some(if plan.ops[k][r::KIND] == r::KIND_BEAUTY {
+            beauty_layers(&img, plan.proxy, &plan.ops[k])
+        } else {
+            layers_from(&img, plan.proxy)
+        });
     }
     layers
+}
+
+// ---------------------------------------------------------------- beauty
+
+#[inline]
+fn enc3(c: [f32; 3]) -> [f32; 3] {
+    [srgb_enc(c[0]), srgb_enc(c[1]), srgb_enc(c[2])]
+}
+
+#[inline]
+fn dec3(e: [f32; 3]) -> [f32; 3] {
+    [srgb_dec(e[0]), srgb_dec(e[1]), srgb_dec(e[2])]
+}
+
+/// Bilinear 4-channel sample of a feature map stored in the planes.
+fn feat_at(planes: &[f32], off: usize, fw: u32, fh: u32, u: f32, v: f32) -> [f32; 4] {
+    let (x0, x1, fx) = bilerp_idx(u, fw);
+    let (y0, y1, fy) = bilerp_idx(v, fh);
+    let w = fw as usize;
+    let mut o = [0.0f32; 4];
+    for (k, ov) in o.iter_mut().enumerate() {
+        let at = |x: usize, y: usize| planes[off + (y * w + x) * 4 + k];
+        let t = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * fx;
+        let b = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * fx;
+        *ov = t + (b - t) * fy;
+    }
+    o
+}
+
+const S: f32 = std::f32::consts::FRAC_1_SQRT_2;
+const RING: [[f32; 2]; 8] = [
+    [1.0, 0.0],
+    [S, S],
+    [0.0, 1.0],
+    [-S, S],
+    [-1.0, 0.0],
+    [-S, -S],
+    [0.0, -1.0],
+    [S, -S],
+];
+const TAU: f32 = std::f32::consts::TAU;
+/// OKLab hue (radians) of a natural skin tone (50 degrees).
+const SKIN_TARGET_HUE: f32 = 0.872_664_6;
+
+impl Ctx<'_> {
+    /// Portrait retouching of one pixel. `c` is linear; `m` the skin weight (0 when the
+    /// op has no skin plane). Port of `beauty_px` in render.wgsl.
+    fn beauty_px(
+        &self,
+        rec: &[f32; prep::REC],
+        c: [f32; 3],
+        m: f32,
+        u: f32,
+        v: f32,
+        layer: Option<&Layer>,
+    ) -> [f32; 3] {
+        let fl = rec[r::FLAGS] as u32;
+        let planes = &self.plan.planes;
+        let proxy = self.plan.proxy;
+        let px = self.plan.layer_len();
+        let mut out = c;
+        let skin_f = r::FB_SMOOTH | r::FB_WHITEN | r::FB_BLEM | r::FB_DARK;
+        let f = if (fl & r::FB_DARK != 0 && m > 0.0) || fl & (r::FB_EYE | r::FB_TEETH) != 0 {
+            feat_at(
+                planes,
+                rec[r::B_FEAT_OFF] as usize,
+                rec[r::B_FEAT_W] as u32,
+                rec[r::B_FEAT_H] as u32,
+                u,
+                v,
+            )
+        } else {
+            [0.0; 4]
+        };
+        if fl & skin_f != 0 && m > 0.0 {
+            let mut e = enc3(c);
+            let mut lin = c;
+            if fl & (r::FB_SMOOTH | r::FB_BLEM) != 0 {
+                let l = layer.expect("beauty layer");
+                let a = layer_at_base(l, 0, proxy, u, v);
+                let b = layer_at_base(l, px, proxy, u, v);
+                let lo = [a[0], a[1], a[2]];
+                let ls = [b[0], b[1], b[2]];
+                if fl & r::FB_BLEM != 0 {
+                    let n = rec[r::B_BL_N] as usize;
+                    let off = rec[r::B_BL_OFF] as usize;
+                    let (asx, asy) = (rec[r::B_ASX], rec[r::B_ASY]);
+                    for j in 0..n {
+                        let bl = &planes[off + j * 4..off + j * 4 + 3];
+                        let (dx, dy) = ((u - bl[0]) * asx, (v - bl[1]) * asy);
+                        let d2 = dx * dx + dy * dy;
+                        let rmax = bl[2] * 1.15;
+                        if d2 >= rmax * rmax {
+                            continue;
+                        }
+                        let w = 1.0 - smoothstep(0.8 * bl[2], rmax, d2.sqrt());
+                        let rr = bl[2] * 1.3 + rec[r::B_RING];
+                        let mut acc = [0.0f32; 3];
+                        for rg in &RING {
+                            let s = layer_at_base(
+                                l,
+                                0,
+                                proxy,
+                                bl[0] + rg[0] * rr / asx,
+                                bl[1] + rg[1] * rr / asy,
+                            );
+                            acc[0] += s[0];
+                            acc[1] += s[1];
+                            acc[2] += s[2];
+                        }
+                        for k in 0..3 {
+                            let fill = acc[k] * 0.125;
+                            let h = (e[k] - lo[k]).clamp(-0.015, 0.015);
+                            e[k] += (fill + 0.25 * h - e[k]) * w;
+                        }
+                    }
+                }
+                if fl & r::FB_SMOOTH != 0 {
+                    let s = rec[r::B_SMOOTH];
+                    let tex = 1.0 - 0.5 * s;
+                    for k in 0..3 {
+                        e[k] = lo[k] + s * (ls[k] - lo[k]) + (e[k] - lo[k]) * tex;
+                    }
+                }
+                lin = dec3(e);
+            }
+            if fl & (r::FB_WHITEN | r::FB_DARK) != 0 {
+                let mut lab = to_oklab(lin);
+                if fl & r::FB_WHITEN != 0 {
+                    let a = rec[r::B_WHITEN];
+                    let hp = 1.0 - smoothstep(0.80, 0.97, lab[0]);
+                    lab[0] += 0.09 * a * hp;
+                    let mut chroma = lab[1].hypot(lab[2]);
+                    if chroma > 1e-5 {
+                        let mut hue = lab[2].atan2(lab[1]);
+                        let dh = SKIN_TARGET_HUE - hue;
+                        let dh = dh - TAU * ((dh + std::f32::consts::PI) / TAU).floor();
+                        hue += dh.clamp(-0.12 * a, 0.12 * a);
+                        chroma *= 1.0 - 0.12 * a;
+                        lab[1] = chroma * hue.cos();
+                        lab[2] = chroma * hue.sin();
+                    }
+                }
+                if fl & r::FB_DARK != 0 {
+                    let w = rec[r::B_DARK] * f[3];
+                    let hp = 1.0 - smoothstep(0.80, 0.97, lab[0]);
+                    lab[0] += 0.07 * w * hp;
+                    lab[1] *= 1.0 - 0.35 * w;
+                    lab[2] = lab[2] * (1.0 - 0.35 * w) + 0.018 * w;
+                }
+                lin = from_oklab(lab);
+            }
+            let lin = [
+                lin[0].clamp(0.0, 1.0),
+                lin[1].clamp(0.0, 1.0),
+                lin[2].clamp(0.0, 1.0),
+            ];
+            out = [
+                c[0] + (lin[0] - c[0]) * m,
+                c[1] + (lin[1] - c[1]) * m,
+                c[2] + (lin[2] - c[2]) * m,
+            ];
+        }
+        if fl & (r::FB_EYE | r::FB_TEETH) != 0 && (f[0] > 0.0 || f[1] > 0.0 || f[2] > 0.0) {
+            let mut lab = to_oklab(out);
+            let hp = 1.0 - smoothstep(0.90, 1.02, lab[0]);
+            if fl & r::FB_EYE != 0 {
+                let a = rec[r::B_EYE];
+                let (wx, wy) = (f[0] * a, f[1] * a);
+                lab[0] += (0.10 * wx + 0.05 * wy) * hp;
+                let cs = 1.0 - 0.3 * wx + 0.15 * wy;
+                lab[1] *= cs;
+                lab[2] *= cs;
+            }
+            if fl & r::FB_TEETH != 0 {
+                let w = f[2] * rec[r::B_TEETH];
+                lab[0] += 0.08 * w * hp;
+                lab[1] *= 1.0 - 0.25 * w;
+                lab[2] *= 1.0 - 0.6 * w;
+            }
+            let o = from_oklab(lab);
+            out = [
+                o[0].clamp(0.0, 1.0),
+                o[1].clamp(0.0, 1.0),
+                o[2].clamp(0.0, 1.0),
+            ];
+        }
+        out
+    }
+}
+
+/// Frequency-separation layers of a beauty op on the proxy grid (two slots, rgb in
+/// sRGB-encoded space): slot 0 = Gaussian low-pass `Lo` (sigma ~ face size), slot 1 = the
+/// edge-aware (bilateral) smoothed low band `Ls`, computed inside the op's rect only.
+fn beauty_layers(img: &[[f32; 3]], proxy: (u32, u32), rec: &[f32; prep::REC]) -> Layer {
+    let (w, h) = (proxy.0 as usize, proxy.1 as usize);
+    let sig = rec[r::B_SIGLO];
+    let rad = rec[r::B_RAD] as i32;
+    let sr = rec[r::B_RANGE];
+    let ss_ = (rad as f32 * 0.5).max(1.0);
+    let rect = &rec[r::B_RECT..r::B_RECT + 4];
+    let (x0, x1) = (
+        ((rect[0] * w as f32).floor() as usize).min(w),
+        ((rect[2] * w as f32).ceil() as usize).min(w),
+    );
+    let (y0, y1) = (
+        ((rect[1] * h as f32).floor() as usize).min(h),
+        ((rect[3] * h as f32).ceil() as usize).min(h),
+    );
+    let e: Vec<[f32; 3]> = img.iter().map(|&c| enc3(c)).collect();
+    let r_g = (3.0 * sig).ceil() as i32;
+    let wt: Vec<f32> = (-r_g..=r_g)
+        .map(|d| (-(d * d) as f32 / (2.0 * sig * sig)).exp())
+        .collect();
+    let mut tmp = vec![[0.0f32; 3]; w * h];
+    tmp.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        for (x, o) in row.iter_mut().enumerate() {
+            let (mut acc, mut ws) = ([0.0f32; 3], 0.0f32);
+            for (k, &g) in wt.iter().enumerate() {
+                let xi = (x as i32 + k as i32 - r_g).clamp(0, w as i32 - 1) as usize;
+                let c = e[y * w + xi];
+                acc[0] += g * c[0];
+                acc[1] += g * c[1];
+                acc[2] += g * c[2];
+                ws += g;
+            }
+            *o = [acc[0] / ws, acc[1] / ws, acc[2] / ws];
+        }
+    });
+    let mut lo = vec![[0.0f32; 3]; w * h];
+    lo.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        for (x, o) in row.iter_mut().enumerate() {
+            let (mut acc, mut ws) = ([0.0f32; 3], 0.0f32);
+            for (k, &g) in wt.iter().enumerate() {
+                let yi = (y as i32 + k as i32 - r_g).clamp(0, h as i32 - 1) as usize;
+                let c = tmp[yi * w + x];
+                acc[0] += g * c[0];
+                acc[1] += g * c[1];
+                acc[2] += g * c[2];
+                ws += g;
+            }
+            *o = [acc[0] / ws, acc[1] / ws, acc[2] / ws];
+        }
+    });
+    let mut out = vec![[0.0f32; 4]; 2 * w * h];
+    let (a, b) = out.split_at_mut(w * h);
+    b.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        for (x, o) in row.iter_mut().enumerate() {
+            let c = lo[y * w + x];
+            if x < x0 || x >= x1 || y < y0 || y >= y1 {
+                *o = [c[0], c[1], c[2], 0.0];
+                continue;
+            }
+            let (mut acc, mut ws) = ([0.0f32; 3], 0.0f32);
+            for dy in -rad..=rad {
+                let yi = y as i32 + dy;
+                if yi < 0 || yi >= h as i32 {
+                    continue;
+                }
+                for dx in -rad..=rad {
+                    let xi = x as i32 + dx;
+                    if xi < 0 || xi >= w as i32 {
+                        continue;
+                    }
+                    let n = lo[yi as usize * w + xi as usize];
+                    let d2 = (n[0] - c[0]).powi(2) + (n[1] - c[1]).powi(2) + (n[2] - c[2]).powi(2);
+                    let wgt = (-((dx * dx + dy * dy) as f32) / (2.0 * ss_ * ss_)).exp()
+                        * (-d2 / (2.0 * sr * sr)).exp();
+                    acc[0] += wgt * n[0];
+                    acc[1] += wgt * n[1];
+                    acc[2] += wgt * n[2];
+                    ws += wgt;
+                }
+            }
+            *o = [acc[0] / ws, acc[1] / ws, acc[2] / ws, 0.0];
+        }
+    });
+    a.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        for (x, o) in row.iter_mut().enumerate() {
+            let c = lo[y * w + x];
+            *o = [c[0], c[1], c[2], 0.0];
+        }
+    });
+    out
 }
 
 // ---------------------------------------------------------------- LUT, sharpen, output
@@ -523,8 +834,16 @@ pub fn render_plan(plan: &Plan, src: &RgbImage) -> RgbImage {
     enc.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
         let v = (y as f32 + 0.5) / oh as f32;
         for (x, o) in row.iter_mut().enumerate() {
-            let c0 = geom::sample(src, &g, x as u32, y as u32);
             let u = (x as f32 + 0.5) / ow as f32;
+            let d = plan.warp_disp(u, v);
+            let c0 = geom::sample_off(
+                src,
+                &g,
+                x as u32,
+                y as u32,
+                d[0] * ow as f32,
+                d[1] * oh as f32,
+            );
             let c = ctx.ops_px(c0, u, v, nops);
             *o = finalize(plan, c);
         }

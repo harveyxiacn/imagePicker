@@ -10,7 +10,9 @@ struct Params {
     row3: vec4<u32>,   // nluts, layer_off (vec4 units), mode, _
     misc: vec4<f32>,   // sharpen, _, _, _
     luts: array<vec4<f32>, 4>, // offset (vec4 units), size, amount, _
-    sig: vec4<f32>,    // layer sigmas (hs, cl, d)
+    sig: vec4<f32>,    // layer sigmas (hs, cl, d) | beauty: sigma_lo, radius, range sigma, spatial sigma
+    wrp: vec4<u32>,    // warp field: planes offset, grid w, grid h, enabled
+    rect: vec4<f32>,   // beauty layer rect (normalised x0, y0, x1, y1)
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -138,9 +140,9 @@ fn geo_map(fx: f32, fy: f32) -> vec2<f32> {
     );
 }
 
-fn geo_sample(ox: u32, oy: u32) -> vec3<f32> {
-    let fx = f32(ox) + 0.5;
-    let fy = f32(oy) + 0.5;
+fn geo_sample(ox: u32, oy: u32, off: vec2<f32>) -> vec3<f32> {
+    let fx = f32(ox) + 0.5 + off.x;
+    let fy = f32(oy) + 0.5 + off.y;
     let n = P.row2.x;
     if n == 1u {
         let s = geo_map(fx, fy);
@@ -192,10 +194,40 @@ fn layer_at(off: u32, u: f32, v: f32) -> vec4<f32> {
     return t + (bt - t) * fy;
 }
 
+// Backward warp displacement (normalised output units) at (u, v).
+fn warp_at(u: f32, v: f32) -> vec2<f32> {
+    let off = P.wrp.x;
+    let gw = P.wrp.y;
+    let gh = P.wrp.z;
+    let x = u * f32(gw) - 0.5;
+    let y = v * f32(gh) - 0.5;
+    let x0 = floor(x);
+    let y0 = floor(y);
+    let fx = x - x0;
+    let fy = y - y0;
+    let xa = u32(clamp(i32(x0), 0, i32(gw) - 1));
+    let xb = u32(clamp(i32(x0) + 1, 0, i32(gw) - 1));
+    let ya = u32(clamp(i32(y0), 0, i32(gh) - 1));
+    let yb = u32(clamp(i32(y0) + 1, 0, i32(gh) - 1));
+    var o = vec2<f32>(0.0);
+    for (var c = 0u; c < 2u; c = c + 1u) {
+        let p00 = planes[off + (ya * gw + xa) * 2u + c];
+        let p10 = planes[off + (ya * gw + xb) * 2u + c];
+        let p01 = planes[off + (yb * gw + xa) * 2u + c];
+        let p11 = planes[off + (yb * gw + xb) * 2u + c];
+        let t = p00 + (p10 - p00) * fx;
+        let b = p01 + (p11 - p01) * fx;
+        o[c] = t + (b - t) * fy;
+    }
+    return o;
+}
+
 fn mask_value(k: u32, u: f32, v: f32, guide: f32) -> f32 {
     let kind = R(k, 0u);
     var m: f32;
-    if kind == 1.0 {
+    if kind == 4.0 && R(k, 29u) < 1.0 {
+        m = 0.0;
+    } else if kind == 1.0 || kind == 4.0 {
         let off = u32(R(k, 28u));
         let pw = u32(R(k, 29u));
         let ph = u32(R(k, 30u));
@@ -395,10 +427,166 @@ fn adjust(k: u32, rgb_in: vec3<f32>, lay: vec4<f32>) -> vec3<f32> {
     return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+// ------------------------------------------------------------------ beauty
+
+var<private> RING: array<vec2<f32>, 8> = array<vec2<f32>, 8>(
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(0.7071068, 0.7071068),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(-0.7071068, 0.7071068),
+    vec2<f32>(-1.0, 0.0),
+    vec2<f32>(-0.7071068, -0.7071068),
+    vec2<f32>(0.0, -1.0),
+    vec2<f32>(0.7071068, -0.7071068),
+);
+const TAU: f32 = 6.283185307179586;
+const SKIN_TARGET_HUE: f32 = 0.8726646;
+
+fn dec3(e: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(dec1(e.x), dec1(e.y), dec1(e.z));
+}
+
+fn feat_at(off: u32, fw: u32, fh: u32, u: f32, v: f32) -> vec4<f32> {
+    let x = u * f32(fw) - 0.5;
+    let y = v * f32(fh) - 0.5;
+    let x0 = floor(x);
+    let y0 = floor(y);
+    let fx = x - x0;
+    let fy = y - y0;
+    let xa = u32(clamp(i32(x0), 0, i32(fw) - 1));
+    let xb = u32(clamp(i32(x0) + 1, 0, i32(fw) - 1));
+    let ya = u32(clamp(i32(y0), 0, i32(fh) - 1));
+    let yb = u32(clamp(i32(y0) + 1, 0, i32(fh) - 1));
+    var o = vec4<f32>(0.0);
+    for (var c = 0u; c < 4u; c = c + 1u) {
+        let p00 = planes[off + (ya * fw + xa) * 4u + c];
+        let p10 = planes[off + (ya * fw + xb) * 4u + c];
+        let p01 = planes[off + (yb * fw + xa) * 4u + c];
+        let p11 = planes[off + (yb * fw + xb) * 4u + c];
+        let t = p00 + (p10 - p00) * fx;
+        let b = p01 + (p11 - p01) * fx;
+        o[c] = t + (b - t) * fy;
+    }
+    return o;
+}
+
+// Port of `Ctx::beauty_px` in cpu.rs.
+fn beauty_px(k: u32, c: vec3<f32>, m: f32, u: f32, v: f32) -> vec3<f32> {
+    let fl = u32(R(k, 1u));
+    let px = P.row2.z * P.row2.w;
+    let loff = u32(R(k, 27u));
+    var out = c;
+    var f = vec4<f32>(0.0);
+    if ((fl & 32u) != 0u && m > 0.0) || (fl & 24u) != 0u {
+        f = feat_at(u32(R(k, 9u)), u32(R(k, 10u)), u32(R(k, 11u)), u, v);
+    }
+    if (fl & 39u) != 0u && m > 0.0 {
+        var e = enc3(c);
+        var lin = c;
+        if (fl & 5u) != 0u {
+            let a = layer_at(loff, u, v);
+            let b = layer_at(loff + px, u, v);
+            let lo = a.xyz;
+            let ls = b.xyz;
+            if (fl & 4u) != 0u {
+                let n = u32(R(k, 13u));
+                let off = u32(R(k, 12u));
+                let asx = R(k, 14u);
+                let asy = R(k, 15u);
+                for (var j = 0u; j < n; j = j + 1u) {
+                    let bi = off + j * 4u;
+                    let bu = planes[bi];
+                    let bv = planes[bi + 1u];
+                    let rn = planes[bi + 2u];
+                    let dx = (u - bu) * asx;
+                    let dy = (v - bv) * asy;
+                    let d2 = dx * dx + dy * dy;
+                    let rmax = rn * 1.15;
+                    if d2 >= rmax * rmax {
+                        continue;
+                    }
+                    let w = 1.0 - ss(0.8 * rn, rmax, sqrt(d2));
+                    let rr = rn * 1.3 + R(k, 16u);
+                    var acc = vec3<f32>(0.0);
+                    for (var q = 0u; q < 8u; q = q + 1u) {
+                        let rg = RING[q];
+                        acc = acc + layer_at(loff, bu + rg.x * rr / asx, bv + rg.y * rr / asy).xyz;
+                    }
+                    let fill = acc * 0.125;
+                    let h = clamp(e - lo, vec3<f32>(-0.015), vec3<f32>(0.015));
+                    e = e + (fill + 0.25 * h - e) * w;
+                }
+            }
+            if (fl & 1u) != 0u {
+                let s = R(k, 4u);
+                let tex = 1.0 - 0.5 * s;
+                e = lo + s * (ls - lo) + (e - lo) * tex;
+            }
+            lin = dec3(e);
+        }
+        if (fl & 34u) != 0u {
+            var lab = to_oklab(lin);
+            if (fl & 2u) != 0u {
+                let a = R(k, 5u);
+                let hp = 1.0 - ss(0.80, 0.97, lab.x);
+                lab.x = lab.x + 0.09 * a * hp;
+                var chroma = length(vec2<f32>(lab.y, lab.z));
+                if chroma > 1e-5 {
+                    var hue = atan2(lab.z, lab.y);
+                    var dh = SKIN_TARGET_HUE - hue;
+                    dh = dh - TAU * floor((dh + PI) / TAU);
+                    hue = hue + clamp(dh, -0.12 * a, 0.12 * a);
+                    chroma = chroma * (1.0 - 0.12 * a);
+                    lab.y = chroma * cos(hue);
+                    lab.z = chroma * sin(hue);
+                }
+            }
+            if (fl & 32u) != 0u {
+                let w = R(k, 8u) * f.w;
+                let hp = 1.0 - ss(0.80, 0.97, lab.x);
+                lab.x = lab.x + 0.07 * w * hp;
+                lab.y = lab.y * (1.0 - 0.35 * w);
+                lab.z = lab.z * (1.0 - 0.35 * w) + 0.018 * w;
+            }
+            lin = from_oklab(lab);
+        }
+        lin = clamp(lin, vec3<f32>(0.0), vec3<f32>(1.0));
+        out = c + (lin - c) * m;
+    }
+    if (fl & 24u) != 0u && (f.x > 0.0 || f.y > 0.0 || f.z > 0.0) {
+        var lab = to_oklab(out);
+        let hp = 1.0 - ss(0.90, 1.02, lab.x);
+        if (fl & 8u) != 0u {
+            let a = R(k, 6u);
+            let wx = f.x * a;
+            let wy = f.y * a;
+            lab.x = lab.x + (0.10 * wx + 0.05 * wy) * hp;
+            let cs = 1.0 - 0.3 * wx + 0.15 * wy;
+            lab.y = lab.y * cs;
+            lab.z = lab.z * cs;
+        }
+        if (fl & 16u) != 0u {
+            let w = f.z * R(k, 7u);
+            lab.x = lab.x + 0.08 * w * hp;
+            lab.y = lab.y * (1.0 - 0.25 * w);
+            lab.z = lab.z * (1.0 - 0.6 * w);
+        }
+        out = clamp(from_oklab(lab), vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    return out;
+}
+
 fn eval_ops(rgb0: vec3<f32>, u: f32, v: f32, nops: u32) -> vec3<f32> {
     let guide = enc1(lum(rgb0));
     var c = rgb0;
     for (var k = 0u; k < nops; k = k + 1u) {
+        if R(k, 0u) == 4.0 {
+            let mb = mask_value(k, u, v, guide);
+            if mb > 0.0 || (u32(R(k, 1u)) & 24u) != 0u {
+                c = beauty_px(k, c, mb, u, v);
+            }
+            continue;
+        }
         let global = R(k, 0u) == 0.0;
         var m = 1.0;
         if !global {
@@ -451,9 +639,13 @@ fn lut_apply(off: u32, n: u32, e: vec3<f32>) -> vec3<f32> {
 
 // Linear pixel after ops at a grid position.
 fn lin_px(ox: u32, oy: u32, nops: u32) -> vec3<f32> {
-    let c0 = geo_sample(ox, oy);
     let u = (f32(ox) + 0.5) / f32(P.row0.z);
     let v = (f32(oy) + 0.5) / f32(P.row0.w);
+    var d = vec2<f32>(0.0);
+    if P.wrp.w != 0u {
+        d = warp_at(u, v);
+    }
+    let c0 = geo_sample(ox, oy, vec2<f32>(d.x * f32(P.row0.z), d.y * f32(P.row0.w)));
     return eval_ops(c0, u, v, nops);
 }
 

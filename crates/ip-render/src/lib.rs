@@ -488,6 +488,7 @@ mod cpu;
 mod cube;
 mod geom;
 mod gpu;
+mod portrait;
 mod prep;
 mod presets;
 /// Synthetic images and helpers for tests/benchmarks.
