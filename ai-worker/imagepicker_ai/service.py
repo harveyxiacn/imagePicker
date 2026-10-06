@@ -13,7 +13,10 @@ from typing import Any
 from . import PROTOCOL_VERSION, __version__
 from . import hw as hwmod
 from .beauty import BeautyPreparer
+from .besttake import BestTake
+from .enhance import Enhancer
 from .errors import DownloadFailed, InvalidParams, RpcError
+from .inpaint import Inpainter
 from .masks import TARGETS as MASK_TARGETS
 from .masks import MaskGenerator
 from .models.download import Cancelled
@@ -22,6 +25,7 @@ from .models.registry import Registry
 from .paths import resolve_models_dir
 from .pipeline import Analyzer
 from .rpc import Ctx, RpcServer
+from .runtime import GenRuntime
 from .steps import PROFILES, STEPS
 from .steps.face_search import faces_embed
 
@@ -46,6 +50,10 @@ class WorkerService:
         self.analyzer = Analyzer(self.manager, self.hw, decode_workers=decode_workers)
         self.masks = MaskGenerator(self.manager, self.hw)
         self.beauty = BeautyPreparer(self.masks)
+        self.gen = GenRuntime(self.manager, self.hw)
+        self.besttake = BestTake(self.masks)
+        self.inpaint = Inpainter(self.gen)
+        self.enhance = Enhancer(self.gen, self.masks)
         self.io_pool = ThreadPoolExecutor(2, thread_name_prefix="io")
         self.idle_unload_s = idle_unload_s
         self.started_at = time.time()
@@ -66,6 +74,9 @@ class WorkerService:
             "mask.generate": self.mask_generate,
             "beauty.prepare": self.beauty_prepare,
             "faces.embed": self.faces_embed,
+            "besttake.compose": self.besttake_compose,
+            "inpaint.run": self.inpaint_run,
+            "enhance.run": self.enhance_run,
         }
 
     # ------------------------------------------------------------------ lifecycle
@@ -81,6 +92,9 @@ class WorkerService:
         await self.server.stop()
         self.analyzer.shutdown()
         self.beauty.shutdown()
+        self.besttake.shutdown()
+        self.enhance.shutdown()
+        self.gen.shutdown()
         self.masks.shutdown()
         self.manager.unload()
         self.io_pool.shutdown(wait=False, cancel_futures=True)
@@ -137,6 +151,14 @@ class WorkerService:
             "profiles": profiles,
             # what `models.ensure` must fetch on this machine for each mask target
             "beauty_models": self.beauty.required_models(),
+            # M5: what `models.ensure` must fetch for each generative method on this machine
+            "besttake_models": self.besttake.all_models(),
+            "inpaint_models": {m: self.inpaint.required_models(m) for m in ("lama", "sdxl")},
+            "enhance_models": {
+                "denoise": self.enhance.required_models("denoise"),
+                "face_restore": self.enhance.required_models("face_restore"),
+                "upscale": {str(sc): self.enhance.required_models("upscale", sc) for sc in (2, 4)},
+            },
             "mask_models": {
                 t: self.masks.required_models(t) + self.masks.optional_models(t)
                 for t in MASK_TARGETS
@@ -198,6 +220,15 @@ class WorkerService:
 
     async def beauty_prepare(self, params: Any, ctx: Ctx) -> dict[str, Any]:
         return await self.beauty.prepare(params, lambda p: ctx.progress(**p))
+
+    async def besttake_compose(self, params: Any, ctx: Ctx) -> dict[str, Any]:
+        return await self.besttake.compose(params, lambda p: ctx.progress(**p))
+
+    async def inpaint_run(self, params: Any, ctx: Ctx) -> dict[str, Any]:
+        return await self.inpaint.run(params, lambda p: ctx.progress(**p))
+
+    async def enhance_run(self, params: Any, ctx: Ctx) -> dict[str, Any]:
+        return await self.enhance.run(params, lambda p: ctx.progress(**p))
 
     async def faces_embed(self, params: Any, _ctx: Ctx) -> dict[str, Any]:
         return await faces_embed(self.analyzer, params, self.analyzer.decode_pool)

@@ -29,7 +29,7 @@
   vram_mb: 0
   ram_mb: 50
   size_mb: 0.3
-  required_for: [faces, identity]
+  required_for: [faces, identity, besttake.compose]
   license: MIT
   resident: true
 
@@ -47,7 +47,7 @@
   vram_mb: 0
   ram_mb: 150
   size_mb: 3.7
-  required_for: [faces]
+  required_for: [faces, besttake.compose, besttake, enhance, enhance.face_restore]
   license: Apache-2.0
   resident: true
 
@@ -249,7 +249,7 @@
   vram_mb: 900
   ram_mb: 1200
   size_mb: 183
-  required_for: [mask.subject, mask.person]
+  required_for: [mask.subject, mask.person, besttake.compose]
   license: MIT
   resident: false
   exclusive_group: segment_subject
@@ -267,7 +267,7 @@
   vram_mb: 1800
   ram_mb: 2500
   size_mb: 214
-  required_for: [mask.subject, mask.person]
+  required_for: [mask.subject, mask.person, besttake.compose]
   license: MIT
   resident: false
   exclusive_group: segment_subject
@@ -285,7 +285,7 @@
   vram_mb: 1500
   ram_mb: 2000
   size_mb: 109
-  required_for: [mask.subject, mask.person]
+  required_for: [mask.subject, mask.person, besttake.compose]
   license: MIT
   resident: false
   exclusive_group: segment_subject
@@ -303,7 +303,7 @@
   vram_mb: 3500
   ram_mb: 4000
   size_mb: 467
-  required_for: [mask.subject, mask.person]
+  required_for: [mask.subject, mask.person, besttake.compose]
   license: MIT
   resident: false
   optional: true
@@ -325,7 +325,7 @@
   vram_mb: 0
   ram_mb: 120
   size_mb: 15.6
-  required_for: [mask.skin, mask.hair, mask.clothes]
+  required_for: [mask.skin, mask.hair, mask.clothes, besttake.compose, besttake]
   license: Apache-2.0
   resident: false
 
@@ -350,3 +350,181 @@
   required_for: [mask.sky]
   license: MIT
   resident: false
+
+
+# ---------------------------------------------------------------------------------------------
+# M5 generative models (docs/api-contract-m5.md section B, docs/03 sections 5, 6.5, 8.2).
+# `required_for` lists RPC operations here: inpaint.run / enhance.<op> / besttake.compose.
+# All default models are permissively licensed; weights are never shipped, only downloaded on
+# request. Models of the `diffusion` exclusive group never coexist (ModelManager evicts).
+# ---------------------------------------------------------------------------------------------
+
+# LaMa (big-lama, advimman/lama, Apache-2.0). Carve/LaMa-ONNX (Apache-2.0) export, fixed 512x512:
+# image [1,3,512,512] in 0..1, mask [1,1,512,512] (1 = hole), output [1,3,512,512] in 0..255.
+- id: lama-big-fp32
+  task: [inpaint]
+  source: { hf: Carve/LaMa-ONNX, origin: advimman/lama (big-lama) }
+  files:
+    - path: lama_fp32.onnx
+      sha256: 1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6
+      size: 208044816
+  backend: onnx
+  precision: fp32
+  tiers: [T0, T1, T2, T3]
+  vram_mb: 900
+  ram_mb: 1400
+  size_mb: 198
+  required_for: [inpaint, inpaint.run]
+  license: Apache-2.0
+  resident: false
+
+# SCUNet (Swin-Conv-UNet, cszn/SCUNet, Apache-2.0): blind real-world denoising, PSNR-oriented
+# checkpoint (faithful, no invented texture). Heliosoph/scunet-onnx (Apache-2.0) torch.onnx export,
+# NCHW float32 0..1, H and W divisible by 8, dynamic shapes; weights in the .data sibling file.
+- id: scunet-color-real-psnr
+  task: [denoise]
+  source: { hf: Heliosoph/scunet-onnx, origin: cszn/SCUNet (scunet_color_real_psnr) }
+  files:
+    - path: scunet_color_real_psnr.onnx
+      sha256: 231be201ab413dbc999d7951caa9844846b93a12a40a41e037d6b5888ed4e88c
+      size: 3798678
+    - path: scunet_color_real_psnr.onnx.data
+      sha256: 98825ea1210b641c71e5f052f582c70c49fd44b35387ebe2c034268c17df3feb
+      size: 73138176
+  backend: onnx
+  precision: fp32
+  tiers: [T1, T2, T3]
+  vram_mb: 1800
+  ram_mb: 2200
+  size_mb: 73.4
+  required_for: [enhance, enhance.denoise]
+  license: Apache-2.0
+  resident: false
+
+# GFPGAN v1.4 (TencentARC/GFPGAN, Apache-2.0 code and weights; the FFHQ training data has its own
+# terms - flagged for the licence audit, doc 07 section 4). ONNX export (neurobytemind/GFPGANv1.4.onnx,
+# apache-2.0): input [1,3,512,512] RGB in -1..1 (FFHQ-aligned 512 crop), output same range.
+- id: gfpgan-v1.4
+  task: [face_restore]
+  source: { hf: neurobytemind/GFPGANv1.4.onnx, origin: TencentARC/GFPGAN (v1.4) }
+  files:
+    - path: GFPGANv1.4.onnx
+      sha256: cd7311b8d9e13cdb1e208b12363182da58c7bf45e26d1aa67bbeac4751aae92e
+      size: 340256686
+  backend: onnx
+  precision: fp32
+  tiers: [T1, T2, T3]
+  vram_mb: 1400
+  ram_mb: 1800
+  size_mb: 324.5
+  required_for: [enhance, enhance.face_restore]
+  license: Apache-2.0
+  resident: false
+
+# Real-ESRGAN (xinntao/Real-ESRGAN, BSD-3-Clause): RealESRGAN_x2plus / RealESRGAN_x4plus ONNX
+# exports from facefusion/models-3.0.0 (the mirror carries no licence metadata of its own; the
+# weights are the upstream BSD-3 ones). Input [N,3,H,W] 0..1, dynamic H/W, output scale x.
+- id: realesrgan-x2
+  task: [upscale]
+  source: { hf: facefusion/models-3.0.0, origin: xinntao/Real-ESRGAN (RealESRGAN_x2plus) }
+  files:
+    - path: real_esrgan_x2.onnx
+      sha256: 5be2d62ab3b0357986efb20a19638334c0e7a2a055ccbc52c77063da0482b3bb
+      size: 69552244
+  backend: onnx
+  precision: fp32
+  tiers: [T0, T1]
+  vram_mb: 1500
+  ram_mb: 1800
+  size_mb: 66.3
+  required_for: [enhance, enhance.upscale]
+  license: BSD-3-Clause
+  resident: false
+
+- id: realesrgan-x2-fp16
+  task: [upscale]
+  source: { hf: facefusion/models-3.0.0, origin: xinntao/Real-ESRGAN (RealESRGAN_x2plus) }
+  files:
+    - path: real_esrgan_x2_fp16.onnx
+      sha256: 0218a7177bccafaad11bcee4fcb3aa42a74c8551da195eede6c62645fa8bdcc7
+      size: 36146329
+  backend: onnx
+  precision: fp16
+  tiers: [T2, T3]
+  vram_mb: 900
+  ram_mb: 1200
+  size_mb: 34.5
+  required_for: [enhance, enhance.upscale]
+  license: BSD-3-Clause
+  resident: false
+
+- id: realesrgan-x4
+  task: [upscale]
+  source: { hf: facefusion/models-3.0.0, origin: xinntao/Real-ESRGAN (RealESRGAN_x4plus) }
+  files:
+    - path: real_esrgan_x4.onnx
+      sha256: afa7fa42eed0315a3d7b2a54e79e4e44a672d3c0889c2828c4f84c9ab91edb0b
+      size: 69539503
+  backend: onnx
+  precision: fp32
+  tiers: [T0, T1]
+  vram_mb: 1500
+  ram_mb: 1800
+  size_mb: 66.3
+  required_for: [enhance, enhance.upscale]
+  license: BSD-3-Clause
+  resident: false
+
+- id: realesrgan-x4-fp16
+  task: [upscale]
+  source: { hf: facefusion/models-3.0.0, origin: xinntao/Real-ESRGAN (RealESRGAN_x4plus) }
+  files:
+    - path: real_esrgan_x4_fp16.onnx
+      sha256: 223c117884ed92526ba1f89fbc09c663f15786c1049802c1a0ac8895b09a9cbc
+      size: 36144084
+  backend: onnx
+  precision: fp16
+  tiers: [T2, T3]
+  vram_mb: 900
+  ram_mb: 1200
+  size_mb: 34.5
+  required_for: [enhance, enhance.upscale]
+  license: BSD-3-Clause
+  resident: false
+
+# SDXL Inpainting 0.1 (diffusers/stable-diffusion-xl-1.0-inpainting-0.1, CreativeML OpenRAIL++-M):
+# optional T3 "pro" pack (`uv sync --extra pro`: torch + diffusers). fp16 variant files only
+# (~7.0 GB). Exclusive group `diffusion`: never loaded together with another diffusion / VLM model.
+- id: sdxl-inpaint
+  task: [inpaint]
+  source: { hf: diffusers/stable-diffusion-xl-1.0-inpainting-0.1, origin: diffusers/stable-diffusion-xl-1.0-inpainting-0.1 }
+  files:
+    - { path: model_index.json, size: 690 }
+    - { path: scheduler/scheduler_config.json, size: 479 }
+    - { path: text_encoder/config.json, size: 746 }
+    - { path: text_encoder/model.fp16.safetensors, size: 246144867, sha256: fc83cf401d930147807e7c44021c164bcc5508c9d4cc0ff35f4e354685ca9cd0 }
+    - { path: text_encoder_2/config.json, size: 758 }
+    - { path: text_encoder_2/model.fp16.safetensors, size: 1389382884, sha256: a8622bd41f8d359df484fdf9de091edb9337a2fd747f0a5c9c320a62e24d1fd3 }
+    - { path: tokenizer/merges.txt, size: 524619 }
+    - { path: tokenizer/special_tokens_map.json, size: 472 }
+    - { path: tokenizer/tokenizer_config.json, size: 737 }
+    - { path: tokenizer/vocab.json, size: 1059962 }
+    - { path: tokenizer_2/merges.txt, size: 524619 }
+    - { path: tokenizer_2/special_tokens_map.json, size: 460 }
+    - { path: tokenizer_2/tokenizer_config.json, size: 725 }
+    - { path: tokenizer_2/vocab.json, size: 1059962 }
+    - { path: unet/config.json, size: 1932 }
+    - { path: unet/diffusion_pytorch_model.fp16.safetensors, size: 5135178560, sha256: 6470840731e98cc16713ddf3ac7ee458c9fdbcb881a98c6727cd4a938f227d3f }
+    - { path: vae/config.json, size: 659 }
+    - { path: vae/diffusion_pytorch_model.fp16.safetensors, size: 167335338, sha256: 4ad62825e5c8b31eefb77355ba6693785619bf7d669d9b1a6fd9f19dec6d65b3 }
+  backend: torch
+  precision: fp16
+  tiers: [T3]
+  vram_mb: 9000
+  ram_mb: 12000
+  size_mb: 6700
+  required_for: [inpaint, inpaint.run, pro]
+  license: OpenRAIL++
+  resident: false
+  optional: true
+  exclusive_group: diffusion
