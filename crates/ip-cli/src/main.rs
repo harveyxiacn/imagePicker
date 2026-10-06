@@ -86,6 +86,30 @@ enum Command {
         #[arg(long, default_value_t = 92)]
         quality: u8,
     },
+    /// Show what the personalised scoring has learned (labels, accuracy, fusion weight).
+    Taste {
+        /// Train now instead of waiting for the next 50 labels.
+        #[arg(long)]
+        retrain: bool,
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
+    },
+}
+
+fn print_taste(t: &ip_core::taste::TasteOut) {
+    let pct = |v: Option<f64>| {
+        v.map(|v| format!("{:.1}%", v * 100.0))
+            .unwrap_or_else(|| "-".into())
+    };
+    println!("labels:            {}", t.labels);
+    println!("training pairs:    {}", t.pairs);
+    println!("model active:      {}", if t.active { "yes" } else { "no" });
+    println!("holdout accuracy:  {}", pct(t.holdout_accuracy));
+    println!("base accuracy:     {}", pct(t.base_accuracy));
+    println!("fusion alpha:      {:.2}", t.alpha);
+    for tr in &t.traits {
+        println!("trait:             {tr}");
+    }
 }
 
 #[derive(Debug)]
@@ -533,6 +557,17 @@ async fn main() -> Result<()> {
             if report.status.state == RunState::Failed {
                 std::process::exit(1);
             }
+            Ok(())
+        }
+        Command::Taste { retrain, data_dir } => {
+            init_tracing("warn");
+            let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
+            let t = if retrain {
+                core.retrain_taste().await?
+            } else {
+                core.taste().await?
+            };
+            print_taste(&t);
             Ok(())
         }
         Command::Render {

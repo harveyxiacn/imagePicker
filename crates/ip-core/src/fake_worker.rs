@@ -316,6 +316,7 @@ impl AiWorker for FakeWorker {
                 beauty,
             ],
             profiles,
+            beauty_models: json!([BEAUTY_MODEL]),
         })
     }
     async fn models_ensure(
@@ -508,7 +509,10 @@ impl AiWorker for FakeWorker {
         let found: Vec<(Option<i64>, [f64; 4])> = if req.faces.is_empty() {
             vec![(None, [0.3, 0.2, 0.4, 0.5])]
         } else {
-            req.faces.iter().map(|f| (Some(f.face_id), f.bbox)).collect()
+            req.faces
+                .iter()
+                .map(|f| (Some(f.face_id), f.bbox))
+                .collect()
         };
         let pid = req.photo.photo_id;
         let mut people = Vec::new();

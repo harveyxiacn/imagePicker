@@ -80,6 +80,56 @@ pub struct PhotosParams {
     include_background: Option<String>,
     faces_min: Option<i64>,
     faces_max: Option<i64>,
+    // ---- M4
+    has_edits: Option<String>,
+}
+
+impl PhotosParams {
+    /// Parameters of a smart collection's `query` string (no session/paging keys allowed).
+    pub(crate) fn from_collection_query(q: &str) -> Result<Self, ApiError> {
+        const KEYS: [&str; 20] = [
+            "rating_gte",
+            "flag",
+            "color_label",
+            "sort",
+            "ai_rating_gte",
+            "issues_none",
+            "issues_any",
+            "burst_best_only",
+            "burst_id",
+            "scene_type",
+            "persons",
+            "person_mode",
+            "exclude_persons",
+            "person_state",
+            "include_background",
+            "faces_min",
+            "faces_max",
+            "has_edits",
+            "session_id",
+            "cursor",
+        ];
+        let q = q.trim().trim_start_matches('?');
+        let pairs: Vec<(String, String)> = serde_urlencoded::from_str(q)
+            .map_err(|e| ApiError::bad_request(format!("invalid query: {e}")))?;
+        if let Some((k, _)) = pairs
+            .iter()
+            .find(|(k, _)| k != "limit" && !KEYS.contains(&k.as_str()))
+        {
+            return Err(ApiError::bad_request(format!(
+                "unknown query parameter {k:?}"
+            )));
+        }
+        let mut p: PhotosParams = serde_urlencoded::from_str(q)
+            .map_err(|e| ApiError::bad_request(format!("invalid query: {e}")))?;
+        if p.session_id.is_some() || p.cursor.is_some() || p.limit.is_some() {
+            return Err(ApiError::bad_request(
+                "query must not contain session_id, cursor or limit",
+            ));
+        }
+        p.session_id = Some(0); // placeholder so the shared validation accepts it
+        Ok(p)
+    }
 }
 
 fn flag_of(name: &str, v: &Option<String>) -> Result<bool, ApiError> {
@@ -106,10 +156,8 @@ fn csv_ids(name: &str, v: &Option<String>) -> Result<Vec<i64>, ApiError> {
         .collect()
 }
 
-pub async fn list_photos(
-    State(st): State<AppState>,
-    ApiQuery(p): ApiQuery<PhotosParams>,
-) -> ApiResult<Json<Value>> {
+/// Validates the `/api/photos` parameters (also used to vet smart-collection queries).
+pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
     let session_id = p
         .session_id
         .ok_or_else(|| ApiError::bad_request("session_id is required"))?;
@@ -179,31 +227,39 @@ pub async fn list_photos(
             return Err(ApiError::bad_request(format!("{name} must be >= 0")));
         }
     }
-    let page = st
-        .core
-        .photos(PhotoQuery {
-            session_id,
-            rating_gte: p.rating_gte,
-            flag,
-            color_label,
-            sort,
-            cursor: p.cursor.filter(|s| !s.is_empty()),
-            limit: p.limit,
-            ai_rating_gte: p.ai_rating_gte,
-            issues_none: flag_of("issues_none", &p.issues_none)?,
-            issues_any,
-            burst_best_only: flag_of("burst_best_only", &p.burst_best_only)?,
-            burst_id: p.burst_id,
-            scene_type: p.scene_type.filter(|s| !s.is_empty()),
-            persons: csv_ids("persons", &p.persons)?,
-            person_mode,
-            exclude_persons: csv_ids("exclude_persons", &p.exclude_persons)?,
-            person_state,
-            include_background: flag_of("include_background", &p.include_background)?,
-            faces_min: p.faces_min,
-            faces_max: p.faces_max,
-        })
-        .await?;
+    Ok(PhotoQuery {
+        session_id,
+        rating_gte: p.rating_gte,
+        flag,
+        color_label,
+        sort,
+        cursor: p.cursor.filter(|s| !s.is_empty()),
+        limit: p.limit,
+        ai_rating_gte: p.ai_rating_gte,
+        issues_none: flag_of("issues_none", &p.issues_none)?,
+        issues_any,
+        burst_best_only: flag_of("burst_best_only", &p.burst_best_only)?,
+        burst_id: p.burst_id,
+        scene_type: p.scene_type.filter(|s| !s.is_empty()),
+        persons: csv_ids("persons", &p.persons)?,
+        person_mode,
+        exclude_persons: csv_ids("exclude_persons", &p.exclude_persons)?,
+        person_state,
+        include_background: flag_of("include_background", &p.include_background)?,
+        faces_min: p.faces_min,
+        faces_max: p.faces_max,
+        has_edits: match p.has_edits.as_deref().filter(|s| !s.is_empty()) {
+            None => None,
+            Some(_) => Some(flag_of("has_edits", &p.has_edits)?),
+        },
+    })
+}
+
+pub async fn list_photos(
+    State(st): State<AppState>,
+    ApiQuery(p): ApiQuery<PhotosParams>,
+) -> ApiResult<Json<Value>> {
+    let page = st.core.photos(photo_query(p)?).await?;
     Ok(Json(json!({
         "photos": page.photos, "total": page.total, "next_cursor": page.next_cursor
     })))

@@ -156,6 +156,8 @@ pub struct ProfileInfo {
 pub struct ModelsListing {
     pub models: Vec<WorkerModel>,
     pub profiles: std::collections::BTreeMap<String, ProfileInfo>,
+    /// Models portrait retouching needs: ids, or objects with an `id` (kept raw on purpose).
+    pub beauty_models: serde_json::Value,
 }
 
 /// Photo of a `mask.generate` request.

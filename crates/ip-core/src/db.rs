@@ -159,6 +159,7 @@ CREATE TABLE preset (
     // v6: M4 (docs/api-contract-m4.md): portrait geometry cache, smart collections and the
     // personalised-scoring data (preference labels + the trained model's state).
     r#"
+ALTER TABLE photo ADD COLUMN base_score REAL;  -- ai_score before personalisation
 CREATE TABLE beauty_geometry (
   photo_id INTEGER PRIMARY KEY REFERENCES photo(id) ON DELETE CASCADE,
   content_key TEXT NOT NULL,              -- photo.content_key (fast_key when unknown) when prepared

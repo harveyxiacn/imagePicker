@@ -2,6 +2,7 @@
 //! Contract: `docs/api-contract-m2.md`.
 
 pub mod cluster;
+pub mod faces;
 pub mod grouping;
 pub mod scoring;
 pub mod store;

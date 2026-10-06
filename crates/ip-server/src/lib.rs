@@ -4,6 +4,7 @@ pub mod error;
 pub mod fs;
 pub mod m2;
 pub mod m3;
+pub mod m4;
 pub mod routes;
 pub mod ws;
 
@@ -12,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use ip_core::{Core, CoreConfig};
@@ -94,6 +96,28 @@ pub fn build_router(core: Arc<Core>, web_dir: Option<PathBuf>) -> Router {
         .route("/luts", get(m3::list_luts))
         .route("/luts/import", post(m3::import_lut))
         .route("/masks/{id}", get(m3::mask))
+        .route("/photos/{id}/people", get(m4::photo_people))
+        .route("/photos/{id}/beauty/prepare", post(m4::beauty_prepare))
+        .route(
+            "/people/{id}/beauty-profile",
+            get(m4::get_beauty_profile).put(m4::put_beauty_profile),
+        )
+        .route("/edits/apply-profiles", post(m4::apply_profiles))
+        .route("/people/best", get(m4::people_best))
+        .route(
+            "/faces/search",
+            post(m4::faces_search).layer(DefaultBodyLimit::max(m4::SEARCH_BODY_LIMIT)),
+        )
+        .route(
+            "/collections",
+            get(m4::list_collections).post(m4::create_collection),
+        )
+        .route(
+            "/collections/{id}",
+            patch(m4::patch_collection).delete(m4::delete_collection),
+        )
+        .route("/taste", get(m4::taste))
+        .route("/taste/reset", post(m4::taste_reset))
         .route("/events", get(ws::events))
         .fallback(routes::api_not_found)
         .method_not_allowed_fallback(routes::method_not_allowed);

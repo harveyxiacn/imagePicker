@@ -373,11 +373,7 @@ pub struct ServiceParts {
 
 impl RenderService {
     pub fn new(p: ServiceParts) -> Self {
-        let masks = Arc::new(MaskStore::new(
-            p.db.clone(),
-            p.worker.clone(),
-            p.masks_dir,
-        ));
+        let masks = Arc::new(MaskStore::new(p.db.clone(), p.worker.clone(), p.masks_dir));
         Self {
             renderer: p.renderer,
             luts: Arc::new(LutLibrary::new(p.luts_dir)),

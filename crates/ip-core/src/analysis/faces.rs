@@ -321,11 +321,14 @@ impl Core {
                     c.query_row("SELECT embedding FROM face WHERE id=?1", [face_id], |r| {
                         r.get(0)
                     })?;
-                let q = emb.map(|b| decode_f16(&b)).filter(|v| !v.is_empty()).ok_or_else(|| {
-                    CoreError::Conflict(
+                let q =
+                    emb.map(|b| decode_f16(&b))
+                        .filter(|v| !v.is_empty())
+                        .ok_or_else(|| {
+                            CoreError::Conflict(
                         "this face has no identity embedding; run a standard analysis first".into(),
                     )
-                })?;
+                        })?;
                 let (candidates, similar_faces) =
                     search_embedding(c, &q, session_id, Some(face_id))?;
                 Ok(FaceSearchOut {

@@ -11,9 +11,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use ip_render::{
-    Adjust, AutoContext, AutoMode, Backend, EditStack, MaskRef, MaskTarget, Op, Warp,
-};
+use ip_render::{Adjust, AutoContext, AutoMode, Backend, EditStack, MaskRef, MaskTarget, Op, Warp};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -236,7 +234,9 @@ fn check_op(op: &Op) -> Result<()> {
 
 fn check_person(what: &str, person_id: Option<i64>) -> Result<()> {
     match person_id {
-        Some(p) if p < 1 => Err(bad(format!("{what} person_id must be a positive id or null"))),
+        Some(p) if p < 1 => Err(bad(format!(
+            "{what} person_id must be a positive id or null"
+        ))),
         _ => Ok(()),
     }
 }

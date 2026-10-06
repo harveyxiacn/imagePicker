@@ -48,7 +48,11 @@ pub enum Event {
     #[serde(rename = "beauty.ready")]
     BeautyReady { photo_id: i64 },
     #[serde(rename = "taste.updated")]
-    TasteUpdated { labels: i64, active: bool, alpha: f64 },
+    TasteUpdated {
+        labels: i64,
+        active: bool,
+        alpha: f64,
+    },
     #[serde(rename = "collections.updated")]
     CollectionsUpdated {},
     #[serde(rename = "worker.status")]

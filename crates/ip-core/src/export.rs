@@ -349,13 +349,8 @@ impl Core {
                 let mut report = ExportReport::default();
                 let mut offset = 0usize;
                 for (dir, refs) in &groups {
-                    let rep = export_photos(
-                        &*imaging,
-                        refs,
-                        dir,
-                        &opts,
-                        edits.as_ref(),
-                        &|done, _| {
+                    let rep =
+                        export_photos(&*imaging, refs, dir, &opts, edits.as_ref(), &|done, _| {
                             events.emit(Event::TaskProgress {
                                 task_id: tid2.clone(),
                                 kind: "export".into(),
@@ -364,8 +359,7 @@ impl Core {
                                 state: "running".into(),
                                 error: None,
                             });
-                        },
-                    );
+                        });
                     offset += refs.len();
                     report.written.extend(rep.written);
                     report.errors.extend(rep.errors);

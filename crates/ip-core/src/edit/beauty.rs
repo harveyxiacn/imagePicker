@@ -4,8 +4,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use ip_render::{Mask, Op, PersonGeometry};
 use ip_worker_client::{
@@ -412,10 +412,25 @@ impl Core {
             .await?;
         // models first, so the client gets its 409 right away instead of a failed task
         let listing = self.worker.models_list().await.map_err(map_worker_err)?;
+        // the worker names its portrait models in `beauty_models` (ids or objects with an id);
+        // older listings only tag them `required_for: ["beauty"]`
+        let named: Vec<String> = listing
+            .beauty_models
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().or_else(|| v.get("id").and_then(Value::as_str)))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
         let missing: Vec<String> = listing
             .models
             .iter()
-            .filter(|m| !m.installed && m.required_for.iter().any(|s| s == "beauty"))
+            .filter(|m| {
+                !m.installed
+                    && (named.contains(&m.id) || m.required_for.iter().any(|s| s == "beauty"))
+            })
             .map(|m| m.id.clone())
             .collect();
         if !missing.is_empty() {
@@ -464,12 +479,9 @@ impl Core {
             .ok()
             .flatten();
         let Some(cur) = cur else { return };
-        let portrait = ops_of(&cur.stack).iter().any(|o| {
-            matches!(
-                super::sync::op_type(o),
-                Some("beauty") | Some("warp")
-            )
-        });
+        let portrait = ops_of(&cur.stack)
+            .iter()
+            .any(|o| matches!(super::sync::op_type(o), Some("beauty") | Some("warp")));
         if portrait && cur.has_edits {
             self.render
                 .purge_edited(&crate::edit::edited_key(&r.fast_key, &cur.hash));
@@ -529,8 +541,9 @@ impl Core {
             .db
             .call(move |c| {
                 let profiles: BTreeMap<i64, Value> = {
-                    let mut st = c
-                        .prepare("SELECT id, beauty_profile FROM person WHERE beauty_profile IS NOT NULL")?;
+                    let mut st = c.prepare(
+                        "SELECT id, beauty_profile FROM person WHERE beauty_profile IS NOT NULL",
+                    )?;
                     let v = st
                         .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
                         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -561,7 +574,11 @@ impl Core {
                     for p in &people {
                         new_ops.extend(profile_ops(&profiles[p], *p)?);
                     }
-                    out.push((r, cur.map(|c| ops_of(&c.stack)).unwrap_or_default(), new_ops));
+                    out.push((
+                        r,
+                        cur.map(|c| ops_of(&c.stack)).unwrap_or_default(),
+                        new_ops,
+                    ));
                 }
                 Ok(out)
             })

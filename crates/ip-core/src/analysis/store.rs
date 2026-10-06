@@ -417,7 +417,7 @@ struct SRow {
     emb: Option<Vec<f32>>,
 }
 
-fn load_faces_feat(
+pub(crate) fn load_faces_feat(
     conn: &Connection,
     sql: &str,
     args: &[i64],
@@ -448,7 +448,7 @@ fn load_faces_feat(
     Ok(out)
 }
 
-const FACE_FEAT_COLS: &str =
+pub(crate) const FACE_FEAT_COLS: &str =
     "f.photo_id, f.id, f.person_id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
     f.eyes_open, f.smile, f.gaze, f.yaw, f.pitch, f.sharpness, f.is_subject";
 
@@ -456,6 +456,7 @@ const FACE_FEAT_COLS: &str =
 /// Returns the ids of the photos whose AI fields were written.
 pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i64>> {
     let mut touched = Vec::new();
+    let taste = crate::taste::load_active(conn)?;
     for chunk in burst_ids.chunks(200) {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let ph = placeholders(chunk.len());
@@ -517,17 +518,25 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
                     emb: m.emb.as_deref(),
                 })
                 .collect();
-            let ranked = scoring::rank_burst(scored);
+            let mut ranked = scoring::rank_burst(scored);
+            if let Some((model, alpha)) = &taste {
+                let user: HashMap<i64, f64> = members
+                    .iter()
+                    .map(|m| (m.feat.photo_id, model.user_score(&m.feat, m.emb.as_deref())))
+                    .collect();
+                ranked = crate::taste::fuse(ranked, &user, *alpha);
+            }
             let best = ranked.first().map(|r| r.photo_id);
             for r in &ranked {
                 tx.execute(
-                    "UPDATE photo SET ai_score=?2, ai_rating=?3, issues=?4, rank_in_burst=?5 WHERE id=?1",
+                    "UPDATE photo SET ai_score=?2, ai_rating=?3, issues=?4, rank_in_burst=?5, base_score=?6 WHERE id=?1",
                     params![
                         r.photo_id,
                         (r.q * 10_000.0).round() / 10_000.0,
                         r.ai_rating,
                         Issue::to_mask(&r.issues),
-                        r.rank as i64
+                        r.rank as i64,
+                        (r.base_q * 10_000.0).round() / 10_000.0
                     ],
                 )?;
                 let explain = json!({
