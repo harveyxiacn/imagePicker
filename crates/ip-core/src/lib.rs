@@ -222,3 +222,5 @@ impl Core {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_m2;

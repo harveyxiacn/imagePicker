@@ -731,7 +731,12 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
     let mut sums: Vec<Option<Vec<f32>>> = Vec::new();
     let _ = &groups;
     for (i, f) in faces.iter().enumerate() {
-        let k = (f.group, track_of[i]);
+        // a user-assigned face is its own unit: the user's word beats "same track = same person"
+        let k = if f.locked {
+            (f.group, usize::MAX - i)
+        } else {
+            (f.group, track_of[i])
+        };
         let ti = *key_to_track.entry(k).or_insert_with(|| {
             tracks.push(TrackInput {
                 emb: None,

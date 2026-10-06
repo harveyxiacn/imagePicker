@@ -858,8 +858,8 @@ impl Core {
         }
         let events = self_.events.clone();
         let mut rx = self_.worker.subscribe();
+        let init = rx.borrow().clone();
         tokio::spawn(async move {
-            let init = rx.borrow().clone();
             let mut last: Option<(WorkerState, Option<String>)> = Some((init.state, init.error));
             loop {
                 let st = rx.borrow_and_update().clone();
