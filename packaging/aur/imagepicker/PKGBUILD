@@ -1,0 +1,82 @@
+# Maintainer: harveyxiacn <harveyxiacn@gmail.com>
+#
+# Builds imagePicker from the release tag. `packaging/aur/update.sh <version>` refreshes pkgver and sha256sums.
+pkgname=imagepicker
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Fast, local-first AI photo culling and retouching'
+arch=('x86_64')
+url='https://github.com/harveyxiacn/imagePicker'
+license=('Apache-2.0')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'glib2' 'openssl')
+makedepends=('rust' 'cargo' 'nodejs' 'pnpm' 'git' 'patchelf' 'librsvg' 'xdotool'
+             'libayatana-appindicator' 'pkgconf' 'binutils' 'libarchive')
+optdepends=('uv: runs the optional local AI worker (Python)'
+            'nvidia-utils: CUDA acceleration for the AI worker')
+conflicts=('imagepicker-bin')
+options=('!lto')
+# pkgver cannot contain '-', so pre-releases use '_' (0.2.0_rc1 -> tag v0.2.0-rc1).
+_tag="v${pkgver//_/-}"
+_srcdir="imagePicker-${pkgver//_/-}"
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/${_tag}.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$srcdir/$_srcdir"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+  # Network access is allowed here (and only here). Optional bundled-resource step, if the repo ships it.
+  if [ -f apps/desktop/scripts/fetch-uv.sh ]; then bash apps/desktop/scripts/fetch-uv.sh; fi
+}
+
+build() {
+  cd "$srcdir/$_srcdir"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  export NO_STRIP=true
+  (cd web && pnpm install --frozen-lockfile && pnpm build)
+  cd apps/desktop
+  pnpm install --frozen-lockfile
+  # Bundle as .deb only to get the exact resource layout Tauri expects; we repackage it in package().
+  pnpm tauri build --bundles deb
+}
+
+package() {
+  cd "$srcdir/$_srcdir"
+  local deb root="$srcdir/deb-root"
+  deb="$(find target -type f -path '*/release/bundle/deb/*.deb' | head -n1)"
+  [ -n "$deb" ] || { echo "tauri did not produce a .deb" >&2; return 1; }
+  rm -rf "$root" && mkdir "$root"
+  bsdtar -xf "$deb" -C "$root"
+  bsdtar -xf "$root"/data.tar.* -C "$root"
+
+  install -d "$pkgdir/usr"
+  cp -a "$root/usr/bin" "$root/usr/lib" "$pkgdir/usr/" 2>/dev/null || cp -a "$root/usr/bin" "$pkgdir/usr/"
+
+  local bin
+  bin="$(find "$pkgdir/usr/bin" -maxdepth 1 -type f -perm -u+x | head -n1)"
+  [ -n "$bin" ] || { echo "no executable found in the bundle" >&2; return 1; }
+  if [ "$(basename "$bin")" != imagepicker ]; then
+    ln -s "$(basename "$bin")" "$pkgdir/usr/bin/imagepicker"
+  fi
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/imagepicker.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=imagePicker
+Comment=Fast, local-first AI photo culling
+Exec=imagepicker %F
+Icon=imagepicker
+Terminal=false
+Categories=Graphics;Photography;
+StartupWMClass=imagePicker
+EOF
+
+  local icon size
+  while IFS= read -r icon; do
+    size="$(basename "$(dirname "$(dirname "$icon")")")"
+    install -Dm644 "$icon" "$pkgdir/usr/share/icons/hicolor/${size}/apps/imagepicker.png"
+  done < <(find "$root/usr/share/icons/hicolor" -type f -name '*.png' 2>/dev/null)
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/${pkgname}/LICENSE"
+}

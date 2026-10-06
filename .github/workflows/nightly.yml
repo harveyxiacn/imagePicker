@@ -1,0 +1,122 @@
+name: Nightly
+
+# Full test suites + perf scripts on a schedule. Never publishes anything; results are workflow artifacts.
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tests:
+    name: Full tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nightly-tests
+      - name: Rust tests (including ignored)
+        run: cargo test --workspace --exclude ip-desktop -- --include-ignored
+        continue-on-error: true
+        id: rust_ignored
+      - name: Rust tests (default set must pass)
+        run: cargo test --workspace --exclude ip-desktop
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Web tests and build
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm test
+          pnpm build
+      - uses: astral-sh/setup-uv@v6
+      - name: AI worker tests
+        working-directory: ai-worker
+        run: |
+          uv sync --extra cpu --dev
+          uv run ruff check .
+          uv run pytest -m "not models and not gpu"
+      - name: Report ignored-test outcome
+        if: always()
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.rust_ignored.outcome }}
+        run: |
+          echo "Rust tests with --include-ignored: ${OUTCOME}" >> "$GITHUB_STEP_SUMMARY"
+
+  perf:
+    name: Perf scripts (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nightly-perf
+      - name: Software Vulkan for wgpu (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1
+      - name: Run benchmarks
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p perf-results
+          status=0
+          if [ -f crates/ip-imaging/examples/bench_thumbs.rs ]; then
+            cargo run --release -p ip-imaging --example bench_thumbs -- --synth 100 2>&1 | tee perf-results/bench_thumbs.txt || status=1
+          else
+            echo "bench_thumbs example not present; skipped" | tee perf-results/bench_thumbs.txt
+          fi
+          if [ -f crates/ip-render/examples/bench_render.rs ]; then
+            cargo run --release -p ip-render --example bench_render 2>&1 | tee perf-results/bench_render.txt || status=1
+          else
+            echo "bench_render example not present; skipped" | tee perf-results/bench_render.txt
+          fi
+          {
+            echo "### Perf results (${RUNNER_OS})"
+            for f in perf-results/*.txt; do
+              echo "#### $(basename "$f")"
+              echo '```'
+              tail -n 40 "$f"
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Perf numbers on shared runners are informational: record failures but do not hide results.
+          exit "$status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-${{ runner.os }}
+          path: perf-results/*
+          if-no-files-found: warn
+          retention-days: 30

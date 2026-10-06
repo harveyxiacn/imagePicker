@@ -1,0 +1,24 @@
+pkgbase = imagepicker-bin
+	pkgdesc = Fast, local-first AI photo culling and retouching (prebuilt release)
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/harveyxiacn/imagePicker
+	arch = x86_64
+	license = Apache-2.0
+	depends = webkit2gtk-4.1
+	depends = gtk3
+	depends = libayatana-appindicator
+	depends = glib2
+	depends = openssl
+	optdepends = uv: runs the optional local AI worker (Python)
+	optdepends = nvidia-utils: CUDA acceleration for the AI worker
+	provides = imagepicker
+	conflicts = imagepicker
+	options = !strip
+	options = !debug
+	source = imagepicker-bin-0.1.0.deb::https://github.com/harveyxiacn/imagePicker/releases/download/v0.1.0/imagePicker_0.1.0_amd64.deb
+	source = LICENSE-0.1.0::https://raw.githubusercontent.com/harveyxiacn/imagePicker/v0.1.0/LICENSE
+	sha256sums = SKIP
+	sha256sums = SKIP
+
+pkgname = imagepicker-bin

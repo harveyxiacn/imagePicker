@@ -1,0 +1,62 @@
+# DRAFT Flatpak manifest (P2, not built in CI, never test-built by the author yet).
+#
+# This draft repackages the release .deb so it can be tried locally:
+#   flatpak install flathub org.gnome.Platform//47 org.gnome.Sdk//47
+#   flatpak-builder --user --install --force-clean build-dir packaging/flatpak/io.github.harveyxiacn.imagepicker.yml
+#   flatpak run io.github.harveyxiacn.imagepicker
+#
+# Flathub itself requires building from source with offline dependencies. For that, replace the `deb`
+# source with the repository + generated `cargo-sources.json` (flatpak-cargo-generator.py Cargo.lock) and
+# `node-sources.json` (flatpak-node-generator pnpm), and the Rust/Node SDK extensions below.
+# Remaining TODO before submission: AppStream metainfo (.metainfo.xml), screenshots, OARS rating,
+# decide the AI worker story (the Python worker needs `uv` + network access to model hosts; inside the sandbox
+# it must live under XDG_DATA_HOME, which `--filesystem=xdg-data/imagepicker` below does not yet cover).
+app-id: io.github.harveyxiacn.imagepicker
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+command: imagepicker
+finish-args:
+  - --share=ipc
+  - --share=network # model downloads, optional remote worker
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri # GPU rendering (WebGL2 / wgpu)
+  - --filesystem=xdg-pictures # default photo location; other folders are granted through the portal file chooser
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher # tray icon
+
+modules:
+  - name: imagepicker
+    buildsystem: simple
+    build-commands:
+      # A .deb is an ar archive with data.tar.*; bsdtar/ar are in the SDK.
+      - ar x imagepicker.deb
+      - mkdir -p root && tar -xf data.tar.* -C root
+      - cp -a root/usr/. /app/
+      # Stable launcher name regardless of what Tauri called the binary.
+      - |
+        bin=$(find /app/bin -maxdepth 1 -type f -perm -u+x | head -n1)
+        [ "$(basename "$bin")" = imagepicker ] || ln -s "$(basename "$bin")" /app/bin/imagepicker
+      - install -Dm644 desktop.desktop /app/share/applications/io.github.harveyxiacn.imagepicker.desktop
+      - |
+        for icon in $(find root/usr/share/icons/hicolor -name '*.png'); do
+          size=$(basename "$(dirname "$(dirname "$icon")")")
+          install -Dm644 "$icon" "/app/share/icons/hicolor/$size/apps/io.github.harveyxiacn.imagepicker.png"
+        done
+    sources:
+      - type: file
+        url: https://github.com/harveyxiacn/imagePicker/releases/download/v0.1.0/imagePicker_0.1.0_amd64.deb
+        sha256: "0000000000000000000000000000000000000000000000000000000000000000" # TODO: fill from SHA256SUMS.txt
+        dest-filename: imagepicker.deb
+      - type: inline
+        dest-filename: desktop.desktop
+        contents: |
+          [Desktop Entry]
+          Type=Application
+          Name=imagePicker
+          Comment=Fast, local-first AI photo culling
+          Exec=imagepicker %F
+          Icon=io.github.harveyxiacn.imagepicker
+          Terminal=false
+          Categories=Graphics;Photography;

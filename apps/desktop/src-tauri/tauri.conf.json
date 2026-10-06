@@ -16,7 +16,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "dmg", "appimage", "deb"],
+    "targets": ["nsis", "msi", "dmg", "appimage", "deb"],
     "category": "Photography",
     "shortDescription": "Local-first AI photo culling",
     "longDescription": "imagePicker: fast, local-first photo culling with AI assistance.",
@@ -26,6 +26,9 @@
     "windows": {
       "nsis": { "installMode": "currentUser", "languages": ["SimpChinese", "English"] }
     },
-    "macOS": { "minimumSystemVersion": "11.0" }
+    "macOS": { "minimumSystemVersion": "11.0" },
+    "linux": {
+      "deb": { "section": "graphics", "priority": "optional" }
+    }
   }
 }

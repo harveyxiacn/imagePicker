@@ -92,3 +92,11 @@ jobs:
       # Compile-only (no installer, no release publishing); builds the SPA via beforeBuildCommand.
       - run: pnpm tauri build --no-bundle
         working-directory: apps/desktop
+
+  version-consistency:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Cargo workspace, Cargo.lock, tauri.conf.json, both package.json files and pyproject.toml must agree.
+      - run: bash scripts/bump-version.sh --check
