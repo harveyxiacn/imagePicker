@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import type { AnalysisStatus, HardwareInfo, Photo, ServerEvent, Session, Settings, Taste } from '@/api/types'
+import type { AnalysisStatus, HardwareInfo, Photo, RuntimeInfo, ServerEvent, Session, Settings, Taste } from '@/api/types'
 import type { PhotosListQuery } from './filter'
 
 export const qk = {
@@ -9,6 +9,7 @@ export const qk = {
   photosAll: ['photos'] as const,
   photos: (sessionId: number, q: PhotosListQuery) => ['photos', sessionId, q] as const,
   hardware: ['hardware'] as const,
+  runtime: ['runtime'] as const,
   models: ['models'] as const,
   analysisStatus: (sid: number) => ['analysis', 'status', sid] as const,
   analysis: (photoId: number) => ['analysis', 'photo', photoId] as const,
@@ -228,6 +229,17 @@ export function applyEvents(
       case 'xmp.conflict':
         xmpConflicts.push(ev)
         break
+      case 'runtime.updated': {
+        const prev = qc.getQueryData<RuntimeInfo>(qk.runtime)
+        // keep the hardware part of the last full GET; the event carries the install state only
+        qc.setQueryData<RuntimeInfo>(qk.runtime, { ...prev, ...ev.runtime })
+        if (prev?.state !== ev.runtime.state) {
+          // the worker restarts on another interpreter: hardware / models are stale
+          void qc.invalidateQueries({ queryKey: qk.hardware })
+          void qc.invalidateQueries({ queryKey: qk.models })
+        }
+        break
+      }
     }
   }
 

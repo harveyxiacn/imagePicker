@@ -6,7 +6,9 @@ import { api } from '@/api/client'
 import { useAssistantStatus, useHardware, useModels } from '@/api/queries'
 import type { ModelInfo, ModelSource } from '@/api/types'
 import { formatBytes } from '@/lib/format'
+import { offerRuntimeInstall } from '@/lib/runtime'
 import { useToasts } from '@/stores/toasts'
+import { RuntimeCard } from './RuntimeCard'
 import { Card, ConfirmDialog, Row, Select } from './controls'
 import { useSetting } from './useSetting'
 
@@ -40,6 +42,7 @@ export function HardwareSection() {
       setTasks((cur) => ({ ...cur, [m.id]: task_id }))
       useToasts.getState().updateTask({ type: 'task.progress', task_id, kind: 'model_download', done: 0, total: Math.round(m.size_mb * 1e6), state: 'running' })
     } catch (e) {
+      if (offerRuntimeInstall(e)) return
       useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
     }
   }
@@ -58,6 +61,7 @@ export function HardwareSection() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="settings-hardware">
+      <RuntimeCard />
       <Card title={t('settings.hardware.title')} testId="settings-worker">
         <Row label={t('settings.hardware.worker')} hint={w?.error ?? undefined}>
           {w ? (

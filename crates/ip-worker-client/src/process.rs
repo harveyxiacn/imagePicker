@@ -134,8 +134,12 @@ pub fn find_worker_dir() -> Option<PathBuf> {
             }
         }
     }
-    let built_from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ai-worker");
-    has_worker(&built_from).then_some(built_from)
+    // Only in debug builds: a release build must not depend on the machine it was built on.
+    if cfg!(debug_assertions) {
+        let built_from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ai-worker");
+        return has_worker(&built_from).then_some(built_from);
+    }
+    None
 }
 
 /// Spawns the worker with piped stdout/stderr.

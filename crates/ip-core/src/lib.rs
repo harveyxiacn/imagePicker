@@ -19,6 +19,7 @@ pub mod jsonfix;
 pub mod model;
 pub mod paths;
 pub mod roots;
+pub mod runtime;
 pub mod settings;
 pub mod taste;
 pub mod thumbs;
@@ -101,6 +102,8 @@ pub struct Core {
     pub settings: SettingsStore,
     /// Assistant plans (in memory, 30 minute TTL).
     pub assistant: assistant::AssistantState,
+    /// The installable AI runtime (M7).
+    pub runtime: runtime::RuntimeManager,
     pub(crate) xmp: xmp::XmpState,
     pub(crate) evicting: std::sync::atomic::AtomicBool,
     task_seq: AtomicU64,
@@ -133,10 +136,15 @@ impl Core {
             workers,
         );
         let worker_timeouts = TimeoutHandle::new(WorkerTimeouts::from_env());
+        let runtime = runtime::RuntimeManager::new(&dirs.root, dirs.logs.clone());
         let worker: Arc<dyn AiWorker> = match cfg.worker {
             Some(w) => w,
             None => {
                 let mut wc = WorkerConfig::from_env();
+                wc.runtime = Some(ip_worker_client::RuntimeLaunch {
+                    root: runtime.root().to_path_buf(),
+                    version: runtime.version().to_string(),
+                });
                 if wc.models_dir.is_none() {
                     wc.models_dir = Some(dirs.root.join("models"));
                 }
@@ -180,6 +188,7 @@ impl Core {
             render,
             settings,
             assistant: Default::default(),
+            runtime,
             xmp: Default::default(),
             evicting: std::sync::atomic::AtomicBool::new(false),
             task_seq: AtomicU64::new(tasks as u64),

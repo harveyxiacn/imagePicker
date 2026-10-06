@@ -434,7 +434,8 @@ fn guest_allows(method: &Method, path: &str, query: Option<&str>) -> bool {
         .split('/')
         .filter(|s| !s.is_empty())
         .collect();
-    const DENIED_ROOT: [&str; 14] = [
+    const DENIED_ROOT: [&str; 15] = [
+        "runtime",
         "people",
         "faces",
         "taste",
@@ -818,6 +819,7 @@ mod tests {
         assert!(!g(&Method::GET, "/api/photos/3/analysis", None));
         assert!(!g(&Method::GET, "/api/taste", None));
         assert!(!g(&Method::GET, "/api/settings", None));
+        assert!(!g(&Method::GET, "/api/runtime", None));
         assert!(!g(&Method::GET, "/api/assistant/status", None));
         assert!(!g(&Method::GET, "/api/fs/list", None));
         assert!(!g(&Method::GET, "/api/system/lan", None));

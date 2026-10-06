@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useModels } from '@/api/queries'
 import { startAnalysis } from '@/lib/analysis'
+import { offerRuntimeInstall } from '@/lib/runtime'
 import { formatBytes } from '@/lib/format'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
@@ -52,6 +53,10 @@ export function ModelConsentDialog() {
       const { task_id } = await api.ensureModels(consent.models)
       setEnsure(task_id)
     } catch (err) {
+      if (offerRuntimeInstall(err)) {
+        setConsent(null)
+        return
+      }
       setEnsure(null, err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)

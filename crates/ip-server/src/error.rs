@@ -59,11 +59,16 @@ impl From<CoreError> for ApiError {
                 e.extra = Some(serde_json::json!({ "models": models }));
                 e
             }
-            CoreError::WorkerUnavailable(m) => Self::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "worker_unavailable",
-                m.clone(),
-            ),
+            CoreError::WorkerUnavailable(m) => {
+                let missing = m.contains(ip_worker_client::RUNTIME_MISSING_TAG);
+                let msg = m.replace(ip_worker_client::RUNTIME_MISSING_TAG, "");
+                let mut e = Self::new(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable", msg);
+                if missing {
+                    // the UI offers "install the AI components"
+                    e.extra = Some(serde_json::json!({ "runtime": "missing" }));
+                }
+                e
+            }
             CoreError::WorkerTimeout(m) => {
                 Self::new(StatusCode::GATEWAY_TIMEOUT, "worker_timeout", m.clone())
             }

@@ -8,6 +8,7 @@ pub mod m3;
 pub mod m4;
 pub mod m5;
 pub mod m6;
+pub mod m7;
 pub mod routes;
 pub mod ws;
 
@@ -50,6 +51,10 @@ pub struct ServerConfig {
     pub password: Option<String>,
     /// Set the guest password together with `password` (`Some("")` removes it).
     pub guest_password: Option<String>,
+    /// Bundled `uv` binary (desktop resources); also `IMAGEPICKER_UV`.
+    pub uv_path: Option<PathBuf>,
+    /// Bundled worker source (`pyproject.toml`, `uv.lock`, `imagepicker_ai/`); also `IMAGEPICKER_WORKER_SRC`.
+    pub worker_src: Option<PathBuf>,
 }
 
 impl ServerConfig {
@@ -77,6 +82,8 @@ impl Default for ServerConfig {
             extra_roots: Vec::new(),
             password: None,
             guest_password: None,
+            uv_path: None,
+            worker_src: None,
         }
     }
 }
@@ -202,6 +209,9 @@ pub fn build_router_auth(
         .route("/xmp/sync", post(m6::xmp_sync))
         .route("/photos/{id}/tags", get(m6::photo_tags))
         .route("/photos/tags", post(m6::set_tags))
+        .route("/runtime", get(m7::get_runtime).delete(m7::delete_runtime))
+        .route("/runtime/install", post(m7::install_runtime))
+        .route("/runtime/cancel", post(m7::cancel_runtime))
         .route("/events", get(ws::events))
         .merge(auth::routes())
         .fallback(routes::api_not_found)
@@ -323,6 +333,10 @@ pub async fn spawn_with_core(
     core: Arc<Core>,
     config: &ServerConfig,
 ) -> anyhow::Result<RunningServer> {
+    core.runtime.set_bundled(ip_core::runtime::Bundled {
+        uv: config.uv_path.clone(),
+        worker_src: config.worker_src.clone(),
+    });
     let store = SecurityStore::open(core.data_dir());
     if let Some(pw) = &config.password {
         store
