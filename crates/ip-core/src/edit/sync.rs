@@ -284,7 +284,7 @@ mod tests {
         ];
         let m = merge_ops(&t, &s, &[SyncKind::Global, SyncKind::Local]);
         let types: Vec<_> = m.iter().map(|o| op_type(o).unwrap()).collect();
-        assert_eq!(types, ["crop", "global", "local", "lut", "warp"]);
+        assert_eq!(types, ["crop", "global", "local", "lut", "future_op"]);
         assert_eq!(m[1]["exposure"], -1.0);
         assert_eq!(m[3]["file"], "a"); // lut untouched
         let none = merge_ops(&t, &s, &[SyncKind::Crop]);
