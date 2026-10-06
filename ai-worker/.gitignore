@@ -1,0 +1,7 @@
+.venv/
+.models/
+.bench/
+.pytest_cache/
+.ruff_cache/
+# the repo-root .gitignore ignores "models/"; this package dir must stay tracked
+!imagepicker_ai/models/

@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "imagepicker-ai"
+version = "0.1.0"
+description = "imagePicker AI worker: JSON-RPC 2.0 over WebSocket, local-first photo analysis"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "websockets>=14",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "pillow>=10.3",
+    "pillow-heif>=0.18",
+    "pyyaml>=6",
+    "huggingface_hub>=0.26",
+    "tokenizers>=0.20",
+    "platformdirs>=4",
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+# ONNX Runtime CPU (DirectML / CoreML users: install onnxruntime-directml / onnxruntime-silicon instead).
+cpu = ["onnxruntime>=1.20"]
+# ONNX Runtime CUDA 13 build (default wheel of onnxruntime-gpu >= 1.30; needs NVIDIA driver >= 580)
+# plus the CUDA/cuDNN runtime libs as wheels, so no system CUDA toolkit is needed.
+cuda = [
+    "onnxruntime-gpu>=1.30",
+    "nvidia-cudnn-cu13>=9",
+    "nvidia-cublas",
+    "nvidia-cuda-runtime",
+    "nvidia-cufft",
+    "nvidia-curand",
+    "nvidia-cuda-nvrtc",
+]
+# Face blendshapes / head pose. Without it the faces step falls back to YuNet only.
+mediapipe = ["mediapipe>=0.10.14"]
+# transformers+torch fallback for embeddings (and for exporting ONNX models).
+torch = ["torch>=2.4", "transformers>=4.49", "sentencepiece", "protobuf", "onnx"]
+
+[project.scripts]
+imagepicker-ai = "imagepicker_ai.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
+
+[tool.uv]
+conflicts = [[{ extra = "cpu" }, { extra = "cuda" }]]
+# mediapipe hard-depends on opencv-contrib-python, which would clash with the
+# headless wheel we already ship; drop it (mediapipe's Tasks API does not need cv2).
+override-dependencies = ["opencv-contrib-python; sys_platform == 'never'"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["imagepicker_ai"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC"]
+ignore = ["E501", "SIM105"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ASYNC109"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "models: needs model downloads / network (run explicitly: pytest -m models)",
+]
+addopts = "-m 'not models'"
