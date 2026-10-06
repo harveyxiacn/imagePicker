@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import { previewUrl, thumbUrl } from '@/api/client'
 import type { Photo } from '@/api/types'
 import { useElementSize } from '@/lib/hooks'
@@ -35,17 +35,26 @@ interface Props {
   imageSize?: { w: number; h: number }
 }
 
-/** Layer that fades in when its image has loaded. */
+/**
+ * Layer that fades in when its image has loaded. An image that is already decoded in the browser's
+ * cache (a preloaded neighbour in the loupe) is shown at once, without the fade, so stepping through
+ * photos does not wait for an animation.
+ */
 function Layer({ src, rect, className }: { src: string; rect: React.CSSProperties; className?: string }) {
-  const [loaded, setLoaded] = useState(false)
+  const [state, setState] = useState<'pending' | 'instant' | 'fade'>('pending')
+  const ref = useCallback((el: HTMLImageElement | null) => {
+    if (el && el.complete && el.naturalWidth > 0) setState((s) => (s === 'pending' ? 'instant' : s))
+  }, [])
   return (
     <img
+      ref={ref}
       src={src}
       alt=""
       draggable={false}
-      onLoad={() => setLoaded(true)}
+      decoding="async"
+      onLoad={() => setState((s) => (s === 'pending' ? 'fade' : s))}
       className={`pointer-events-none absolute max-w-none select-none ${className ?? ''}`}
-      style={{ ...rect, opacity: loaded ? 1 : 0, transition: 'opacity 160ms ease-out' }}
+      style={{ ...rect, opacity: state === 'pending' ? 0 : 1, transition: state === 'fade' ? 'opacity 160ms ease-out' : 'none' }}
     />
   )
 }

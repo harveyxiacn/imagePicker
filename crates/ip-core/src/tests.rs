@@ -608,3 +608,90 @@ async fn export_copies_resizes_and_never_overwrites() {
         Err(CoreError::BadRequest(_))
     ));
 }
+
+#[tokio::test]
+async fn totals_are_cached_but_never_stale() {
+    let env = env();
+    make_photos(env.src.path(), 12);
+    let s = import(&env, env.src.path()).await;
+    let paged = |cursor: Option<String>, flag| PhotoQuery {
+        session_id: s.id,
+        limit: Some(5),
+        cursor,
+        flag,
+        ..Default::default()
+    };
+    // pages 1..3 of an unfiltered query all report the full total
+    let p1 = env.core.photos(paged(None, FlagFilter::Any)).await.unwrap();
+    assert_eq!((p1.photos.len(), p1.total), (5, 12));
+    let p2 = env
+        .core
+        .photos(paged(p1.next_cursor.clone(), FlagFilter::Any))
+        .await
+        .unwrap();
+    assert_eq!((p2.photos.len(), p2.total), (5, 12));
+    let p3 = env
+        .core
+        .photos(paged(p2.next_cursor.clone(), FlagFilter::Any))
+        .await
+        .unwrap();
+    assert_eq!(
+        (p3.photos.len(), p3.total, p3.next_cursor.is_none()),
+        (2, 12, true)
+    );
+    // a filter that fits one page: total = rows on that page
+    let none = env
+        .core
+        .photos(paged(None, FlagFilter::Picked))
+        .await
+        .unwrap();
+    assert_eq!((none.photos.len(), none.total), (0, 0));
+    // a write invalidates the cached total of a multi-page filter
+    let ids: Vec<i64> = (p1.photos.iter().chain(&p2.photos)).map(|p| p.id).collect();
+    env.core
+        .patch_photos(PatchRequest {
+            ids: ids[..7].to_vec(),
+            flag: Some(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let picked = env
+        .core
+        .photos(paged(None, FlagFilter::Picked))
+        .await
+        .unwrap();
+    assert_eq!((picked.photos.len(), picked.total), (5, 7));
+    env.core
+        .patch_photos(PatchRequest {
+            ids: ids[..3].to_vec(),
+            flag: Some(0),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let picked = env
+        .core
+        .photos(paged(None, FlagFilter::Picked))
+        .await
+        .unwrap();
+    assert_eq!((picked.photos.len(), picked.total), (4, 4));
+    // a cursor page of a filtered query keeps the filter's total
+    let first = env
+        .core
+        .photos(PhotoQuery {
+            limit: Some(2),
+            ..paged(None, FlagFilter::Picked)
+        })
+        .await
+        .unwrap();
+    let second = env
+        .core
+        .photos(PhotoQuery {
+            limit: Some(2),
+            ..paged(first.next_cursor.clone(), FlagFilter::Picked)
+        })
+        .await
+        .unwrap();
+    assert_eq!((first.total, second.total, second.photos.len()), (4, 4, 2));
+}

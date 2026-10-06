@@ -2,7 +2,9 @@
 //!
 //! Async code uses [`Db::call`] (runs on tokio's blocking pool); worker threads use [`Db::with`].
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -248,7 +250,9 @@ fn configure(conn: &Connection) -> Result<()> {
         "PRAGMA journal_mode=WAL;
          PRAGMA synchronous=NORMAL;
          PRAGMA foreign_keys=ON;
-         PRAGMA mmap_size=268435456;",
+         PRAGMA mmap_size=268435456;
+         PRAGMA cache_size=-32768;
+         PRAGMA temp_store=MEMORY;",
     )?;
     Ok(())
 }
@@ -256,6 +260,10 @@ fn configure(conn: &Connection) -> Result<()> {
 struct Pool {
     conns: Mutex<Vec<Connection>>,
     cv: Condvar,
+    /// Bumped whenever a pooled connection changed any row (see [`Db::generation`]).
+    generation: AtomicU64,
+    /// `COUNT(*)` results of list queries, valid for one generation.
+    counts: Mutex<(u64, HashMap<String, i64>)>,
 }
 
 #[derive(Clone)]
@@ -298,6 +306,8 @@ impl Db {
             pool: Arc::new(Pool {
                 conns: Mutex::new(conns),
                 cv: Condvar::new(),
+                generation: AtomicU64::new(0),
+                counts: Mutex::new((0, HashMap::new())),
             }),
             path: path.to_path_buf(),
         })
@@ -323,7 +333,38 @@ impl Db {
     /// Blocking access; do not call from async context directly.
     pub fn with<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
         let mut guard = self.acquire();
-        f(guard.conn.as_mut().expect("connection present"))
+        let conn = guard.conn.as_mut().expect("connection present");
+        let before = conn.total_changes();
+        let out = f(conn);
+        if conn.total_changes() != before {
+            self.pool.generation.fetch_add(1, Ordering::SeqCst);
+        }
+        out
+    }
+
+    /// Changes whenever any statement run through this pool inserted, updated or deleted rows.
+    /// Derived data (e.g. list totals) computed under one generation is valid until it moves.
+    pub fn generation(&self) -> u64 {
+        self.pool.generation.load(Ordering::SeqCst)
+    }
+
+    pub fn cached_count(&self, generation: u64, key: &str) -> Option<i64> {
+        let c = self.pool.counts.lock().unwrap();
+        (c.0 == generation).then(|| c.1.get(key).copied()).flatten()
+    }
+
+    pub fn store_count(&self, generation: u64, key: String, n: i64) {
+        let mut c = self.pool.counts.lock().unwrap();
+        if c.0 != generation {
+            if generation < c.0 {
+                return;
+            }
+            *c = (generation, HashMap::new());
+        }
+        if c.1.len() >= 256 {
+            c.1.clear();
+        }
+        c.1.insert(key, n);
     }
 
     /// Runs `f` on the blocking pool so the tokio runtime is never blocked.

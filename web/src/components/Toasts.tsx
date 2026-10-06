@@ -19,7 +19,7 @@ export function Toasts() {
       aria-live="polite"
     >
       {Object.values(tasks)
-        .filter((task) => !(task.kind === 'model_download' && consentOpen) && !isGenKind(task.kind))
+        .filter((task) => !(task.kind === 'model_download' && consentOpen) && !isGenKind(task.kind) && task.kind !== 'analysis')
         .map((task) => {
         const pct = task.total > 0 ? Math.round((task.done / task.total) * 100) : 0
         return (

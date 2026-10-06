@@ -25,3 +25,6 @@ target-desktop/
 
 # uv fetched at build time (apps/desktop/scripts/fetch-uv.sh)
 apps/desktop/src-tauri/binaries/
+
+# per-task cargo target dirs (target-*/)
+target-*/

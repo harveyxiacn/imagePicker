@@ -1,0 +1,700 @@
+{
+  "label": "after",
+  "date": "2026-10-06T12:09:48.872Z",
+  "host": "win32",
+  "quick": false,
+  "cold_start_ms": {
+    "empty_catalog": {
+      "n": 7,
+      "p50": 31.31,
+      "p95": 46.82,
+      "max": 46.82
+    },
+    "catalog_20k": {
+      "n": 7,
+      "p50": 32.2,
+      "p95": 41.48,
+      "max": 41.48
+    },
+    "catalog_100k": {
+      "n": 7,
+      "p50": 30.52,
+      "p95": 38.54,
+      "max": 38.54
+    }
+  },
+  "import": {
+    "photos": 1000,
+    "ms": {
+      "import_call": 7,
+      "first_rows_100": 25,
+      "first_screen_meta": 84,
+      "first_thumb": 101,
+      "thumbs_100": 305,
+      "thumbs_all": 1501,
+      "session_ready": 1505
+    },
+    "rss_after_import_mb": {
+      "ws": 81,
+      "priv": 87,
+      "peak": 169
+    }
+  },
+  "query": {
+    "rows_20k_1session": {
+      "sessions": 1,
+      "cases": {
+        "default (taken_at) limit=500": {
+          "n": 30,
+          "p50": 5.33,
+          "p95": 8.9,
+          "max": 15.77
+        },
+        "default limit=5000 (web page size)": {
+          "n": 30,
+          "p50": 28.16,
+          "p95": 39.09,
+          "max": 40.12
+        },
+        "sort=-taken_at": {
+          "n": 30,
+          "p50": 10.84,
+          "p95": 22.98,
+          "max": 23.73
+        },
+        "sort=name": {
+          "n": 30,
+          "p50": 5.46,
+          "p95": 7.01,
+          "max": 10.64
+        },
+        "sort=rating": {
+          "n": 30,
+          "p50": 5.52,
+          "p95": 15.44,
+          "max": 15.82
+        },
+        "sort=ai": {
+          "n": 30,
+          "p50": 6.5,
+          "p95": 8.15,
+          "max": 14.63
+        },
+        "rating_gte=4": {
+          "n": 30,
+          "p50": 2.08,
+          "p95": 2.8,
+          "max": 2.83
+        },
+        "flag=picked": {
+          "n": 30,
+          "p50": 5.04,
+          "p95": 12.27,
+          "max": 15.25
+        },
+        "flag=rejected sort=ai": {
+          "n": 30,
+          "p50": 5.19,
+          "p95": 7.38,
+          "max": 9.44
+        },
+        "issues_any=blurry": {
+          "n": 30,
+          "p50": 5.45,
+          "p95": 14.83,
+          "max": 20.38
+        },
+        "issues_none=1": {
+          "n": 30,
+          "p50": 5.37,
+          "p95": 14.27,
+          "max": 17.21
+        },
+        "burst_best_only=1": {
+          "n": 30,
+          "p50": 6.62,
+          "p95": 15.14,
+          "max": 17.09
+        },
+        "scene_type=portrait": {
+          "n": 30,
+          "p50": 6.72,
+          "p95": 10.16,
+          "max": 16.65
+        },
+        "persons=2": {
+          "n": 30,
+          "p50": 5.51,
+          "p95": 16.04,
+          "max": 16.19
+        },
+        "persons=2,3 mode=all": {
+          "n": 30,
+          "p50": 2.11,
+          "p95": 2.36,
+          "max": 2.62
+        },
+        "persons=2 smiling": {
+          "n": 30,
+          "p50": 4.29,
+          "p95": 6.76,
+          "max": 7.95
+        },
+        "exclude_persons=2": {
+          "n": 30,
+          "p50": 10.31,
+          "p95": 14.57,
+          "max": 18.18
+        },
+        "person_state=eyes_open": {
+          "n": 30,
+          "p50": 9.39,
+          "p95": 13.28,
+          "max": 18.79
+        },
+        "ai_rating_gte=4 sort=ai": {
+          "n": 30,
+          "p50": 7.05,
+          "p95": 17.24,
+          "max": 17.64
+        },
+        "limit=1 (collection count)": {
+          "n": 30,
+          "p50": 1.64,
+          "p95": 2.16,
+          "max": 2.64
+        },
+        "burst_id=<one>": {
+          "n": 30,
+          "p50": 0.34,
+          "p95": 0.38,
+          "max": 0.44
+        }
+      },
+      "cursor_depth_ms": {
+        "taken_at": {
+          "page0": 14.2,
+          "page5": 4.2,
+          "page20": 4.6,
+          "page39": 15.3
+        },
+        "name": {
+          "page0": 4.5,
+          "page5": 4.6,
+          "page20": 4.4,
+          "page39": 4.5
+        },
+        "ai": {
+          "page0": 6.1,
+          "page5": 16.3,
+          "page20": 8.2,
+          "page39": 9.1
+        }
+      },
+      "full_session_pull_ms": {
+        "n": 5,
+        "p50": 166,
+        "p95": 184.47,
+        "max": 184.47
+      },
+      "sessions_list_ms": {
+        "n": 30,
+        "p50": 3.7,
+        "p95": 5.24,
+        "max": 5.44
+      },
+      "groups_ms": {
+        "n": 5,
+        "p50": 19.18,
+        "p95": 22.4,
+        "max": 22.4
+      },
+      "people_ms": {
+        "n": 5,
+        "p50": 9.79,
+        "p95": 11.57,
+        "max": 11.57
+      }
+    },
+    "rows_100k_5sessions": {
+      "sessions": 5,
+      "cases": {
+        "default (taken_at) limit=500": {
+          "n": 30,
+          "p50": 4.78,
+          "p95": 6.54,
+          "max": 7.19
+        },
+        "default limit=5000 (web page size)": {
+          "n": 30,
+          "p50": 26.85,
+          "p95": 35.24,
+          "max": 37.24
+        },
+        "sort=-taken_at": {
+          "n": 30,
+          "p50": 9.69,
+          "p95": 11.39,
+          "max": 21.26
+        },
+        "sort=name": {
+          "n": 30,
+          "p50": 3.81,
+          "p95": 6.13,
+          "max": 13.8
+        },
+        "sort=rating": {
+          "n": 30,
+          "p50": 4.32,
+          "p95": 4.67,
+          "max": 4.88
+        },
+        "sort=ai": {
+          "n": 30,
+          "p50": 5.07,
+          "p95": 5.57,
+          "max": 5.89
+        },
+        "rating_gte=4": {
+          "n": 30,
+          "p50": 3.52,
+          "p95": 3.97,
+          "max": 4.12
+        },
+        "flag=picked": {
+          "n": 30,
+          "p50": 3.51,
+          "p95": 5.15,
+          "max": 13.62
+        },
+        "flag=rejected sort=ai": {
+          "n": 30,
+          "p50": 3.76,
+          "p95": 4.66,
+          "max": 7.72
+        },
+        "issues_any=blurry": {
+          "n": 30,
+          "p50": 3.66,
+          "p95": 4.28,
+          "max": 9.45
+        },
+        "issues_none=1": {
+          "n": 30,
+          "p50": 3.98,
+          "p95": 5.74,
+          "max": 7.49
+        },
+        "burst_best_only=1": {
+          "n": 30,
+          "p50": 3.51,
+          "p95": 3.93,
+          "max": 4.56
+        },
+        "scene_type=portrait": {
+          "n": 30,
+          "p50": 3.94,
+          "p95": 7.5,
+          "max": 8.23
+        },
+        "persons=2": {
+          "n": 30,
+          "p50": 6.29,
+          "p95": 8.65,
+          "max": 16.68
+        },
+        "persons=2,3 mode=all": {
+          "n": 30,
+          "p50": 5.97,
+          "p95": 6.47,
+          "max": 6.57
+        },
+        "persons=2 smiling": {
+          "n": 30,
+          "p50": 5.25,
+          "p95": 9.72,
+          "max": 10.38
+        },
+        "exclude_persons=2": {
+          "n": 30,
+          "p50": 7.95,
+          "p95": 17.94,
+          "max": 18.1
+        },
+        "person_state=eyes_open": {
+          "n": 30,
+          "p50": 6.72,
+          "p95": 10.48,
+          "max": 17.01
+        },
+        "ai_rating_gte=4 sort=ai": {
+          "n": 30,
+          "p50": 4.55,
+          "p95": 4.83,
+          "max": 4.94
+        },
+        "limit=1 (collection count)": {
+          "n": 30,
+          "p50": 1.52,
+          "p95": 1.72,
+          "max": 2.19
+        },
+        "burst_id=<one>": {
+          "n": 30,
+          "p50": 0.28,
+          "p95": 0.38,
+          "max": 0.41
+        }
+      },
+      "cursor_depth_ms": {
+        "taken_at": {
+          "page0": 3.8,
+          "page5": 4,
+          "page20": 4,
+          "page39": 3.8
+        },
+        "name": {
+          "page0": 4.6,
+          "page5": 4.6,
+          "page20": 4.2,
+          "page39": 4.3
+        },
+        "ai": {
+          "page0": 10,
+          "page5": 9.9,
+          "page20": 5.5,
+          "page39": 4.6
+        }
+      },
+      "full_session_pull_ms": {
+        "n": 5,
+        "p50": 102.5,
+        "p95": 153.45,
+        "max": 153.45
+      },
+      "sessions_list_ms": {
+        "n": 30,
+        "p50": 15.73,
+        "p95": 20.72,
+        "max": 22.12
+      },
+      "groups_ms": {
+        "n": 5,
+        "p50": 14.27,
+        "p95": 16.18,
+        "max": 16.18
+      },
+      "people_ms": {
+        "n": 5,
+        "p50": 21.64,
+        "p95": 22.42,
+        "max": 22.42
+      }
+    },
+    "rows_100k_1session_stress": {
+      "sessions": 1,
+      "cases": {
+        "default (taken_at) limit=500": {
+          "n": 30,
+          "p50": 11.44,
+          "p95": 18.25,
+          "max": 24.05
+        },
+        "default limit=5000 (web page size)": {
+          "n": 30,
+          "p50": 30.72,
+          "p95": 36.97,
+          "max": 43.88
+        },
+        "sort=-taken_at": {
+          "n": 30,
+          "p50": 27.63,
+          "p95": 34.03,
+          "max": 36.73
+        },
+        "sort=name": {
+          "n": 30,
+          "p50": 9.5,
+          "p95": 9.8,
+          "max": 19.1
+        },
+        "sort=rating": {
+          "n": 30,
+          "p50": 10.49,
+          "p95": 11.01,
+          "max": 11.59
+        },
+        "sort=ai": {
+          "n": 30,
+          "p50": 12.49,
+          "p95": 22.67,
+          "max": 22.85
+        },
+        "rating_gte=4": {
+          "n": 30,
+          "p50": 8.84,
+          "p95": 9.47,
+          "max": 12.08
+        },
+        "flag=picked": {
+          "n": 30,
+          "p50": 8.68,
+          "p95": 9.75,
+          "max": 11.64
+        },
+        "flag=rejected sort=ai": {
+          "n": 30,
+          "p50": 9.37,
+          "p95": 9.81,
+          "max": 9.93
+        },
+        "issues_any=blurry": {
+          "n": 30,
+          "p50": 9.53,
+          "p95": 16.28,
+          "max": 18.86
+        },
+        "issues_none=1": {
+          "n": 30,
+          "p50": 14.32,
+          "p95": 20.4,
+          "max": 25.24
+        },
+        "burst_best_only=1": {
+          "n": 30,
+          "p50": 10,
+          "p95": 19.6,
+          "max": 20.08
+        },
+        "scene_type=portrait": {
+          "n": 30,
+          "p50": 10.89,
+          "p95": 17.15,
+          "max": 20.73
+        },
+        "persons=2": {
+          "n": 30,
+          "p50": 7.87,
+          "p95": 12.44,
+          "max": 18.14
+        },
+        "persons=2,3 mode=all": {
+          "n": 30,
+          "p50": 6.38,
+          "p95": 6.77,
+          "max": 7.06
+        },
+        "persons=2 smiling": {
+          "n": 30,
+          "p50": 6.36,
+          "p95": 8.37,
+          "max": 19.15
+        },
+        "exclude_persons=2": {
+          "n": 30,
+          "p50": 30.96,
+          "p95": 42.07,
+          "max": 54.56
+        },
+        "person_state=eyes_open": {
+          "n": 30,
+          "p50": 24.61,
+          "p95": 25.05,
+          "max": 31.32
+        },
+        "ai_rating_gte=4 sort=ai": {
+          "n": 30,
+          "p50": 11.77,
+          "p95": 16.83,
+          "max": 16.84
+        },
+        "limit=1 (collection count)": {
+          "n": 30,
+          "p50": 6.9,
+          "p95": 7.46,
+          "max": 7.48
+        },
+        "burst_id=<one>": {
+          "n": 30,
+          "p50": 0.32,
+          "p95": 0.47,
+          "max": 0.48
+        }
+      },
+      "cursor_depth_ms": {
+        "taken_at": {
+          "page0": 9.4,
+          "page5": 10.5,
+          "page20": 10.2,
+          "page39": 9.9,
+          "page59": 9.8
+        },
+        "name": {
+          "page0": 9.9,
+          "page5": 10.9,
+          "page20": 11.1,
+          "page39": 10.9,
+          "page59": 11.4
+        },
+        "ai": {
+          "page0": 13.7,
+          "page5": 14.4,
+          "page20": 14.1,
+          "page39": 14.8,
+          "page59": 14.7
+        }
+      },
+      "full_session_pull_ms": {
+        "n": 5,
+        "p50": 660.88,
+        "p95": 691.57,
+        "max": 691.57
+      },
+      "sessions_list_ms": {
+        "n": 30,
+        "p50": 12.42,
+        "p95": 13.59,
+        "max": 14.42
+      },
+      "groups_ms": {
+        "n": 5,
+        "p50": 69.44,
+        "p95": 70.24,
+        "max": 70.24
+      },
+      "people_ms": {
+        "n": 5,
+        "p50": 40.7,
+        "p95": 41.44,
+        "max": 41.44
+      }
+    }
+  },
+  "patch_ws": {
+    "patch_ms": {
+      "1 photo rating": {
+        "n": 30,
+        "p50": 0.42,
+        "p95": 0.61,
+        "max": 8.28
+      },
+      "1 photo flag": {
+        "n": 30,
+        "p50": 0.33,
+        "p95": 0.44,
+        "max": 0.44
+      },
+      "100 photos rating": {
+        "n": 10,
+        "p50": 0.92,
+        "p95": 1.02,
+        "max": 1.02
+      },
+      "1000 photos flag": {
+        "n": 5,
+        "p50": 3.42,
+        "p95": 5.9,
+        "max": 5.9
+      },
+      "5000 photos rating": {
+        "n": 3,
+        "p50": 24.23,
+        "p95": 39.38,
+        "max": 39.38
+      },
+      "20000 photos rating (select all)": {
+        "n": 3,
+        "p50": 122.1,
+        "p95": 125.27,
+        "max": 125.27
+      }
+    },
+    "ws": {
+      "photos.updated x1": {
+        "ms": 52,
+        "frames": 1,
+        "kb": 0
+      },
+      "photos.updated x100": {
+        "ms": 50,
+        "frames": 1,
+        "kb": 5
+      },
+      "photos.updated x1000": {
+        "ms": 50,
+        "frames": 1,
+        "kb": 54
+      },
+      "photos.updated x5000": {
+        "ms": 52,
+        "frames": 1,
+        "kb": 273
+      },
+      "photos.updated x20000": {
+        "ms": 155,
+        "frames": 1,
+        "kb": 1104
+      }
+    }
+  },
+  "preview": {
+    "thumb256_cached_ms": {
+      "n": 30,
+      "p50": 0.44,
+      "p95": 0.51,
+      "max": 0.64
+    },
+    "thumb512_cold_ms": {
+      "n": 20,
+      "p50": 99.08,
+      "p95": 107.92,
+      "max": 107.92
+    },
+    "preview2048_cold_ms": {
+      "n": 12,
+      "p50": 65.09,
+      "p95": 76.49,
+      "max": 76.49
+    },
+    "preview2048_warm_ms": {
+      "n": 30,
+      "p50": 0.77,
+      "p95": 1.47,
+      "max": 2.29
+    },
+    "preview1024_cold_ms": {
+      "n": 12,
+      "p50": 33.94,
+      "p95": 51.71,
+      "max": 51.71
+    },
+    "preview1024_warm_ms": {
+      "n": 30,
+      "p50": 0.46,
+      "p95": 0.73,
+      "max": 2.04
+    }
+  },
+  "memory_mb": {
+    "idle": {
+      "ws": 84,
+      "priv": 91,
+      "peak": 84
+    },
+    "after_list_20k": {
+      "ws": 78,
+      "priv": 80,
+      "peak": 102
+    },
+    "after_80_full_listings": {
+      "ws": 80,
+      "priv": 81,
+      "peak": 102
+    },
+    "after_patch_20k": {
+      "ws": 85,
+      "priv": 87,
+      "peak": 102
+    }
+  }
+}

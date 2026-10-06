@@ -12,6 +12,8 @@ use ip_core::{
 };
 use ip_server::ServerConfig;
 
+mod bench;
+
 #[derive(Parser, Debug)]
 #[command(name = "imagepicker", version, about = "Local-first AI photo culling")]
 struct Cli {
@@ -138,6 +140,11 @@ enum Command {
         engine: Option<String>,
         #[arg(long)]
         data_dir: Option<PathBuf>,
+    },
+    /// Synthetic libraries for the performance benchmarks (see bench/README.md).
+    Bench {
+        #[command(subcommand)]
+        cmd: bench::BenchCmd,
     },
     /// Show what the personalised scoring has learned (labels, accuracy, fusion weight).
     Taste {
@@ -856,6 +863,7 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Bench { cmd } => tokio::task::block_in_place(|| bench::run(cmd)),
         Command::Taste { retrain, data_dir } => {
             init_tracing("warn");
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;

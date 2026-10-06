@@ -2,6 +2,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { Ban, ChevronDown, ChevronRight, Flag as FlagIcon, ImageOff, Layers } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { api, thumbUrl } from '@/api/client'
 import type { Photo } from '@/api/types'
 import { issueBadges } from '@/lib/ai'
@@ -23,13 +24,14 @@ interface CellProps {
   selected: boolean
   active: boolean
   onToggleStack: (burstId: number) => void
+  /** Passed down (not read via `useTranslation`) so a mounted cell carries no i18n subscription. */
+  t: TFunction
 }
 
 const sameStack = (a: StackInfo | null, b: StackInfo | null) =>
   a === b || (!!a && !!b && a.burstId === b.burstId && a.count === b.count && a.expanded === b.expanded && a.isCover === b.isCover)
 
-const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggleStack }: CellProps) {
-  const { t } = useTranslation()
+const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggleStack, t }: CellProps) {
   const [failed, setFailed] = useState(false)
   const showBadges = size >= 100
   const rejected = photo.flag === -1
@@ -159,6 +161,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
   a.selected === b.selected &&
   a.active === b.active &&
   a.onToggleStack === b.onToggleStack &&
+  a.t === b.t &&
   sameStack(a.stack, b.stack),
 )
 
@@ -336,6 +339,7 @@ export function Grid({ items, onOpen, onToggleStack, onToggleScene, onContext }:
                     selected={selection.ids.has(it.photo.id)}
                     active={it.photo.id === activeId}
                     onToggleStack={onToggleStack}
+                    t={t}
                   />
                 ))}
               </div>
