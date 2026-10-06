@@ -104,6 +104,48 @@ fn heavy_stack() -> EditStack {
     }
 }
 
+/// Face warp + body warp + full beauty (the M4 portrait stack) on top of a light global edit.
+fn portrait_stack() -> EditStack {
+    EditStack {
+        version: 1,
+        ops: vec![
+            Op::Global(Adjust {
+                exposure: 0.2,
+                contrast: 8.0,
+                shadows: 15.0,
+                ..Default::default()
+            }),
+            Op::Warp(Warp::Face {
+                person_id: None,
+                level: Level::Standard,
+                slim: 60.0,
+                chin: 30.0,
+                eyes: 50.0,
+                nose: 30.0,
+            }),
+            Op::Warp(Warp::Body {
+                person_id: None,
+                level: Level::Standard,
+                arms: 50.0,
+                legs: 40.0,
+                waist: 40.0,
+                lengthen_legs: 30.0,
+                protect_background: true,
+            }),
+            Op::Beauty(Beauty {
+                person_id: None,
+                level: Level::Standard,
+                smooth: 60.0,
+                whiten: 40.0,
+                blemish: true,
+                eye_brighten: 40.0,
+                teeth_whiten: 40.0,
+                dark_circles: 40.0,
+            }),
+        ],
+    }
+}
+
 fn time(
     r: &dyn Renderer,
     src: &RgbImage,
@@ -192,6 +234,57 @@ fn main() {
         let c = time(cpu.as_ref(), src, &st, &masks, max, runs);
         let g = if gpu.backend() == Backend::Gpu {
             format!("{:10.1}", time(gpu.as_ref(), src, &st, &masks, max, runs))
+        } else {
+            "      n/a".into()
+        };
+        println!("{name:<34} {c:>10.1} {g}");
+    }
+
+    // ---- portrait stack (face warp + body warp + beauty, all on)
+    println!(
+        "
+portrait stack (synthetic 3:4 portrait, people geometry from testutil)"
+    );
+    let (pw, ph) = (4000u32, 6000u32);
+    let t = Instant::now();
+    let mut portrait = synth_portrait(pw, ph);
+    portrait.person.blemishes = (0..24)
+        .map(|i| {
+            let a = i as f32 * 0.7;
+            [
+                portrait.face[0] + 0.5 * portrait.face[2] * a.cos() * (0.4 + (i % 3) as f32 * 0.2),
+                portrait.face[1] + 0.6 * portrait.face[3] * a.sin() * (0.4 + (i % 4) as f32 * 0.15),
+                (3.0 + (i % 4) as f32) / ph as f32,
+            ]
+        })
+        .collect();
+    println!(
+        "generated {}x{} portrait in {:.1}s",
+        pw,
+        ph,
+        t.elapsed().as_secs_f64()
+    );
+    let people = PortraitMasks(vec![portrait.person.clone()]);
+    let pst = portrait_stack();
+    let pproxy = cpu
+        .render(&RenderRequest {
+            source: &portrait.image,
+            stack: &EditStack::default(),
+            masks: &NoAssets,
+            luts: &NoAssets,
+            max_long_edge: Some(2400),
+        })
+        .unwrap();
+    println!("{:<34} {:>10} {:>10}", "case", "CPU ms", "GPU ms");
+    let cases: [(&str, &RgbImage, Option<u32>, usize); 3] = [
+        ("preview 1600 (from 2400 proxy)", &pproxy, Some(1600), 5),
+        ("preview 1600 (from 24 MP)", &portrait.image, Some(1600), 3),
+        ("export full-res 24 MP", &portrait.image, None, 2),
+    ];
+    for (name, src, max, runs) in cases {
+        let c = time(cpu.as_ref(), src, &pst, &people, max, runs);
+        let g = if gpu.backend() == Backend::Gpu {
+            format!("{:10.1}", time(gpu.as_ref(), src, &pst, &people, max, runs))
         } else {
             "      n/a".into()
         };

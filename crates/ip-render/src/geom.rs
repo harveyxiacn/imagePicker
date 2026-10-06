@@ -66,6 +66,18 @@ impl Geo {
         Geo::new(self.sw, self.sh, self.rect, self.angle, ow, oh)
     }
 
+    /// Inverse of [`Geo::map`]: source pixel coordinates -> continuous output position.
+    pub fn unmap(&self, sx: f32, sy: f32) -> (f32, f32) {
+        let dxs = sx - self.hw;
+        let dys = sy - self.hh;
+        let dx = dxs * self.cos + dys * self.sin;
+        let dy = -dxs * self.sin + dys * self.cos;
+        (
+            (self.hw + dx - self.cx0) / self.xs,
+            (self.hh + dy - self.cy0) / self.ys,
+        )
+    }
+
     /// Continuous output position (pixel centres at i + 0.5) -> source pixel coordinates.
     #[inline]
     pub fn map(&self, fx: f32, fy: f32) -> (f32, f32) {
@@ -117,8 +129,14 @@ pub fn bilinear(src: &RgbImage, sx: f32, sy: f32, lut: &[f32; 256]) -> [f32; 3] 
 
 /// Supersampled (area-ish) sample of output pixel `(ox, oy)` in linear light.
 pub fn sample(src: &RgbImage, g: &Geo, ox: u32, oy: u32) -> [f32; 3] {
+    sample_off(src, g, ox, oy, 0.0, 0.0)
+}
+
+/// Like [`sample`], reading the source at the output position displaced by `(dx, dy)`
+/// output pixels (the warp stage). A zero offset is bit-identical to [`sample`].
+pub fn sample_off(src: &RgbImage, g: &Geo, ox: u32, oy: u32, dx: f32, dy: f32) -> [f32; 3] {
     let lut = dec_lut();
-    let (fx, fy) = (ox as f32 + 0.5, oy as f32 + 0.5);
+    let (fx, fy) = (ox as f32 + 0.5 + dx, oy as f32 + 0.5 + dy);
     let n = g.taps;
     if n == 1 {
         let (sx, sy) = g.map(fx, fy);
@@ -139,4 +157,19 @@ pub fn sample(src: &RgbImage, g: &Geo, ox: u32, oy: u32) -> [f32; 3] {
     }
     let k = inv * inv;
     [acc[0] * k, acc[1] * k, acc[2] * k]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Geo;
+
+    #[test]
+    fn unmap_inverts_map() {
+        let g = Geo::new(640, 480, [0.1, 0.05, 0.8, 0.85], 7.5, 300, 250);
+        for (fx, fy) in [(0.5, 0.5), (10.25, 200.5), (299.5, 3.0)] {
+            let (sx, sy) = g.map(fx, fy);
+            let (bx, by) = g.unmap(sx, sy);
+            assert!((bx - fx).abs() < 1e-3 && (by - fy).abs() < 1e-3);
+        }
+    }
 }
