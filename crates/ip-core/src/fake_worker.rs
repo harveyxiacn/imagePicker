@@ -297,11 +297,7 @@ impl AiWorker for FakeWorker {
         self.batch_sizes.lock().unwrap().push(req.items.len());
         *self.last_profile.lock().unwrap() = req.profile.clone();
         *self.last_allow_download.lock().unwrap() = Some(req.allow_download);
-        if self
-            .crash_batches
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-            .is_ok()
-        {
+        if take_one(&self.crash_batches) {
             self.set_state(WorkerState::Crashed);
             return Err(WorkerError::Disconnected);
         }
@@ -410,4 +406,17 @@ impl AiWorker for FakeWorker {
     async fn shutdown(&self) {
         self.set_state(WorkerState::Stopped);
     }
+}
+
+/// Atomically decrements `n` if it is non-zero; returns whether it did.
+/// (Spelled out instead of `fetch_update`, which newer toolchains deprecate.)
+fn take_one(n: &AtomicUsize) -> bool {
+    let mut cur = n.load(Ordering::SeqCst);
+    while cur > 0 {
+        match n.compare_exchange_weak(cur, cur - 1, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return true,
+            Err(actual) => cur = actual,
+        }
+    }
+    false
 }
