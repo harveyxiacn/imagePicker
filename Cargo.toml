@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ip-imaging", "crates/ip-core", "crates/ip-server", "crates/ip-cli"]
+members = ["crates/ip-imaging", "crates/ip-worker-client", "crates/ip-core", "crates/ip-server", "crates/ip-cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ repository = "https://github.com/harveyxiacn/imagePicker"
 [workspace.dependencies]
 ip-imaging = { path = "crates/ip-imaging" }
 ip-core = { path = "crates/ip-core" }
+ip-worker-client = { path = "crates/ip-worker-client" }
 ip-server = { path = "crates/ip-server" }
 anyhow = "1"
 thiserror = "2"
@@ -32,6 +33,8 @@ tokio-tungstenite = "0.30"
 futures-util = "0.3"
 http-body-util = "0.1"
 tempfile = "3"
+async-trait = "0.1"
+getrandom = "0.4"
 
 [profile.release]
 lto = "thin"
