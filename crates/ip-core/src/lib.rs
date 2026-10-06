@@ -1,6 +1,7 @@
 //! Catalog (SQLite), import, thumbnail scheduling, tasks and events.
 
 pub mod analysis;
+pub mod auth;
 pub mod catalog;
 pub mod collections;
 pub mod db;
@@ -15,6 +16,7 @@ pub mod jpegmeta;
 pub mod jsonfix;
 pub mod model;
 pub mod paths;
+pub mod roots;
 pub mod taste;
 pub mod thumbs;
 
