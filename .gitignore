@@ -1,0 +1,20 @@
+# Rust
+target/
+# Node
+node_modules/
+dist/
+# Python
+__pycache__/
+.venv/
+*.pyc
+# Models & caches (never commit weights or personal photos)
+models/
+*.onnx
+*.safetensors
+*.gguf
+bench/data/
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
