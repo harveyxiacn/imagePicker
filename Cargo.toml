@@ -21,6 +21,17 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rayon = "1"
 blake3 = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+dirs = "7"
+axum = { version = "0.8", features = ["ws", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+clap = { version = "4", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+tokio-tungstenite = "0.30"
+futures-util = "0.3"
+http-body-util = "0.1"
+tempfile = "3"
 
 [profile.release]
 lto = "thin"
