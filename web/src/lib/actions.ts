@@ -1,7 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { useToasts } from '@/stores/toasts'
+import i18n from '@/i18n'
 import { planAcceptAi } from './ai'
+import { canNow } from './auth'
 import { applyEditChanges } from './editActions'
 import { findCachedPhotos, patchPhotosInCache, qk } from './cache'
 import {
@@ -12,6 +14,13 @@ import {
   type EditablePatch,
   type HistoryEntry,
 } from './history'
+
+/** Read-only guests (LAN mode) cannot change ratings / flags: tell them instead of failing with a 403. */
+export function guestBlocked(): boolean {
+  if (canNow('rate')) return false
+  useToasts.getState().push('info', i18n.t('auth.readOnly') as string, 2500)
+  return true
+}
 
 /** Optimistically write `side` values of the changes to the cache, then PATCH the server. */
 async function commit(qc: QueryClient, changes: Change[], side: 'before' | 'after'): Promise<void> {
@@ -34,6 +43,7 @@ export async function editPhotos(
   patch: EditablePatch,
   label: string,
 ): Promise<void> {
+  if (guestBlocked()) return
   const changes = computeChanges(findCachedPhotos(qc, ids), patch)
   if (changes.length === 0) return
   useHistory.getState().push({ label, changes })
@@ -64,6 +74,7 @@ export async function editPhotoGroups(
   groups: { ids: number[]; patch: EditablePatch }[],
   label: string,
 ): Promise<void> {
+  if (guestBlocked()) return
   const changes: Change[] = []
   for (const g of groups) changes.push(...computeChanges(findCachedPhotos(qc, g.ids), g.patch))
   if (changes.length === 0) return
@@ -76,6 +87,7 @@ export async function editPhotoGroups(
  * POST /api/photos/accept-ai; undo/redo use the regular PATCH path.
  */
 export async function acceptAiRatings(qc: QueryClient, ids: number[], label: string): Promise<number> {
+  if (guestBlocked()) return 0
   const changes = planAcceptAi(findCachedPhotos(qc, ids))
   if (changes.length === 0) return 0
   useHistory.getState().push({ label, changes })

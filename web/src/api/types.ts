@@ -299,6 +299,9 @@ export type ServerEvent =
   | { type: 'enhance.done'; photo_id: number; op: EnhanceOp; ok: boolean; reason: string | null }
   | { type: 'taste.updated'; labels: number; active: boolean; alpha: number }
   | { type: 'collections.updated' }
+  | { type: 'assistant.done'; plan_id: string; ok: boolean; results: AssistantResult[]; undo: AssistantUndo }
+  | { type: 'settings.updated'; settings: Settings }
+  | { type: 'xmp.conflict'; photo_id: number; sidecar: { rating?: number | null }; catalog: { rating?: number | null } }
 
 export interface ApiErrorBody {
   error: { code: string; message: string }
@@ -666,4 +669,132 @@ export interface LutInfo {
   id: string
   name: string
   builtin: boolean
+}
+
+// ---- M6 (docs/api-contract-m6.md) ----
+
+export type AssistantTool =
+  | 'filter'
+  | 'set_rating'
+  | 'set_flag'
+  | 'accept_ai'
+  | 'group_keep_top'
+  | 'scene_keep_top'
+  | 'apply_preset'
+  | 'auto_adjust'
+  | 'apply_profiles'
+  | 'besttake_auto'
+  | 'remove_bystanders'
+  | 'export'
+  | 'describe'
+  | 'suggest_edits'
+
+export type AssistantEngine = 'rules' | 'llm'
+
+export interface AssistantStatus {
+  engine: AssistantEngine
+  llm_model: string | null
+  vlm_model: string | null
+  llm_available: boolean
+  vlm_available: boolean
+}
+
+export interface AssistantContext {
+  /** current filter as a /api/photos query string (no session_id) */
+  filter: string
+  selection: number[]
+  current_photo_id: number | null
+  locale: 'zh-CN' | 'en'
+}
+
+export interface PlanStep {
+  tool: AssistantTool | (string & {})
+  args: Record<string, unknown>
+  summary: string
+  affects: number
+  destructive: boolean
+}
+
+export interface AssistantPlan {
+  plan_id: string
+  reply: string
+  steps: PlanStep[]
+  needs_confirmation: boolean
+  engine: AssistantEngine
+  unsupported: string | null
+}
+
+export interface AssistantResult {
+  tool: string
+  ok: boolean
+  affected: number
+  error?: string | null
+  /** `suggest_edits` / `describe` payloads (client-side extension, see docs of the web UI) */
+  data?: unknown
+}
+
+/** Values BEFORE the execution: enough to revert it as one undo step. */
+export interface AssistantUndo {
+  edits: { photo_id: number; before: EditStack }[]
+  photos: { id: number; user_rating: number | null; flag: Flag; color_label: ColorLabel }[]
+}
+
+export interface EditSuggestion {
+  problems: string[]
+  adjust: Adjust
+  reason: string
+}
+
+export type XmpMode = 'off' | 'sidecar' | 'sidecar_and_embedded'
+export type ModelSource = 'auto' | 'hf' | 'hf-mirror' | 'modelscope'
+export type GroupStrictness = 'loose' | 'normal' | 'strict'
+export type RenderBackend = 'auto' | 'gpu' | 'cpu'
+
+export interface Settings {
+  language: 'zh-CN' | 'en'
+  theme: 'dark' | 'light' | 'system'
+  analysis: { default_profile: AnalysisProfile; auto_analyze_on_import: boolean; group_strictness: GroupStrictness }
+  faces: { enabled: boolean }
+  privacy: { allow_network: boolean }
+  models: { dir: string; source: ModelSource }
+  cache: { max_gb: number }
+  render: { backend: RenderBackend }
+  xmp_mode: XmpMode
+  lan: { enabled: boolean; port: number; guest_enabled: boolean }
+  roots: string[]
+  assistant: { engine: 'auto' | 'rules' | 'llm' }
+}
+
+/** Recursive partial used for `PATCH /api/settings`. */
+export type SettingsPatch = {
+  [K in keyof Settings]?: Settings[K] extends unknown[] ? Settings[K] : Settings[K] extends object ? Partial<Settings[K]> : Settings[K]
+}
+
+export type CacheKind = 'thumbs' | 'previews' | 'masks' | 'edits' | 'gen'
+export const CACHE_KINDS: CacheKind[] = ['thumbs', 'previews', 'masks', 'edits', 'gen']
+export interface CacheInfo {
+  bytes: number
+  items: Record<CacheKind, number>
+}
+
+export interface OnboardingInfo {
+  first_run: boolean
+  hardware: HardwareInfo['worker']
+  recommended_tier: 'T0' | 'T1' | 'T2' | 'T3'
+  recommended_download_mb: number
+  /** ids of the models to download for the recommended tier (optional extension; falls back to the analysis models) */
+  recommended_models?: string[]
+}
+
+export type Role = 'owner' | 'guest'
+export interface AuthMe {
+  role: Role | null
+  lan: boolean
+}
+
+export interface LanInfo {
+  enabled: boolean
+  urls: string[]
+  qr_svg: string | null
+  restart_required?: boolean
 }

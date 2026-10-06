@@ -31,7 +31,7 @@ const r2 = (x: number) => Math.round(x * 100) / 100
 // Models, worker
 // ============================================================================
 
-const MODELS: ModelInfo[] = [
+export const MODELS: ModelInfo[] = [
   { id: 'yunet', task: ['face_detect'], size_mb: 0.3, license: 'MIT', noncommercial: false, installed: true, required_for: ['fast', 'standard'] },
   { id: 'mediapipe-face-landmarker', task: ['face_landmarks', 'blendshapes'], size_mb: 4, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: ['fast', 'standard'] },
   { id: 'auraface-v1', task: ['face_identity'], size_mb: 250, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: ['standard'] },
@@ -64,6 +64,17 @@ const worker: HardwareInfo['worker'] = {
   providers: ['CUDAExecutionProvider', 'CPUExecutionProvider'],
   gpu: { name: 'NVIDIA GeForce RTX 4090', vram_mb: 24564 },
   error: null,
+}
+
+export const workerInfo = (): HardwareInfo['worker'] => ({ ...worker })
+
+/** M6: "clear all face data" (settings > faces & privacy). */
+export function clearFaceData(): void {
+  for (const f of faceById.values()) {
+    f.person_id = null
+    f.person_name = null
+    f.assigned = false
+  }
 }
 
 function setWorker(state: WorkerState) {

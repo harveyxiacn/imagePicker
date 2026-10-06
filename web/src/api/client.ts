@@ -38,6 +38,17 @@ import type {
   BystandersResponse,
   InpaintBody,
   EnhanceBody,
+  AssistantContext,
+  AssistantPlan,
+  AssistantStatus,
+  AuthMe,
+  CacheInfo,
+  CacheKind,
+  LanInfo,
+  OnboardingInfo,
+  Role,
+  Settings,
+  SettingsPatch,
 } from './types'
 
 export class ApiError extends Error {
@@ -61,20 +72,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
-  if (!res.ok) {
-    let code = 'http_error'
-    let message = `${res.status} ${res.statusText}`
-    let body: unknown
-    try {
-      const j = (await res.json()) as ApiErrorBody
-      body = j
-      code = j.error.code
-      message = j.error.message
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new ApiError(res.status, code, message, body)
-  }
+  if (!res.ok) throw await toApiError(res, path)
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
@@ -82,11 +80,15 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 /** multipart/form-data request (the browser sets the boundary header). */
 async function requestForm<T>(method: string, path: string, body: FormData): Promise<T> {
   const res = await fetch(BASE + path, { method, body })
-  if (!res.ok) throw await toApiError(res)
+  if (!res.ok) throw await toApiError(res, path)
   return (await res.json()) as T
 }
 
-async function toApiError(res: Response): Promise<ApiError> {
+/** Hooks installed by the app shell (kept out of this module so it stays free of router imports). */
+export const authHooks: { onUnauthorized: ((requestPath: string) => void) | null } = { onUnauthorized: null }
+
+async function toApiError(res: Response, path = ''): Promise<ApiError> {
+  if (res.status === 401) authHooks.onUnauthorized?.(path)
   let code = 'http_error'
   let message = `${res.status} ${res.statusText}`
   let body: unknown
@@ -109,7 +111,7 @@ export async function renderPreview(body: PreviewBody, signal?: AbortSignal): Pr
     body: JSON.stringify(body),
     signal,
   })
-  if (!res.ok) throw await toApiError(res)
+  if (!res.ok) throw await toApiError(res, '/render/preview')
   const ms = Number(res.headers.get('X-Render-Ms'))
   const backend = res.headers.get('X-Render-Backend')
   return {
@@ -124,7 +126,7 @@ export async function fetchMask(photoId: number, target: string, personId?: numb
   const q = new URLSearchParams({ target })
   if (personId !== undefined) q.set('person_id', String(personId))
   const res = await fetch(`${BASE}/masks/${photoId}?${q.toString()}`, { signal })
-  if (!res.ok) throw await toApiError(res)
+  if (!res.ok) throw await toApiError(res, '/masks')
   return res.blob()
 }
 
@@ -154,6 +156,8 @@ export function photosQueryString(q: PhotosQuery): string {
   if (q.limit) p.set('limit', String(q.limit))
   return p.toString()
 }
+
+const unwrapSettings = (r: Settings | { settings: Settings }): Settings => ('settings' in r ? r.settings : r)
 
 export const api = {
   health: () => request<{ ok: boolean; version: string }>('GET', '/health'),
@@ -232,6 +236,27 @@ export const api = {
   bystanders: (id: number) => request<BystandersResponse>('GET', `/photos/${id}/bystanders`),
   inpaint: (id: number, body: InpaintBody) => request<{ task_id: string }>('POST', `/photos/${id}/inpaint`, body),
   enhance: (id: number, body: EnhanceBody) => request<{ task_id: string }>('POST', `/photos/${id}/enhance`, body),
+  // ---- M6 ----
+  assistantStatus: () => request<AssistantStatus>('GET', '/assistant/status'),
+  assistantPlan: (body: { session_id: number; message: string; context: AssistantContext; engine?: 'auto' | 'rules' | 'llm' }) =>
+    request<AssistantPlan>('POST', '/assistant/plan', body),
+  assistantExecute: (plan_id: string) => request<{ task_id: string }>('POST', '/assistant/execute', { plan_id }),
+  assistantDescribe: (photo_id: number) => request<{ caption: string; keywords: string[] }>('POST', '/assistant/describe', { photo_id }),
+  settings: () => request<Settings | { settings: Settings }>('GET', '/settings').then(unwrapSettings),
+  patchSettings: (patch: SettingsPatch) => request<Settings | { settings: Settings }>('PATCH', '/settings', patch).then(unwrapSettings),
+  cache: () => request<CacheInfo>('GET', '/cache'),
+  clearCache: (kinds: CacheKind[]) => request<void>('POST', '/cache/clear', { kinds }),
+  deleteModel: (id: string) => request<void>('DELETE', `/models/${encodeURIComponent(id)}`),
+  deleteAllFaces: () => request<void>('DELETE', '/faces?confirm=true'),
+  onboarding: () => request<OnboardingInfo>('GET', '/onboarding'),
+  onboardingDone: () => request<void>('POST', '/onboarding/done'),
+  lan: () => request<LanInfo>('GET', '/system/lan'),
+  me: () => request<AuthMe>('GET', '/auth/me'),
+  login: (password: string) => request<{ role?: Role }>('POST', '/auth/login', { password }),
+  logout: () => request<void>('POST', '/auth/logout'),
+  setPassword: (password: string, guest_password?: string) =>
+    request<{ ok: boolean }>('POST', '/auth/password', guest_password === undefined ? { password } : { password, guest_password }),
+  xmpSync: (session_id: number, direction: 'read' | 'write') => request<{ updated?: number }>('POST', '/xmp/sync', { session_id, direction }),
   fsRoots: () => request<{ roots: string[] }>('GET', '/fs/roots'),
   fsList: (path?: string) =>
     request<FsList>('GET', `/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),

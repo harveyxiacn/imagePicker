@@ -91,6 +91,7 @@ export const BINDINGS: Binding[] = [
   { id: 'group.pickNext', keys: ['shift+enter'], scopes: ['group'], group: 'ai', desc: 'groupPickNext' },
   { id: 'faces.toggle', keys: ['shift+f'], scopes: ['loupe', 'compare', 'group'], group: 'ai', desc: 'facesToggle' },
   { id: 'personFilter.open', keys: ['shift+p'], scopes: ALL, group: 'ai', desc: 'personFilter' },
+  { id: 'assistant.toggle', keys: ['mod+j'], scopes: WITH_EDIT, group: 'ai', desc: 'assistant' },
   { id: 'export.open', keys: ['mod+e'], scopes: WITH_EDIT, group: 'misc', desc: 'export' },
   { id: 'help.toggle', keys: ['?'], scopes: WITH_EDIT, group: 'misc', desc: 'help' },
 ]

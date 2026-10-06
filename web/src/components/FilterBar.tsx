@@ -202,6 +202,7 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
             onClick={() => setGrouped(!grouped)}
             title={grouped ? t('stack.flat') : t('stack.grouped')}
             data-testid="grouped-toggle"
+            data-coach="stacks"
           >
             <Layers size={14} />
             {grouped ? t('stack.groupedShort') : t('stack.flatShort')}

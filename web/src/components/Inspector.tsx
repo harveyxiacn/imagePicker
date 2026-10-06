@@ -73,7 +73,7 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor, onAccep
       </div>
 
       <section className="flex flex-col gap-2.5">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2" data-coach="rating">
           <span className="text-muted">{t('inspector.rating')}</span>
           <StarRating value={photo.user_rating} onChange={onRate} />
         </div>

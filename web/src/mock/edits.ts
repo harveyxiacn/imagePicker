@@ -44,7 +44,7 @@ export function store(p: Photo, stackIn: EditStack): { stack: EditStack; updated
 
 const g = (a: Adjust): EditStack => ({ version: 1, ops: [{ type: 'global', ...a }] })
 
-const BUILTIN: Preset[] = [
+export const BUILTIN: Preset[] = [
   {
     id: 'film_warm',
     name: 'preset.film_warm',
@@ -81,7 +81,7 @@ let presetSeq = 0
 
 // ---------------------------------------------------------------- auto
 
-function autoAdjust(p: Photo, mode: AutoMode): Adjust {
+export function autoAdjust(p: Photo, mode: AutoMode): Adjust {
   const h = hashString(`${p.id}:${mode}`)
   const r = (k: number) => ((h >> (k * 3)) & 7) / 7 // 0..1, deterministic per photo
   const base: Adjust = {

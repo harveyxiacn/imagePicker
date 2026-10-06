@@ -1,7 +1,12 @@
 import { useEffect } from 'react'
+import { guestBlocked } from '@/lib/actions'
+import { canNow } from '@/lib/auth'
 import { COLOR_KEYS, dispatchKey, isTypingTarget, type Handlers, type Scope } from '@/lib/keymap'
 import { useUi } from '@/stores/ui'
 import type { Controller } from './useController'
+
+/** Actions a read-only guest may not trigger (the server answers 403 anyway). */
+const GUEST_BLOCKED = /^(rate\.|rateNext\.|flag\.|color\.|ai\.|edit\.open|export\.open)/
 
 const REPEATABLE = new Set(['nav.prev', 'nav.next', 'nav.up', 'nav.down', 'edit.undo', 'edit.redo'])
 
@@ -86,6 +91,7 @@ export function useShortcuts(ctrl: Controller) {
         get: (target, id: string) => {
           const fn = target[id]
           if (!fn) return undefined
+          if (GUEST_BLOCKED.test(id) && !canNow('rate')) return () => void guestBlocked()
           // Suppress OS key-repeat for one-shot actions.
           return e.repeat && !REPEATABLE.has(id) ? () => undefined : fn
         },

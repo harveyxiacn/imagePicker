@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { errorText } from '@/lib/errors'
 import { ArrowUp, Folder, HardDrive, Image as ImageIcon, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -105,7 +106,7 @@ export function FolderBrowser({ open, onOpenChange, onSelect, title, confirmLabe
               <Loader2 className="animate-spin" size={18} />
             </div>
           ) : list.isError ? (
-            <div className="p-4 text-danger">{(list.error as Error).message}</div>
+            <div className="p-4 text-danger">{errorText(list.error)}</div>
           ) : current && current.dirs.length === 0 ? (
             <div className="p-4 text-muted">{t('folder.empty')}</div>
           ) : (
