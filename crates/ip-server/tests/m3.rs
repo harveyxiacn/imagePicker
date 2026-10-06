@@ -656,6 +656,9 @@ async fn sync_and_auto_http() {
     .await;
     assert_eq!(r.status, StatusCode::OK);
     assert!(r.json()["adjust"]["exposure"].is_number());
+    // f32 sliders must serialise in shortest form, never widened f64 noise.
+    let raw = String::from_utf8_lossy(&r.body);
+    assert!(!raw.contains("9999") && !raw.contains("0000001"), "{raw}");
     let doc = call(&e.app, Method::GET, &format!("/api/edits/{b}"), None)
         .await
         .json();

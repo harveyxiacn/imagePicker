@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ip_core::ip_render::Backend;
 use ip_core::{AutoRequest, PresetCreate, PreviewRequest, SyncRequest};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::error::{ApiJson, ApiPath, ApiQuery, ApiResult};
@@ -61,14 +61,21 @@ pub async fn render_preview(
     Ok(resp)
 }
 
+/// Serialised directly (not via `json!`/`Value`), so `f32` slider values keep their shortest
+/// representation instead of widening to f64 noise like `-0.19999998807907104`.
+#[derive(Serialize)]
+pub struct AutoResponse {
+    adjust: ip_render::Adjust,
+}
+
 pub async fn auto_edit(
     State(st): State<AppState>,
     ApiPath(id): ApiPath<i64>,
     ApiJson(req): ApiJson<AutoRequest>,
-) -> ApiResult<Json<Value>> {
-    Ok(Json(
-        json!({ "adjust": st.core.auto_adjust(id, req.mode).await? }),
-    ))
+) -> ApiResult<Json<AutoResponse>> {
+    Ok(Json(AutoResponse {
+        adjust: st.core.auto_adjust(id, req.mode).await?,
+    }))
 }
 
 pub async fn sync_edits(

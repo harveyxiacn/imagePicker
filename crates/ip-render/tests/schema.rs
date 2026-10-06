@@ -32,3 +32,35 @@ fn parses_doc05_stack_and_ignores_future_ops() {
         .unwrap()
         .is_identity());
 }
+
+#[test]
+fn auto_adjust_values_are_slider_granular() {
+    // A dark, bluish image produces non-trivial suggestions.
+    let (w, h) = (64u32, 48u32);
+    let data: Vec<u8> = (0..w * h)
+        .flat_map(|i| [20u8, 30, (60 + i % 40) as u8])
+        .collect();
+    let img = ip_render::RgbImage {
+        width: w,
+        height: h,
+        data,
+    };
+    let a = ip_render::auto_adjust(&img, &Default::default(), ip_render::AutoMode::Auto);
+    assert_eq!((a.exposure * 100.0).round() / 100.0, a.exposure);
+    assert_eq!((a.temp / 10.0).round() * 10.0, a.temp);
+    for v in [
+        a.contrast,
+        a.highlights,
+        a.shadows,
+        a.whites,
+        a.blacks,
+        a.tint,
+        a.vibrance,
+        a.clarity,
+    ] {
+        assert_eq!(v.round(), v);
+    }
+    // f32 -> JSON must not leak binary noise like -0.19999998807907104.
+    let j = serde_json::to_string(&a).unwrap();
+    assert!(!j.contains("99999") && !j.contains("00000"), "{j}");
+}

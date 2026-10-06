@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 ip-core.workspace = true
 ip-imaging.workspace = true
+ip-render.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -18,7 +19,6 @@ tower-http.workspace = true
 dirs.workspace = true
 
 [dev-dependencies]
-ip-render.workspace = true
 ip-core = { workspace = true, features = ["testutil"] }
 tempfile.workspace = true
 tokio-tungstenite.workspace = true
