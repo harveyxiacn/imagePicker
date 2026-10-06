@@ -202,7 +202,11 @@ impl Core {
     /// bytes freed. Scratch files (`gen`) go first, then rendered edits and previews, then
     /// thumbnails, masks last (they are the costliest to rebuild).
     pub fn evict_cache_blocking(&self) -> u64 {
-        let budget = (self.settings().cache.max_gb * GIB) as u64;
+        self.evict_cache_to((self.settings().cache.max_gb * GIB) as u64)
+    }
+
+    /// [`Core::evict_cache_blocking`] with an explicit budget in bytes.
+    pub fn evict_cache_to(&self, budget: u64) -> u64 {
         let mut all: Vec<(u8, Entry)> = Vec::new();
         for (class, kinds) in [
             (0u8, &["gen"][..]),
@@ -352,6 +356,7 @@ impl Core {
         let tier = hw.tier.clone().unwrap_or_else(|| "T0".to_string());
         // what the standard analysis would still have to download
         let mut mb: Option<f64> = None;
+        let mut missing: Vec<String> = Vec::new();
         if let Ok(Ok(l)) =
             tokio::time::timeout(Duration::from_secs(20), self.worker.models_list()).await
         {
@@ -364,19 +369,20 @@ impl Core {
                     .map(|m| m.id.clone())
                     .collect(),
             };
-            mb = Some(
-                l.models
-                    .iter()
-                    .filter(|m| !m.installed && wanted.contains(&m.id))
-                    .map(|m| m.size_mb)
-                    .sum(),
-            );
+            let todo: Vec<&ip_worker_client::WorkerModel> = l
+                .models
+                .iter()
+                .filter(|m| !m.installed && wanted.contains(&m.id))
+                .collect();
+            missing = todo.iter().map(|m| m.id.clone()).collect();
+            mb = Some(todo.iter().map(|m| m.size_mb).sum());
         }
         Ok(json!({
             "first_run": first_run,
             "hardware": hw,
             "recommended_tier": tier,
             "recommended_download_mb": mb.map(|m| m.round() as i64),
+            "recommended_models": missing,
         }))
     }
 

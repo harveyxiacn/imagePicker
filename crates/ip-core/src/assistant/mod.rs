@@ -359,44 +359,53 @@ impl Core {
             }
         }
         let _ = fallback_note;
-        let (calls, hints, unsupported) = match calls {
-            Some(c) => (c, Vec::new(), None),
-            None => {
-                let parsed = rules::parse(
-                    &req.message,
-                    &RulesCtx {
-                        people: &people,
-                        presets: &presets,
-                        selection: &req.context.selection,
-                        current_photo_id: req.context.current_photo_id,
-                        locale,
-                    },
-                );
-                (parsed.calls, parsed.hints, parsed.unsupported)
-            }
+        let names = Names {
+            people: &people,
+            presets: &presets,
         };
-
-        let mut unsupported = unsupported;
-        let mut steps = Vec::new();
-        if unsupported.is_none() {
-            let names = Names {
-                people: &people,
-                presets: &presets,
+        let mut llm_calls = calls;
+        let (steps, hints, unsupported) = loop {
+            let (calls, hints, mut unsupported) = match llm_calls.take() {
+                Some(c) => (c, Vec::new(), None),
+                None => {
+                    let parsed = rules::parse(
+                        &req.message,
+                        &RulesCtx {
+                            people: &people,
+                            presets: &presets,
+                            selection: &req.context.selection,
+                            current_photo_id: req.context.current_photo_id,
+                            locale,
+                        },
+                    );
+                    (parsed.calls, parsed.hints, parsed.unsupported)
+                }
             };
-            for c in calls {
-                match self.build_step(sid, &req.context, &c, locale, &names).await {
-                    Ok(s) => steps.push(s),
-                    Err(msg) => {
-                        unsupported = Some(msg);
-                        steps.clear();
-                        break;
+            let mut steps = Vec::new();
+            if unsupported.is_none() {
+                for c in calls {
+                    match self.build_step(sid, &req.context, &c, locale, &names).await {
+                        Ok(s) => steps.push(s),
+                        Err(msg) => {
+                            unsupported = Some(msg);
+                            steps.clear();
+                            break;
+                        }
                     }
                 }
+                if steps.is_empty() && unsupported.is_none() {
+                    unsupported = Some(rules::unsupported_help(locale));
+                }
             }
-            if steps.is_empty() && unsupported.is_none() {
-                unsupported = Some(rules::unsupported_help(locale));
+            if unsupported.is_some() && engine == "llm" {
+                // the model referred to something that does not exist: use the rules instead
+                tracing::info!(reason = ?unsupported, "assistant: model plan rejected; using the rules");
+                engine = "rules";
+                llm_reply = None;
+                continue;
             }
-        }
+            break (steps, hints, unsupported);
+        };
         let needs_confirmation = steps.iter().any(|s| s.destructive);
         let reply = match (&unsupported, &llm_reply) {
             (Some(u), _) => u.clone(),

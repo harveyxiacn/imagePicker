@@ -27,6 +27,9 @@ pub struct XmpSyncRequest {
     pub session_id: i64,
     /// `read` | `write`
     pub direction: String,
+    /// Limits the sync to these photos of the session.
+    #[serde(default)]
+    pub photo_ids: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -516,7 +519,7 @@ impl Core {
         .await
         .map_err(|e| CoreError::Internal(anyhow::anyhow!("xmp write task failed: {e}")))?;
         let mut updates = Vec::new();
-        let mut conflicts: Vec<(i64, Value, Value)> = Vec::new();
+        let mut conflicts: Vec<(i64, i64, Value, Value)> = Vec::new();
         let mut db_work: Vec<(i64, Outcome)> = Vec::new();
         for (id, o) in outcomes {
             match &o {
@@ -550,7 +553,14 @@ impl Core {
                                 updates.push(u);
                             }
                             record_state(c, id, &path, mtime)?;
-                            conflicts.push((id, payload.0, payload.1));
+                            let sid: i64 = c
+                                .query_row(
+                                    "SELECT COALESCE(MIN(session_id), 0) FROM session_photo WHERE photo_id=?1",
+                                    [id],
+                                    |r| r.get(0),
+                                )
+                                .unwrap_or(0);
+                            conflicts.push((sid, id, payload.0, payload.1));
                         }
                         _ => {}
                     }
@@ -563,8 +573,9 @@ impl Core {
         if !updates.is_empty() {
             self.events.emit(Event::PhotosUpdated { items: updates });
         }
-        for (photo_id, sidecar, catalog) in conflicts {
+        for (session_id, photo_id, sidecar, catalog) in conflicts {
             self.events.emit(Event::XmpConflict {
+                session_id,
                 photo_id,
                 sidecar,
                 catalog,
@@ -598,6 +609,13 @@ impl Core {
                 Ok(v)
             })
             .await?;
+        let ids = match &req.photo_ids {
+            Some(only) => {
+                let only: BTreeSet<i64> = only.iter().copied().collect();
+                ids.into_iter().filter(|i| only.contains(i)).collect()
+            }
+            None => ids,
+        };
         if req.direction == "write" {
             return self.xmp_write(ids, true, &mode).await;
         }
@@ -656,6 +674,7 @@ impl Core {
         }
         for (photo_id, sidecar, catalog) in conflicts {
             self.events.emit(Event::XmpConflict {
+                session_id: sid,
                 photo_id,
                 sidecar,
                 catalog,

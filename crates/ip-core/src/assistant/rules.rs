@@ -238,7 +238,7 @@ fn rx() -> &'static Rx {
             view: r(r"只看|只显示|只要|只留|看看|看下|看一下|显示|展示|筛选|过滤|找出|找一下|找|查看|列出|\b(show|display|filter|find|list|view|see|only|just|give me|look at)\b"),
             reject: r(r"淘汰|丢弃|拒绝|排除|删掉|删除|扔掉|弃掉|\b(reject|discard|cull|trash|delete|throw away|get rid of|bin)\b"),
             unreject: r(r"(取消|撤销|恢复|撤回).{0,3}淘汰|\b(unreject|un-reject|restore)\b|undo.{0,6}reject"),
-            pick: r(r"(标记|标为|标成|设为|设置为|设成|改为)\s*(选用|选中|精选|入选)|\b(mark|flag|set|label|tag)\b.{0,24}?\bas\s+(a\s+)?(pick(s|ed)?|keepers?|favou?rites?)\b|\bpick (them|these|all|it)\b"),
+            pick: r(r"(标记|标为|标成|设为|设置为|设成|改为)\s*(?:为|成)?\s*(选用|选中|精选|入选)|\b(mark|flag|set|label|tag)\b.{0,24}?\bas\s+(a\s+)?(pick(s|ed)?|keepers?|favou?rites?)\b|\bpick (them|these|all|it)\b"),
             unpick: r(r"(取消|清除|去掉|移除|撤销).{0,3}(选用|选中|旗标|标记)|\b(unflag|unpick|un-pick|clear (the )?flags?|remove (the )?flags?)\b"),
             keep: r(r"保留|留下|留|只要|\b(keep|leave|retain)\b"),
             clear_filter: r(r"(清除|取消|重置|去掉|清空)\s*(所有)?(筛选|过滤)|显示(全部|所有|全部照片|所有照片)|看全部|\b(clear|reset|remove)\b.{0,8}\bfilters?\b|\bshow (me )?(all|everything)\b|\bshow all\b"),
@@ -1024,6 +1024,12 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
     } else {
         None
     };
+    // "小红书" must not be read as the person 小红
+    let xhs_hit = x.xhs.is_match(&norm);
+    for m in x.xhs.find_iter(&norm) {
+        let start = norm[..m.start()].chars().count();
+        blank_chars(&mut t, start, m.as_str().chars().count());
+    }
     // ---- people
     let mut persons = match_people(&mut t, ctx.people);
     persons.dedup();
@@ -1055,7 +1061,7 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
     let per_group = !per_scene && x.per_group.is_match(&verb_text);
     let unreject = x.unreject.is_match(&verb_text);
     let unpick = x.unpick.is_match(&verb_text);
-    let pick = !unpick && x.pick.is_match(&verb_text);
+    let pick = !unpick && x.pick.is_match(&text_no_names);
     let reject = !unreject && x.reject.is_match(&verb_text);
     let clear_rating = x.clear_rating.is_match(&verb_text);
     let set_rating_m = x
@@ -1092,6 +1098,10 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         || preset.is_some()
         || auto_adjust;
     extract(&text_no_names, &mut ents, view || !action_present);
+    if pick {
+        // "mark as picks": the pick flag is the action, not a scope
+        ents.flag = None;
+    }
     if set_rating.is_some() {
         // the rating being set is not a filter
         ents.rating_gte = None;
@@ -1159,7 +1169,7 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
 
     // ---- intents, most specific first
     if is_export {
-        let preset_id = if x.xhs.is_match(&text_no_names) {
+        let preset_id = if xhs_hit {
             Some("xiaohongshu")
         } else if x.wechat.is_match(&text_no_names) {
             Some("wechat")
@@ -1186,7 +1196,9 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         action(ctx, "apply_profiles", Map::new(), &ents, &mut acc, un, &mut calls);
     } else if is_accept_ai {
         action(ctx, "accept_ai", Map::new(), &ents, &mut acc, un, &mut calls);
-    } else if (per_scene || per_group) && (keep || reject || ents.count.is_some() || ents.best) && !view
+    } else if (per_scene || per_group)
+        && (keep || reject || ents.count.is_some())
+        && !(view && !keep)
     {
         let rest = x.rest.is_match(&verb_text) && reject;
         let n = ents.count.unwrap_or(1).clamp(1, 100);

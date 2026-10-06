@@ -18,6 +18,9 @@ use crate::model::{ExportRequest, PatchRequest, PhotoUpdate};
 use crate::Core;
 
 /// Longest a single step may take (best take / inpainting / export run in the background).
+/// Error of an `export` step without `dest`: only that step fails, the plan goes on.
+pub const DEST_REQUIRED: &str = "dest_required";
+
 const STEP_WAIT: Duration = Duration::from_secs(60 * 60);
 
 /// Before-state of everything the plan changed: first snapshot wins.
@@ -27,13 +30,15 @@ struct Undo {
     edits: BTreeMap<i64, Value>,
 }
 
-/// Export presets: long edge in pixels, JPEG quality (`docs/api-contract-m6.md` A.1).
-pub fn export_preset(name: &str) -> (Option<u32>, u8) {
+/// Export presets (`docs/api-contract-m6.md` A.1): `(long edge, crop-fit size, JPEG quality)`.
+/// wechat: long edge 2048, q85; xiaohongshu: 3:4 crop-fit 1440x1920, q90; instagram: 4:5
+/// crop-fit 1080x1350, q90; original: no resize.
+pub fn export_preset(name: &str) -> (Option<u32>, Option<(u32, u32)>, u8) {
     match name {
-        "wechat" => (Some(1920), 85),
-        "xiaohongshu" => (Some(1440), 90),
-        "instagram" => (Some(1350), 90),
-        _ => (None, 95),
+        "wechat" => (Some(2048), None, 85),
+        "xiaohongshu" => (None, Some((1440, 1920)), 90),
+        "instagram" => (None, Some((1080, 1350)), 90),
+        _ => (None, None, 95),
     }
 }
 
@@ -82,6 +87,7 @@ impl Core {
         let mut undo = Undo::default();
         let mut results: Vec<Value> = Vec::new();
         let mut failed: Option<String> = None;
+        let mut any_failed = false;
         for (i, step) in plan.steps.iter().enumerate() {
             if let Some(why) = &failed {
                 results.push(json!({
@@ -108,13 +114,17 @@ impl Core {
                     results.push(json!({
                         "tool": step.tool, "ok": false, "affected": 0, "error": msg
                     }));
-                    failed = Some(msg);
+                    if msg == DEST_REQUIRED {
+                        any_failed = true;
+                    } else {
+                        failed = Some(msg);
+                    }
                 }
             }
             self.assistant_progress(&task_id, i as i64 + 1, total, "running", None);
         }
         let undo_json = self.finish_undo(undo).await;
-        let ok = failed.is_none();
+        let ok = failed.is_none() && !any_failed;
         self.events.emit(Event::AssistantDone {
             plan_id,
             ok,
@@ -301,17 +311,16 @@ impl Core {
                 if ids.is_empty() {
                     return done(0);
                 }
-                let dest = args["dest"].as_str().map(str::to_string).ok_or_else(|| {
-                    CoreError::bad_request(
-                        "export needs a destination folder (dest); the UI asks for it",
-                    )
-                })?;
-                let (long_edge, quality) =
+                let dest = args["dest"]
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| CoreError::bad_request(DEST_REQUIRED))?;
+                let (long_edge, fit, quality) =
                     export_preset(args["preset"].as_str().unwrap_or("original"));
                 let n = ids.len();
                 let mut rx = self.events.subscribe();
                 let task = self
-                    .export(ExportRequest {
+                    .export_fit(ExportRequest {
                         ids,
                         dest,
                         folders: None,
@@ -321,7 +330,7 @@ impl Core {
                         apply_edits: true,
                         upscale: None,
                         strip_gps: false,
-                    })
+                    }, fit)
                     .await?;
                 wait_task(&mut rx, &task).await?;
                 done(n)
@@ -622,9 +631,9 @@ mod tests {
 
     #[test]
     fn export_presets_are_distinct() {
-        assert_eq!(export_preset("xiaohongshu"), (Some(1440), 90));
-        assert_eq!(export_preset("instagram").0, Some(1350));
-        assert_eq!(export_preset("wechat").0, Some(1920));
-        assert_eq!(export_preset("original").0, None);
+        assert_eq!(export_preset("xiaohongshu"), (None, Some((1440, 1920)), 90));
+        assert_eq!(export_preset("instagram"), (None, Some((1080, 1350)), 90));
+        assert_eq!(export_preset("wechat"), (Some(2048), None, 85));
+        assert_eq!(export_preset("original"), (None, None, 95));
     }
 }

@@ -87,6 +87,7 @@ pub enum Event {
     /// M6: a sidecar changed outside the app and differs from the catalog.
     #[serde(rename = "xmp.conflict")]
     XmpConflict {
+        session_id: i64,
         photo_id: i64,
         sidecar: serde_json::Value,
         catalog: serde_json::Value,

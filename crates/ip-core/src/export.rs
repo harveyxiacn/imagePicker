@@ -30,6 +30,49 @@ pub struct ExportOptions {
     /// Leave the GPS position out of re-encoded outputs.
     pub strip_gps: bool,
     pub upscale: Option<UpscaleExport>,
+    /// Crop-fit every output to this aspect ratio and, when larger, scale it down to exactly
+    /// `(width, height)` (social media presets). Never upscales.
+    pub fit: Option<(u32, u32)>,
+}
+
+/// Center-crops `img` to the aspect ratio of `(w, h)`, then scales it down to `w x h` when it
+/// is larger.
+pub fn fit_crop(img: &RgbImage, w: u32, h: u32) -> RgbImage {
+    let (iw, ih) = (img.width as u64, img.height as u64);
+    if iw == 0 || ih == 0 || w == 0 || h == 0 {
+        return img.clone();
+    }
+    // largest centered region with aspect w:h
+    let (cw, ch) = if iw * h as u64 > ih * w as u64 {
+        ((ih * w as u64 / h as u64).max(1), ih)
+    } else {
+        (iw, (iw * h as u64 / w as u64).max(1))
+    };
+    let (x0, y0) = ((iw - cw) / 2, (ih - ch) / 2);
+    let mut crop = Vec::with_capacity((cw * ch * 3) as usize);
+    for y in 0..ch {
+        let start = (((y0 + y) * iw + x0) * 3) as usize;
+        crop.extend_from_slice(&img.data[start..start + (cw * 3) as usize]);
+    }
+    let (ow, oh) = if cw > w as u64 {
+        (w, h)
+    } else {
+        (cw as u32, ch as u32)
+    };
+    if (ow as u64, oh as u64) == (cw, ch) {
+        return RgbImage {
+            width: cw as u32,
+            height: ch as u32,
+            data: crop,
+        };
+    }
+    let buf = image::RgbImage::from_raw(cw as u32, ch as u32, crop).expect("size matches");
+    let out = image::imageops::resize(&buf, ow, oh, image::imageops::FilterType::Triangle);
+    RgbImage {
+        width: ow,
+        height: oh,
+        data: out.into_raw(),
+    }
 }
 
 /// Super-resolution of exports: render -> temp PNG -> `enhance.run upscale` -> JPEG.
@@ -274,7 +317,10 @@ pub fn export_photos(
 ) -> ExportReport {
     let edited = |r: &PhotoRef| edits.and_then(|e| e.stacks.get(&r.id));
     let names = plan_names_with(refs, &opts.name_template, dest, &|r| {
-        opts.long_edge.is_some() || edited(r).is_some() || opts.upscale.is_some()
+        opts.long_edge.is_some()
+            || edited(r).is_some()
+            || opts.upscale.is_some()
+            || opts.fit.is_some()
     });
     let done = AtomicUsize::new(0);
     let total = refs.len();
@@ -284,6 +330,30 @@ pub fn export_photos(
         .map(|(r, out)| {
             let stack = edited(r);
             let res = match (stack, &opts.upscale, opts.long_edge) {
+                (stack, None, _) if opts.fit.is_some() => {
+                    let (fw, fh) = opts.fit.expect("checked");
+                    // render a little larger than the target so the crop keeps its resolution
+                    let edge = fw.max(fh).saturating_mul(2);
+                    let rendered = match (stack, edits) {
+                        (Some(stack), Some(e)) => e
+                            .svc
+                            .render_gated(r, stack, Some(edge), MaskMode::Strict, &e.handle)
+                            .map(|o| o.image)
+                            .map_err(|e| e.to_string()),
+                        _ => imaging
+                            .decode_rgb8(&r.path, r.format, r.orientation, edge)
+                            .map(|(width, height, data)| RgbImage {
+                                width,
+                                height,
+                                data,
+                            })
+                            .map_err(|e| format!("{e:#}")),
+                    };
+                    rendered
+                        .map(|img| fit_crop(&img, fw, fh))
+                        .and_then(|img| encode_with_meta(imaging, r, &img, opts))
+                        .and_then(|bytes| write_new(out, &bytes).map_err(|e| e.to_string()))
+                }
                 (stack, Some(up), _) => export_upscaled(imaging, r, stack, up, opts)
                     .and_then(|bytes| write_new(out, &bytes).map_err(|e| e.to_string())),
                 (Some(stack), None, _) => {
@@ -337,6 +407,15 @@ pub fn export_photos(
 impl Core {
     /// Validates and starts an export task; progress arrives as `task.progress` events.
     pub async fn export(self: &Arc<Self>, req: ExportRequest) -> Result<String> {
+        self.export_fit(req, None).await
+    }
+
+    /// [`Core::export`] with crop-fit to `fit` (width, height); see [`ExportOptions::fit`].
+    pub async fn export_fit(
+        self: &Arc<Self>,
+        req: ExportRequest,
+        fit: Option<(u32, u32)>,
+    ) -> Result<String> {
         let folders = req.folders.clone().filter(|f| !f.is_empty());
         match (&folders, req.ids.is_empty()) {
             (Some(_), false) => {
@@ -430,6 +509,7 @@ impl Core {
             quality: req.quality,
             name_template: req.name_template.clone(),
             strip_gps: req.strip_gps,
+            fit,
             upscale: req.upscale.map(|scale| UpscaleExport {
                 svc: self.render.clone(),
                 worker: self.worker.clone(),

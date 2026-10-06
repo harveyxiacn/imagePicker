@@ -139,6 +139,8 @@ pub struct FakeWorker {
     /// Milliseconds each batch takes (to test cancellation / progress).
     pub delay_ms: AtomicUsize,
     pub last_profile: Mutex<Option<String>>,
+    /// Explicit `steps` of the last `analyze.batch` request.
+    pub last_steps: Mutex<Option<Vec<String>>>,
     pub last_allow_download: Mutex<Option<bool>>,
     /// Number of upcoming batches that fail with `Disconnected` (simulated crashes).
     pub crash_batches: AtomicUsize,
@@ -213,6 +215,7 @@ impl Default for FakeWorker {
             batch_sizes: Mutex::new(vec![]),
             delay_ms: AtomicUsize::new(0),
             last_profile: Mutex::new(None),
+            last_steps: Mutex::new(None),
             last_allow_download: Mutex::new(None),
             crash_batches: AtomicUsize::new(0),
             mask_calls: AtomicUsize::new(0),
@@ -501,6 +504,7 @@ impl AiWorker for FakeWorker {
         self.analyze_calls.fetch_add(1, Ordering::SeqCst);
         self.batch_sizes.lock().unwrap().push(req.items.len());
         *self.last_profile.lock().unwrap() = req.profile.clone();
+        *self.last_steps.lock().unwrap() = req.steps.clone();
         *self.last_allow_download.lock().unwrap() = Some(req.allow_download);
         if take_one(&self.crash_batches) {
             self.set_state(WorkerState::Crashed);
