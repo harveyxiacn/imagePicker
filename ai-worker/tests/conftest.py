@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -57,19 +58,35 @@ def synth_files(tmp_path: Path) -> list[Path]:
     return paths
 
 
-@pytest.fixture(scope="session")
-def portrait_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Public-domain portrait (Wikimedia Commons), downloaded at test time; skip when offline."""
+def _commons_cache() -> Path:
     cache = Path(os.environ.get("IMAGEPICKER_TEST_CACHE", AI_WORKER_ROOT / ".models" / "_testimg"))
     cache.mkdir(parents=True, exist_ok=True)
-    p = cache / "Albert_Einstein_Head.jpg"
+    return cache
+
+
+def fetch_commons(name: str) -> Path:
+    """Public-domain image from Wikimedia Commons, cached on disk; skips the test when offline."""
+    p = _commons_cache() / name
     if not p.exists():
-        url = "https://commons.wikimedia.org/wiki/Special:FilePath/Albert_Einstein_Head.jpg?width=1280"
+        quoted = urllib.parse.quote(name)
+        url = f"https://commons.wikimedia.org/wiki/Special:FilePath/{quoted}?width=1280"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "imagepicker-tests/0.1 (dev)"})
             with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
                 data = r.read()
             p.write_bytes(data)
         except Exception as e:  # noqa: BLE001
-            pytest.skip(f"offline, cannot fetch test portrait: {e}")
+            pytest.skip(f"offline, cannot fetch {name}: {e}")
     return p
+
+
+@pytest.fixture(scope="session")
+def commons():
+    """Callable: Commons file name -> local path (downloaded at test time, skip when offline)."""
+    return fetch_commons
+
+
+@pytest.fixture(scope="session")
+def portrait_path() -> Path:
+    """Public-domain portrait (Wikimedia Commons), downloaded at test time; skip when offline."""
+    return fetch_commons("Albert_Einstein_Head.jpg")

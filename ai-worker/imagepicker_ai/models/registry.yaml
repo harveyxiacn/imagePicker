@@ -11,6 +11,7 @@
 #   tiers         tiers for which this is a default/recommended model
 #   vram_mb/ram_mb/size_mb  budget numbers used by ModelManager
 #   license / noncommercial
+#   required_for  analyze steps that need this model (informational, surfaced by models.list)
 #   resident      keep loaded unless budget forces eviction (analysis models); false = LRU/idle evicted first
 #   exclusive_group  at most one loaded model per group (e.g. vlm vs diffusion)
 # Weights are never shipped with this repository; they are downloaded on user request.
@@ -28,6 +29,7 @@
   vram_mb: 0
   ram_mb: 50
   size_mb: 0.3
+  required_for: [faces, identity]
   license: MIT
   resident: true
 
@@ -45,6 +47,7 @@
   vram_mb: 0
   ram_mb: 150
   size_mb: 3.7
+  required_for: [faces]
   license: Apache-2.0
   resident: true
 
@@ -64,6 +67,7 @@
   vram_mb: 700
   ram_mb: 900
   size_mb: 355
+  required_for: [embed, scene]
   license: Apache-2.0
   resident: true
 
@@ -83,6 +87,7 @@
   vram_mb: 450
   ram_mb: 500
   size_mb: 178
+  required_for: [embed, scene]
   license: Apache-2.0
   resident: true
 
@@ -104,6 +109,7 @@
   vram_mb: 700
   ram_mb: 800
   size_mb: 550
+  required_for: [scene, search]
   license: Apache-2.0
   resident: false
 
@@ -128,6 +134,72 @@
   vram_mb: 1800
   ram_mb: 2500
   size_mb: 1430
+  required_for: []
   license: Apache-2.0
   resident: false
   optional: true
+
+# AuraFace v1 (fal.ai): ArcFace ResNet-100 trained on commercially usable data. Only the recognition
+# net (glintr100.onnx: 112x112 RGB aligned crop, (x-127.5)/127.5 -> 512-d) is used; detection comes
+# from YuNet. The other files of the repo (scrfd, 1k3d68, 2d106det, genderage) are not downloaded.
+- id: auraface
+  task: [face_identity]
+  source: { hf: fal/AuraFace-v1, origin: fal/AuraFace-v1 }
+  files:
+    - path: glintr100.onnx
+      sha256: a7933ea5330113b01c9b60351d8f4c33003f145d8470ac5f0e52ee2effe25c60
+      size: 260694151
+  backend: onnx
+  precision: fp32
+  tiers: [T0, T1, T2, T3]
+  vram_mb: 400
+  ram_mb: 450
+  size_mb: 249
+  required_for: [identity]
+  license: Apache-2.0
+  resident: true
+
+# NIMA (Neural Image Assessment, Talebi & Milanfar 2018), MobileNet(v1) weights from
+# idealo/image-quality-assessment (Apache-2.0), converted to fp16 LiteRT by litert-community.
+# Both predict a 10-bin score distribution; score = mean over 1..10.
+#   aesthetic: trained on AVA (photographer-rated aesthetics)
+#   technical: trained on TID2013 (synthetic blur/noise/compression distortions)
+# Licence: the weights/code are Apache-2.0 (idealo/image-quality-assessment, and the litert-community
+# re-export). The training datasets (AVA, TID2013) carry research-use terms of their own; they are
+# not redistributed here. noncommercial: false reflects the model licence, not the dataset terms
+# (flag for the pre-release licence audit, doc 07 section 4).
+# Evaluated and rejected as default: pyiqa weights (chaofengc/IQA-PyTorch-Weights, CC-BY-NC-SA-4.0,
+# needs torch), somepago/AestheticSigLIP (Apache-2.0 but a 1.7 GB so400m checkpoint, no ONNX).
+- id: nima-aesthetic
+  task: [aesthetic]
+  source: { hf: litert-community/NIMA-LiteRT, origin: idealo/image-quality-assessment }
+  files:
+    - path: nima_aesthetic_fp16.tflite
+      sha256: a5051a0fcced735682735e3e0fd58ee54c83ed664282a003f52235b3dbcb9320
+      size: 6448632
+  backend: tflite
+  precision: fp16
+  tiers: [T0, T1, T2, T3]
+  vram_mb: 0
+  ram_mb: 60
+  size_mb: 6.2
+  required_for: [aesthetic]
+  license: Apache-2.0
+  resident: true
+
+- id: nima-technical
+  task: [iqa]
+  source: { hf: litert-community/NIMA-LiteRT, origin: idealo/image-quality-assessment }
+  files:
+    - path: nima_technical_fp16.tflite
+      sha256: 34fe245d9b6ae14f48cc1b0e276b93d18b905083dafe24f502e862dd8b81f0fa
+      size: 6449632
+  backend: tflite
+  precision: fp16
+  tiers: [T0, T1, T2, T3]
+  vram_mb: 0
+  ram_mb: 60
+  size_mb: 6.2
+  required_for: [iqa]
+  license: Apache-2.0
+  resident: true

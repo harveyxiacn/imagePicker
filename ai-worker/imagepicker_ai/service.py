@@ -19,7 +19,7 @@ from .models.registry import Registry
 from .paths import resolve_models_dir
 from .pipeline import Analyzer
 from .rpc import Ctx, RpcServer
-from .steps import STEPS
+from .steps import PROFILES, STEPS
 
 log = logging.getLogger(__name__)
 
@@ -110,11 +110,20 @@ class WorkerService:
                 "gpu": live,
             },
             "steps": list(STEPS),
+            "profiles": {k: list(v) for k, v in PROFILES.items()},
             "features": {"mediapipe": mediapipe_available(), "heif": _heif_ok()},
         }
 
     async def models_list(self, _params: Any, _ctx: Ctx) -> dict[str, Any]:
-        return {"models": self.manager.list_models(), "models_dir": str(self.models_dir)}
+        profiles = {
+            name: {"steps": list(steps), "models": self.analyzer.models_for_steps(list(steps))}
+            for name, steps in PROFILES.items()
+        }
+        return {
+            "models": self.manager.list_models(),
+            "models_dir": str(self.models_dir),
+            "profiles": profiles,
+        }
 
     async def models_ensure(self, params: Any, ctx: Ctx) -> dict[str, Any]:
         ids = _model_ids(params)
