@@ -70,6 +70,20 @@ describe('i18n', () => {
       ['taste', ['low_saturation', 'bright_exposure', 'warm_tone', 'smile_over_sharp', 'centered_subject', 'dislikes_blur'].map((k) => `trait_${k}`)],
       ['history', ['portrait', 'portraitLevel', 'applyProfile', 'portraitReset', 'applyProfiles']],
       ['people', ['view_cards', 'view_best']],
+      ['assistant', ['filter', 'set_rating', 'set_flag', 'accept_ai', 'group_keep_top', 'scene_keep_top', 'apply_preset', 'auto_adjust', 'apply_profiles', 'besttake_auto', 'remove_bystanders', 'export', 'describe', 'suggest_edits'].map((k) => `tool_${k}`)],
+      ['assistant', ['best', 'tone', 'picked', 'bystanders'].flatMap((k) => [`chip_${k}`, `chip_${k}_prompt`])],
+      ['settings', ['hardware', 'analysis', 'faces', 'cache', 'render', 'lan', 'xmp', 'keys', 'appearance'].map((k) => `nav.${k}`)],
+      ['settings', ['auto', 'hf', 'hf-mirror', 'modelscope'].map((k) => `models.source_${k}`)],
+      ['settings', ['thumbs', 'previews', 'masks', 'edits', 'gen'].flatMap((k) => [`cache.kind_${k}`, `cache.kind_${k}_hint`])],
+      ['settings', ['off', 'sidecar', 'sidecar_and_embedded'].flatMap((k) => [`xmp.mode_${k}`, `xmp.mode_${k}_desc`])],
+      ['settings', ['loose', 'normal', 'strict'].map((k) => `analysis.strictness_${k}`)],
+      ['settings', ['auto', 'rules', 'llm'].map((k) => `assistant.engine_${k}`)],
+      ['settings', ['auto', 'gpu', 'cpu'].map((k) => `render.backend_${k}`)],
+      ['onboarding', ['analyze', 'stacks', 'rating'].flatMap((k) => [`coach_${k}_title`, `coach_${k}`])],
+      ['login', ['rateLimited', 'rateLimitedWait', 'wrong', 'lanDisabled', 'failed'].map((k) => `error_${k}`)],
+      ['errors', ['forbiddenPath', 'forbidden', 'forbiddenOrigin', 'lanDisabled']],
+      ['export', ['original', 'wechat', 'xiaohongshu', 'instagram'].map((k) => `preset_${k}`)],
+      ['keys', ['assistant']],
     ]
     for (const [ns, keys] of families) for (const k of keys) expect(zh.has(`${ns}.${k}`), `${ns}.${k}`).toBe(true)
   })

@@ -74,7 +74,25 @@ export function Toasts() {
           ) : (
             <Info size={16} className="mt-0.5 shrink-0 text-accent" />
           )}
-          <span className="flex-1">{x.text}</span>
+          <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <span>{x.text}</span>
+            {x.actions && (
+              <span className="flex flex-wrap gap-1.5">
+                {x.actions.map((a) => (
+                  <button
+                    key={a.label}
+                    className="btn !h-6 text-xs"
+                    onClick={() => {
+                      a.onClick()
+                      dismiss(x.id)
+                    }}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </span>
+            )}
+          </span>
           <button className="btn btn-ghost btn-icon !h-6 !w-6" aria-label={t('common.close')} onClick={() => dismiss(x.id)}>
             <X size={14} />
           </button>

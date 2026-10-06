@@ -2,14 +2,15 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronLeft, Download, Eye, EyeOff, LayoutGrid, Loader2, Merge, Pencil, ScanFace, Star, Trophy, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { api, faceCropUrl, fetchAllPhotos, thumbUrl } from '@/api/client'
-import { usePeople, useSession } from '@/api/queries'
+import { useMe, usePeople, useSession } from '@/api/queries'
 import type { Person } from '@/api/types'
 import { ExportDialog } from '@/components/ExportDialog'
 import { FaceSearchDialog } from '@/components/FaceSearchDialog'
 import { Modal } from '@/components/Modal'
 import { HeaderControls } from '@/components/HeaderControls'
+import { can } from '@/lib/auth'
 import { buildBestSections, sectionsToFolders } from '@/lib/bestN'
 import { qk } from '@/lib/cache'
 import { applyProfilesToPhotos } from '@/lib/editActions'
@@ -61,7 +62,15 @@ function NameField({ person, onSave }: { person: Person; onSave: (name: string |
 }
 
 /** People page (doc 04 3.6): face cards with inline rename, multi-select merge, hide, click to filter the library. */
+/** Guests never see people / face data (docs/api-contract-m6.md B). */
 export function People() {
+  const { sessionId } = useParams()
+  const me = useMe()
+  if (me.data && !can(me.data.role, 'people')) return <Navigate to={`/s/${sessionId}`} replace />
+  return <PeopleInner />
+}
+
+function PeopleInner() {
   const { sessionId: raw } = useParams()
   const sessionId = Number(raw)
   const { t, i18n } = useTranslation()

@@ -2,9 +2,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, ClipboardCopy, ClipboardPaste, Columns2, Download, History, Loader2, Redo2, RotateCcw, Undo2, Users, Eclipse, Check, AlertCircle } from 'lucide-react'
 import { useCallback, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { api } from '@/api/client'
-import { usePhotos } from '@/api/queries'
+import { useMe, usePhotos } from '@/api/queries'
+import { AssistantButton, AssistantHost } from '@/components/assistant/AssistantDrawer'
 import { CopyDialog } from '@/components/edit/CopyDialog'
 import { EditCanvas } from '@/components/edit/EditCanvas'
 import { EditPanel } from '@/components/edit/EditPanel'
@@ -14,6 +15,7 @@ import { Filmstrip } from '@/components/Filmstrip'
 import { GenTasks } from '@/components/GenTasks'
 import { HelpOverlay } from '@/components/HelpOverlay'
 import { ModelConsentDialog } from '@/components/ModelConsentDialog'
+import { can } from '@/lib/auth'
 import { qk } from '@/lib/cache'
 import { flushSaves } from '@/lib/editActions'
 import { isEmptyStack } from '@/lib/edit'
@@ -34,6 +36,7 @@ export function Edit() {
   const qc = useQueryClient()
   const navigate = useNavigate()
 
+  const role = useMe().data?.role ?? 'owner'
   const filter = useUi((s) => s.filter)
   const exportOpen = useUi((s) => s.exportOpen)
   const photosQ = usePhotos(sessionId, filter)
@@ -91,6 +94,8 @@ export function Edit() {
   const selectionCount = useUi((s) => s.selection.ids.size)
   const edited = !isEmptyStack(stack)
 
+  if (!can(role, 'edit')) return <Navigate to={`/s/${sessionId}`} replace />
+
   if (photosQ.isSuccess && !photo && fallback.isError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
@@ -144,6 +149,7 @@ export function Edit() {
             {saveState === 'saving' ? <Loader2 size={12} className="animate-spin" /> : saveState === 'error' ? <AlertCircle size={12} className="text-danger" /> : <Check size={12} className="text-success" />}
             <span className="hidden sm:inline">{t(`edit.save_${saveState}`)}</span>
           </span>
+          <AssistantButton />
           <button className="btn" onClick={() => useUi.getState().setExportOpen(true)} title={`${t('top.export')} (Ctrl+E)`}>
             <Download size={14} />
             <span className="hidden sm:inline">{t('top.export')}</span>
@@ -183,6 +189,7 @@ export function Edit() {
 
       <HelpOverlay />
       <ModelConsentDialog />
+      <AssistantHost sessionId={sessionId} photoId={photoId} />
       <CopyDialog />
       <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={[photoId]} allIds={photos.map((p) => p.id)} />
     </div>

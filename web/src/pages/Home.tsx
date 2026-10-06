@@ -4,10 +4,13 @@ import { useMemo, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, thumbUrl } from '@/api/client'
-import { useSessions } from '@/api/queries'
+import { useMe, useSessions } from '@/api/queries'
 import type { Session } from '@/api/types'
 import { FolderBrowser } from '@/components/FolderBrowser'
 import { HeaderControls } from '@/components/HeaderControls'
+import { UserMenu } from '@/components/UserMenu'
+import { can } from '@/lib/auth'
+import { errorText } from '@/lib/errors'
 import { qk } from '@/lib/cache'
 import { getPlatform, useNativeImport } from '@/platform'
 import { useToasts } from '@/stores/toasts'
@@ -21,6 +24,7 @@ export function Home() {
   const [dragOver, setDragOver] = useState(false)
   const platform = useMemo(() => getPlatform(), [])
   const push = useToasts((s) => s.push)
+  const role = useMe().data?.role ?? 'owner'
 
   const importMut = useMutation({
     mutationFn: (path: string) => api.importFolder({ path }),
@@ -28,7 +32,7 @@ export function Home() {
       void qc.invalidateQueries({ queryKey: qk.sessions })
       navigate(`/s/${session.id}`)
     },
-    onError: (e) => push('error', e instanceof Error ? e.message : String(e)),
+    onError: (e) => push('error', errorText(e), 9000),
   })
 
   // Desktop shell: menu "Import Folder…" and OS folder drops arrive as native events.
@@ -63,16 +67,19 @@ export function Home() {
             <HeartHandshake size={15} />
             {t('taste.title')}
           </Link>
-          <button className="btn btn-ghost" disabled title={t('common.soon')}>
-            <Settings size={15} />
-            {t('home.settings')}
-          </button>
+          {can(role, 'settings') && (
+            <Link to="/settings" className="btn btn-ghost" data-testid="home-settings-link">
+              <Settings size={15} />
+              {t('home.settings')}
+            </Link>
+          )}
+          <UserMenu />
         </div>
       </header>
 
       <main className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-8">
-          <section
+          {can(role, 'edit') && <section
             onDragOver={(e) => {
               e.preventDefault()
               setDragOver(true)
@@ -96,7 +103,7 @@ export function Home() {
               </button>
             </div>
             {!platform.canDropFolders && <div className="text-xs text-faint">{t('home.browserHint')}</div>}
-          </section>
+          </section>}
 
           <section>
             <h2 className="mb-3 text-base font-semibold">{t('home.recent')}</h2>

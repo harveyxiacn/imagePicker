@@ -8,6 +8,7 @@ import { ADJUST_NUMERIC_KEYS } from '@/api/types'
 import { autoApply, changeStack, commitLive, setLive } from '@/lib/editActions'
 import { getAdjust, getSharpen, setGlobalField, setSharpen, updateGlobal } from '@/lib/edit'
 import { useEdit } from '@/stores/edit'
+import { EditSuggest } from '../assistant/EditSuggest'
 import { AdjustSliders } from './AdjustSliders'
 import { Section } from './Section'
 import { Slider } from './Slider'
@@ -47,6 +48,7 @@ export function AiPanel() {
         <button className="btn" disabled title={t('common.soon')}>
           {t('edit.matchRef')}
         </button>
+        <EditSuggest />
       </div>
       {applied && (
         <div key={applied.nonce} className="anim-pop mt-2 rounded-card border border-ai/40 bg-ai/10 p-2" data-testid="auto-applied">
