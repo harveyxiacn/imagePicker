@@ -44,6 +44,7 @@ pub(crate) fn map_worker_err(e: WorkerError) -> CoreError {
     match e {
         WorkerError::Unavailable(m) => CoreError::WorkerUnavailable(m),
         WorkerError::Timeout(m) => CoreError::WorkerUnavailable(m),
+        e @ WorkerError::CallTimeout { .. } => CoreError::WorkerTimeout(e.to_string()),
         other => CoreError::Internal(anyhow::anyhow!("{other}")),
     }
 }
@@ -226,7 +227,13 @@ impl Core {
             let res = call.await;
             let (d, t) = sum(&totals);
             match res {
-                Ok(Ok(())) => core.events.emit(ev(t, t, "done", None)),
+                Ok(Ok(())) => {
+                    // portrait geometry built while a model was missing is stale now
+                    if let Err(e) = core.refresh_partial_beauty(None).await {
+                        tracing::warn!(error = %e, "refreshing partial portrait geometry failed");
+                    }
+                    core.events.emit(ev(t, t, "done", None))
+                }
                 Ok(Err(e)) => core.events.emit(ev(d, t, "failed", Some(e.to_string()))),
                 Err(e) => core
                     .events
@@ -717,12 +724,22 @@ impl Core {
         self.db.call(move |c| store::burst_faces(c, burst_id)).await
     }
 
+    /// People without the single-photo subjects (`singleton`).
     pub async fn people(&self, session_id: Option<i64>) -> Result<Vec<Person>> {
+        self.people_with(session_id, false).await
+    }
+
+    /// `GET /api/people`; `include_singletons` adds the single-photo subjects.
+    pub async fn people_with(
+        &self,
+        session_id: Option<i64>,
+        include_singletons: bool,
+    ) -> Result<Vec<Person>> {
         if let Some(s) = session_id {
             self.session(s).await?;
         }
         self.db
-            .call(move |c| store::list_people(c, session_id))
+            .call(move |c| store::list_people(c, session_id, include_singletons))
             .await
     }
 

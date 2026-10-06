@@ -53,14 +53,16 @@ pub fn op_type(op: &Value) -> Option<&str> {
 /// Canonical pipeline position of an op type; unknown (future) ops keep to the end.
 pub(crate) fn rank(op: &Value) -> u8 {
     match op_type(op) {
-        Some("crop") => 0,
-        Some("warp") => 1,
-        Some("global") => 2,
-        Some("local") => 3,
-        Some("beauty") => 4,
-        Some("lut") => 5,
-        Some("output_sharpen") => 6,
-        _ => 7,
+        // generated patches go onto the upright source before anything else (M5)
+        Some("patch") => 0,
+        Some("crop") => 1,
+        Some("warp") => 2,
+        Some("global") => 3,
+        Some("local") => 4,
+        Some("beauty") => 5,
+        Some("lut") => 6,
+        Some("output_sharpen") => 7,
+        _ => 8,
     }
 }
 
@@ -82,6 +84,10 @@ pub fn op_person(op: &Value) -> Option<i64> {
 }
 
 /// Target ops with the `include`d kinds replaced by the source's ops of those kinds.
+///
+/// `patch` ops (best take, inpaint, denoise, face restore) are never copied: their assets belong
+/// to one photo. [`SyncKind`] has no `patch` member, so the target keeps its own patches and the
+/// source's are ignored.
 pub fn merge_ops(target: &[Value], source: &[Value], include: &[SyncKind]) -> Vec<Value> {
     merge_ops_scoped(target, source, include, None)
 }

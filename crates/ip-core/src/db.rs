@@ -195,6 +195,12 @@ CREATE TABLE taste_state (
   trained_at INTEGER
 );
 "#,
+    // v7: M5 (docs/api-contract-m5.md section D): single-photo subject people, and a flag on the
+    // portrait geometry cache for results that were built without some models.
+    r#"
+ALTER TABLE person ADD COLUMN singleton INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE beauty_geometry ADD COLUMN partial INTEGER NOT NULL DEFAULT 0;
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.

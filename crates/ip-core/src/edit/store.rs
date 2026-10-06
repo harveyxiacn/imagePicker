@@ -54,6 +54,17 @@ pub fn current(conn: &Connection, photo_id: i64) -> Result<Option<CurrentEdit>> 
     }
 }
 
+/// Every retained stack version of the photo (current and previous), as stored.
+pub fn all_stacks(conn: &Connection, photo_id: i64) -> Result<Vec<Value>> {
+    let mut st = conn.prepare("SELECT stack FROM edit_version WHERE photo_id=?1")?;
+    let rows = st
+        .query_map([photo_id], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    rows.into_iter()
+        .map(|s| serde_json::from_str(&s).map_err(Into::into))
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct SaveOutcome {
     /// `photo.edit_hash` before the call (cached images of it can be dropped).

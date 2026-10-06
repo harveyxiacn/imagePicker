@@ -187,13 +187,16 @@ impl BeautyStore {
         std::fs::write(&tmp, &bytes)?;
         std::fs::rename(&tmp, &path)?;
         let n = resp.people.len() as i64;
+        // some part (pose, skin...) was left out for lack of a model: refreshed once it is installed
+        let partial = resp.skipped.values().any(|why| why == "model_unavailable") as i64;
         let (id, k, s) = (r.id, key.clone(), sig.clone());
         self.db.with(move |c| {
             c.execute(
-                "INSERT INTO beauty_geometry(photo_id, content_key, faces_sig, people, prepared_at)
-                 VALUES(?1,?2,?3,?4,?5)
-                 ON CONFLICT(photo_id) DO UPDATE SET content_key=?2, faces_sig=?3, people=?4, prepared_at=?5",
-                params![id, k, s, n, now_ms()],
+                "INSERT INTO beauty_geometry(photo_id, content_key, faces_sig, people, prepared_at, partial)
+                 VALUES(?1,?2,?3,?4,?5,?6)
+                 ON CONFLICT(photo_id) DO UPDATE SET content_key=?2, faces_sig=?3, people=?4,
+                   prepared_at=?5, partial=?6",
+                params![id, k, s, n, now_ms(), partial],
             )?;
             Ok(())
         })?;
@@ -436,6 +439,8 @@ impl Core {
         if !missing.is_empty() {
             return Err(CoreError::ModelsMissing(missing));
         }
+        // every model is installed: a geometry built without some of them is out of date
+        self.refresh_partial_beauty(Some(photo_id)).await?;
         let task_id = format!("beauty-{}", self.next_task_seq());
         let (core, tid) = (self.clone(), task_id.clone());
         let ev = move |done: i64, state: &str, error: Option<String>| Event::TaskProgress {
@@ -467,6 +472,36 @@ impl Core {
             }
         });
         Ok(task_id)
+    }
+
+    /// Drops the cached geometry that was built without some models (`beauty_geometry.partial`),
+    /// so it is rebuilt with whatever is installed now, and redoes the edited thumbnails that
+    /// were rendered from it. `only` limits this to one photo. Returns the invalidated photos.
+    pub async fn refresh_partial_beauty(self: &Arc<Self>, only: Option<i64>) -> Result<Vec<i64>> {
+        let ids: Vec<i64> = self
+            .db
+            .call(move |c| {
+                let mut st = c.prepare(
+                    "SELECT photo_id FROM beauty_geometry
+                     WHERE partial=1 AND (?1 IS NULL OR photo_id=?1)",
+                )?;
+                let ids = st
+                    .query_map([only], |r| r.get::<_, i64>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                drop(st);
+                for id in &ids {
+                    c.execute("DELETE FROM beauty_geometry WHERE photo_id=?1", [id])?;
+                }
+                Ok(ids)
+            })
+            .await?;
+        for id in &ids {
+            let id = *id;
+            if let Ok(r) = self.db.call(move |c| catalog::photo_ref(c, id)).await {
+                self.after_beauty_ready(&r).await;
+            }
+        }
+        Ok(ids)
     }
 
     /// Edited thumbnails rendered before the geometry existed lack the portrait ops: redo them.

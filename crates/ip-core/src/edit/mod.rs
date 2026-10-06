@@ -3,6 +3,7 @@
 
 pub mod beauty;
 pub mod luts;
+pub mod patch;
 pub mod service;
 pub mod store;
 pub mod sync;
@@ -227,8 +228,32 @@ fn check_op(op: &Op) -> Result<()> {
                 range(n, v, 0.0, 100.0)?;
             }
         }
-        // TODO(M5): validate patch rect/feather/amount and that the asset exists.
-        Op::Patch(_) | Op::Warp(Warp::Unknown) | Op::Unknown => {}
+        Op::Patch(p) => {
+            if !patch::valid_asset_id(&p.asset) {
+                return Err(bad(
+                    "patch asset must be 1..96 characters of letters, digits, '_' or '-'",
+                ));
+            }
+            for v in p.rect {
+                finite("patch rect", v)?;
+            }
+            let [x, y, w, h] = p.rect;
+            if !(0.0..=1.0).contains(&x) || !(0.0..=1.0).contains(&y) {
+                return Err(bad("patch rect x/y must be within 0..1"));
+            }
+            if w <= 0.0 || h <= 0.0 || x + w > 1.0001 || y + h > 1.0001 {
+                return Err(bad(
+                    "patch rect must be a non-empty region inside the image",
+                ));
+            }
+            range("patch feather", p.feather, 0.0, 0.5)?;
+            range("patch amount", p.amount, 0.0, 1.0)?;
+            check_person("patch", p.person_id)?;
+            if p.source_photo_id.is_some_and(|i| i < 1) {
+                return Err(bad("patch source_photo_id must be a positive id or null"));
+            }
+        }
+        Op::Warp(Warp::Unknown) | Op::Unknown => {}
     }
     Ok(())
 }
@@ -247,6 +272,7 @@ fn check_person(what: &str, person_id: Option<i64>) -> Result<()> {
 pub fn op_is_noop(op: &Op) -> bool {
     match op {
         Op::Unknown | Op::Warp(Warp::Unknown) => true,
+        Op::Patch(p) => !p.enabled || p.amount <= 0.0,
         Op::Beauty(b) => {
             !b.blemish
                 && [
@@ -322,12 +348,33 @@ pub fn validate_stack(raw: Value) -> Result<CheckedStack> {
     })
 }
 
+/// [`validate_stack`] plus the checks that need the photo: every `patch` asset must exist
+/// among the photo's assets (a patch is specific to the photo it was generated for).
+pub fn validate_stack_for(
+    raw: Value,
+    photo_id: i64,
+    patches: &patch::PatchStore,
+) -> Result<CheckedStack> {
+    let checked = validate_stack(raw)?;
+    for op in &checked.stack.ops {
+        if let Op::Patch(p) = op {
+            if !patches.exists(photo_id, &p.asset) {
+                return Err(bad(format!(
+                    "patch asset {:?} does not exist for photo {photo_id}",
+                    p.asset
+                )));
+            }
+        }
+    }
+    Ok(checked)
+}
+
 fn parse_saved(raw: &Value) -> Result<EditStack> {
     serde_json::from_value(raw.clone())
         .map_err(|e| CoreError::Internal(anyhow::anyhow!("stored edit stack is invalid: {e}")))
 }
 
-fn ops_of(raw: &Value) -> Vec<Value> {
+pub(crate) fn ops_of(raw: &Value) -> Vec<Value> {
     raw.get("ops")
         .and_then(Value::as_array)
         .cloned()
@@ -450,25 +497,47 @@ impl Core {
             return;
         }
         let core = self.clone();
-        tokio::spawn(async move {
-            for id in ids {
-                let Ok(r) = core.db.call(move |c| catalog::photo_ref(c, id)).await else {
-                    continue; // deleted meanwhile
-                };
-                let has_edits = r.edit_hash.is_some();
-                if has_edits {
-                    // failures are logged inside; the event is still sent
-                    let _ = core.render.edited_image(r.clone(), GRID).await;
-                }
-                core.events.emit(Event::EditsUpdated {
-                    items: vec![EditUpdate {
-                        id,
-                        has_edits,
-                        thumb_version: r.thumb_version(),
-                    }],
-                });
+        tokio::spawn(async move { core.refresh_edits(ids).await });
+    }
+
+    /// The awaited form of [`Core::spawn_edit_refresh`] (generation tasks use it to order
+    /// `edits.updated` before their `*.done` event).
+    pub(crate) async fn refresh_edits(self: &Arc<Self>, ids: Vec<i64>) {
+        for id in ids {
+            let Ok(r) = self.db.call(move |c| catalog::photo_ref(c, id)).await else {
+                continue; // deleted meanwhile
+            };
+            let has_edits = r.edit_hash.is_some();
+            if has_edits {
+                // failures are logged inside; the event is still sent
+                let _ = self.render.edited_image(r.clone(), GRID).await;
             }
-        });
+            self.events.emit(Event::EditsUpdated {
+                items: vec![EditUpdate {
+                    id,
+                    has_edits,
+                    thumb_version: r.thumb_version(),
+                }],
+            });
+        }
+    }
+
+    /// Deletes the patch assets of a photo that no retained edit version refers to.
+    pub(crate) async fn gc_patches(&self, photo_id: i64) {
+        let keep = self
+            .db
+            .call(move |c| store::all_stacks(c, photo_id))
+            .await
+            .map(|stacks| {
+                stacks
+                    .iter()
+                    .flat_map(patch::assets_in_stack)
+                    .collect::<HashSet<String>>()
+            });
+        if let Ok(keep) = keep {
+            let svc = self.render.clone();
+            let _ = tokio::task::spawn_blocking(move || svc.patches.gc(photo_id, &keep)).await;
+        }
     }
 
     pub async fn get_edit(&self, photo_id: i64) -> Result<EditDoc> {
@@ -496,7 +565,7 @@ impl Core {
     /// Saves the stack (an empty one resets the photo) and broadcasts `edits.updated` once the
     /// new grid thumbnail exists.
     pub async fn put_edit(self: &Arc<Self>, photo_id: i64, raw: Value) -> Result<EditPut> {
-        let checked = validate_stack(raw)?;
+        let checked = validate_stack_for(raw, photo_id, &self.render.patches)?;
         if checked.stack.ops.is_empty() {
             self.delete_edit(photo_id).await?;
             let r = self
@@ -529,6 +598,7 @@ impl Core {
             if let Some(old) = &out.old_hash {
                 self.render.purge_edited(&edited_key(&before.fast_key, old));
             }
+            self.gc_patches(photo_id).await;
             self.spawn_edit_refresh(vec![photo_id]);
         }
         let thumb_version =
@@ -570,8 +640,11 @@ impl Core {
                 "long_edge must be within 16..{PREVIEW_MAX_EDGE}"
             )));
         }
-        let given = req.stack.map(validate_stack).transpose()?;
         let id = req.photo_id;
+        let given = req
+            .stack
+            .map(|s| validate_stack_for(s, id, &self.render.patches))
+            .transpose()?;
         let (r, saved) = self
             .db
             .call(move |c| Ok((catalog::photo_ref(c, id)?, store::current(c, id)?)))
@@ -761,6 +834,16 @@ impl Core {
         self: &Arc<Self>,
         stacks: Vec<(catalog::PhotoRef, Vec<Value>)>,
     ) -> Result<Vec<i64>> {
+        let changed_ids = self.persist_stacks_quiet(stacks).await?;
+        self.spawn_edit_refresh(changed_ids.clone());
+        Ok(changed_ids)
+    }
+
+    /// [`Core::persist_stacks`] without the `edits.updated` refresh (the caller sends it).
+    pub(crate) async fn persist_stacks_quiet(
+        self: &Arc<Self>,
+        stacks: Vec<(catalog::PhotoRef, Vec<Value>)>,
+    ) -> Result<Vec<i64>> {
         let mut writes = Vec::new();
         for (t, ops) in stacks {
             let checked = validate_stack(stack_json(ops))?;
@@ -793,7 +876,9 @@ impl Core {
                 changed_ids.push(t.id);
             }
         }
-        self.spawn_edit_refresh(changed_ids.clone());
+        for id in &changed_ids {
+            self.gc_patches(*id).await;
+        }
         Ok(changed_ids)
     }
 

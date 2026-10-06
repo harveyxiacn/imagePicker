@@ -55,6 +55,24 @@ pub enum Event {
     },
     #[serde(rename = "collections.updated")]
     CollectionsUpdated {},
+    #[serde(rename = "besttake.done")]
+    BestTakeDone {
+        photo_id: i64,
+        results: Vec<crate::generate::BestTakeResult>,
+    },
+    #[serde(rename = "inpaint.done")]
+    InpaintDone {
+        photo_id: i64,
+        ok: bool,
+        reason: Option<String>,
+    },
+    #[serde(rename = "enhance.done")]
+    EnhanceDone {
+        photo_id: i64,
+        op: String,
+        ok: bool,
+        reason: Option<String>,
+    },
     #[serde(rename = "worker.status")]
     WorkerStatus {
         state: String,
@@ -109,6 +127,8 @@ pub struct Coalescer {
     taste: Option<Event>,
     collections: bool,
     worker: Option<Event>,
+    /// `*.done` events: delivered one by one, in order.
+    done: Vec<Event>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +147,7 @@ enum Key {
     Taste,
     Collections,
     Worker,
+    Done,
 }
 
 impl Coalescer {
@@ -217,6 +238,12 @@ impl Coalescer {
                 self.note(Key::Worker);
                 self.worker = Some(ev);
             }
+            ev @ (Event::BestTakeDone { .. }
+            | Event::InpaintDone { .. }
+            | Event::EnhanceDone { .. }) => {
+                self.note(Key::Done);
+                self.done.push(ev);
+            }
             ev @ Event::TaskProgress { .. } => {
                 let id = match &ev {
                     Event::TaskProgress { task_id, .. } => task_id.clone(),
@@ -304,6 +331,7 @@ impl Coalescer {
                         out.push(ev);
                     }
                 }
+                Key::Done => out.append(&mut self.done),
             }
         }
         out

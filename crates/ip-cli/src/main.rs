@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use ip_core::{
-    AnalysisRunRequest, AnalysisStatus, Core, CoreConfig, ImportRequest, ImportState, PhotoQuery,
-    Profile, RunState,
+    AnalysisRunRequest, AnalysisStatus, BestTakePlan, BestTakeResult, Core, CoreConfig, Event,
+    ImportRequest, ImportState, InpaintBody, PhotoQuery, Profile, RunState,
 };
 use ip_server::ServerConfig;
 
@@ -86,6 +86,32 @@ enum Command {
         #[arg(long, default_value_t = 92)]
         quality: u8,
     },
+    /// Print the best-take plan of a burst (who could get a better expression from which
+    /// frame); with `--auto` also compose the best takes into the base photo's edit stack.
+    Besttake {
+        burst_id: i64,
+        /// Run the automatic choice (needs the AI worker and its best-take models).
+        #[arg(long)]
+        auto: bool,
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
+    },
+    /// Remove bystanders (non-subject faces) or given faces from a photo with the inpainting
+    /// model; the result is saved as a patch in the photo's edit stack (debugging).
+    Inpaint {
+        photo_id: i64,
+        /// Remove every non-subject face.
+        #[arg(long)]
+        bystanders: bool,
+        /// Remove these faces (comma separated face ids).
+        #[arg(long, value_delimiter = ',')]
+        face_ids: Vec<i64>,
+        /// `lama` (default) or `sdxl`.
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
+    },
     /// Show what the personalised scoring has learned (labels, accuracy, fusion weight).
     Taste {
         /// Train now instead of waiting for the next 50 labels.
@@ -94,6 +120,100 @@ enum Command {
         #[arg(long)]
         data_dir: Option<PathBuf>,
     },
+}
+
+/// How long a headless generative task may take before the CLI gives up waiting.
+const GEN_WAIT: Duration = Duration::from_secs(30 * 60);
+
+fn print_plan(plan: &BestTakePlan) {
+    println!("base photo:    {}", plan.base_photo_id);
+    if plan.people.is_empty() {
+        println!("people:        none (no face of the base photo appears in other frames)");
+    }
+    for p in &plan.people {
+        println!(
+            "person:        track {} / person {:?} {} (base face {}) -> best photo {}",
+            p.track_id,
+            p.person_id,
+            p.person_name.as_deref().unwrap_or(""),
+            p.base_face_id,
+            p.best_photo_id
+        );
+        for c in &p.candidates {
+            println!(
+                "  candidate:   photo {} face {} expression {} {}",
+                c.photo_id,
+                c.face_id,
+                c.expression_score
+                    .map(|s| format!("{s:.3}"))
+                    .unwrap_or_else(|| "-".into()),
+                match (c.composable, &c.reason) {
+                    (true, _) => "composable".to_string(),
+                    (false, r) => format!("not composable ({})", r.as_deref().unwrap_or("?")),
+                }
+            );
+        }
+    }
+}
+
+/// The plan of a burst and, with `auto`, the outcome of composing it (`besttake.done`).
+async fn besttake_headless(
+    core: &Arc<Core>,
+    burst_id: i64,
+    auto: bool,
+) -> Result<(BestTakePlan, Option<Vec<BestTakeResult>>)> {
+    let plan = core.besttake_plan(burst_id).await?;
+    if !auto {
+        return Ok((plan, None));
+    }
+    let mut rx = core.events.subscribe();
+    core.besttake_auto(burst_id).await?;
+    let wait = async {
+        loop {
+            match rx.recv().await {
+                Ok(Event::BestTakeDone { photo_id, results }) if photo_id == plan.base_photo_id => {
+                    return Ok(results)
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(e) => anyhow::bail!("event stream closed: {e}"),
+            }
+        }
+    };
+    let results = tokio::time::timeout(GEN_WAIT, wait)
+        .await
+        .context("timed out waiting for besttake.done")??;
+    Ok((plan, Some(results)))
+}
+
+/// Starts an inpainting task and waits for `inpaint.done`.
+async fn inpaint_headless(core: &Arc<Core>, photo_id: i64, body: InpaintBody) -> Result<()> {
+    let mut rx = core.events.subscribe();
+    core.inpaint_start(photo_id, body).await?;
+    let wait = async {
+        loop {
+            match rx.recv().await {
+                Ok(Event::InpaintDone {
+                    photo_id: p,
+                    ok,
+                    reason,
+                }) if p == photo_id => {
+                    return if ok {
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!(
+                            "inpainting failed: {}",
+                            reason.unwrap_or_default()
+                        ))
+                    }
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(e) => anyhow::bail!("event stream closed: {e}"),
+            }
+        }
+    };
+    tokio::time::timeout(GEN_WAIT, wait)
+        .await
+        .context("timed out waiting for inpaint.done")?
 }
 
 fn print_taste(t: &ip_core::taste::TasteOut) {
@@ -559,6 +679,60 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Besttake {
+            burst_id,
+            auto,
+            data_dir,
+        } => {
+            init_tracing("warn");
+            let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
+            let res = besttake_headless(&core, burst_id, auto).await;
+            core.worker.shutdown().await;
+            let (plan, results) = res?;
+            print_plan(&plan);
+            if let Some(results) = results {
+                for r in &results {
+                    println!(
+                        "composed:      base face {} -> {}{}",
+                        r.base_face_id,
+                        if r.ok { "ok" } else { "failed" },
+                        r.reason
+                            .as_deref()
+                            .map(|s| format!(" ({s})"))
+                            .unwrap_or_default()
+                    );
+                }
+                if results.iter().any(|r| !r.ok) {
+                    std::process::exit(1);
+                }
+            }
+            Ok(())
+        }
+        Command::Inpaint {
+            photo_id,
+            bystanders,
+            face_ids,
+            model,
+            data_dir,
+        } => {
+            init_tracing("warn");
+            anyhow::ensure!(
+                bystanders || !face_ids.is_empty(),
+                "give --bystanders or --face-ids"
+            );
+            let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
+            let body = InpaintBody {
+                bystanders,
+                face_ids: (!face_ids.is_empty()).then_some(face_ids),
+                strokes: None,
+                model,
+            };
+            let res = inpaint_headless(&core, photo_id, body).await;
+            core.worker.shutdown().await;
+            res?;
+            println!("inpainted photo {photo_id}; the patch is part of its edit stack");
+            Ok(())
+        }
         Command::Taste { retrain, data_dir } => {
             init_tracing("warn");
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
@@ -714,6 +888,122 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[test]
+    fn parses_besttake_and_inpaint() {
+        let cli = Cli::try_parse_from(["imagepicker", "besttake", "7", "--auto"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Besttake {
+                burst_id: 7,
+                auto: true,
+                ..
+            }
+        ));
+        let cli = Cli::try_parse_from([
+            "imagepicker",
+            "inpaint",
+            "9",
+            "--bystanders",
+            "--face-ids",
+            "1,2",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Inpaint {
+                photo_id,
+                bystanders,
+                face_ids,
+                ..
+            } => assert_eq!((photo_id, bystanders, face_ids), (9, true, vec![1, 2])),
+            _ => panic!("wrong command"),
+        }
+        assert!(Cli::try_parse_from(["imagepicker", "besttake"]).is_err());
+    }
+
+    #[tokio::test]
+    async fn headless_inpaint_and_besttake_plan_with_a_fake_worker() {
+        use ip_core::testutil::{person, FakeFace, FakeSpec, FakeWorker};
+        let data = tempfile::tempdir().unwrap();
+        let src = tempfile::tempdir().unwrap();
+        make_photos(src.path(), 2);
+        let worker = Arc::new(FakeWorker::new());
+        worker.set(
+            "img_000.jpg",
+            FakeSpec::at(0.0).with_faces(vec![
+                FakeFace::new([0.3, 0.2, 0.3, 0.4], person(1, 0.0)),
+                FakeFace::new([0.8, 0.7, 0.06, 0.08], person(2, 0.0)),
+            ]),
+        );
+        worker.set("img_001.jpg", FakeSpec::at(90.0));
+        let core = Core::open(CoreConfig {
+            data_dir: Some(data.path().to_path_buf()),
+            imaging: Arc::new(FakeImaging::new()),
+            thumb_workers: Some(2),
+            worker: Some(worker.clone()),
+            renderer: None,
+            force_cpu: true,
+        })
+        .unwrap();
+        let r = analyze_headless(
+            &core,
+            &src.path().to_string_lossy(),
+            Profile::Standard,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        let page = core
+            .photos(PhotoQuery {
+                session_id: r.session_id,
+                limit: Some(10),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let first = page
+            .photos
+            .iter()
+            .find(|p| p.file_name == "img_000.jpg")
+            .unwrap();
+        inpaint_headless(
+            &core,
+            first.id,
+            InpaintBody {
+                bystanders: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let stack = core.get_edit(first.id).await.unwrap().stack;
+        assert_eq!(stack["ops"][0]["kind"], "inpaint");
+        assert_eq!(
+            worker
+                .inpaint_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        // without a model the failure is reported
+        worker.set_missing(&[ip_core::testutil::INPAINT_MODEL]);
+        assert!(inpaint_headless(
+            &core,
+            first.id,
+            InpaintBody {
+                bystanders: true,
+                ..Default::default()
+            }
+        )
+        .await
+        .is_err());
+        let burst = first.burst_id;
+        if let Some(b) = burst {
+            let (plan, res) = besttake_headless(&core, b, false).await.unwrap();
+            assert!(res.is_none());
+            print_plan(&plan);
+        }
     }
 
     #[test]

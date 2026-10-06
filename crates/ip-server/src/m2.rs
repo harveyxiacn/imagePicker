@@ -76,6 +76,8 @@ pub async fn analysis_cancel(
 #[derive(Deserialize)]
 pub struct SessionParams {
     session_id: Option<i64>,
+    /// `1`: also list single-photo subjects (`GET /api/people`, M5).
+    include_singletons: Option<String>,
 }
 
 fn require_session(p: &SessionParams) -> Result<i64, ApiError> {
@@ -178,9 +180,10 @@ pub async fn people(
     State(st): State<AppState>,
     ApiQuery(p): ApiQuery<SessionParams>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(
-        json!({ "people": st.core.people(p.session_id).await? }),
-    ))
+    Ok(Json(json!({ "people": st.core.people_with(
+            p.session_id,
+            matches!(p.include_singletons.as_deref(), Some("1") | Some("true")),
+        ).await? })))
 }
 
 pub async fn patch_person(

@@ -159,6 +159,14 @@ pub struct ExportRequest {
     /// Render the saved edits into the output (M3). Photos without edits are unaffected.
     #[serde(default = "default_true")]
     pub apply_edits: bool,
+    /// M5: super-resolution factor (2 or 4). Every output is rendered, run through the worker's
+    /// `enhance.run upscale` and encoded at `quality`. With `long_edge`, that is the size of the
+    /// *result* (the render is made at `long_edge / upscale` first).
+    #[serde(default)]
+    pub upscale: Option<u32>,
+    /// M5: leave the GPS position out of the EXIF of re-encoded outputs.
+    #[serde(default)]
+    pub strip_gps: bool,
 }
 
 fn default_quality() -> u8 {

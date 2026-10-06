@@ -10,6 +10,8 @@ pub mod managed;
 pub mod process;
 pub mod protocol;
 mod protocol_m4;
+mod protocol_m5;
+pub mod timeout;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -19,6 +21,8 @@ pub use error::{Result, WorkerError};
 pub use managed::{ManagedWorker, WorkerConfig};
 pub use protocol::*;
 pub use protocol_m4::*;
+pub use protocol_m5::*;
+pub use timeout::{TimeoutHandle, TimeoutWorker, WorkerTimeouts};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -105,6 +109,33 @@ pub trait AiWorker: Send + Sync {
             "this AI worker does not support faces.embed".into(),
         ))
     }
+    /// Composites one person's face from another frame (`besttake.compose`). Workers that predate
+    /// M5 report `Unavailable`.
+    async fn besttake_compose(
+        &self,
+        _req: &BestTakeComposeRequest,
+    ) -> Result<BestTakeComposeResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support besttake.compose".into(),
+        ))
+    }
+    /// Generative object removal (`inpaint.run`).
+    async fn inpaint_run(&self, _req: &InpaintRequest) -> Result<InpaintResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support inpaint.run".into(),
+        ))
+    }
+    /// Denoise / face restoration / super-resolution (`enhance.run`).
+    async fn enhance_run(&self, _req: &EnhanceRequest) -> Result<EnhanceResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support enhance.run".into(),
+        ))
+    }
     /// Stops the worker process (gracefully, then by killing the process tree).
     async fn shutdown(&self);
+    /// Kills an unresponsive worker immediately (no polite shutdown request). The next request
+    /// starts a fresh process. Default: [`AiWorker::shutdown`].
+    async fn kill(&self) {
+        self.shutdown().await;
+    }
 }

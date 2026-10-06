@@ -654,6 +654,7 @@ struct CFace {
     locked: bool,
     bbox: [f64; 4],
     emb: Option<Vec<f32>>,
+    is_subject: bool,
     /// Burst id, or `-photo_id` for photos outside any burst.
     group: i64,
     t: i64,
@@ -676,6 +677,7 @@ fn load_cfaces(conn: &Connection, sql: &str, args: &[i64]) -> Result<Vec<CFace>>
                     .filter(|e| !e.is_empty()),
                 group: r.get::<_, Option<i64>>(9)?.unwrap_or(-photo_id),
                 t: r.get::<_, Option<i64>>(10)?.unwrap_or(0),
+                is_subject: r.get::<_, i64>(11)? != 0,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -684,7 +686,7 @@ fn load_cfaces(conn: &Connection, sql: &str, args: &[i64]) -> Result<Vec<CFace>>
 
 const CFACE_COLS: &str =
     "f.id, f.photo_id, f.person_id, f.person_locked, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
-    f.embedding, p.burst_id, COALESCE(p.taken_at, p.mtime)";
+    f.embedding, p.burst_id, COALESCE(p.taken_at, p.mtime), f.is_subject";
 
 /// Track index (within its group) per face; `groups` are the face indices of each burst.
 fn track_groups(faces: &[CFace]) -> (Vec<usize>, BTreeMap<i64, Vec<usize>>) {
@@ -827,6 +829,13 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
 
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut new_ids: HashMap<usize, i64> = HashMap::new();
+    // subjects that stayed unassigned for lack of a second photo still get a (singleton) person
+    // so they can be picked in the portrait panel; they join a real person later if one matches
+    let mut track_subject = vec![false; tracks.len()];
+    for (i, f) in faces.iter().enumerate() {
+        track_subject[face_track[i]] |= f.is_subject;
+    }
+    let mut singles: HashMap<usize, i64> = HashMap::new();
     let mut touched: HashSet<i64> = faces.iter().filter_map(|f| f.person_id).collect();
     let mut changed_photos: HashSet<i64> = HashSet::new();
     for (i, f) in faces.iter().enumerate() {
@@ -841,7 +850,25 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
                     id
                 }
             }),
-            Assignment::None => None,
+            Assignment::None => {
+                let ti = face_track[i];
+                if tracks[ti].emb.is_some() && track_subject[ti] {
+                    Some(match singles.get(&ti) {
+                        Some(id) => *id,
+                        None => {
+                            tx.execute(
+                                "INSERT INTO person(created_at, singleton) VALUES(?1, 1)",
+                                [now_ms()],
+                            )?;
+                            let id = tx.last_insert_rowid();
+                            singles.insert(ti, id);
+                            id
+                        }
+                    })
+                } else {
+                    None
+                }
+            }
         };
         let final_person = if f.locked { f.person_id } else { new_person };
         if let Some(p) = final_person {
@@ -920,6 +947,12 @@ pub fn recompute_person(conn: &Connection, person_id: i64) -> Result<()> {
     conn.execute(
         "UPDATE person SET cover_face_id=?2, center=COALESCE(?3, center) WHERE id=?1",
         params![person_id, cover, center],
+    )?;
+    // a singleton that gained a second photo (or a name) is a real person now
+    conn.execute(
+        "UPDATE person SET singleton=0 WHERE id=?1 AND singleton=1 AND
+           (name IS NOT NULL OR (SELECT COUNT(DISTINCT photo_id) FROM face WHERE person_id=?1) >= 2)",
+        [person_id],
     )?;
     Ok(())
 }
@@ -1463,27 +1496,35 @@ fn person_row(r: &rusqlite::Row) -> rusqlite::Result<Person> {
         cover_face_id: r.get(2)?,
         photo_count: r.get(3)?,
         hidden: r.get::<_, i64>(4)? != 0,
+        singleton: r.get::<_, i64>(5)? != 0,
     })
 }
 
-pub fn list_people(conn: &Connection, session_id: Option<i64>) -> Result<Vec<Person>> {
+/// People of a session (or all). Single-photo subjects (`singleton`) are left out unless
+/// `include_singletons`.
+pub fn list_people(
+    conn: &Connection,
+    session_id: Option<i64>,
+    include_singletons: bool,
+) -> Result<Vec<Person>> {
     let sql = match session_id {
         Some(_) => {
-            "SELECT pe.id, pe.name, pe.cover_face_id, COUNT(DISTINCT f.photo_id), pe.hidden
+            "SELECT pe.id, pe.name, pe.cover_face_id, COUNT(DISTINCT f.photo_id), pe.hidden, pe.singleton
              FROM person pe JOIN face f ON f.person_id=pe.id
              JOIN session_photo sp ON sp.photo_id=f.photo_id AND sp.session_id=?1
+             WHERE (?2 OR pe.singleton=0)
              GROUP BY pe.id ORDER BY 4 DESC, pe.id"
         }
         None => {
-            "SELECT pe.id, pe.name, pe.cover_face_id, COUNT(DISTINCT f.photo_id), pe.hidden
+            "SELECT pe.id, pe.name, pe.cover_face_id, COUNT(DISTINCT f.photo_id), pe.hidden, pe.singleton
              FROM person pe JOIN face f ON f.person_id=pe.id
-             WHERE ?1 IS NULL
+             WHERE ?1 IS NULL AND (?2 OR pe.singleton=0)
              GROUP BY pe.id ORDER BY 4 DESC, pe.id"
         }
     };
     let mut st = conn.prepare(sql)?;
     let v = st
-        .query_map([session_id], person_row)?
+        .query_map(params![session_id, include_singletons], person_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(v)
 }
@@ -1491,7 +1532,7 @@ pub fn list_people(conn: &Connection, session_id: Option<i64>) -> Result<Vec<Per
 pub fn get_person(conn: &Connection, id: i64) -> Result<Person> {
     conn.query_row(
         "SELECT pe.id, pe.name, pe.cover_face_id,
-                (SELECT COUNT(DISTINCT photo_id) FROM face WHERE person_id=pe.id), pe.hidden
+                (SELECT COUNT(DISTINCT photo_id) FROM face WHERE person_id=pe.id), pe.hidden, pe.singleton
          FROM person pe WHERE pe.id=?1",
         [id],
         person_row,

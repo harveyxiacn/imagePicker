@@ -19,6 +19,9 @@ pub enum CoreError {
     /// The AI worker cannot run (HTTP 503 `worker_unavailable`).
     #[error("{0}")]
     WorkerUnavailable(String),
+    /// A worker call did not answer in time and the worker was killed (HTTP 504 `worker_timeout`).
+    #[error("{0}")]
+    WorkerTimeout(String),
     #[error("{0:#}")]
     Internal(anyhow::Error),
 }
@@ -41,6 +44,7 @@ impl CoreError {
             Self::Unprocessable(_) => "unprocessable",
             Self::ModelsMissing(_) => "models_missing",
             Self::WorkerUnavailable(_) => "worker_unavailable",
+            Self::WorkerTimeout(_) => "worker_timeout",
             Self::Internal(_) => "internal",
         }
     }

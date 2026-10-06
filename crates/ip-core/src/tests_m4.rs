@@ -911,6 +911,8 @@ async fn export_into_folders() {
                 quality: 90,
                 name_template: "{name}".into(),
                 apply_edits: true,
+                upscale: None,
+                strip_gps: false,
                 folders: Some(folders),
             })
             .await
@@ -958,6 +960,8 @@ async fn export_into_folders() {
             quality: 90,
             name_template: "{name}".into(),
             apply_edits: true,
+            upscale: None,
+            strip_gps: false,
             folders,
         }
     };

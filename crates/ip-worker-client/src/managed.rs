@@ -16,6 +16,7 @@ use crate::error::{Result, WorkerError};
 use crate::process;
 use crate::protocol::*;
 use crate::protocol_m4::*;
+use crate::protocol_m5::*;
 use crate::{AiWorker, WorkerState, WorkerStatus};
 
 #[derive(Debug, Clone)]
@@ -484,6 +485,41 @@ impl AiWorker for ManagedWorker {
             .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
         let v = self.rpc("faces.embed", params, None, None).await?;
         parse(v, "faces.embed")
+    }
+
+    async fn besttake_compose(
+        &self,
+        req: &BestTakeComposeRequest,
+    ) -> Result<BestTakeComposeResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("besttake.compose", params, None, None).await?;
+        parse(v, "besttake.compose")
+    }
+
+    async fn inpaint_run(&self, req: &InpaintRequest) -> Result<InpaintResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("inpaint.run", params, None, None).await?;
+        parse(v, "inpaint.run")
+    }
+
+    async fn enhance_run(&self, req: &EnhanceRequest) -> Result<EnhanceResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("enhance.run", params, None, None).await?;
+        parse(v, "enhance.run")
+    }
+
+    async fn kill(&self) {
+        let conn = self.conn.lock().await.take();
+        self.shared.generation.fetch_add(1, Ordering::SeqCst);
+        if let Some(c) = conn {
+            c.client.close();
+            // dropping `c` kills the process tree
+        }
+        self.shared.reset_failures();
+        self.shared.set_state(WorkerState::Stopped, None);
     }
 
     async fn shutdown(&self) {

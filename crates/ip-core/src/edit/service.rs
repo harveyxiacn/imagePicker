@@ -10,12 +10,14 @@ use std::time::Instant;
 use ip_imaging::ThumbCache;
 use ip_render::{
     Backend, EditStack, Mask, MaskProvider, MaskTarget, Op, RenderRequest, Renderer, RgbImage,
+    RgbaImage,
 };
 use ip_worker_client::{AiWorker, MaskPhoto, MaskRequest};
 use tokio::runtime::Handle;
 use tokio::sync::{OnceCell, Semaphore};
 
 use super::luts::LutLibrary;
+use super::patch::PatchStore;
 use super::store;
 use crate::analysis::map_worker_err;
 use crate::catalog::PhotoRef;
@@ -297,6 +299,7 @@ fn write_png_atomic(img: &image::GrayImage, path: &Path) -> Result<()> {
 
 struct PhotoMasks {
     store: Arc<MaskStore>,
+    patches: Arc<PatchStore>,
     beauty: Arc<super::beauty::BeautyStore>,
     photo: PhotoRef,
     handle: Handle,
@@ -319,6 +322,14 @@ impl MaskProvider for PhotoMasks {
             // preserved through anyhow so the HTTP layer can answer 409/503
             Err(e) => Err(anyhow::Error::new(e)),
         }
+    }
+
+    fn patch(&self, asset: &str) -> ip_render::Result<Option<RgbaImage>> {
+        Ok(self
+            .patches
+            .load(self.photo.id, asset)
+            .map_err(anyhow::Error::new)?
+            .map(|a| (*a).clone()))
     }
 
     fn people(&self) -> ip_render::Result<Vec<ip_render::PersonGeometry>> {
@@ -345,6 +356,7 @@ pub struct RenderService {
     pub luts: Arc<LutLibrary>,
     pub masks: Arc<MaskStore>,
     pub beauty: Arc<super::beauty::BeautyStore>,
+    pub patches: Arc<PatchStore>,
     imaging: Arc<dyn Imaging>,
     db: Db,
     gate: Arc<Semaphore>,
@@ -369,6 +381,7 @@ pub struct ServiceParts {
     pub beauty_dir: PathBuf,
     pub edited_thumbs_dir: PathBuf,
     pub edited_previews_dir: PathBuf,
+    pub edits_dir: PathBuf,
 }
 
 impl RenderService {
@@ -384,6 +397,7 @@ impl RenderService {
                 masks.clone(),
             )),
             masks,
+            patches: Arc::new(PatchStore::new(p.edits_dir)),
             imaging: p.imaging,
             db: p.db,
             gate: Arc::new(Semaphore::new(RENDER_CONCURRENCY)),
@@ -475,6 +489,7 @@ impl RenderService {
         let src = self.source(r, source_edge(r, stack, long_edge))?;
         let masks = PhotoMasks {
             store: self.masks.clone(),
+            patches: self.patches.clone(),
             beauty: self.beauty.clone(),
             photo: r.clone(),
             handle: handle.clone(),

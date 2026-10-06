@@ -5,6 +5,7 @@ pub mod fs;
 pub mod m2;
 pub mod m3;
 pub mod m4;
+pub mod m5;
 pub mod routes;
 pub mod ws;
 
@@ -116,6 +117,13 @@ pub fn build_router(core: Arc<Core>, web_dir: Option<PathBuf>) -> Router {
             "/collections/{id}",
             patch(m4::patch_collection).delete(m4::delete_collection),
         )
+        .route("/bursts/{id}/besttake", get(m5::besttake_plan))
+        .route("/bursts/{id}/besttake/auto", post(m5::besttake_auto))
+        .route("/besttake", post(m5::besttake))
+        .route("/photos/{id}/bystanders", get(m5::bystanders))
+        .route("/photos/{id}/inpaint", post(m5::inpaint))
+        .route("/photos/{id}/enhance", post(m5::enhance))
+        .route("/assets/{photo_id}/{asset}", get(m5::asset))
         .route("/taste", get(m4::taste))
         .route("/taste/reset", post(m4::taste_reset))
         .route("/events", get(ws::events))
@@ -124,6 +132,7 @@ pub fn build_router(core: Arc<Core>, web_dir: Option<PathBuf>) -> Router {
     Router::new()
         .nest("/api", api)
         .fallback(routes::fallback)
+        .layer(axum::middleware::from_fn(m5::tidy_json))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

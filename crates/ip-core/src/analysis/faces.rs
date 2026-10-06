@@ -71,7 +71,7 @@ pub fn best_of_people(
             ));
             args.extend(ids.iter().copied());
         }
-        None => sql.push_str(" AND pe.hidden=0"),
+        None => sql.push_str(" AND pe.hidden=0 AND pe.singleton=0"),
     }
     let mut st = conn.prepare(&sql)?;
     // person -> photo -> (best expression, ai_score, burst)
