@@ -3,6 +3,15 @@
   "build": {
     "beforeDevCommand": "pnpm --dir ../../web dev --host"
   },
+  "app": {
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["/storage/emulated/0/**"]
+      }
+    }
+  },
   "bundle": {
     "externalBin": [],
     "resources": [],

@@ -73,3 +73,11 @@ export async function loadAlbums(
   if (!perm.granted) return { status: 'denied', albums: [] }
   return { status: perm.partial ? 'partial' : 'ok', albums: await media.listAlbums() }
 }
+
+/**
+ * WebView-loadable URL for an album cover. Uses Tauri's asset protocol (scope limited to shared
+ * storage in `tauri.android.conf.json`); on Android the scheme is `http://asset.localhost/<encoded path>`.
+ */
+export function albumCoverUrl(album: { cover_path?: string | null }): string | null {
+  return album.cover_path ? `http://asset.localhost/${encodeURIComponent(album.cover_path)}` : null
+}

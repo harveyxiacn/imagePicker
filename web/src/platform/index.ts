@@ -9,7 +9,7 @@
  * In the browser, `pickFolder` is null and the server-side folder browser (/api/fs/*) is used.
  */
 import { useEffect } from 'react'
-import { createMediaApi, isAndroidShell, type MediaApi } from './android'
+import { albumCoverUrl, createMediaApi, isAndroidShell, type MediaApi } from './android'
 
 export * from './android'
 
@@ -36,17 +36,38 @@ export interface Platform {
   revealInFolder: ((path: string) => Promise<void>) | null
   /** Android shell only: permissions, albums, share, trash, foreground service, publish. */
   media: MediaApi | null
+  /** Android-only flat aliases of `media` (optional so desktop/browser need none). */
+  requestPermission?: MediaApi['requestPermission']
+  listAlbums?: MediaApi['listAlbums']
+  albumCoverUrl?: (album: { cover_path?: string | null }) => string | null
+  share?: MediaApi['share']
+  trash?: MediaApi['trash']
+  publishExports?: MediaApi['publishExports']
+  startForeground?: MediaApi['startForeground']
+  stopForeground?: MediaApi['stopForeground']
+  keepAwake?: MediaApi['keepAwake']
 }
 
 export function getPlatform(): Platform {
   if (isAndroidShell()) {
-    // No native folder dialog or drag-and-drop on Android: the UI lists albums (`media.listAlbums`).
+    // No native folder dialog or drag-and-drop on Android: the UI lists albums (`listAlbums`).
+    const media = createMediaApi((cmd, args) => window.__TAURI_INTERNALS__!.invoke(cmd, args))
     return {
       kind: 'tauri',
       canDropFolders: false,
       pickFolder: null,
       revealInFolder: null,
-      media: createMediaApi((cmd, args) => window.__TAURI_INTERNALS__!.invoke(cmd, args)),
+      media,
+      // Flat aliases feature-detected by web/src/lib/mobilePlatform.ts.
+      requestPermission: media.requestPermission,
+      listAlbums: media.listAlbums,
+      albumCoverUrl,
+      share: media.share,
+      trash: media.trash,
+      publishExports: media.publishExports,
+      startForeground: media.startForeground,
+      stopForeground: media.stopForeground,
+      keepAwake: media.keepAwake,
     }
   }
   if (isTauri()) {
