@@ -130,4 +130,9 @@ if (F) {
   row('console errors', (s) => F[s]?.console_errors?.length);
   p();
 }
+const notes = new URL('./notes.md', import.meta.url);
+if (existsSync(notes)) {
+  p();
+  p(readFileSync(notes, 'utf8').trimEnd());
+}
 console.log(out.join('\n'));

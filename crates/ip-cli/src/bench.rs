@@ -150,7 +150,8 @@ fn base_image(w: u32, h: u32, variant: u64) -> image::RgbImage {
             let yy = y as f64 / h as f64;
             for x in 0..w {
                 let xx = x as f64 / w as f64;
-                let base = (xx * fx * 6.28).sin() * 40.0 + (yy * fy * 6.28).cos() * 40.0;
+                let base = (xx * fx * std::f64::consts::TAU).sin() * 40.0
+                    + (yy * fy * std::f64::consts::TAU).cos() * 40.0;
                 // a soft "subject" blob
                 let d = ((xx - 0.5).powi(2) + (yy - 0.55).powi(2)).sqrt();
                 let blob = (1.0 - (d * 3.0).min(1.0)) * 70.0;
@@ -353,8 +354,7 @@ fn seed_catalog(
                     } else {
                         None
                     };
-                    for k in i..j {
-                        let t = times[k];
+                    for (k, &t) in times.iter().enumerate().take(j).skip(i) {
                         let rated = rng.below(100) < 30;
                         let rating: Option<i64> = rated.then(|| 1 + rng.below(5) as i64);
                         let flag: i64 = match rng.below(100) {

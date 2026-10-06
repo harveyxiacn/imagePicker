@@ -127,7 +127,9 @@ async fn main() {
                         if let Some(id) = id {
                             let _ = tx.send(json!({"jsonrpc":"2.0","method":"progress","params":{"req":id,"kind":"analyze","done":n,"total":n}}).to_string());
                         }
-                        reply(json!({"items": items, "steps": [], "skipped_steps": [], "warnings": []}));
+                        reply(
+                            json!({"items": items, "steps": [], "skipped_steps": [], "warnings": []}),
+                        );
                     }
                     "analyze.batch" => {
                         let n = v["params"]["items"]
@@ -158,9 +160,9 @@ fn synthetic_items(items: &Value) -> Vec<Value> {
         .map(|it| {
             let path = it["path"].as_str().unwrap_or_default();
             let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-            let name_hash = path
-                .bytes()
-                .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+            let name_hash = path.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+                (h ^ b as u64).wrapping_mul(0x100_0000_01b3)
+            });
             // frames from one base image share a size, hence a pHash: they cluster into bursts
             let phash = size.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (name_hash & 0x3);
             let unit = |shift: u32| ((name_hash >> shift) & 0xff) as f64 / 255.0;
