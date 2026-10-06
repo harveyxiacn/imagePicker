@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useGroups, usePhotos, useSession } from '@/api/queries'
+import { AssistantHost } from '@/components/assistant/AssistantDrawer'
 import { CollectionsSidebar } from '@/components/CollectionsSidebar'
 import { Compare } from '@/components/Compare'
 import { ExportDialog } from '@/components/ExportDialog'
@@ -236,6 +237,7 @@ export function Library() {
       <StatusBar sessionId={sessionId} session={session.data} photos={photos} />
       <HelpOverlay />
       <ModelConsentDialog />
+      <AssistantHost sessionId={sessionId} />
       <Modal
         open={acceptAllOpen}
         onOpenChange={useUi.getState().setAcceptAllOpen}

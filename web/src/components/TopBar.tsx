@@ -1,10 +1,14 @@
-import { ChevronLeft, Columns2, Download, GalleryHorizontal, HelpCircle, LayoutGrid, PanelLeft, PanelRight, Search, Square, Users } from 'lucide-react'
+import { ChevronLeft, Columns2, Download, GalleryHorizontal, HelpCircle, LayoutGrid, PanelLeft, PanelRight, Search, Settings as SettingsIcon, Square, Users } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
+import { useMe } from '@/api/queries'
 import type { Session } from '@/api/types'
+import { can } from '@/lib/auth'
 import { useUi, type View } from '@/stores/ui'
 import { AnalyzeControl, WorkerChip } from './AnalyzeControl'
+import { AssistantButton } from './assistant/AssistantDrawer'
 import { HeaderControls } from './HeaderControls'
+import { UserMenu } from './UserMenu'
 
 const VIEWS: { v: View; icon: typeof LayoutGrid; key: string }[] = [
   { v: 'grid', icon: LayoutGrid, key: 'G' },
@@ -28,6 +32,7 @@ export function TopBar({ sessionId, session, onView }: Props) {
   const setExportOpen = useUi((s) => s.setExportOpen)
   const sidebarOpen = useUi((s) => s.sidebarOpen)
   const setSidebarOpen = useUi((s) => s.setSidebarOpen)
+  const role = useMe().data?.role ?? 'owner'
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-2 sm:gap-3 sm:px-3">
@@ -71,16 +76,31 @@ export function TopBar({ sessionId, session, onView }: Props) {
 
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
         <WorkerChip />
-        <AnalyzeControl sessionId={sessionId} photoCount={session?.photo_count ?? 0} />
-        <Link to={`/s/${sessionId}/people`} className="btn" title={t('people.title')} data-testid="people-link">
-          <Users size={14} />
-          <span className="hidden lg:inline">{t('people.title')}</span>
-        </Link>
-        <button className="btn" onClick={() => setExportOpen(true)} title={`${t('top.export')} (Ctrl+E)`}>
-          <Download size={14} />
-          <span className="hidden sm:inline">{t('top.export')}</span>
-        </button>
+        {can(role, 'analyze') && (
+          <div data-coach="analyze">
+            <AnalyzeControl sessionId={sessionId} photoCount={session?.photo_count ?? 0} />
+          </div>
+        )}
+        <AssistantButton />
+        {can(role, 'people') && (
+          <Link to={`/s/${sessionId}/people`} className="btn" title={t('people.title')} data-testid="people-link">
+            <Users size={14} />
+            <span className="hidden lg:inline">{t('people.title')}</span>
+          </Link>
+        )}
+        {can(role, 'export') && (
+          <button className="btn" onClick={() => setExportOpen(true)} title={`${t('top.export')} (Ctrl+E)`}>
+            <Download size={14} />
+            <span className="hidden sm:inline">{t('top.export')}</span>
+          </button>
+        )}
         <HeaderControls />
+        {can(role, 'settings') && (
+          <Link to="/settings" className="btn btn-ghost btn-icon" aria-label={t('home.settings')} title={t('home.settings')} data-testid="settings-link">
+            <SettingsIcon size={16} />
+          </Link>
+        )}
+        <UserMenu />
         <button className="btn btn-ghost btn-icon" onClick={() => setHelpOpen(true)} aria-label={t('top.help')} title={`${t('top.help')} (?)`}>
           <HelpCircle size={16} />
         </button>

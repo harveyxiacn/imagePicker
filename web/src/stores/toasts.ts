@@ -5,12 +5,14 @@ export interface Toast {
   id: string
   kind: 'info' | 'error' | 'success'
   text: string
+  /** optional action buttons (e.g. XMP conflict resolution); the toast closes after an action runs */
+  actions?: { label: string; onClick: () => void }[]
 }
 
 interface ToastState {
   toasts: Toast[]
   tasks: Record<string, TaskEvent>
-  push: (kind: Toast['kind'], text: string, ttl?: number) => void
+  push: (kind: Toast['kind'], text: string, ttl?: number, actions?: Toast['actions']) => void
   dismiss: (id: string) => void
   updateTask: (t: TaskEvent) => void
   dismissTask: (id: string) => void
@@ -21,9 +23,9 @@ let seq = 0
 export const useToasts = create<ToastState>((set, get) => ({
   toasts: [],
   tasks: {},
-  push: (kind, text, ttl = 4000) => {
+  push: (kind, text, ttl = 4000, actions) => {
     const id = `t${++seq}`
-    set((s) => ({ toasts: [...s.toasts, { id, kind, text }] }))
+    set((s) => ({ toasts: [...s.toasts, { id, kind, text, actions }] }))
     if (ttl > 0) setTimeout(() => get().dismiss(id), ttl)
   },
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),

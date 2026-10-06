@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import type { AnalysisStatus, HardwareInfo, Photo, ServerEvent, Session, Taste } from '@/api/types'
+import type { AnalysisStatus, HardwareInfo, Photo, ServerEvent, Session, Settings, Taste } from '@/api/types'
 import type { PhotosListQuery } from './filter'
 
 export const qk = {
@@ -29,6 +29,12 @@ export const qk = {
   bystanders: (photoId: number) => ['bystanders', photoId] as const,
   besttake: (burstId: number) => ['besttake', burstId] as const,
   best: (sid: number, ids: number[], n: number) => ['best', sid, ids, n] as const,
+  settings: ['settings'] as const,
+  me: ['auth', 'me'] as const,
+  assistantStatus: ['assistant', 'status'] as const,
+  cacheInfo: ['cache'] as const,
+  onboarding: ['onboarding'] as const,
+  lan: ['lan'] as const,
 }
 
 /** Photo fields owned by the analysis pipeline (never user-editable, safe to overwrite from the server). */
@@ -82,6 +88,9 @@ export interface ApplyDeps {
   /** Fetch one photo (defaults to the API); injectable for tests. */
   fetchPhoto?: (id: number) => Promise<Photo>
   onAnalysis?: (e: Extract<ServerEvent, { type: 'analysis.progress' }>) => void
+  /** M6: assistant.done / xmp.conflict */
+  onAssistant?: (e: Extract<ServerEvent, { type: 'assistant.done' }>) => void
+  onXmpConflict?: (e: Extract<ServerEvent, { type: 'xmp.conflict' }>) => void
   /** M5: besttake.done / inpaint.done / enhance.done */
   onGen?: (e: Extract<ServerEvent, { type: 'besttake.done' | 'inpaint.done' | 'enhance.done' }>) => void
 }
@@ -147,6 +156,9 @@ export function applyEvents(
   let collectionsChanged = false
   const beautyReady = new Set<number>()
   const genDone: Extract<ServerEvent, { type: 'besttake.done' | 'inpaint.done' | 'enhance.done' }>[] = []
+  const assistantDone: Extract<ServerEvent, { type: 'assistant.done' }>[] = []
+  const xmpConflicts: Extract<ServerEvent, { type: 'xmp.conflict' }>[] = []
+  let settings: Settings | null = null
   let taste: Extract<ServerEvent, { type: 'taste.updated' }> | null = null
   let worker: Extract<ServerEvent, { type: 'worker.status' }> | null = null
 
@@ -206,6 +218,15 @@ export function applyEvents(
         break
       case 'collections.updated':
         collectionsChanged = true
+        break
+      case 'assistant.done':
+        assistantDone.push(ev)
+        break
+      case 'settings.updated':
+        settings = ev.settings
+        break
+      case 'xmp.conflict':
+        xmpConflicts.push(ev)
         break
     }
   }
@@ -282,6 +303,13 @@ export function applyEvents(
     )
   }
 
+  if (settings) {
+    qc.setQueryData(qk.settings, settings)
+    // models.source / lan / cache changes affect other panels
+    void qc.invalidateQueries({ queryKey: qk.lan })
+  }
+  if (deps.onAssistant) for (const a of assistantDone) deps.onAssistant(a)
+  if (deps.onXmpConflict) for (const c of xmpConflicts) deps.onXmpConflict(c)
   if (deps.onGen) for (const g of genDone) deps.onGen(g)
   if (onTask) for (const t of tasks.values()) onTask(t)
 

@@ -1,12 +1,15 @@
 import { useMutation } from '@tanstack/react-query'
 import { AlertTriangle, FolderOpen, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useHardware } from '@/api/queries'
 import { missingModelsOf } from '@/lib/analysis'
+import { errorText } from '@/lib/errors'
+import { EXPORT_PRESETS, type ExportPresetId } from '@/lib/exportPresets'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
+import { useUi } from '@/stores/ui'
 import { FolderBrowser } from './FolderBrowser'
 import { Modal } from './Modal'
 
@@ -20,6 +23,7 @@ interface Props {
 }
 
 type EdgeChoice = 'original' | '2048' | '4096' | 'custom'
+
 
 const LS_KEY = 'imagepicker.exportDest'
 const readDest = () => {
@@ -41,6 +45,27 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const [browse, setBrowse] = useState(false)
   const [upscale, setUpscale] = useState<0 | 2 | 4>(0)
   const hardware = useHardware().data
+  const wantedPreset = useUi((s) => s.exportPreset)
+  const [preset, setPreset] = useState<ExportPresetId | null>(null)
+  const applyPreset = (id: ExportPresetId) => {
+    const p = EXPORT_PRESETS[id]
+    setPreset(id)
+    setQuality(p.quality)
+    if (p.edge === null) setEdge('original')
+    else {
+      setEdge('custom')
+      setCustom(p.edge)
+    }
+  }
+  // the assistant opens the dialog with a preset preselected (state adjusted during render, store cleared in an effect)
+  const [seenPreset, setSeenPreset] = useState<string | null>(null)
+  if (open && wantedPreset && wantedPreset !== seenPreset) {
+    setSeenPreset(wantedPreset)
+    if (wantedPreset in EXPORT_PRESETS) applyPreset(wantedPreset as ExportPresetId)
+  } else if (!wantedPreset && seenPreset) setSeenPreset(null)
+  useEffect(() => {
+    if (open && wantedPreset) useUi.getState().setExportPreset(null)
+  }, [open, wantedPreset])
   const slowTier = !hardware?.tier || hardware.tier === 'T0' || hardware.tier === 'T1'
   const push = useToasts((s) => s.push)
   const updateTask = useToasts((s) => s.updateTask)
@@ -67,7 +92,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
       // 409 models_missing (Real-ESRGAN): consent dialog, then export again
       const missing = missingModelsOf(e)
       if (missing) useAnalysisUi.getState().setConsent({ sessionId: 0, profile: 'fast', models: missing, onReady: () => mut.mutate() })
-      else push('error', e instanceof Error ? e.message : String(e))
+      else push('error', errorText(e), 9000)
     },
   })
 
@@ -105,6 +130,16 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
               </ul>
             </div>
           )}
+          <div className="flex flex-col gap-1" data-testid="export-presets">
+            <span className="text-muted">{t('export.preset')}</span>
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.keys(EXPORT_PRESETS) as ExportPresetId[]).map((id) => (
+                <button key={id} className="chip" aria-pressed={preset === id} onClick={() => applyPreset(id)} data-testid={`export-preset-${id}`}>
+                  {t(`export.preset_${id}`)}
+                </button>
+              ))}
+            </div>
+          </div>
           <fieldset className={`flex gap-4 ${byFolder ? 'hidden' : ''}`}>
             <legend className="mb-1 text-muted">{t('export.scope')}</legend>
             <label className="flex items-center gap-1.5">

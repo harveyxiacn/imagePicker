@@ -33,6 +33,8 @@ interface UiState {
   acceptAllOpen: boolean
   helpOpen: boolean
   exportOpen: boolean
+  /** assistant `export` plans preselect a preset (original / wechat / xiaohongshu / instagram) */
+  exportPreset: string | null
   /** M4: save-as-smart-collection dialog, face search dialog */
   saveCollectionOpen: boolean
   faceSearchOpen: boolean
@@ -72,6 +74,7 @@ interface UiState {
   resetFilter: () => void
   setHelpOpen: (b: boolean) => void
   setExportOpen: (b: boolean) => void
+  setExportPreset: (p: string | null) => void
   setSaveCollectionOpen: (b: boolean) => void
   setFaceSearchOpen: (b: boolean) => void
   setSidebarOpen: (b: boolean) => void
@@ -109,6 +112,7 @@ export const useUi = create<UiState>()(
       grouped: true,
       helpOpen: false,
       exportOpen: false,
+      exportPreset: null,
       saveCollectionOpen: false,
       faceSearchOpen: false,
       sidebarOpen: !narrow,
@@ -140,6 +144,7 @@ export const useUi = create<UiState>()(
       resetFilter: () => set((s) => ({ filter: { ...DEFAULT_FILTER, sort: s.filter.sort } })),
       setHelpOpen: (helpOpen) => set({ helpOpen }),
       setExportOpen: (exportOpen) => set({ exportOpen }),
+      setExportPreset: (exportPreset) => set({ exportPreset }),
       setSaveCollectionOpen: (saveCollectionOpen) => set({ saveCollectionOpen }),
       setFaceSearchOpen: (faceSearchOpen) => set({ faceSearchOpen }),
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
