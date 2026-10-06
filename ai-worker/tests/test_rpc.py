@@ -282,13 +282,31 @@ async def test_system_info_and_models_list(service):
         assert info["tier"] in ("T0", "T1", "T2", "T3")
         assert info["providers"][-1] == "CPUExecutionProvider"
         assert "hardware" in info and info["hardware"]["cpu_cores_logical"] >= 1
-        assert set(info["steps"]) == {"phash", "quality", "faces", "embed"}
+        assert set(info["steps"]) == {
+            "phash",
+            "quality",
+            "faces",
+            "identity",
+            "embed",
+            "aesthetic",
+            "iqa",
+            "scene",
+        }
+        assert info["profiles"]["fast"] == ["phash", "quality", "faces"]
         assert info["vram"]["budget_mb"] > 0
 
         await call(ws, "models.list", id=2)
-        models = (await recv(ws))["result"]["models"]
+        listed = (await recv(ws))["result"]
+        models = listed["models"]
         ids = {m["id"] for m in models}
-        assert {"yunet", "siglip2-base", "mediapipe-face-landmarker"} <= ids
+        assert {"yunet", "siglip2-base", "mediapipe-face-landmarker", "auraface"} <= ids
+        by_id = {m["id"]: m for m in models}
+        assert by_id["auraface"]["required_for"] == ["identity"]
+        assert "scene" in by_id["siglip2-base-fp16"]["required_for"]
+        assert by_id["nima-aesthetic"]["required_for"] == ["aesthetic"]
+        assert set(listed["profiles"]) == {"fast", "standard"}
+        assert "auraface" in listed["profiles"]["standard"]["models"]
+        assert "auraface" not in listed["profiles"]["fast"]["models"]
         assert all(m["installed"] is False for m in models)
 
         await call(ws, "models.unload", {"id": "yunet"}, id=3)
@@ -335,7 +353,7 @@ async def test_analyze_batch_classic_steps_over_rpc(service, synth_files, tmp_pa
             "analyze.batch",
             {
                 "items": items,
-                "steps": ["phash", "iqa", "segment"],
+                "steps": ["phash", "sharpness", "segment"],
                 "analysis_size": 512,
                 "out_dir": str(tmp_path / "out"),
             },
