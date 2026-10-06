@@ -21,7 +21,9 @@ interface Props {
   onEdit?: () => void
 }
 
-const PRELOAD = 2
+/** Neighbours preloaded (and decoded) ahead of / behind the current photo. */
+const PRELOAD_AHEAD = 3
+const PRELOAD_BEHIND = 2
 
 /** Single-photo view: fit / 100% / wheel zoom, pan, progressive loading, neighbour preloading, filmstrip. */
 export function Loupe({ photos, photo, index, onMove, onPick, onRate, onEdit }: Props) {
@@ -36,14 +38,17 @@ export function Loupe({ photos, photo, index, onMove, onPick, onRate, onEdit }: 
   const id = photo?.id ?? null
   const view = state.id === id ? state.view : FIT_VIEW
 
-  // Preload neighbours' 2048 previews so ←/→ feels instant.
+  // Preload neighbours' 2048 previews so ←/→ feels instant: the nearest first, and decoded
+  // (`decode()`), so the first paint after a key press does not wait for the JPEG decode.
   useEffect(() => {
     const imgs: HTMLImageElement[] = []
-    for (let d = -PRELOAD; d <= PRELOAD; d++) {
+    for (let d = -PRELOAD_BEHIND; d <= PRELOAD_AHEAD; d++) {
       const p = photos[index + d]
       if (p && d !== 0) {
         const im = new Image()
+        im.fetchPriority = Math.abs(d) <= 1 ? 'high' : 'low'
         im.src = previewUrl(p.id, 2048, p.thumb_version)
+        void im.decode().catch(() => undefined)
         imgs.push(im)
       }
     }

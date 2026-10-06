@@ -33,8 +33,10 @@ p(`| Import ${B.import?.photos} x 12 MP JPEG: first screen (100 rows with metada
 p(`| Import: first 100 thumbnails | (informative) | ${fmt(im(A, 'thumbs_100'))} | ${fmt(im(B, 'thumbs_100'))} | |`);
 p(`| Import: all thumbnails | < 10000 ms | ${fmt(im(A, 'thumbs_all'))} | ${fmt(im(B, 'thumbs_all'))} | ${ok(im(B, 'thumbs_all'), 10000)} |`);
 if (F) {
-  p(`| Grid scroll (20k photos, real server) p95 frame | <= 16.7 ms | ${fmt(F.before?.grid?.p95)} | ${fmt(F.after?.grid?.p95 ?? F.grid?.p95)} | ${ok(F.after?.grid?.p95 ?? F.grid?.p95, 16.7)} |`);
-  p(`| Loupe next photo (key press to painted) p95 | < 50 ms | ${fmt(F.before?.loupe?.p95)} | ${fmt(F.after?.loupe?.p95 ?? F.loupe?.p95)} | ${ok(F.after?.loupe?.p95 ?? F.loupe?.p95, 50)} |`);
+  const fe = (side, k) => F[side]?.[k];
+  p(`| Grid scroll, 20k photos, real server, 2500 px/s: p95 frame | <= 16.7 ms | ${fmt(fe('before', 'grid')?.p95)} | ${fmt(fe('after', 'grid')?.p95)} | ${ok(fe('after', 'grid')?.p95, 16.8)} |`);
+  p(`| Grid scroll, dense (96 px, ungrouped) + 4x CPU throttle, 6000 px/s: p50 frame | (stress) | ${fmt(fe('before', 'dense_throttled_4x')?.['6000px/s']?.frame_ms?.p50)} | ${fmt(fe('after', 'dense_throttled_4x')?.['6000px/s']?.frame_ms?.p50)} | |`);
+  p(`| Loupe next photo (key press to full preview painted) p95 | < 50 ms | ${fmt(fe('before', 'loupe')?.settled_ms?.p95)} | ${fmt(fe('after', 'loupe')?.settled_ms?.p95)} | ${ok(fe('after', 'loupe')?.settled_ms?.p95, 50)} |`);
 }
 const mem = (r) => r.memory_mb?.after_patch_20k?.priv;
 p(`| Memory over a 20k session (private bytes, excluding models) | < 1536 MB | ${fmt(mem(A))} | ${fmt(mem(B))} | ${ok(mem(B), 1536)} |`);
@@ -108,11 +110,24 @@ for (const k of Object.keys(B.memory_mb ?? {})) p(`| ${k} | ${m(A.memory_mb?.[k]
 p();
 
 if (F) {
-  p('## Frontend (Playwright, real server, 20k photos)');
+  p('## Frontend (Playwright + headless Chromium, REAL server, 20k photos, 1440x900)');
   p();
-  p('```json');
-  p(JSON.stringify(F, null, 2));
-  p('```');
+  p('`web/scripts/perf-real.mjs`: a requestAnimationFrame sampler while the grid scrolls at a fixed speed over the warm thumbnail cache; the loupe test presses ArrowRight 40 times (half relaxed, half quick). Headless Chromium rasterises in software, so absolute numbers are pessimistic.');
+  p();
+  p('| Metric | Before | After |');
+  p('|---|---|---|');
+  const row = (name, f) => p(`| ${name} | ${f('before') ?? 'n/a'} | ${f('after') ?? 'n/a'} |`);
+  const fr = (o) => (o ? `${o.p50} / ${o.p95} / ${o.max}` : 'n/a');
+  for (const sp of ['1500px/s', '2500px/s', '6000px/s']) row(`grid ${sp}: frame ms p50 / p95 / max`, (s) => fr(F[s]?.scroll_warm?.[sp]?.frame_ms));
+  for (const sp of ['2500px/s', '6000px/s']) row(`dense grid, CPU 4x, ${sp}: frame ms p50 / p95 / max`, (s) => fr(F[s]?.dense_throttled_4x?.[sp]?.frame_ms));
+  for (const sp of ['2500px/s', '6000px/s']) row(`dense grid, CPU 4x, ${sp}: frames over 33 ms`, (s) => `${F[s]?.dense_throttled_4x?.[sp]?.jank_frames_gt33ms} of ${F[s]?.dense_throttled_4x?.[sp]?.frames}`);
+  row('jump to a random position: all visible thumbnails loaded (ms p50)', (s) => F[s]?.jump_settle_ms?.p50);
+  row('loupe next: first pixels of the new photo (ms p50 / p95)', (s) => `${F[s]?.loupe?.first_pixels_ms?.p50} / ${F[s]?.loupe?.first_pixels_ms?.p95}`);
+  row('loupe next: full preview painted (ms p50 / p95)', (s) => `${F[s]?.loupe?.settled_ms?.p50} / ${F[s]?.loupe?.settled_ms?.p95}`);
+  row('loupe, key held (25 steps at 35 ms): last photo settled (ms)', (s) => (F[s]?.loupe_held_key != null ? Math.round(F[s].loupe_held_key) : null));
+  row('first thumbnail visible after navigation (ms)', (s) => F[s]?.first_thumb_visible_ms);
+  row('JS heap after loading 20k rows (MB)', (s) => F[s]?.js_heap_mb_after_load);
+  row('console errors', (s) => F[s]?.console_errors?.length);
   p();
 }
 console.log(out.join('\n'));

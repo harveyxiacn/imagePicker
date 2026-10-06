@@ -46,6 +46,13 @@ pub enum BenchCmd {
         people: usize,
         #[arg(long, default_value_t = 1)]
         seed: u64,
+        /// Point the rows at real files: `IMG_00001.jpg`.. from this directory (made by `gen`),
+        /// cycling through `--files-count` of them. Every row is still a distinct photo (own
+        /// fast key and root alias), so thumbnails are generated per row on demand.
+        #[arg(long)]
+        files_dir: Option<PathBuf>,
+        #[arg(long, default_value_t = 1000)]
+        files_count: usize,
     },
 }
 
@@ -63,7 +70,16 @@ pub fn run(cmd: BenchCmd) -> Result<()> {
             session_size,
             people,
             seed,
-        } => seed_catalog(&data_dir, rows, session_size.max(1), people, seed),
+            files_dir,
+            files_count,
+        } => seed_catalog(
+            &data_dir,
+            rows,
+            session_size.max(1),
+            people,
+            seed,
+            files_dir.map(|d| (d, files_count.max(1))),
+        ),
     }
 }
 
@@ -248,6 +264,7 @@ fn seed_catalog(
     session_size: usize,
     people: usize,
     seed: u64,
+    files: Option<(PathBuf, usize)>,
 ) -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
     let db = Db::open(&data_dir.join("catalog.db")).context("open catalog")?;
@@ -276,12 +293,26 @@ fn seed_catalog(
         let times = timeline(n, &mut rng);
         let sid = db.with(|c| {
             let tx = c.transaction()?;
-            let root = format!("bench-root-{s}");
-            tx.execute(
-                "INSERT INTO root_folder(path, added_at) VALUES(?1, ?2)",
-                params![root, now],
-            )?;
-            let root_id = tx.last_insert_rowid();
+            // One root per `files_count` rows. With real files the roots are aliases of the same
+            // directory (`dir/.`, `dir/./.`, ...), which keeps (root, rel_path) unique.
+            let n_roots = files.as_ref().map_or(1, |(_, c)| n.div_ceil(*c));
+            let mut roots = Vec::with_capacity(n_roots);
+            for k in 0..n_roots {
+                let root = match &files {
+                    Some((dir, _)) => format!(
+                        "{}{}",
+                        dir.to_string_lossy().trim_end_matches(['/', '\\']),
+                        "/.".repeat(s * n_roots + k)
+                    ),
+                    None => format!("bench-root-{s}"),
+                };
+                tx.execute(
+                    "INSERT INTO root_folder(path, added_at) VALUES(?1, ?2)",
+                    params![root, now],
+                )?;
+                roots.push(tx.last_insert_rowid());
+            }
+            let root_id = roots[0];
             tx.execute(
                 "INSERT INTO session(title, created_at, root_id, import_state) VALUES(?1, ?2, ?3, 'ready')",
                 params![format!("Bench session {s}"), now - s as i64, root_id],
@@ -342,13 +373,16 @@ fn seed_catalog(
                         } as i64;
                         let w = if rng.below(5) == 0 { 3000 } else { 4000 };
                         let h = 7000 - w;
-                        let name = format!("IMG_{:05}.jpg", seq + 1);
+                        let (name, row_root) = match &files {
+                            Some((_, c)) => (format!("IMG_{:05}.jpg", seq % c + 1), roots[seq / c]),
+                            None => (format!("IMG_{:05}.jpg", seq + 1), root_id),
+                        };
                         let size_bytes = 4_000_000i64 + rng.below(3_000_000) as i64;
                         let fk = format!("fk{s:03}{seq:09}{:016x}", rng.next());
                         let ck = format!("ck{s:03}{seq:09}{:016x}", rng.next());
                         let scene = scenes[rng.below(scenes.len() as u64) as usize];
                         let pid = ins.insert(params![
-                            root_id,
+                            row_root,
                             name,
                             name,
                             size_bytes,
