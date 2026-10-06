@@ -561,7 +561,8 @@ pub fn build(req: &RenderRequest<'_>) -> Result<Plan> {
                 }
             }
             Op::OutputSharpen(s) => plan.sharpen = s.amount.clamp(0.0, 100.0),
-            Op::Crop(_) | Op::Unknown => {}
+            // TODO(M4): beauty and warp are parsed but not rendered yet.
+            Op::Crop(_) | Op::Beauty(_) | Op::Warp(_) | Op::Unknown => {}
         }
     }
     Ok(plan)

@@ -31,7 +31,9 @@ fn one() -> u32 {
 
 impl EditStack {
     pub fn is_identity(&self) -> bool {
-        self.ops.iter().all(|o| matches!(o, Op::Unknown))
+        self.ops
+            .iter()
+            .all(|o| matches!(o, Op::Unknown | Op::Warp(Warp::Unknown)))
     }
 }
 
@@ -45,6 +47,10 @@ pub enum Op {
     Local(LocalAdjust),
     Lut(Lut),
     OutputSharpen(OutputSharpen),
+    /// Portrait retouching on skin (M4). Applied after local adjustments.
+    Beauty(Beauty),
+    /// Parametric geometric reshaping of a face or body (M4). Applied right after crop.
+    Warp(Warp),
     #[serde(other)]
     Unknown,
 }
@@ -210,6 +216,97 @@ pub struct OutputSharpen {
     pub amount: f32,
 }
 
+/// Who a portrait op applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Level {
+    /// Strength caps for a natural look (docs/03 §7.2: face warp <= 3% of face width).
+    Natural,
+    Standard,
+    /// Highest caps (face warp <= 6% of face width).
+    Refined,
+}
+
+/// Skin retouching for one person (`person_id`) or, with `None`, every detected face.
+/// All amounts 0..100 (0 = off). The level scales and caps every amount.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Beauty {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person_id: Option<i64>,
+    #[serde(default = "standard_level")]
+    pub level: Level,
+    /// Texture-preserving smoothing (frequency separation on the skin mask).
+    #[serde(default)]
+    pub smooth: f32,
+    /// Brighten and even skin tone (LAB L up, a/b toward a natural skin target).
+    #[serde(default)]
+    pub whiten: f32,
+    /// Remove small blemishes found by the worker (`PersonGeometry::blemishes`).
+    #[serde(default)]
+    pub blemish: bool,
+    /// Brighten the eye whites/iris region from face landmarks.
+    #[serde(default)]
+    pub eye_brighten: f32,
+    /// Whiten teeth inside the inner-lip polygon from face landmarks.
+    #[serde(default)]
+    pub teeth_whiten: f32,
+    /// Reduce dark circles under the eyes.
+    #[serde(default)]
+    pub dark_circles: f32,
+}
+
+fn standard_level() -> Level {
+    Level::Standard
+}
+
+/// Parametric liquify. The renderer derives a smooth displacement field from the
+/// person's geometry (face landmarks / body keypoints) and these amounts, so sliders
+/// stay interactive without a worker round-trip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Warp {
+    /// Amounts -100..100 (positive = slimmer / smaller / larger eyes).
+    Face {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        person_id: Option<i64>,
+        #[serde(default = "standard_level")]
+        level: Level,
+        #[serde(default)]
+        slim: f32,
+        #[serde(default)]
+        chin: f32,
+        #[serde(default)]
+        eyes: f32,
+        #[serde(default)]
+        nose: f32,
+    },
+    /// Amounts 0..100 (positive = slimmer / longer).
+    Body {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        person_id: Option<i64>,
+        #[serde(default = "standard_level")]
+        level: Level,
+        #[serde(default)]
+        arms: f32,
+        #[serde(default)]
+        legs: f32,
+        #[serde(default)]
+        waist: f32,
+        #[serde(default)]
+        lengthen_legs: f32,
+        /// Reduce the warp where it would bend straight background lines (docs/03 §7.3).
+        #[serde(default = "yes")]
+        protect_background: bool,
+    },
+    /// Unrecognised `kind` (e.g. from a newer version): kept loadable, not rendered.
+    #[serde(other)]
+    Unknown,
+}
+
+fn yes() -> bool {
+    true
+}
+
 // ------------------------------------------------------------------ images & providers
 
 /// Upright 8-bit sRGB image, tightly packed RGB.
@@ -229,9 +326,35 @@ pub struct Mask {
     pub data: Vec<u8>,
 }
 
-/// Supplies AI masks for `MaskRef::Ai`. Returning `Ok(None)` skips that local op.
+/// Geometry of one person for portrait ops, in normalised upright-image coordinates
+/// (before crop). Produced by the worker's `beauty.prepare` and cached by the core.
+#[derive(Debug, Clone, Default)]
+pub struct PersonGeometry {
+    /// `None` for faces not assigned to a person.
+    pub person_id: Option<i64>,
+    /// `[x, y, w, h]` face box.
+    pub face_box: [f32; 4],
+    /// MediaPipe Face Mesh 478 landmarks `[x, y]` (empty if unavailable).
+    pub face_landmarks: Vec<[f32; 2]>,
+    /// MediaPipe Pose 33 keypoints `[x, y, visibility]` (empty if unavailable).
+    pub pose: Vec<[f32; 3]>,
+    /// Skin of this person only, excluding eyes/brows/lips (255 = skin).
+    pub skin: Option<Mask>,
+    /// Whole-body matte of this person (255 = person).
+    pub body: Option<Mask>,
+    /// Blemishes `[x, y, radius]` (radius normalised to the image long edge).
+    pub blemishes: Vec<[f32; 3]>,
+}
+
+/// Supplies AI masks for `MaskRef::Ai`, and person geometry for `beauty`/`warp` ops.
+/// Returning `Ok(None)` / an empty list skips the op.
 pub trait MaskProvider: Send + Sync {
     fn mask(&self, target: MaskTarget, person_id: Option<i64>) -> Result<Option<Mask>>;
+
+    /// Every person/face in the photo. Default: none (portrait ops are skipped).
+    fn people(&self) -> Result<Vec<PersonGeometry>> {
+        Ok(Vec::new())
+    }
 }
 
 /// A 3D LUT: `size`^3 entries of RGB in 0..1, red index fastest (`.cube` order).

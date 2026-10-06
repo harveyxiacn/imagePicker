@@ -178,7 +178,8 @@ fn check_op(op: &Op) -> Result<()> {
             range("lut amount", l.amount, 0.0, 1.0)?;
         }
         Op::OutputSharpen(s) => range("output_sharpen amount", s.amount, 0.0, 100.0)?,
-        Op::Unknown => {}
+        // TODO(M4): range-check beauty/warp amounts.
+        Op::Beauty(_) | Op::Warp(_) | Op::Unknown => {}
     }
     Ok(())
 }

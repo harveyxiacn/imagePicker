@@ -16,7 +16,9 @@ fn parses_doc05_stack_and_ignores_future_ops() {
     ]}"#;
     let s: EditStack = serde_json::from_str(json).unwrap();
     assert_eq!(s.ops.len(), 7);
-    assert!(matches!(s.ops[1], Op::Unknown) && matches!(s.ops[2], Op::Unknown));
+    assert!(matches!(s.ops[1], Op::Unknown));
+    // A known op type with an unknown kind degrades instead of failing the whole stack.
+    assert!(matches!(s.ops[2], Op::Warp(ip_render::Warp::Unknown)));
     match &s.ops[4] {
         Op::Local(l) => assert_eq!(
             l.mask,
@@ -63,4 +65,45 @@ fn auto_adjust_values_are_slider_granular() {
     // f32 -> JSON must not leak binary noise like -0.19999998807907104.
     let j = serde_json::to_string(&a).unwrap();
     assert!(!j.contains("99999") && !j.contains("00000"), "{j}");
+}
+
+#[test]
+fn parses_m4_portrait_ops() {
+    use ip_render::{Level, Warp};
+    let json = r#"{"version":1,"ops":[
+        {"type":"warp","kind":"face","person_id":12,"slim":25,"eyes":10},
+        {"type":"warp","kind":"body","person_id":12,"arms":20,"legs":15,"level":"natural"},
+        {"type":"beauty","person_id":12,"level":"natural","smooth":30,"whiten":20,"blemish":true}
+    ]}"#;
+    let s: EditStack = serde_json::from_str(json).unwrap();
+    match &s.ops[0] {
+        Op::Warp(Warp::Face {
+            person_id,
+            slim,
+            level,
+            ..
+        }) => {
+            assert_eq!(
+                (*person_id, *slim, *level),
+                (Some(12), 25.0, Level::Standard)
+            )
+        }
+        o => panic!("{o:?}"),
+    }
+    match &s.ops[1] {
+        Op::Warp(Warp::Body {
+            protect_background,
+            level,
+            ..
+        }) => {
+            assert!(*protect_background);
+            assert_eq!(*level, Level::Natural);
+        }
+        o => panic!("{o:?}"),
+    }
+    match &s.ops[2] {
+        Op::Beauty(b) => assert!(b.blemish && b.smooth == 30.0 && b.teeth_whiten == 0.0),
+        o => panic!("{o:?}"),
+    }
+    assert!(!s.is_identity());
 }
