@@ -1,0 +1,117 @@
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+import type { ConnectionStatus } from '@/api/events'
+import { DEFAULT_FILTER, type FilterState } from '@/lib/filter'
+import { EMPTY_SELECTION, type SelectionState } from '@/lib/selection'
+
+export type View = 'grid' | 'loupe' | 'compare'
+export type Theme = 'dark' | 'light' | 'system'
+export type Lang = 'zh-CN' | 'en'
+
+interface UiState {
+  view: View
+  activeId: number | null
+  selection: SelectionState
+  /** Compare mode: pinned "A" photo (the candidate "B" is `activeId`). */
+  compareA: number | null
+  compareCount: 2 | 4
+  syncZoom: boolean
+  filter: FilterState
+  helpOpen: boolean
+  exportOpen: boolean
+  connection: ConnectionStatus
+  /** Increments when Space asks panes to toggle fit <-> 100%. */
+  zoomToggle: number
+  /** Grid column count (published by the Grid for ↑/↓ navigation). */
+  gridCols: number
+  setGridCols: (n: number) => void
+
+  // persisted preferences
+  thumbSize: number
+  inspectorOpen: boolean
+  theme: Theme
+  lang: Lang
+
+  setView: (v: View) => void
+  setActive: (id: number | null) => void
+  setSelection: (s: SelectionState) => void
+  setCompareA: (id: number | null) => void
+  setCompareCount: (n: 2 | 4) => void
+  setSyncZoom: (b: boolean) => void
+  setFilter: (f: Partial<FilterState>) => void
+  resetFilter: () => void
+  setHelpOpen: (b: boolean) => void
+  setExportOpen: (b: boolean) => void
+  setConnection: (c: ConnectionStatus) => void
+  toggleZoom: () => void
+  setThumbSize: (n: number) => void
+  setInspectorOpen: (b: boolean) => void
+  setTheme: (t: Theme) => void
+  setLang: (l: Lang) => void
+  /** Reset per-session transient state when entering a library. */
+  resetSessionState: () => void
+}
+
+const narrow = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 1023px)').matches
+
+export const useUi = create<UiState>()(
+  persist(
+    (set) => ({
+      view: 'grid',
+      activeId: null,
+      selection: EMPTY_SELECTION,
+      compareA: null,
+      compareCount: 2,
+      syncZoom: true,
+      filter: DEFAULT_FILTER,
+      helpOpen: false,
+      exportOpen: false,
+      connection: 'connecting',
+      zoomToggle: 0,
+      gridCols: 6,
+      setGridCols: (gridCols) => set({ gridCols }),
+      thumbSize: 176,
+      inspectorOpen: !narrow,
+      theme: 'dark',
+      lang: 'zh-CN',
+
+      setView: (view) => set({ view }),
+      setActive: (activeId) => set({ activeId }),
+      setSelection: (selection) => set({ selection }),
+      setCompareA: (compareA) => set({ compareA }),
+      setCompareCount: (compareCount) => set({ compareCount }),
+      setSyncZoom: (syncZoom) => set({ syncZoom }),
+      setFilter: (f) => set((s) => ({ filter: { ...s.filter, ...f } })),
+      resetFilter: () => set((s) => ({ filter: { ...DEFAULT_FILTER, sort: s.filter.sort } })),
+      setHelpOpen: (helpOpen) => set({ helpOpen }),
+      setExportOpen: (exportOpen) => set({ exportOpen }),
+      setConnection: (connection) => set({ connection }),
+      toggleZoom: () => set((s) => ({ zoomToggle: s.zoomToggle + 1 })),
+      setThumbSize: (thumbSize) => set({ thumbSize }),
+      setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
+      setTheme: (theme) => set({ theme }),
+      setLang: (lang) => set({ lang }),
+      resetSessionState: () =>
+        set({
+          view: 'grid',
+          activeId: null,
+          selection: EMPTY_SELECTION,
+          compareA: null,
+          filter: DEFAULT_FILTER,
+          helpOpen: false,
+          exportOpen: false,
+        }),
+    }),
+    {
+      name: 'imagepicker.ui',
+      partialize: (s) => ({
+        thumbSize: s.thumbSize,
+        inspectorOpen: s.inspectorOpen,
+        theme: s.theme,
+        lang: s.lang,
+        syncZoom: s.syncZoom,
+        compareCount: s.compareCount,
+      }),
+    },
+  ),
+)
