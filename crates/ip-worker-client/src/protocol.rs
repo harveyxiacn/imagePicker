@@ -157,3 +157,33 @@ pub struct ModelsListing {
     pub models: Vec<WorkerModel>,
     pub profiles: std::collections::BTreeMap<String, ProfileInfo>,
 }
+
+/// Photo of a `mask.generate` request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MaskPhoto {
+    pub photo_id: i64,
+    pub path: String,
+    pub orientation: u8,
+}
+
+/// `mask.generate` params (`docs/api-contract-m3.md` section D).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MaskRequest {
+    pub photo: MaskPhoto,
+    pub targets: Vec<String>,
+    /// Normalised `[x, y, w, h]` face box for `target = person`.
+    pub person_bbox: Option<[f64; 4]>,
+    /// Long edge of the produced masks.
+    pub size: u32,
+    pub out_dir: String,
+    pub allow_download: bool,
+}
+
+/// `mask.generate` result: target -> PNG path, plus what was skipped and why.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct MaskResponse {
+    pub masks: std::collections::BTreeMap<String, String>,
+    pub models: std::collections::BTreeMap<String, String>,
+    pub skipped: std::collections::BTreeMap<String, String>,
+}

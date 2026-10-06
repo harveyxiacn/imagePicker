@@ -10,5 +10,6 @@ pub mod vecs;
 
 mod run;
 
+pub(crate) use run::map_worker_err;
 pub use run::{ModelsMissing, RunInfo};
 pub use types::*;

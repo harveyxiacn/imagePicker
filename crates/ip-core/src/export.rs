@@ -1,6 +1,6 @@
 //! Export task: copy originals or write resized JPEGs, never overwriting existing files.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -9,7 +9,12 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
+use ip_render::EditStack;
+use tokio::runtime::Handle;
+
 use crate::catalog::{self, now_ms, PhotoRef};
+use crate::edit::service::{encode_jpeg, MaskMode};
+use crate::edit::{store, RenderService};
 use crate::error::{CoreError, Result};
 use crate::events::Event;
 use crate::imaging::Imaging;
@@ -21,6 +26,14 @@ pub struct ExportOptions {
     pub long_edge: Option<u32>,
     pub quality: u8,
     pub name_template: String,
+}
+
+/// Saved edits to render into the output (M3): photos listed in `stacks` are rendered at full
+/// resolution and written as JPEG; the rest follow the original M1 behaviour.
+pub struct EditedExport {
+    pub svc: Arc<RenderService>,
+    pub handle: Handle,
+    pub stacks: HashMap<i64, EditStack>,
 }
 
 #[derive(Debug, Default)]
@@ -88,11 +101,21 @@ fn render_name(template: &str, r: &PhotoRef, seq: usize) -> String {
 
 /// Decide the output file name of every photo up front (collision-free, deterministic).
 pub fn plan_names(refs: &[PhotoRef], template: &str, dest: &Path, resized: bool) -> Vec<PathBuf> {
+    plan_names_with(refs, template, dest, &|_| resized)
+}
+
+/// Like [`plan_names`] with a per-photo decision whether the output is a re-encoded JPEG.
+pub fn plan_names_with(
+    refs: &[PhotoRef],
+    template: &str,
+    dest: &Path,
+    jpeg: &dyn Fn(&PhotoRef) -> bool,
+) -> Vec<PathBuf> {
     let mut taken: HashSet<String> = HashSet::new();
     let mut out = Vec::with_capacity(refs.len());
     for (i, r) in refs.iter().enumerate() {
         let base = render_name(template, r, i + 1);
-        let ext = if resized {
+        let ext = if jpeg(r) {
             "jpg".to_string()
         } else {
             Path::new(&r.file_name)
@@ -137,18 +160,33 @@ pub fn export_photos(
     refs: &[PhotoRef],
     dest: &Path,
     opts: &ExportOptions,
+    edits: Option<&EditedExport>,
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> ExportReport {
-    let names = plan_names(refs, &opts.name_template, dest, opts.long_edge.is_some());
+    let edited = |r: &PhotoRef| edits.and_then(|e| e.stacks.get(&r.id));
+    let names = plan_names_with(refs, &opts.name_template, dest, &|r| {
+        opts.long_edge.is_some() || edited(r).is_some()
+    });
     let done = AtomicUsize::new(0);
     let total = refs.len();
     let results: Vec<std::result::Result<PathBuf, (i64, String)>> = refs
         .par_iter()
         .zip(names.par_iter())
         .map(|(r, out)| {
-            let res = match opts.long_edge {
-                None => copy_new(&r.path, out).map_err(|e| e.to_string()),
-                Some(edge) => imaging
+            let stack = edited(r);
+            let res = match (stack, opts.long_edge) {
+                (Some(stack), _) => {
+                    let e = edits.expect("edited stacks come with a render context");
+                    e.svc
+                        .render_gated(r, stack, opts.long_edge, MaskMode::Strict, &e.handle)
+                        .map_err(|e| e.to_string())
+                        .and_then(|o| {
+                            encode_jpeg(&o.image, opts.quality).map_err(|e| format!("{e:#}"))
+                        })
+                        .and_then(|bytes| write_new(out, &bytes).map_err(|e| e.to_string()))
+                }
+                (None, None) => copy_new(&r.path, out).map_err(|e| e.to_string()),
+                (None, Some(edge)) => imaging
                     .generate_thumbnail(&r.path, r.format, r.orientation, edge, opts.quality)
                     .map_err(|e| format!("{e:#}"))
                     .and_then(|img| write_new(out, &img.bytes).map_err(|e| e.to_string())),
@@ -223,6 +261,40 @@ impl Core {
             quality: req.quality,
             name_template: req.name_template.clone(),
         };
+        let edits = if req.apply_edits {
+            let with_edits: Vec<i64> = refs
+                .iter()
+                .filter(|r| r.edit_hash.is_some())
+                .map(|r| r.id)
+                .collect();
+            let stacks = self
+                .db
+                .call(move |c| {
+                    let mut m = HashMap::new();
+                    for id in with_edits {
+                        if let Some(cur) = store::current(c, id)? {
+                            if cur.has_edits {
+                                let st: EditStack =
+                                    serde_json::from_value(cur.stack).map_err(|e| {
+                                        CoreError::Internal(anyhow::anyhow!(
+                                            "stored edit stack of photo {id} is invalid: {e}"
+                                        ))
+                                    })?;
+                                m.insert(id, st);
+                            }
+                        }
+                    }
+                    Ok(m)
+                })
+                .await?;
+            Some(EditedExport {
+                svc: self.render.clone(),
+                handle: Handle::current(),
+                stacks,
+            })
+        } else {
+            None
+        };
         tokio::spawn(async move {
             let ev = |done: usize, state: &str, error: Option<String>| Event::TaskProgress {
                 task_id: tid.clone(),
@@ -235,16 +307,23 @@ impl Core {
             core.events.emit(ev(0, "running", None));
             let (imaging, events, tid2) = (core.imaging.clone(), core.events.clone(), tid.clone());
             let res = tokio::task::spawn_blocking(move || {
-                export_photos(&*imaging, &refs, &dest, &opts, &|done, total| {
-                    events.emit(Event::TaskProgress {
-                        task_id: tid2.clone(),
-                        kind: "export".into(),
-                        done: done as i64,
-                        total: total as i64,
-                        state: "running".into(),
-                        error: None,
-                    });
-                })
+                export_photos(
+                    &*imaging,
+                    &refs,
+                    &dest,
+                    &opts,
+                    edits.as_ref(),
+                    &|done, total| {
+                        events.emit(Event::TaskProgress {
+                            task_id: tid2.clone(),
+                            kind: "export".into(),
+                            done: done as i64,
+                            total: total as i64,
+                            state: "running".into(),
+                            error: None,
+                        });
+                    },
+                )
             })
             .await;
             let (state, error, done) = match res {
@@ -298,6 +377,9 @@ mod tests {
             fast_key: "0".repeat(32),
             taken_at: taken,
             mtime_ms: None,
+            edit_hash: None,
+            width: None,
+            height: None,
         }
     }
 

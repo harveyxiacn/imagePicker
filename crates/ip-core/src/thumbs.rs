@@ -227,8 +227,18 @@ impl Thumbs {
     /// Returns the cached file, generating it first if needed. Concurrent calls for the same
     /// `(photo, size)` share one generation.
     pub async fn ensure(&self, id: i64, size: u32) -> Result<PathBuf> {
+        let r = self
+            .inner
+            .db
+            .call(move |c| catalog::photo_ref(c, id))
+            .await?;
+        self.ensure_ref(r, size).await
+    }
+
+    /// Like [`Thumbs::ensure`] for the *original* image of an already loaded row.
+    pub async fn ensure_ref(&self, r: PhotoRef, size: u32) -> Result<PathBuf> {
         let inner = self.inner.clone();
-        let r = inner.db.call(move |c| catalog::photo_ref(c, id)).await?;
+        let id = r.id;
         let path = inner.cache_for(size).path_for(&r.fast_key, size);
         if tokio::fs::try_exists(&path).await.unwrap_or(false) {
             return Ok(path);
@@ -364,7 +374,7 @@ impl Inner {
             self.events.emit(Event::ThumbsReady {
                 items: vec![ThumbItem {
                     id: r.id,
-                    v: catalog::thumb_version(&r.fast_key),
+                    v: r.thumb_version(),
                 }],
             });
         }

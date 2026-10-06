@@ -1,8 +1,9 @@
-//! HTTP + WebSocket API (axum). Contract: docs/api-contract-m1.md.
+//! HTTP + WebSocket API (axum). Contracts: docs/api-contract-m1.md .. m3.md.
 
 pub mod error;
 pub mod fs;
 pub mod m2;
+pub mod m3;
 pub mod routes;
 pub mod ws;
 
@@ -11,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use ip_core::{Core, CoreConfig};
 use tokio::net::TcpListener;
@@ -81,6 +82,17 @@ pub fn build_router(core: Arc<Core>, web_dir: Option<PathBuf>) -> Router {
         .route("/people", get(m2::people))
         .route("/people/merge", post(m2::merge_people))
         .route("/people/{id}", patch(m2::patch_person))
+        .route(
+            "/edits/{id}",
+            get(m3::get_edit).put(m3::put_edit).delete(m3::delete_edit),
+        )
+        .route("/edits/{id}/auto", post(m3::auto_edit))
+        .route("/edits/sync", post(m3::sync_edits))
+        .route("/render/preview", post(m3::render_preview))
+        .route("/presets", get(m3::list_presets).post(m3::create_preset))
+        .route("/presets/{id}", delete(m3::delete_preset))
+        .route("/luts/import", post(m3::import_lut))
+        .route("/masks/{id}", get(m3::mask))
         .route("/events", get(ws::events))
         .fallback(routes::api_not_found)
         .method_not_allowed_fallback(routes::method_not_allowed);

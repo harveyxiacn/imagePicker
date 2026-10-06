@@ -3,6 +3,7 @@
 pub mod analysis;
 pub mod catalog;
 pub mod db;
+pub mod edit;
 pub mod error;
 pub mod events;
 pub mod export;
@@ -12,6 +13,8 @@ pub mod model;
 pub mod paths;
 pub mod thumbs;
 
+#[cfg(any(test, feature = "testutil"))]
+pub mod fake_renderer;
 #[cfg(any(test, feature = "testutil"))]
 pub mod fake_worker;
 #[cfg(any(test, feature = "testutil"))]
@@ -23,9 +26,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use analysis::types::*;
+pub use edit::{
+    AutoRequest, CheckedStack, EditDoc, EditPut, LutOut, PresetCreate, PresetOut, Preview,
+    PreviewRequest, RenderService, SyncRequest,
+};
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};
 pub use imaging::{Imaging, RealImaging};
+pub use ip_render;
 pub use model::*;
 
 use db::Db;
@@ -41,6 +49,10 @@ pub struct CoreConfig {
     pub thumb_workers: Option<usize>,
     /// `None` = the real Python worker (started lazily on first use).
     pub worker: Option<Arc<dyn AiWorker>>,
+    /// `None` = `ip_render::create_renderer` (GPU preferred; CPU when `force_cpu` or
+    /// `IMAGEPICKER_RENDER=cpu`).
+    pub renderer: Option<Arc<dyn ip_render::Renderer>>,
+    pub force_cpu: bool,
 }
 
 impl CoreConfig {
@@ -50,6 +62,8 @@ impl CoreConfig {
             imaging: Arc::new(RealImaging),
             thumb_workers: None,
             worker: None,
+            renderer: None,
+            force_cpu: false,
         }
     }
 }
@@ -61,6 +75,7 @@ pub struct Core {
     pub thumbs: Thumbs,
     pub dirs: DataDirs,
     pub worker: Arc<dyn AiWorker>,
+    pub render: Arc<RenderService>,
     task_seq: AtomicU64,
     pub(crate) runs: std::sync::Mutex<std::collections::HashMap<i64, analysis::RunInfo>>,
     pub(crate) analysis_gate: tokio::sync::Semaphore,
@@ -98,6 +113,25 @@ impl Core {
                 Arc::new(ManagedWorker::new(wc))
             }
         };
+        let renderer: Arc<dyn ip_render::Renderer> = match cfg.renderer {
+            Some(r) => r,
+            None => {
+                let cpu_env = std::env::var("IMAGEPICKER_RENDER")
+                    .map(|v| v.trim().eq_ignore_ascii_case("cpu"))
+                    .unwrap_or(false);
+                Arc::from(ip_render::create_renderer(!(cfg.force_cpu || cpu_env)))
+            }
+        };
+        let render = Arc::new(RenderService::new(edit::service::ServiceParts {
+            renderer,
+            imaging: cfg.imaging.clone(),
+            db: db.clone(),
+            worker: worker.clone(),
+            luts_dir: dirs.luts.clone(),
+            masks_dir: dirs.masks.clone(),
+            edited_thumbs_dir: dirs.edited_thumbs.clone(),
+            edited_previews_dir: dirs.edited_previews.clone(),
+        }));
         let core = Arc::new(Core {
             db,
             imaging: cfg.imaging,
@@ -105,6 +139,7 @@ impl Core {
             thumbs,
             dirs,
             worker,
+            render,
             task_seq: AtomicU64::new(tasks as u64),
             runs: Default::default(),
             analysis_gate: tokio::sync::Semaphore::new(1),
@@ -199,14 +234,25 @@ impl Core {
         if !thumbs::THUMB_SIZES.contains(&size) {
             return Err(CoreError::bad_request("s must be 256 or 512"));
         }
-        self.thumbs.ensure(id, size).await
+        self.image_path(id, size).await
     }
 
     pub async fn preview_path(&self, id: i64, size: u32) -> Result<PathBuf> {
         if !thumbs::PREVIEW_SIZES.contains(&size) {
             return Err(CoreError::bad_request("s must be 1024, 2048 or 4096"));
         }
-        self.thumbs.ensure(id, size).await
+        self.image_path(id, size).await
+    }
+
+    /// Cached thumbnail/preview: the rendered image for edited photos, the original otherwise.
+    async fn image_path(&self, id: i64, size: u32) -> Result<PathBuf> {
+        let r = self.db.call(move |c| catalog::photo_ref(c, id)).await?;
+        if r.edit_hash.is_some() {
+            if let Some(p) = self.render.edited_image(r.clone(), size).await? {
+                return Ok(p);
+            }
+        }
+        self.thumbs.ensure_ref(r, size).await
     }
 
     pub async fn original(&self, id: i64) -> Result<(PathBuf, ip_imaging::ImageFormat)> {
@@ -225,3 +271,5 @@ impl Core {
 mod tests;
 #[cfg(test)]
 mod tests_m2;
+#[cfg(test)]
+mod tests_m3;

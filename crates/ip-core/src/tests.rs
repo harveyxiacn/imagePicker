@@ -28,6 +28,8 @@ fn env() -> Env {
         imaging: imaging.clone(),
         thumb_workers: Some(3),
         worker: None,
+        renderer: None,
+        force_cpu: false,
     })
     .unwrap();
     Env {
@@ -543,6 +545,7 @@ async fn export_copies_resizes_and_never_overwrites() {
         long_edge,
         quality: 85,
         name_template: tpl.into(),
+        apply_edits: true,
     };
 
     // 1. originals

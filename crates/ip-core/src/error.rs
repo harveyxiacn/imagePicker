@@ -10,6 +10,9 @@ pub enum CoreError {
     BadRequest(String),
     #[error("{0}")]
     Conflict(String),
+    /// Well-formed request whose content is invalid (HTTP 422), e.g. an edit stack out of range.
+    #[error("{0}")]
+    Unprocessable(String),
     /// Models the analysis needs are not installed (HTTP 409 `models_missing`).
     #[error("required models are not installed: {}", .0.join(", "))]
     ModelsMissing(Vec<String>),
@@ -35,6 +38,7 @@ impl CoreError {
             Self::NotFound(_) => "not_found",
             Self::BadRequest(_) => "bad_request",
             Self::Conflict(_) => "conflict",
+            Self::Unprocessable(_) => "unprocessable",
             Self::ModelsMissing(_) => "models_missing",
             Self::WorkerUnavailable(_) => "worker_unavailable",
             Self::Internal(_) => "internal",

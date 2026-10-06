@@ -64,6 +64,113 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Render a photo (catalog id or image path) through an edit stack to a JPEG (debugging).
+    Render {
+        /// Photo id of the catalog, or a path to an image file.
+        target: String,
+        /// Edit stack JSON file (`{"version":1,"ops":[...]}`); default: the saved edits of a
+        /// catalog photo, or no edits for a path.
+        #[arg(long)]
+        stack: Option<PathBuf>,
+        #[arg(long)]
+        out: PathBuf,
+        /// Resize the result so its long edge is at most this many pixels.
+        #[arg(long)]
+        long_edge: Option<u32>,
+        /// Force the CPU renderer (same as IMAGEPICKER_RENDER=cpu).
+        #[arg(long)]
+        cpu: bool,
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
+        /// JPEG quality of the output.
+        #[arg(long, default_value_t = 92)]
+        quality: u8,
+    },
+}
+
+#[derive(Debug)]
+struct RenderReport {
+    backend: ip_core::ip_render::Backend,
+    width: u32,
+    height: u32,
+    render_ms: u64,
+    total_ms: u128,
+}
+
+async fn render_headless(
+    core: &Arc<Core>,
+    target: &str,
+    stack_file: Option<&std::path::Path>,
+    out: &std::path::Path,
+    long_edge: Option<u32>,
+    quality: u8,
+) -> Result<RenderReport> {
+    let started = Instant::now();
+    let given = match stack_file {
+        Some(p) => {
+            let text = std::fs::read_to_string(p)
+                .with_context(|| format!("read stack file {}", p.display()))?;
+            let v: serde_json::Value =
+                serde_json::from_str(&text).context("stack file is not JSON")?;
+            Some(
+                ip_core::edit::validate_stack(v)
+                    .context("invalid edit stack")?
+                    .stack,
+            )
+        }
+        None => None,
+    };
+    if let Some(e) = long_edge {
+        anyhow::ensure!(e > 0, "--long-edge must be positive");
+    }
+    let rendered = match target.parse::<i64>() {
+        Ok(id) => {
+            let r = core
+                .db
+                .call(move |c| ip_core::catalog::photo_ref(c, id))
+                .await
+                .context("photo")?;
+            let stack = match given {
+                Some(s) => s,
+                None => serde_json::from_value(core.get_edit(id).await?.stack)
+                    .context("saved edit stack")?,
+            };
+            core.render
+                .render_async(
+                    r,
+                    stack,
+                    long_edge,
+                    ip_core::edit::service::MaskMode::Strict,
+                )
+                .await?
+        }
+        Err(_) => {
+            let (core2, path) = (core.clone(), PathBuf::from(target));
+            let stack = given.unwrap_or_default();
+            tokio::task::spawn_blocking(move || {
+                core2.render_path_blocking(&path, &stack, long_edge)
+            })
+            .await??
+        }
+    };
+    let (w, h) = (rendered.image.width, rendered.image.height);
+    let jpeg = ip_core::edit::service::encode_jpeg(&rendered.image, quality)?;
+    std::fs::write(out, jpeg).with_context(|| format!("write {}", out.display()))?;
+    Ok(RenderReport {
+        backend: rendered.backend,
+        width: w,
+        height: h,
+        render_ms: rendered.ms,
+        total_ms: started.elapsed().as_millis(),
+    })
+}
+
+fn print_render(r: &RenderReport, out: &std::path::Path) {
+    println!("output:        {}", out.display());
+    println!("size:          {}x{}", r.width, r.height);
+    println!("backend:       {:?}", r.backend);
+    println!("render:        {} ms (decode + render)", r.render_ms);
+    println!("total:         {} ms", r.total_ms);
 }
 
 #[derive(Debug)]
@@ -428,6 +535,27 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Render {
+            target,
+            stack,
+            out,
+            long_edge,
+            cpu,
+            data_dir,
+            quality,
+        } => {
+            init_tracing("warn");
+            let core = Core::open(CoreConfig {
+                force_cpu: cpu,
+                ..CoreConfig::new(data_dir)
+            })
+            .context("open catalog")?;
+            let res =
+                render_headless(&core, &target, stack.as_deref(), &out, long_edge, quality).await;
+            core.worker.shutdown().await;
+            print_render(&res?, &out);
+            Ok(())
+        }
     }
 }
 
@@ -517,6 +645,8 @@ mod tests {
             imaging: Arc::new(FakeImaging::new()),
             thumb_workers: Some(2),
             worker: Some(worker),
+            renderer: None,
+            force_cpu: false,
         })
         .unwrap();
         let r = analyze_headless(
@@ -551,6 +681,108 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parses_render_args() {
+        let cli = Cli::try_parse_from([
+            "imagepicker",
+            "render",
+            "12",
+            "--stack",
+            "s.json",
+            "--out",
+            "o.jpg",
+            "--long-edge",
+            "800",
+            "--cpu",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Render {
+                target,
+                stack,
+                long_edge,
+                cpu,
+                quality,
+                ..
+            } => {
+                assert_eq!(target, "12");
+                assert_eq!(stack.unwrap(), PathBuf::from("s.json"));
+                assert_eq!((long_edge, cpu, quality), (Some(800), true, 92));
+            }
+            _ => panic!("wrong command"),
+        }
+        assert!(Cli::try_parse_from(["imagepicker", "render", "1"]).is_err()); // --out required
+    }
+
+    #[tokio::test]
+    async fn headless_render_by_path_and_by_id() {
+        use ip_core::testutil::FakeRenderer;
+        let data = tempfile::tempdir().unwrap();
+        let src = tempfile::tempdir().unwrap();
+        make_photos(src.path(), 1);
+        let renderer = Arc::new(FakeRenderer::new(ip_core::ip_render::Backend::Cpu));
+        let core = Core::open(CoreConfig {
+            data_dir: Some(data.path().to_path_buf()),
+            imaging: Arc::new(FakeImaging::new()),
+            thumb_workers: Some(1),
+            worker: None,
+            renderer: Some(renderer),
+            force_cpu: true,
+        })
+        .unwrap();
+        let stack = src.path().join("stack.json");
+        std::fs::write(
+            &stack,
+            r#"{"version":1,"ops":[{"type":"global","exposure":1.0}]}"#,
+        )
+        .unwrap();
+        let photo = src.path().join("img_000.jpg");
+        let out = std::env::temp_dir().join(format!("ip-cli-render-{}.jpg", std::process::id()));
+        let r = render_headless(
+            &core,
+            &photo.to_string_lossy(),
+            Some(&stack),
+            &out,
+            Some(100),
+            90,
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.width.max(r.height), 100);
+        let img = image::open(&out).unwrap();
+        assert_eq!(img.width(), r.width);
+        print_render(&r, &out);
+
+        // by catalog id, using the saved edits
+        let st = import_headless(&core, src.path().to_path_buf(), true, None)
+            .await
+            .unwrap();
+        let page = core
+            .photos(PhotoQuery {
+                session_id: st.session_id,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let id = page.photos[0].id;
+        let r2 = render_headless(&core, &id.to_string(), None, &out, None, 90)
+            .await
+            .unwrap();
+        assert_eq!(r2.width, 640);
+        // a bad stack file is reported
+        std::fs::write(
+            &stack,
+            r#"{"version":1,"ops":[{"type":"global","exposure":99}]}"#,
+        )
+        .unwrap();
+        assert!(
+            render_headless(&core, &id.to_string(), Some(&stack), &out, None, 90)
+                .await
+                .is_err()
+        );
+        let _ = std::fs::remove_file(&out);
+    }
+
     #[tokio::test]
     async fn headless_import_waits_for_thumbnails() {
         let data = tempfile::tempdir().unwrap();
@@ -561,6 +793,8 @@ mod tests {
             imaging: Arc::new(FakeImaging::new()),
             thumb_workers: Some(2),
             worker: None,
+            renderer: None,
+            force_cpu: false,
         })
         .unwrap();
         let stats = import_headless(&core, src.path().to_path_buf(), true, None)

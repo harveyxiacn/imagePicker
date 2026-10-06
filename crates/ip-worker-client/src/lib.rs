@@ -84,6 +84,12 @@ pub trait AiWorker: Send + Sync {
         progress: Option<ProgressTx>,
         cancel: &CancelToken,
     ) -> Result<AnalyzeResponse>;
+    /// Generates AI masks (`mask.generate`). Workers that predate M3 report `Unavailable`.
+    async fn mask_generate(&self, _req: &MaskRequest) -> Result<MaskResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support mask.generate".into(),
+        ))
+    }
     /// Stops the worker process (gracefully, then by killing the process tree).
     async fn shutdown(&self);
 }

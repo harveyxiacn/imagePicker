@@ -32,6 +32,8 @@ fn env() -> Env {
         imaging: Arc::new(FakeImaging::new()),
         thumb_workers: Some(2),
         worker: Some(worker.clone()),
+        renderer: None,
+        force_cpu: false,
     })
     .unwrap();
     Env {
