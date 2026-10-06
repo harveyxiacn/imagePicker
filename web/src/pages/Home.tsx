@@ -9,7 +9,7 @@ import type { Session } from '@/api/types'
 import { FolderBrowser } from '@/components/FolderBrowser'
 import { HeaderControls } from '@/components/HeaderControls'
 import { qk } from '@/lib/cache'
-import { getPlatform } from '@/platform'
+import { getPlatform, useNativeImport } from '@/platform'
 import { useToasts } from '@/stores/toasts'
 
 export function Home() {
@@ -31,11 +31,23 @@ export function Home() {
     onError: (e) => push('error', e instanceof Error ? e.message : String(e)),
   })
 
+  // Desktop shell: menu "Import Folder…" and OS folder drops arrive as native events.
+  useNativeImport((p) => importMut.mutate(p), setDragOver)
+
+  const chooseFolder = async () => {
+    if (!platform.pickFolder) return setBrowse(true)
+    try {
+      const p = await platform.pickFolder()
+      if (p) importMut.mutate(p)
+    } catch (e) {
+      push('error', e instanceof Error ? e.message : String(e))
+    }
+  }
+
   const onDrop = (e: DragEvent) => {
     e.preventDefault()
     setDragOver(false)
     if (!platform.canDropFolders) push('info', t('home.dropNeedsDesktop'), 6000)
-    // TODO(tauri): handle tauri://drag-drop paths here.
   }
 
   return (
@@ -71,7 +83,7 @@ export function Home() {
             <Upload size={32} className="text-muted" />
             <div className="text-base font-medium">{t('home.dropTitle')}</div>
             <div className="flex flex-wrap justify-center gap-2">
-              <button className="btn btn-primary !h-9 px-4" onClick={() => setBrowse(true)} disabled={importMut.isPending}>
+              <button className="btn btn-primary !h-9 px-4" onClick={() => void chooseFolder()} disabled={importMut.isPending}>
                 {importMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <FolderOpen size={15} />}
                 {t('home.chooseFolder')}
               </button>
