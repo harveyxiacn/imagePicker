@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = ["crates/ip-imaging", "crates/ip-core", "crates/ip-server", "crates/ip-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/harveyxiacn/imagePicker"
+
+[workspace.dependencies]
+ip-imaging = { path = "crates/ip-imaging" }
+ip-core = { path = "crates/ip-core" }
+ip-server = { path = "crates/ip-server" }
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rayon = "1"
+blake3 = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# Image decoding is unbearably slow at opt-level 0.
+[profile.dev.package."*"]
+opt-level = 2

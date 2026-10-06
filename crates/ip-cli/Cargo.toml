@@ -1,0 +1,18 @@
+[package]
+name = "ip-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "imagepicker"
+path = "src/main.rs"
+
+[dependencies]
+ip-imaging.workspace = true
+ip-core.workspace = true
+ip-server.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
