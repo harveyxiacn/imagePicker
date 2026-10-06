@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 use crate::analysis::types::RunState;
-use crate::model::{PhotoUpdate, Session, ThumbItem};
+use crate::model::{EditUpdate, PhotoUpdate, Session, ThumbItem};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
@@ -19,6 +19,8 @@ pub enum Event {
     ThumbsReady { items: Vec<ThumbItem> },
     #[serde(rename = "photos.updated")]
     PhotosUpdated { items: Vec<PhotoUpdate> },
+    #[serde(rename = "edits.updated")]
+    EditsUpdated { items: Vec<EditUpdate> },
     #[serde(rename = "task.progress")]
     TaskProgress {
         task_id: String,
@@ -85,6 +87,7 @@ pub struct Coalescer {
     order: Vec<Key>,
     thumbs: Vec<ThumbItem>,
     updates: Vec<PhotoUpdate>,
+    edits: Vec<EditUpdate>,
     added: HashMap<i64, i64>,
     sessions: HashMap<i64, Session>,
     tasks: HashMap<String, Event>,
@@ -99,6 +102,7 @@ pub struct Coalescer {
 enum Key {
     Thumbs,
     Updates,
+    Edits,
     Added(i64),
     Session(i64),
     Task(String),
@@ -133,6 +137,16 @@ impl Coalescer {
                         *e = it;
                     } else {
                         self.updates.push(it);
+                    }
+                }
+            }
+            Event::EditsUpdated { items } => {
+                self.note(Key::Edits);
+                for it in items {
+                    if let Some(e) = self.edits.iter_mut().find(|u| u.id == it.id) {
+                        *e = it;
+                    } else {
+                        self.edits.push(it);
                     }
                 }
             }
@@ -194,6 +208,9 @@ impl Coalescer {
                 }),
                 Key::Updates => out.push(Event::PhotosUpdated {
                     items: std::mem::take(&mut self.updates),
+                }),
+                Key::Edits => out.push(Event::EditsUpdated {
+                    items: std::mem::take(&mut self.edits),
                 }),
                 Key::Added(sid) => {
                     if let Some(count) = self.added.remove(&sid) {
@@ -343,6 +360,34 @@ mod tests {
         assert!(v["error"].is_null() && v.get("error").is_some());
         let v = serde_json::to_value(&out[2]).unwrap();
         assert_eq!(v["state"], "running");
+    }
+
+    #[test]
+    fn edits_updated_merges_by_id() {
+        let mut c = Coalescer::default();
+        let eu = |id, v: &str| EditUpdate {
+            id,
+            has_edits: true,
+            thumb_version: v.into(),
+        };
+        c.push(Event::EditsUpdated {
+            items: vec![eu(1, "a"), eu(2, "b")],
+        });
+        c.push(Event::EditsUpdated {
+            items: vec![eu(1, "c")],
+        });
+        let out = c.drain();
+        assert_eq!(out.len(), 1);
+        match &out[0] {
+            Event::EditsUpdated { items } => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0].thumb_version, "c");
+            }
+            e => panic!("unexpected {e:?}"),
+        }
+        let v = serde_json::to_value(&out[0]).unwrap();
+        assert_eq!(v["type"], "edits.updated");
+        assert_eq!(v["items"][1]["has_edits"], true);
     }
 
     #[test]

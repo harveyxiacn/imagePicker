@@ -26,6 +26,16 @@ pub trait Imaging: Send + Sync {
         long_edge: u32,
         quality: u8,
     ) -> Result<EncodedImage>;
+    /// Upright RGB8 with long edge <= `max_long_edge` (render sources).
+    fn decode_rgb8(
+        &self,
+        path: &Path,
+        format: ImageFormat,
+        orientation: u8,
+        max_long_edge: u32,
+    ) -> Result<(u32, u32, Vec<u8>)> {
+        ip_imaging::decode_rgb8(path, format, orientation, max_long_edge)
+    }
 }
 
 /// Delegates to `ip_imaging::*`.

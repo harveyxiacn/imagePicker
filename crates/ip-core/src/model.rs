@@ -42,6 +42,8 @@ pub struct Photo {
     pub face_count: Option<i64>,
     pub subject_face_count: Option<i64>,
     pub analyzed: bool,
+    // ---- M3 (docs/api-contract-m3.md)
+    pub has_edits: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +90,14 @@ pub struct Session {
 pub struct ThumbItem {
     pub id: i64,
     pub v: String,
+}
+
+/// Entry of `edits.updated` (docs/api-contract-m3.md section C).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditUpdate {
+    pub id: i64,
+    pub has_edits: bool,
+    pub thumb_version: String,
 }
 
 /// Entry of `photos.updated`.
@@ -140,6 +150,9 @@ pub struct ExportRequest {
     pub quality: u8,
     #[serde(default = "default_template")]
     pub name_template: String,
+    /// Render the saved edits into the output (M3). Photos without edits are unaffected.
+    #[serde(default = "default_true")]
+    pub apply_edits: bool,
 }
 
 fn default_quality() -> u8 {

@@ -46,6 +46,17 @@ pub fn thumb_version(fast_key: &str) -> String {
     fast_key.chars().take(8).collect()
 }
 
+/// `thumb_version` including the edit-stack hash, so cached URLs change with every edit.
+pub fn thumb_version_for(fast_key: &str, edit_hash: Option<&str>) -> String {
+    match edit_hash {
+        None => thumb_version(fast_key),
+        Some(h) => crate::edit::edited_key(fast_key, h)
+            .chars()
+            .take(8)
+            .collect(),
+    }
+}
+
 // ---------------------------------------------------------------- roots & sessions
 
 pub fn upsert_root(conn: &Connection, path: &str) -> Result<i64> {
@@ -376,6 +387,17 @@ pub struct PhotoRef {
     pub fast_key: String,
     pub taken_at: Option<i64>,
     pub mtime_ms: Option<i64>,
+    /// Hash of the saved edit stack (`None` = unedited).
+    pub edit_hash: Option<String>,
+    /// Display size (orientation applied), when known.
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+impl PhotoRef {
+    pub fn thumb_version(&self) -> String {
+        thumb_version_for(&self.fast_key, self.edit_hash.as_deref())
+    }
 }
 
 fn photo_ref_row(r: &Row) -> rusqlite::Result<PhotoRef> {
@@ -391,12 +413,15 @@ fn photo_ref_row(r: &Row) -> rusqlite::Result<PhotoRef> {
         fast_key: r.get(6)?,
         taken_at: r.get(7)?,
         mtime_ms: r.get(8)?,
+        edit_hash: r.get(9)?,
+        width: r.get::<_, Option<i64>>(10)?.map(|v| v.max(0) as u32),
+        height: r.get::<_, Option<i64>>(11)?.map(|v| v.max(0) as u32),
     })
 }
 
 const REF_SELECT: &str =
     "SELECT p.id, r.path, p.rel_path, p.file_name, COALESCE(p.format,''), p.orientation,
-       p.fast_key, p.taken_at, p.mtime FROM photo p JOIN root_folder r ON r.id=p.root_id";
+       p.fast_key, p.taken_at, p.mtime, p.edit_hash, p.width, p.height FROM photo p JOIN root_folder r ON r.id=p.root_id";
 
 pub fn photo_ref(conn: &Connection, id: i64) -> Result<PhotoRef> {
     conn.query_row(&format!("{REF_SELECT} WHERE p.id=?1"), [id], photo_ref_row)
@@ -453,11 +478,12 @@ const PHOTO_COLS: &str = "p.id, r.path, p.rel_path, p.file_name, COALESCE(p.form
     p.width, p.height, p.taken_at, p.camera, p.lens, p.focal, p.aperture, p.shutter, p.iso,
     p.user_rating, p.ai_rating, COALESCE(p.flag,0), p.color_label, p.burst_id, COALESCE(p.thumb_state,0), p.fast_key, p.taken_at_offset_min,
     p.ai_score, COALESCE(p.issues,0), p.rank_in_burst, (SELECT b.size FROM burst b WHERE b.id=p.burst_id), p.scene_type,
-    p.face_count, p.subject_face_count, COALESCE(p.analysis_version,0)";
+    p.face_count, p.subject_face_count, COALESCE(p.analysis_version,0),
+    COALESCE(p.has_edits,0), p.edit_hash";
 
 /// Number of columns in `PHOTO_COLS`; queries append the session id at this index and the
 /// sort key (for cursors) right after it. Update when adding columns.
-const PHOTO_COL_COUNT: usize = 31;
+const PHOTO_COL_COUNT: usize = 33;
 
 /// Column `PHOTO_COL_COUNT` (after PHOTO_COLS) is the session id.
 fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
@@ -487,7 +513,7 @@ fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
         color_label: r.get(18)?,
         burst_id: r.get(19)?,
         thumb_ready: r.get::<_, i64>(20)? >= 2,
-        thumb_version: thumb_version(&fast_key),
+        thumb_version: thumb_version_for(&fast_key, r.get::<_, Option<String>>(32)?.as_deref()),
         ai_score: r.get(23)?,
         issues: crate::analysis::scoring::Issue::from_mask(r.get::<_, i64>(24)?),
         rank_in_burst: r.get(25)?,
@@ -496,6 +522,7 @@ fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
         face_count: r.get(28)?,
         subject_face_count: r.get(29)?,
         analyzed: r.get::<_, i64>(30)? > 0,
+        has_edits: r.get::<_, i64>(31)? != 0,
     })
 }
 

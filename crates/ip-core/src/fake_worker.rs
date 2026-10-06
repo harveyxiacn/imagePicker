@@ -134,6 +134,16 @@ pub struct FakeWorker {
     pub last_allow_download: Mutex<Option<bool>>,
     /// Number of upcoming batches that fail with `Disconnected` (simulated crashes).
     pub crash_batches: AtomicUsize,
+    /// `mask.generate` calls received.
+    pub mask_calls: AtomicUsize,
+    pub last_mask_request: Mutex<Option<MaskRequest>>,
+    /// Model ids reported by a `-32010 model_unavailable` error (non-empty = masks unavailable
+    /// unless the request allows downloads).
+    mask_missing: Mutex<Vec<String>>,
+    /// Targets answered in `skipped` instead of `masks`.
+    mask_skipped: Mutex<Vec<String>>,
+    /// Makes `mask.generate` fail as if the worker could not start.
+    pub mask_unavailable: std::sync::atomic::AtomicBool,
 }
 
 impl Default for FakeWorker {
@@ -150,6 +160,11 @@ impl Default for FakeWorker {
             last_profile: Mutex::new(None),
             last_allow_download: Mutex::new(None),
             crash_batches: AtomicUsize::new(0),
+            mask_calls: AtomicUsize::new(0),
+            last_mask_request: Mutex::new(None),
+            mask_missing: Mutex::new(vec![]),
+            mask_skipped: Mutex::new(vec![]),
+            mask_unavailable: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -171,6 +186,12 @@ impl FakeWorker {
     }
     pub fn set_missing(&self, ids: &[&str]) {
         *self.missing.lock().unwrap() = ids.iter().map(|s| s.to_string()).collect();
+    }
+    pub fn set_mask_missing(&self, ids: &[&str]) {
+        *self.mask_missing.lock().unwrap() = ids.iter().map(|s| s.to_string()).collect();
+    }
+    pub fn set_mask_skipped(&self, targets: &[&str]) {
+        *self.mask_skipped.lock().unwrap() = targets.iter().map(|s| s.to_string()).collect();
     }
     pub fn set_skipped(&self, steps: &[&str]) {
         *self.skipped.lock().unwrap() = steps.iter().map(|s| s.to_string()).collect();
@@ -402,6 +423,43 @@ impl AiWorker for FakeWorker {
             warnings: vec![],
             timings: json!({}),
         })
+    }
+    async fn mask_generate(&self, req: &MaskRequest) -> Result<MaskResponse> {
+        self.mask_calls.fetch_add(1, Ordering::SeqCst);
+        *self.last_mask_request.lock().unwrap() = Some(req.clone());
+        if self.mask_unavailable.load(Ordering::SeqCst) {
+            return Err(WorkerError::Unavailable("fake worker is down".into()));
+        }
+        let missing = self.mask_missing.lock().unwrap().clone();
+        if !missing.is_empty() && !req.allow_download {
+            return Err(WorkerError::Rpc {
+                code: ip_worker_client::error::CODE_MODEL_UNAVAILABLE,
+                message: "model unavailable".into(),
+                kind: Some("model_unavailable".into()),
+                detail: Some(json!({ "models": missing })),
+            });
+        }
+        let skipped = self.mask_skipped.lock().unwrap().clone();
+        let out = std::path::PathBuf::from(&req.out_dir);
+        std::fs::create_dir_all(&out).map_err(|e| WorkerError::Protocol(e.to_string()))?;
+        let mut resp = MaskResponse::default();
+        for t in &req.targets {
+            if skipped.contains(t) {
+                resp.skipped.insert(t.clone(), "model_unavailable".into());
+                continue;
+            }
+            // A 32x24 mask: left half (x < 16) belongs to the target.
+            let img = image::GrayImage::from_fn(32, 24, |x, _| {
+                image::Luma([if x < 16 { 255 } else { 0 }])
+            });
+            let p = out.join(format!("{}_{t}.png", req.photo.photo_id));
+            img.save_with_format(&p, image::ImageFormat::Png)
+                .map_err(|e| WorkerError::Protocol(e.to_string()))?;
+            resp.masks
+                .insert(t.clone(), p.to_string_lossy().into_owned());
+            resp.models.insert(t.clone(), "fake-seg".into());
+        }
+        Ok(resp)
     }
     async fn shutdown(&self) {
         self.set_state(WorkerState::Stopped);

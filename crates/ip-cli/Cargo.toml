@@ -12,6 +12,7 @@ path = "src/main.rs"
 ip-core.workspace = true
 ip-server.workspace = true
 anyhow.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -20,3 +21,4 @@ clap.workspace = true
 [dev-dependencies]
 ip-core = { workspace = true, features = ["testutil"] }
 tempfile.workspace = true
+image.workspace = true

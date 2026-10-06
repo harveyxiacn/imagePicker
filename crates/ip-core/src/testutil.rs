@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::{Context, Result};
 use ip_imaging::{EncodedImage, ImageFormat, Metadata, ScannedFile, ThumbSource};
 
+pub use crate::fake_renderer::FakeRenderer;
 pub use crate::fake_worker::{person, unit, FakeFace, FakeSpec, FakeWorker};
 use crate::imaging::Imaging;
 

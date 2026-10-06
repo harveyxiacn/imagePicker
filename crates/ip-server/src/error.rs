@@ -50,6 +50,9 @@ impl From<CoreError> for ApiError {
         match &e {
             CoreError::NotFound(m) => Self::not_found(m.clone()),
             CoreError::BadRequest(m) => Self::bad_request(m.clone()),
+            CoreError::Unprocessable(m) => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, "unprocessable", m.clone())
+            }
             CoreError::Conflict(m) => Self::new(StatusCode::CONFLICT, "conflict", m.clone()),
             CoreError::ModelsMissing(models) => {
                 let mut e = Self::new(StatusCode::CONFLICT, "models_missing", e.to_string());

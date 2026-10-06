@@ -37,7 +37,7 @@ pub struct RunInfo {
     pub task_id: String,
 }
 
-fn map_worker_err(e: WorkerError) -> CoreError {
+pub(crate) fn map_worker_err(e: WorkerError) -> CoreError {
     if let Some(models) = e.model_unavailable() {
         return CoreError::ModelsMissing(models);
     }

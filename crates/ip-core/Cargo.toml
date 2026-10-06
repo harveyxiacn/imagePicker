@@ -11,6 +11,7 @@ testutil = []
 [dependencies]
 ip-imaging.workspace = true
 ip-worker-client.workspace = true
+ip-render.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true

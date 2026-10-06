@@ -2113,8 +2113,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "image",
  "ip-core",
  "ip-server",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",
@@ -2131,6 +2133,7 @@ dependencies = [
  "dirs",
  "image",
  "ip-imaging",
+ "ip-render",
  "ip-worker-client",
  "rayon",
  "rusqlite",

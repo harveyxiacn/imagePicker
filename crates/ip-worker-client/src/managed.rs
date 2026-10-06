@@ -464,6 +464,13 @@ impl AiWorker for ManagedWorker {
         parse(v, "analyze.batch")
     }
 
+    async fn mask_generate(&self, req: &MaskRequest) -> Result<MaskResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("mask.generate", params, None, None).await?;
+        parse(v, "mask.generate")
+    }
+
     async fn shutdown(&self) {
         let conn = self.conn.lock().await.take();
         self.shared.generation.fetch_add(1, Ordering::SeqCst);

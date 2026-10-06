@@ -134,6 +134,28 @@ CREATE TABLE face (
 CREATE INDEX idx_face_person ON face(person_id, photo_id);
 CREATE INDEX idx_face_photo ON face(photo_id);
 "#,
+    // v5: M3 editing (docs/api-contract-m3.md). `edit_version` keeps the current stack plus a few
+    // previous ones per photo; `photo.has_edits` already exists, `edit_hash` is its content hash
+    // (part of `thumb_version`).
+    r#"
+ALTER TABLE photo ADD COLUMN edit_hash TEXT;
+CREATE TABLE edit_version (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  photo_id INTEGER NOT NULL REFERENCES photo(id) ON DELETE CASCADE,
+  name TEXT,
+  stack TEXT NOT NULL,                    -- JSON edit stack (docs/05 section 2), stored as received
+  hash TEXT NOT NULL,                     -- additive: content hash of the stack
+  updated_at INTEGER,
+  is_current INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX idx_edit_version_photo ON edit_version(photo_id, is_current, id);
+CREATE TABLE preset (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  stack TEXT NOT NULL,
+  created_at INTEGER
+);
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.
