@@ -476,7 +476,6 @@ async fn presets_http() {
 }
 
 #[tokio::test]
-#[ignore = "needs ip-render implementation"]
 async fn builtin_presets_are_listed_and_protected() {
     let data = tempfile::tempdir().unwrap();
     let core = Core::open(CoreConfig {
@@ -535,7 +534,6 @@ async fn lut_import_errors() {
 }
 
 #[tokio::test]
-#[ignore = "needs ip-render implementation"]
 async fn lut_import_succeeds_and_is_usable() {
     let data = tempfile::tempdir().unwrap();
     let src = tempfile::tempdir().unwrap();

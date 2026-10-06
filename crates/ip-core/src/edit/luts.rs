@@ -9,97 +9,16 @@ use ip_render::{Lut3d, LutProvider};
 
 use crate::error::{CoreError, Result};
 
-/// Grid size of the procedural built-in LUTs.
-const BUILTIN_SIZE: u32 = 17;
 /// Largest `.cube` file accepted for import / path references.
 const MAX_CUBE_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Ids of the procedural looks shipped with the core.
-pub const BUILTIN_LUTS: [&str; 6] = [
-    "film_warm",
-    "film_cool",
-    "bw_classic",
-    "teal_orange",
-    "fade",
-    "vivid",
-];
-
-fn luma(c: [f32; 3]) -> f32 {
-    0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
-}
-
-fn smoothstep(x: f32) -> f32 {
-    let x = x.clamp(0.0, 1.0);
-    x * x * (3.0 - 2.0 * x)
-}
-
-/// Gentle S curve around mid grey, `k` in 0..1.
-fn s_curve(x: f32, k: f32) -> f32 {
-    let x = x.clamp(0.0, 1.0);
-    x + k * (smoothstep(x) - x)
-}
-
-fn saturate(c: [f32; 3], s: f32) -> [f32; 3] {
-    let l = luma(c);
-    [l + (c[0] - l) * s, l + (c[1] - l) * s, l + (c[2] - l) * s]
-}
-
-fn curve3(c: [f32; 3], k: f32) -> [f32; 3] {
-    [s_curve(c[0], k), s_curve(c[1], k), s_curve(c[2], k)]
-}
-
-fn builtin_fn(id: &str) -> Option<fn([f32; 3]) -> [f32; 3]> {
-    Some(match id {
-        "film_warm" => |c| {
-            let c = [c[0] * 1.05 + 0.02, c[1] + 0.01, c[2] * 0.90 + 0.005];
-            curve3(saturate(c, 0.92), 0.35)
-        },
-        "film_cool" => |c| {
-            let c = [c[0] * 0.95, c[1] + 0.005, c[2] * 1.06 + 0.02];
-            curve3(saturate(c, 0.9), 0.3)
-        },
-        "bw_classic" => |c| {
-            let l = s_curve(luma(c), 0.45);
-            [l, l, l]
-        },
-        "teal_orange" => |c| {
-            let hi = smoothstep(luma(c));
-            // shadows toward teal, highlights toward orange
-            let t = [0.0, 0.05, 0.08];
-            let o = [0.08, 0.02, -0.06];
-            [
-                c[0] + t[0] * (1.0 - hi) + o[0] * hi,
-                c[1] + t[1] * (1.0 - hi) + o[1] * hi,
-                c[2] + t[2] * (1.0 - hi) + o[2] * hi,
-            ]
-        },
-        "fade" => |c| {
-            let c = saturate(c, 0.85);
-            [0.06 + c[0] * 0.9, 0.06 + c[1] * 0.9, 0.06 + c[2] * 0.9]
-        },
-        "vivid" => |c| curve3(saturate(c, 1.25), 0.25),
-        _ => return None,
-    })
+/// Built-in looks are owned by ip-render (single source of truth for ids and maths).
+fn is_builtin(id: &str) -> bool {
+    ip_render::builtin_lut_ids().contains(&id)
 }
 
 fn build_builtin(id: &str) -> Option<Lut3d> {
-    let f = builtin_fn(id)?;
-    let n = BUILTIN_SIZE;
-    let mut data = Vec::with_capacity((n * n * n) as usize);
-    let step = 1.0 / (n - 1) as f32;
-    for b in 0..n {
-        for g in 0..n {
-            for r in 0..n {
-                let o = f([r as f32 * step, g as f32 * step, b as f32 * step]);
-                data.push([
-                    o[0].clamp(0.0, 1.0),
-                    o[1].clamp(0.0, 1.0),
-                    o[2].clamp(0.0, 1.0),
-                ]);
-            }
-        }
-    }
-    Some(Lut3d { size: n, data })
+    ip_render::builtin_lut(id)
 }
 
 /// A library id is a file stem made of `[A-Za-z0-9._-]`.
@@ -166,7 +85,7 @@ impl LutLibrary {
 
     /// Resolves a built-in id, an imported id or an absolute `.cube` path.
     pub fn resolve(&self, file: &str) -> anyhow::Result<Option<Arc<Lut3d>>> {
-        if BUILTIN_LUTS.contains(&file) {
+        if is_builtin(file) {
             let key = format!("builtin:{file}");
             if let Some(l) = self.cached(&key) {
                 return Ok(Some(l));
@@ -253,7 +172,7 @@ impl LutLibrary {
             } else {
                 format!("{base}-{n}")
             };
-            if BUILTIN_LUTS.contains(&id.as_str()) {
+            if is_builtin(&id) {
                 n += 1;
                 continue;
             }
@@ -293,13 +212,17 @@ mod tests {
 
     #[test]
     fn builtins_are_well_formed() {
-        for id in BUILTIN_LUTS {
+        for &id in ip_render::builtin_lut_ids() {
             let l = build_builtin(id).unwrap();
             assert_eq!(l.data.len(), (l.size * l.size * l.size) as usize);
             assert!(l.data.iter().flatten().all(|v| (0.0..=1.0).contains(v)));
         }
+        // Monochrome; ip-render adds a hint of warm tone, so allow a slight tint.
         let bw = build_builtin("bw_classic").unwrap();
-        assert!(bw.data.iter().all(|c| (c[0] - c[1]).abs() < 1e-6));
+        assert!(bw
+            .data
+            .iter()
+            .all(|c| (c[0] - c[1]).abs() < 0.02 && (c[1] - c[2]).abs() < 0.02));
     }
 
     #[test]

@@ -1014,7 +1014,6 @@ fn real_env() -> Env {
 }
 
 #[tokio::test]
-#[ignore = "needs ip-render implementation"]
 async fn real_renderer_exposure_and_auto() {
     let e = real_env();
     let id = setup(&e, &[("a.jpg", [60, 60, 60])]).await[0];
@@ -1030,7 +1029,6 @@ async fn real_renderer_exposure_and_auto() {
 }
 
 #[tokio::test]
-#[ignore = "needs ip-render implementation"]
 async fn real_builtin_presets_are_protected_and_listed() {
     let e = real_env();
     let list = e.core.presets().await.unwrap();
@@ -1044,7 +1042,6 @@ async fn real_builtin_presets_are_protected_and_listed() {
 }
 
 #[tokio::test]
-#[ignore = "needs ip-render implementation"]
 async fn real_lut_import_and_use() {
     let e = real_env();
     let id = setup(&e, &[("a.jpg", [100, 100, 100])]).await[0];
@@ -1074,7 +1071,6 @@ async fn real_lut_import_and_use() {
 }
 
 #[tokio::test]
-#[ignore = "needs ip-render implementation"]
 async fn real_adaptive_sync() {
     let e = real_env();
     let ids = setup(&e, &[("a.jpg", [140, 140, 140]), ("b.jpg", [70, 70, 70])]).await;
