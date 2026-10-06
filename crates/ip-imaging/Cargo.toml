@@ -10,3 +10,11 @@ thiserror.workspace = true
 serde.workspace = true
 rayon.workspace = true
 blake3.workspace = true
+jpeg-decoder = { version = "0.3.2", default-features = false }
+fast_image_resize = "6.1.0"
+memmap2 = "0.9.11"
+jpeg-encoder = { version = "0.7.1", features = ["simd"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "webp", "tiff", "jpeg"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
