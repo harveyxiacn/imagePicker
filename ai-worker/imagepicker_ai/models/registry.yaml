@@ -528,3 +528,134 @@
   resident: false
   optional: true
   exclusive_group: diffusion
+
+# ---------------------------------------------------------------------------------------------
+# Local AI assistant (M6): onnxruntime-genai models, `uv sync --extra cuda --extra llm-cuda`
+# (CPU: `--extra cpu --extra llm`). All entries are `optional: true`, exclusive group `diffusion`
+# (an LLM / VLM is never resident together with SDXL or another assistant model), `genai_provider`
+# says which execution provider the build was exported for (a `cuda` build is fp16 + CUDA only,
+# a `cpu` build is fp32 activations and also runs, slower, through the CUDA EP).
+# `genai_role` is `llm` (llm.plan) or `vlm` (vlm.suggest / vlm.describe). Preference order per
+# role is in imagepicker_ai/llm/service.py.
+# ---------------------------------------------------------------------------------------------
+
+# Phi-4-mini-instruct (3.8B, MIT) int4 RTN block-32 CUDA build, official Microsoft export.
+- id: phi-4-mini-genai-int4-cuda
+  task: [llm_plan]
+  source: { hf: microsoft/Phi-4-mini-instruct-onnx, origin: microsoft/Phi-4-mini-instruct }
+  files:
+    - { path: gpu/gpu-int4-rtn-block-32/genai_config.json, size: 1568, sha256: 3cdbd2ff0b2cda7829b262cda331a72b99daaa758d55bb056bb4d098d22b1140 }
+    - { path: gpu/gpu-int4-rtn-block-32/model.onnx, size: 286690, sha256: f8ff300b85719f79f1c220c88575626c62cc772a228244a6b96031d1a8d25250 }
+    - { path: gpu/gpu-int4-rtn-block-32/model.onnx.data, size: 3413194752, sha256: b32f38f9211040b01c1483759cef7a6cce28df9f83b6b8bb91a474575d559d0f }
+    - { path: gpu/gpu-int4-rtn-block-32/tokenizer.json, size: 15524095, sha256: 382cc235b56c725945e149cc25f191da667c836655efd0857b004320e90e91ea }
+    - { path: gpu/gpu-int4-rtn-block-32/tokenizer_config.json, size: 2960, sha256: c565326a315fbe62cda093a59d298828c8f3f823122661325f41f3ba577a7dec }
+    - { path: gpu/gpu-int4-rtn-block-32/vocab.json, size: 3910310, sha256: 6cb65a857824fa6615bb1782d95d882617a8bbce1da0317118586b36f39e98bd }
+    - { path: gpu/gpu-int4-rtn-block-32/merges.txt, size: 2418348, sha256: 856ce61180bb689282eed6b3a6838bb1f438399be23aefe9d20eb379791fb4ad }
+    - { path: gpu/gpu-int4-rtn-block-32/added_tokens.json, size: 249, sha256: d4f2aceb0f20b71dd1f4bcc7e052e4412946bf281840b8f83d39f259571af486 }
+    - { path: gpu/gpu-int4-rtn-block-32/special_tokens_map.json, size: 587, sha256: aff38493227d813e29fcf8406e8e90062f1f031aa47d589325e9c31d89ac7cc3 }
+  backend: onnx
+  precision: int4
+  tiers: [T2, T3]
+  vram_mb: 4600
+  ram_mb: 2500
+  size_mb: 3350
+  required_for: [assistant, llm.plan]
+  license: MIT
+  resident: false
+  optional: true
+  exclusive_group: diffusion
+  genai_provider: cuda
+  genai_role: llm
+
+# Qwen3-4B-Instruct-2507 (Apache-2.0) int4 (MatMulNBits block-32) CPU build, community export
+# (robinsmits/qwen3-4b-instruct-2507-onnx-int4, no CUDA fp16 build exists on the Hub). Runs on CPU
+# (about 18 tokens/s on a 4090 host CPU) and through the CUDA EP at the same speed (the fp32
+# GroupQueryAttention nodes stay on the CPU). Best Chinese of the set; the fallback without a CUDA GPU.
+- id: qwen3-4b-instruct-genai-int4
+  task: [llm_plan]
+  source: { hf: robinsmits/qwen3-4b-instruct-2507-onnx-int4, origin: Qwen/Qwen3-4B-Instruct-2507 }
+  files:
+    - { path: genai_config.json, size: 1572, sha256: 27a08d97068a3a4b7ebf1c9f35b8e4410e188f1510c5c120db9eec8c1045c26f }
+    - { path: model.onnx, size: 424250, sha256: 7d8cde77a77dc9743be3050a2a7553d70f6488028fb7d94c0524e6869de656c0 }
+    - { path: model.onnx.data, size: 2551480320, sha256: 0562b2ddc15a9b812496bb709f72402c44fc8fbf2e8bc9f8f8ec25864a1411be }
+    - { path: tokenizer.json, size: 11422654, sha256: aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4 }
+    - { path: tokenizer_config.json, size: 5644, sha256: e1ff43043fd7fbe07a7656d301d3c59352984be693c69c4becd4b670f52a374b }
+    - { path: vocab.json, size: 2776833, sha256: ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910 }
+    - { path: merges.txt, size: 1671853, sha256: 8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5 }
+    - { path: added_tokens.json, size: 735, sha256: 79f6ec6fcc423d3a82bfac8b9033b1daac7b7bce06a5f5f441637b480cc605de }
+    - { path: special_tokens_map.json, size: 644, sha256: 57255613bbe23c9497211ca68561ff429a51e871dbaf5a59998fa4c8f7fe168a }
+    - { path: chat_template.jinja, size: 2690, sha256: 0ab115e84509e86db2bb05a63edf63778ae7fe624972cdfa982b1e59053d6710 }
+  backend: onnx
+  precision: int4
+  tiers: [T1]
+  vram_mb: 4500
+  ram_mb: 4500
+  size_mb: 2450
+  required_for: [assistant, llm.plan]
+  license: Apache-2.0
+  resident: false
+  optional: true
+  exclusive_group: diffusion
+  genai_provider: cpu
+  genai_role: llm
+
+# Phi-3.5-vision-instruct (4.2B, MIT) int4 RTN block-32 CUDA build, official Microsoft export.
+- id: phi-3.5-vision-genai-int4-cuda
+  task: [vlm_suggest, vlm_describe]
+  source: { hf: microsoft/Phi-3.5-vision-instruct-onnx, origin: microsoft/Phi-3.5-vision-instruct }
+  files:
+    - { path: gpu/gpu-int4-rtn-block-32/genai_config.json, size: 2121, sha256: aab58b61ca85a8bf2d4781fe1b4299e3d0f20a4cd902bc5c02adfe361b62aad9 }
+    - { path: gpu/gpu-int4-rtn-block-32/phi-3.5-v-instruct-embedding.onnx, size: 6091, sha256: b707f7f659d8585a9253f3b95b1740522f3062a7eb4465f09d93c984743e399d }
+    - { path: gpu/gpu-int4-rtn-block-32/phi-3.5-v-instruct-embedding.onnx.data, size: 197001216, sha256: e0af51a7c122ed63878262191faa905c1e317c7153185a6f7275e61d22fda63a }
+    - { path: gpu/gpu-int4-rtn-block-32/phi-3.5-v-instruct-text.onnx, size: 291883, sha256: d598bf368ed0b84b9d9db91a6a4843a2c92d071bf51df6763daadb3213922204 }
+    - { path: gpu/gpu-int4-rtn-block-32/phi-3.5-v-instruct-text.onnx.data, size: 2120189952, sha256: de9df6b7062a3d133af7674041e583534dff5a95758572c15468eb1bf602e576 }
+    - { path: gpu/gpu-int4-rtn-block-32/phi-3.5-v-instruct-vision.onnx, size: 422406, sha256: 30d5d0dc644db606e42cf0d759acb2a22aef4ef572c77689e910ad9fa3b5ad1e }
+    - { path: gpu/gpu-int4-rtn-block-32/phi-3.5-v-instruct-vision.onnx.data, size: 282245640, sha256: 68aafcb815850a4982644fc81efec6800054865bb6dbc4ff41f275cc73533eac }
+    - { path: gpu/gpu-int4-rtn-block-32/processor_config.json, size: 752, sha256: b6f5a3ceb16ad076b31430e358d68f0ebb53d9ddeb91270e9e5c4ff8fefed67f }
+    - { path: gpu/gpu-int4-rtn-block-32/special_tokens_map.json, size: 706, sha256: 8aa9f4bae46e5280787c8979252ffbf81f411a9aae79650f33a03d2a4b282514 }
+    - { path: gpu/gpu-int4-rtn-block-32/tokenizer.json, size: 1851388, sha256: 478fb6fd0bf1403eb2ffda892e285f5ae968b9e0c06eb2815552ebedacb8ca93 }
+    - { path: gpu/gpu-int4-rtn-block-32/tokenizer_config.json, size: 9960, sha256: 7743c1615083d279af0170c5550dd7f40ea4de275fb3a99a5cb09bbe43e50662 }
+  backend: onnx
+  precision: int4
+  tiers: [T2, T3]
+  vram_mb: 4200
+  ram_mb: 2500
+  size_mb: 2450
+  required_for: [assistant, vlm.suggest, vlm.describe]
+  license: MIT
+  resident: false
+  optional: true
+  exclusive_group: diffusion
+  genai_provider: cuda
+  genai_role: vlm
+
+# Same model, CPU int4 build (acc-level-4), for machines without a CUDA GPU (slow: see README).
+- id: phi-3.5-vision-genai-int4-cpu
+  task: [vlm_suggest, vlm_describe]
+  source: { hf: microsoft/Phi-3.5-vision-instruct-onnx, origin: microsoft/Phi-3.5-vision-instruct }
+  files:
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/genai_config.json, size: 2121, sha256: aab58b61ca85a8bf2d4781fe1b4299e3d0f20a4cd902bc5c02adfe361b62aad9 }
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/phi-3.5-v-instruct-embedding.onnx, size: 6091, sha256: 83bb330b0a319812eccdf6b6bc5ce17eb6a120bcf76120f6af27c19c3d396ea1 }
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/phi-3.5-v-instruct-embedding.onnx.data, size: 394002432, sha256: 2dcbf0fcb14433ac8fa82b35c39675c01fb552512b4c0e5d54e8f247046ef393 }
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/phi-3.5-v-instruct-text.onnx, size: 52123846, sha256: f7580bd589693e87e3825ffe8eda3f5fda4158d2d82d27803c263aa0e7454a81 }
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/phi-3.5-v-instruct-text.onnx.data, size: 2327285760, sha256: 214fd2e8a09b8c7b141f9095171aed6f994768a36803b7eeb9ea3be16da99dd6 }
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/phi-3.5-v-instruct-vision.onnx, size: 414021, sha256: e06ccb2d2c35c2565f0abe507241f33cae9d7f63a1d79f6170b317d12f35c3bf }
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/phi-3.5-v-instruct-vision.onnx.data, size: 444916232, sha256: 45af0e626ba0eff702d9c1873c84f9e60f1f17bb2036bf1abc045968b5e645df }
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/processor_config.json, size: 752, sha256: b6f5a3ceb16ad076b31430e358d68f0ebb53d9ddeb91270e9e5c4ff8fefed67f }
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/special_tokens_map.json, size: 670, sha256: f9535fada19315e0d8eb89521cebe111c008fee98d16e7c6744acfb50505d8c3 }
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/tokenizer.json, size: 1851388, sha256: 478fb6fd0bf1403eb2ffda892e285f5ae968b9e0c06eb2815552ebedacb8ca93 }
+    - { path: cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/tokenizer_config.json, size: 9547, sha256: d637971d627e4f8ce0422401bd0a305d9f763657ad21e8205afe8d36b6672524 }
+  backend: onnx
+  precision: int4
+  tiers: [T2]
+  vram_mb: 4200
+  ram_mb: 4500
+  size_mb: 3050
+  required_for: [assistant, vlm.suggest, vlm.describe]
+  license: MIT
+  resident: false
+  optional: true
+  exclusive_group: diffusion
+  genai_provider: cpu
+  genai_role: vlm
+

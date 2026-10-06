@@ -17,6 +17,7 @@ from .besttake import BestTake
 from .enhance import Enhancer
 from .errors import DownloadFailed, InvalidParams, RpcError
 from .inpaint import Inpainter
+from .llm import Assistant
 from .masks import TARGETS as MASK_TARGETS
 from .masks import MaskGenerator
 from .models.download import Cancelled
@@ -54,6 +55,7 @@ class WorkerService:
         self.besttake = BestTake(self.masks)
         self.inpaint = Inpainter(self.gen)
         self.enhance = Enhancer(self.gen, self.masks)
+        self.assistant = Assistant(self.manager, self.hw)
         self.io_pool = ThreadPoolExecutor(2, thread_name_prefix="io")
         self.idle_unload_s = idle_unload_s
         self.started_at = time.time()
@@ -70,6 +72,7 @@ class WorkerService:
             "models.list": self.models_list,
             "models.ensure": self.models_ensure,
             "models.unload": self.models_unload,
+            "models.delete": self.models_delete,
             "analyze.batch": self.analyze_batch,
             "mask.generate": self.mask_generate,
             "beauty.prepare": self.beauty_prepare,
@@ -77,6 +80,9 @@ class WorkerService:
             "besttake.compose": self.besttake_compose,
             "inpaint.run": self.inpaint_run,
             "enhance.run": self.enhance_run,
+            "llm.plan": self.llm_plan,
+            "vlm.suggest": self.vlm_suggest,
+            "vlm.describe": self.vlm_describe,
         }
 
     # ------------------------------------------------------------------ lifecycle
@@ -95,6 +101,7 @@ class WorkerService:
         self.besttake.shutdown()
         self.enhance.shutdown()
         self.gen.shutdown()
+        self.assistant.shutdown()
         self.masks.shutdown()
         self.manager.unload()
         self.io_pool.shutdown(wait=False, cancel_futures=True)
@@ -119,6 +126,12 @@ class WorkerService:
         live = await loop.run_in_executor(self.io_pool, hwmod.nvidia_memory_usage)
         from .steps.faces import mediapipe_available
 
+        assistant = self.assistant.status()
+        assistant_status = {
+            "llm_available": assistant["llm_available"],
+            "vlm_available": assistant["vlm_available"],
+            "assistant": assistant,
+        }
         return {
             "version": __version__,
             "protocol": PROTOCOL_VERSION,
@@ -138,6 +151,7 @@ class WorkerService:
             "mask_targets": list(MASK_TARGETS),
             "profiles": {k: list(v) for k, v in PROFILES.items()},
             "features": {"mediapipe": mediapipe_available(), "heif": _heif_ok()},
+            **assistant_status,
         }
 
     async def models_list(self, _params: Any, _ctx: Ctx) -> dict[str, Any]:
@@ -163,6 +177,8 @@ class WorkerService:
                 t: self.masks.required_models(t) + self.masks.optional_models(t)
                 for t in MASK_TARGETS
             },
+            # M6: the LLM / VLM `models.ensure` has to fetch on this machine ([] = tier too low)
+            "assistant_models": self.assistant.default_models(),
         }
 
     async def models_ensure(self, params: Any, ctx: Ctx) -> dict[str, Any]:
@@ -212,6 +228,22 @@ class WorkerService:
         gone = self.manager.unload(mid)
         return {"unloaded": gone, "loaded": self.manager.loaded()}
 
+    async def models_delete(self, params: Any, _ctx: Ctx) -> dict[str, Any]:
+        """Remove a downloaded model's files (unloading it first when loaded)."""
+        mid = params.get("id") if isinstance(params, dict) else None
+        if not isinstance(mid, str) or mid not in self.registry:
+            raise InvalidParams(f"unknown model id {mid!r}")
+        spec = self.registry.get(mid)
+        loop = asyncio.get_running_loop()
+
+        def work() -> int:
+            freed = self.manager.downloader.installed_size(spec)
+            self.manager.delete(mid)
+            return freed
+
+        freed = await loop.run_in_executor(self.io_pool, work)
+        return {"deleted": True, "freed_bytes": freed}
+
     async def analyze_batch(self, params: Any, ctx: Ctx) -> dict[str, Any]:
         return await self.analyzer.analyze_batch(params, lambda p: ctx.progress(**p))
 
@@ -229,6 +261,15 @@ class WorkerService:
 
     async def enhance_run(self, params: Any, ctx: Ctx) -> dict[str, Any]:
         return await self.enhance.run(params, lambda p: ctx.progress(**p))
+
+    async def llm_plan(self, params: Any, ctx: Ctx) -> dict[str, Any]:
+        return await self.assistant.plan(params, lambda p: ctx.progress(**p))
+
+    async def vlm_suggest(self, params: Any, ctx: Ctx) -> dict[str, Any]:
+        return await self.assistant.suggest(params, lambda p: ctx.progress(**p))
+
+    async def vlm_describe(self, params: Any, ctx: Ctx) -> dict[str, Any]:
+        return await self.assistant.describe(params, lambda p: ctx.progress(**p))
 
     async def faces_embed(self, params: Any, _ctx: Ctx) -> dict[str, Any]:
         return await faces_embed(self.analyzer, params, self.analyzer.decode_pool)
