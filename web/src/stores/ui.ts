@@ -40,6 +40,8 @@ interface UiState {
   faceSearchOpen: boolean
   /** Library left sidebar (smart collections) */
   sidebarOpen: boolean
+  /** Mobile cull: one photo at a time, or quick cull (AI top-3 cards per group). */
+  cullMode: 'single' | 'quick'
   connection: ConnectionStatus
   /** Increments when Space asks panes to toggle fit <-> 100%. */
   zoomToggle: number
@@ -78,6 +80,7 @@ interface UiState {
   setSaveCollectionOpen: (b: boolean) => void
   setFaceSearchOpen: (b: boolean) => void
   setSidebarOpen: (b: boolean) => void
+  setCullMode: (m: 'single' | 'quick') => void
   setConnection: (c: ConnectionStatus) => void
   toggleZoom: () => void
   setThumbSize: (n: number) => void
@@ -116,6 +119,7 @@ export const useUi = create<UiState>()(
       saveCollectionOpen: false,
       faceSearchOpen: false,
       sidebarOpen: !narrow,
+      cullMode: 'single',
       connection: 'connecting',
       zoomToggle: 0,
       gridCols: 6,
@@ -148,6 +152,7 @@ export const useUi = create<UiState>()(
       setSaveCollectionOpen: (saveCollectionOpen) => set({ saveCollectionOpen }),
       setFaceSearchOpen: (faceSearchOpen) => set({ faceSearchOpen }),
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
+      setCullMode: (cullMode) => set({ cullMode }),
       setConnection: (connection) => set({ connection }),
       toggleZoom: () => set((s) => ({ zoomToggle: s.zoomToggle + 1 })),
       setThumbSize: (thumbSize) => set({ thumbSize }),

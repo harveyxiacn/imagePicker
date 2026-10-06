@@ -47,6 +47,10 @@ import type {
   LanInfo,
   OnboardingInfo,
   Role,
+  RemoteConnectBody,
+  RemoteDevice,
+  RemotePairStart,
+  RemoteStatus,
   RuntimeInfo,
   Settings,
   SettingsPatch,
@@ -263,6 +267,14 @@ export const api = {
   setPassword: (password: string, guest_password?: string) =>
     request<{ ok: boolean }>('POST', '/auth/password', guest_password === undefined ? { password } : { password, guest_password }),
   xmpSync: (session_id: number, direction: 'read' | 'write') => request<{ updated?: number }>('POST', '/xmp/sync', { session_id, direction }),
+  // remote AI (M8): phone side
+  remoteStatus: () => request<RemoteStatus>('GET', '/remote/status'),
+  remoteConnect: (body: RemoteConnectBody) => request<RemoteStatus>('POST', '/remote/connect', body),
+  remoteDisconnect: () => request<void>('DELETE', '/remote/connect'),
+  // remote AI (M8): host side
+  remotePairStart: () => request<RemotePairStart>('POST', '/remote/pair/start'),
+  remoteDevices: () => request<{ devices: RemoteDevice[] }>('GET', '/remote/devices'),
+  remoteRevoke: (id: string) => request<void>('DELETE', `/remote/devices/${encodeURIComponent(id)}`),
   fsRoots: () => request<{ roots: string[] }>('GET', '/fs/roots'),
   fsList: (path?: string) =>
     request<FsList>('GET', `/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),

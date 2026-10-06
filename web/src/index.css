@@ -369,3 +369,100 @@ input[type='range'].lr-slider[data-changed='true']::-webkit-slider-thumb {
   color: var(--ai);
   background: color-mix(in srgb, var(--ai) 10%, transparent);
 }
+
+/* ---- M8 mobile (phones < 768 px, touch) ---- */
+/* Notch / gesture-bar safe areas: viewport-fit=cover is set in index.html. */
+@media (max-width: 767px) {
+  #root {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    box-sizing: border-box;
+  }
+  body {
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* 44 px minimum touch targets */
+  .btn {
+    min-height: 44px;
+  }
+  .btn-icon {
+    min-width: 44px;
+  }
+  .chip {
+    min-height: 36px;
+    padding: 0 12px;
+  }
+  .field {
+    min-height: 44px;
+    font-size: 16px; /* no iOS focus zoom */
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    min-width: 20px;
+    min-height: 20px;
+  }
+}
+/* Tablets keep the desktop layout and control sizes (only the slider thumb grows, below). */
+@media (pointer: coarse) {
+  input[type='range'].lr-slider {
+    height: 28px;
+  }
+  input[type='range'].lr-slider::-webkit-slider-thumb {
+    width: 22px;
+    height: 22px;
+    margin-top: -9.5px;
+  }
+}
+.cull-stars button {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+.sheet-in {
+  animation: sheet-up 240ms var(--ease);
+}
+/* The single big slider of the mobile edit drawer */
+input[type='range'].big-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 44px;
+  background: transparent;
+  touch-action: none;
+}
+input[type='range'].big-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+}
+input[type='range'].big-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 30px;
+  height: 30px;
+  margin-top: -12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--panel);
+  box-shadow: 0 0 0 1px var(--faint);
+}
+input[type='range'].big-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+}
+input[type='range'].big-slider::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--panel);
+}

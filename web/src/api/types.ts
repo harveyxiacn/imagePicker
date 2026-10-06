@@ -155,7 +155,8 @@ export interface PhotoUpdateItem {
 }
 
 export type WorkerState = 'stopped' | 'starting' | 'ready' | 'busy' | 'crashed' | 'unavailable'
-export type AnalysisProfile = 'fast' | 'standard'
+/** `lite` = 快速（本机, M8 LiteAnalyzer); `fast` / `standard` run on a local or remote AI worker. */
+export type AnalysisProfile = 'lite' | 'fast' | 'standard'
 export type AnalysisStage = 'analyzing' | 'grouping' | 'scoring' | 'clustering'
 
 export interface HardwareInfo {
@@ -827,4 +828,44 @@ export interface LanInfo {
   urls: string[]
   qr_svg: string | null
   restart_required?: boolean
+}
+
+// ---- M8 (docs/api-contract-m8.md section C: remote AI) ----
+
+/** Phone side: GET /api/remote/status. */
+export interface RemoteStatus {
+  /** A host is paired (token stored). */
+  paired: boolean
+  /** The paired host answered the last health probe. */
+  connected: boolean
+  url: string | null
+  host_name: string | null
+  /** Hardware tier of the host's AI worker. */
+  host_tier: 'T0' | 'T1' | 'T2' | 'T3' | null
+  last_error: string | null
+  /** Unix seconds of the last successful contact. */
+  last_seen: number | null
+}
+
+/** Phone side: POST /api/remote/connect. */
+export interface RemoteConnectBody {
+  url: string
+  code: string
+  device_name?: string
+}
+
+/** Host side: POST /api/remote/pair/start. */
+export interface RemotePairStart {
+  code: string
+  /** Unix seconds. */
+  expires_at: number
+  qr_svg: string
+  url: string
+}
+
+export interface RemoteDevice {
+  device_id: string
+  name: string
+  created_at: number
+  last_seen: number | null
 }

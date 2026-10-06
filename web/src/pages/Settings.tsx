@@ -1,4 +1,4 @@
-import { Cpu, Database, FileJson, Globe, Keyboard, Palette, ScanFace, ScanSearch, Wifi, ChevronLeft, Layers } from 'lucide-react'
+import { Cpu, Database, FileJson, Globe, Keyboard, Palette, ScanFace, ScanSearch, Wifi, ChevronLeft, Layers, MonitorSmartphone, Smartphone } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { useMe, useSettings } from '@/api/queries'
@@ -6,6 +6,7 @@ import { AppearanceSection, ShortcutsSection } from '@/components/settings/MiscS
 import { HardwareSection } from '@/components/settings/HardwareSection'
 import { LanSection, XmpSection } from '@/components/settings/LanXmpSections'
 import { AnalysisSection, CacheSection, FacesSection, RenderSection } from '@/components/settings/PrivacyCacheSections'
+import { RemoteAiSection, RemoteDevicesSection } from '@/components/settings/RemoteAiSections'
 import { can } from '@/lib/auth'
 
 const SETTINGS_SECTIONS = [
@@ -15,6 +16,8 @@ const SETTINGS_SECTIONS = [
   { id: 'cache', icon: Database, view: CacheSection },
   { id: 'render', icon: Layers, view: RenderSection },
   { id: 'lan', icon: Wifi, view: LanSection },
+  { id: 'remote', icon: Smartphone, view: RemoteAiSection },
+  { id: 'devices', icon: MonitorSmartphone, view: RemoteDevicesSection },
   { id: 'xmp', icon: FileJson, view: XmpSection },
   { id: 'keys', icon: Keyboard, view: ShortcutsSection },
   { id: 'appearance', icon: Palette, view: AppearanceSection },

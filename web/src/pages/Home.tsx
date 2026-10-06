@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Aperture, CheckCircle2, FolderOpen, HeartHandshake, ImageOff, Loader2, Settings, Trash2, Upload } from 'lucide-react'
+import { Aperture, CheckCircle2, FolderOpen, HeartHandshake, ImageOff, Images, Loader2, Settings, Trash2, Upload } from 'lucide-react'
 import { useMemo, useState, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
@@ -7,11 +7,14 @@ import { api, thumbUrl } from '@/api/client'
 import { useMe, useSessions } from '@/api/queries'
 import type { Session } from '@/api/types'
 import { FolderBrowser } from '@/components/FolderBrowser'
+import { AlbumPicker } from '@/components/mobile/AlbumPicker'
 import { HeaderControls } from '@/components/HeaderControls'
 import { UserMenu } from '@/components/UserMenu'
 import { can } from '@/lib/auth'
 import { errorText } from '@/lib/errors'
 import { qk } from '@/lib/cache'
+import { getMobilePlatform } from '@/lib/mobilePlatform'
+import { useIsMobile } from '@/lib/useLayout'
 import { getPlatform, useNativeImport } from '@/platform'
 import { useToasts } from '@/stores/toasts'
 
@@ -21,13 +24,16 @@ export function Home() {
   const qc = useQueryClient()
   const sessions = useSessions()
   const [browse, setBrowse] = useState(false)
+  const [albumsOpen, setAlbumsOpen] = useState(false)
+  const isMobile = useIsMobile()
+  const mobilePlatform = useMemo(() => getMobilePlatform(), [])
   const [dragOver, setDragOver] = useState(false)
   const platform = useMemo(() => getPlatform(), [])
   const push = useToasts((s) => s.push)
   const role = useMe().data?.role ?? 'owner'
 
   const importMut = useMutation({
-    mutationFn: (path: string) => api.importFolder({ path }),
+    mutationFn: (v: string | { path: string; title?: string }) => api.importFolder(typeof v === 'string' ? { path: v } : v),
     onSuccess: ({ session }) => {
       void qc.invalidateQueries({ queryKey: qk.sessions })
       navigate(`/s/${session.id}`)
@@ -63,12 +69,12 @@ export function Home() {
         </div>
         <div className="flex items-center gap-2">
           <HeaderControls />
-          <Link to="/taste" className="btn btn-ghost" data-testid="home-taste-link">
+          <Link to="/taste" className="btn btn-ghost" data-testid="home-taste-link" aria-label={t('taste.title')}>
             <HeartHandshake size={15} />
-            {t('taste.title')}
+            <span className="max-md:hidden">{t('taste.title')}</span>
           </Link>
           {can(role, 'settings') && (
-            <Link to="/settings" className="btn btn-ghost" data-testid="home-settings-link">
+            <Link to="/settings" className="btn btn-ghost max-md:!hidden" data-testid="home-settings-link">
               <Settings size={15} />
               {t('home.settings')}
             </Link>
@@ -92,17 +98,25 @@ export function Home() {
             aria-label={t('home.dropTitle')}
           >
             <Upload size={32} className="text-muted" />
-            <div className="text-base font-medium">{t('home.dropTitle')}</div>
+            <div className="text-base font-medium">{isMobile && mobilePlatform.listAlbums ? t('mobile.albums.cta') : t('home.dropTitle')}</div>
             <div className="flex flex-wrap justify-center gap-2">
-              <button className="btn btn-primary !h-9 px-4" onClick={() => void chooseFolder()} disabled={importMut.isPending}>
+              {mobilePlatform.listAlbums && (
+                <button className="btn btn-primary !h-9 px-4" onClick={() => setAlbumsOpen(true)} disabled={importMut.isPending} data-testid="import-albums">
+                  <Images size={15} />
+                  {t('mobile.albums.title')}
+                </button>
+              )}
+              <button className={`btn !h-9 px-4 ${mobilePlatform.listAlbums ? '' : 'btn-primary'}`} onClick={() => void chooseFolder()} disabled={importMut.isPending}>
                 {importMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <FolderOpen size={15} />}
                 {t('home.chooseFolder')}
               </button>
-              <button className="btn !h-9" disabled title={t('common.soon')}>
-                {t('home.importDevice')}
-              </button>
+              {!mobilePlatform.listAlbums && (
+                <button className="btn !h-9" disabled title={t('common.soon')}>
+                  {t('home.importDevice')}
+                </button>
+              )}
             </div>
-            {!platform.canDropFolders && <div className="text-xs text-faint">{t('home.browserHint')}</div>}
+            {!platform.canDropFolders && !isMobile && <div className="text-xs text-faint">{t('home.browserHint')}</div>}
           </section>}
 
           <section>
@@ -130,6 +144,18 @@ export function Home() {
         </div>
       </main>
 
+      <AlbumPicker
+        open={albumsOpen}
+        onOpenChange={setAlbumsOpen}
+        onBrowse={() => {
+          setAlbumsOpen(false)
+          setBrowse(true)
+        }}
+        onSelect={(a) => {
+          setAlbumsOpen(false)
+          importMut.mutate({ path: a.path, title: a.name })
+        }}
+      />
       <FolderBrowser
         open={browse}
         onOpenChange={setBrowse}

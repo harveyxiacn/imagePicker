@@ -232,3 +232,13 @@ export function usePatchSettings() {
     onSuccess: (s) => qc.setQueryData(qk.settings, s),
   })
 }
+
+/** Phone side of remote AI: pairing status (polled lightly so "host went offline" shows up). */
+export function useRemoteStatus(enabled = true) {
+  return useQuery({ queryKey: qk.remoteStatus, queryFn: api.remoteStatus, enabled, staleTime: 5_000, refetchInterval: 15_000, retry: false })
+}
+
+/** Host side: paired phones. */
+export function useRemoteDevices(enabled = true) {
+  return useQuery({ queryKey: qk.remoteDevices, queryFn: api.remoteDevices, select: (d) => d.devices, enabled, staleTime: 0, refetchInterval: 8_000, retry: false })
+}

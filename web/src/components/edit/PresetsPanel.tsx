@@ -41,7 +41,7 @@ function PresetCard({ photoId, preset, label, onApply, onDelete }: { photoId: nu
       </button>
       {onDelete && (
         <button
-          className="btn btn-icon absolute top-0.5 right-0.5 !h-5 !w-5 bg-black/60 opacity-0 group-hover:opacity-100"
+          className="btn btn-icon absolute top-0.5 right-0.5 !h-5 !w-5 bg-black/60 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
           aria-label={t('edit.deletePreset')}
           onClick={onDelete}
         >

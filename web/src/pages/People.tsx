@@ -56,7 +56,7 @@ function NameField({ person, onSave }: { person: Person; onSave: (name: string |
       data-testid="person-name"
     >
       <span className={`truncate font-medium ${person.name ? '' : 'text-muted italic'}`}>{person.name ?? `${t('person.unnamed')} ${person.id}`}</span>
-      <Pencil size={12} className="shrink-0 text-faint opacity-0 group-hover/name:opacity-100" />
+      <Pencil size={12} className="shrink-0 text-faint opacity-0 group-hover/name:opacity-100 [@media(hover:none)]:opacity-100" />
     </button>
   )
 }
@@ -349,7 +349,7 @@ function PeopleInner() {
                     {on && <Check size={13} strokeWidth={3} />}
                   </button>
                   <button
-                    className="btn btn-icon absolute top-3 right-3 !h-6 !w-6 bg-black/55 opacity-0 backdrop-blur group-hover:opacity-100 focus-visible:opacity-100"
+                    className="btn btn-icon absolute top-3 right-3 !h-6 !w-6 bg-black/55 opacity-0 backdrop-blur group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
                     onClick={() => void patch(p, { hidden: !p.hidden })}
                     aria-label={p.hidden ? t('people.unhide') : t('people.hide')}
                     title={p.hidden ? t('people.unhide') : t('people.hide')}

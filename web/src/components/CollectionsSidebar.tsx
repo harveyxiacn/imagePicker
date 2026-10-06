@@ -81,7 +81,7 @@ function Row({ c, sessionId }: { c: Collection; sessionId: number }) {
         </button>
       )}
       {!c.builtin && !renaming && (
-        <span className="absolute top-1/2 right-10 flex -translate-y-1/2 gap-0.5 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+        <span className="absolute top-1/2 right-10 flex -translate-y-1/2 gap-0.5 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100 [@media(hover:none)]:opacity-100">
           <button
             className="btn btn-ghost btn-icon !h-5 !w-5 bg-panel"
             aria-label={t('collections.rename')}
