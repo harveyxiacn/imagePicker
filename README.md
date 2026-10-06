@@ -19,7 +19,7 @@
 
 ### 状态
 
-**预发布（v0.1，开发中）**：核心功能（导入、分析、分组、评分、人物、最佳表情、编辑、人像美化、修复、导出、AI 助手、局域网 WebUI、XMP 互通、设置）已实现并通过 mock 与合成数据验证。已知限制见 [待办与已知问题](docs/backlog.md)：评分阈值尚未在大规模真实照片上校准；HEIC/HEIF 缩略图、搜索框（自然语言搜索）、Android 版尚未提供。安装包与 AI 运行时的打包仍在进行中，目前请参考下文「从源码运行」。
+**预发布（v0.1，开发中）**：核心功能（导入、分析、分组、评分、人物、最佳表情、编辑、人像美化、修复、导出、AI 助手、局域网 WebUI、XMP 互通、设置）已实现并通过 mock 与合成数据验证。已知限制见 [待办与已知问题](docs/backlog.md)：评分阈值尚未在大规模真实照片上校准；HEIC/HEIF 缩略图、搜索框（自然语言搜索）、Android 版尚未提供。安装包与 AI 组件安装器已就绪，首个正式版发布前请参考下文「从源码运行」。
 
 ### 功能亮点
 
@@ -85,12 +85,7 @@ cd web && pnpm install && pnpm build && cd ..
 cargo run -p ip-cli -- serve --web-dir web/dist     # http://127.0.0.1:7878
 ```
 
-**AI 组件（可选，但分析/修图的 AI 功能需要）**：需要 [uv](https://docs.astral.sh/uv/) 与 Python 3.12。
-
-```sh
-cd ai-worker
-uv sync --extra cuda --extra mediapipe   # NVIDIA GPU；仅 CPU 用 --extra cpu --extra mediapipe
-```
+**AI 组件**：安装包内置安装器——首次启动在欢迎卡片或「设置 → 硬件与模型」点「安装 AI 组件」即可（私有 Python 环境，NVIDIA 显卡自动用 CUDA 版，约 2.3 GB）。从源码开发时则在 `ai-worker/` 运行 `uv sync --extra cuda --extra mediapipe`（仅 CPU 用 `--extra cpu`），并先执行 `bash apps/desktop/scripts/fetch-uv.sh`。
 
 **5 步上手**：① 拖入文件夹导入 → ② 点「一键分析」（首次会提示下载模型）→ ③ 用数字键 1–5 打星、`P` 精选、`X` 淘汰，`S` 展开堆栈、`B` 进组视图 → ④ `D` 进入编辑 → ⑤ `Ctrl+E` 导出。完整流程见 [用户指南](docs/user-guide/zh-CN.md)。
 
@@ -119,7 +114,7 @@ Thousands of shots from a trip, party or wedding? Drop the folder in and hit Ana
 
 ### Status
 
-**Pre-release (v0.1, in development).** The core feature set (import, analysis, grouping, scoring, people, best take, editing, portrait retouching, repair, export, AI assistant, LAN WebUI, XMP interop, settings) is implemented and verified against a mock backend and synthetic data. See [backlog](docs/backlog.md) for known limitations: score thresholds are not yet calibrated on a large real-photo set; HEIC/HEIF thumbnails, the search box (natural-language search) and the Android app are not available yet. Installer and AI-runtime packaging is still in progress, so for now see "Run from source" below.
+**Pre-release (v0.1, in development).** The core feature set (import, analysis, grouping, scoring, people, best take, editing, portrait retouching, repair, export, AI assistant, LAN WebUI, XMP interop, settings) is implemented and verified against a mock backend and synthetic data. See [backlog](docs/backlog.md) for known limitations: score thresholds are not yet calibrated on a large real-photo set; HEIC/HEIF thumbnails, the search box (natural-language search) and the Android app are not available yet. Installers and the built-in AI component setup are ready; until the first release is published, see "Run from source" below.
 
 ### Highlights
 
@@ -185,12 +180,7 @@ cd web && pnpm install && pnpm build && cd ..
 cargo run -p ip-cli -- serve --web-dir web/dist     # http://127.0.0.1:7878
 ```
 
-**AI components (optional, required for the AI features):** needs [uv](https://docs.astral.sh/uv/) and Python 3.12.
-
-```sh
-cd ai-worker
-uv sync --extra cuda --extra mediapipe   # NVIDIA GPU; CPU only: --extra cpu --extra mediapipe
-```
+**AI components:** the installers include a built-in setup — click *Install AI components* on the welcome card or in *Settings → Hardware & models* (private Python environment, CUDA build picked automatically on NVIDIA GPUs, about 2.3 GB). When developing from source, run `uv sync --extra cuda --extra mediapipe` in `ai-worker/` (CPU only: `--extra cpu`) and `bash apps/desktop/scripts/fetch-uv.sh` once first.
 
 **Five steps:** ① drop a folder to import → ② click *Analyze* (the first run asks to download models) → ③ rate with `1`–`5`, `P` pick, `X` reject, `S` expand a stack, `B` group view → ④ `D` to edit → ⑤ `Ctrl+E` to export. Full walkthrough in the [User Guide](docs/user-guide/en.md).
 

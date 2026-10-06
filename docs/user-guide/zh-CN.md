@@ -118,17 +118,25 @@ cargo run -p ip-cli -- serve --web-dir web/dist        # 默认 http://127.0.0.1
 
 ### AI 组件（Python 工作进程）
 
-分析、AI 蒙版、人像、修复、本地助手模型由独立的 Python 进程（`ai-worker`）提供，桌面版会自动启动它。当前需要手动准备其运行环境（打包版将内置）：
+分析、AI 蒙版、人像、修复、本地助手模型由独立的 Python 进程（`ai-worker`）提供。**安装包已内置安装器，无需自己装 Python**：
+
+1. 在欢迎卡片点「下载 AI 组件」，或打开「设置 → 硬件与模型 → AI 组件」点「安装」。
+2. 应用会把私有 Python 3.12 与 AI 组件装进数据目录下的 `runtime/`（不影响系统里的 Python），并按硬件自动选择版本：NVIDIA 显卡且驱动 ≥ 580 时安装 CUDA 版，其他情况安装 CPU 版。
+3. 需要联网下载约 1–2.5 GB（视网速 2–5 分钟），可随时取消；装好后约占 2.3 GB。之后再按需下载模型。
+4. 应用升级后会提示重新安装对应版本；可在同一页「移除」以释放空间。
+
+关闭「设置 → 人脸与隐私 → 允许联网」时不会安装。任何需要 AI 的操作在未安装时都会弹出「安装 AI 组件」提示。
+
+> 顶栏的「AI 引擎」状态点会显示 就绪 / 启动中 / 工作中 / 已崩溃 / 不可用。
+
+**从源码运行（开发者）**：桌面开发模式会直接使用仓库里的 `ai-worker/`（需要 [uv](https://docs.astral.sh/uv/)）：
 
 ```sh
-# 需要 uv 与 Python 3.12
 cd ai-worker
 uv sync --extra cuda --extra mediapipe     # NVIDIA 显卡（驱动 ≥ 580）
 uv sync --extra cpu  --extra mediapipe     # 仅 CPU
 # 可选：本地 AI 助手模型  --extra llm-cuda（配 cuda） / --extra llm（配 cpu）
 ```
-
-> 没有安装 CUDA 版本时，即使有 NVIDIA 显卡也会按 T0（CPU）处理。顶栏的「AI 引擎」状态点会显示 就绪 / 启动中 / 工作中 / 已崩溃 / 不可用。
 
 可用环境变量：`IMAGEPICKER_WORKER_DIR`（工作进程目录）、`IMAGEPICKER_WORKER_CMD`（自定义启动命令）、`IMAGEPICKER_MODELS_DIR`（模型目录）。
 
@@ -529,7 +537,7 @@ English works too: "only show Alice's photos rated 4 stars or more", "keep 2 per
 
 | 现象 | 处理 |
 |---|---|
-| 「一键分析」提示 AI 引擎不可用 / 状态点为红色 | 确认已按第 3 节准备 `ai-worker` 环境（`uv` + Python 3.12）；可设置 `IMAGEPICKER_WORKER_DIR` 指向它；查看数据目录下 `logs/` |
+| 「一键分析」提示 AI 引擎不可用 / 状态点为红色 | 在「设置 → 硬件与模型」安装（或重新安装）AI 组件；安装日志在数据目录 `logs/runtime-install.log`，工作进程日志也在 `logs/` |
 | 有 NVIDIA 显卡却显示 T0 / 仅 CPU | 需要用 `--extra cuda` 安装（驱动 ≥ 580）；否则按 CPU 处理 |
 | 模型下载失败 / 很慢 | 在「设置 → 硬件与模型 → 下载源」改用 HF 镜像或 ModelScope；检查「允许联网」是否被关闭 |
 | 分析后星级「不准」 | 评分阈值尚未校准；把 AI 星级当建议，用「我的口味」让评分贴近你；严格度可在设置调整 |

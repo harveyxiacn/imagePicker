@@ -116,17 +116,25 @@ Three coach-mark bubbles follow (Analyze, stacks, number-key rating).
 
 ### AI components (Python worker)
 
-Analysis, AI masks, portraits, repair and the local assistant models run in a separate Python process (`ai-worker`) that the desktop app starts for you. For now its environment must be prepared by hand (packaged builds will bundle it):
+Analysis, AI masks, portraits, repair and the local assistant models run in a separate Python process (`ai-worker`). **The installers include a built-in setup, so you don't need to install Python yourself:**
+
+1. Click *Download AI components* on the welcome card, or open *Settings → Hardware & models → AI components* and click *Install*.
+2. The app installs a private Python 3.12 and the AI components into `runtime/` in the data directory (your system Python is untouched) and picks the build for your hardware: CUDA on NVIDIA GPUs with driver ≥ 580, CPU otherwise.
+3. It downloads about 1–2.5 GB (2–5 minutes depending on your connection), can be cancelled at any time, and takes about 2.3 GB on disk. Models are then downloaded on demand.
+4. After an app update you are asked to reinstall the matching version; *Remove* on the same page frees the space.
+
+Nothing is installed while *Settings → Faces & privacy → Allow network* is off. Any AI action offers *Install AI components* when they are missing.
+
+> The *AI engine* dot in the top bar shows Ready / Starting / Busy / Crashed / Unavailable.
+
+**Running from source (developers):** the desktop dev mode uses the repo's `ai-worker/` directly (needs [uv](https://docs.astral.sh/uv/)):
 
 ```sh
-# needs uv and Python 3.12
 cd ai-worker
 uv sync --extra cuda --extra mediapipe     # NVIDIA GPU (driver >= 580)
 uv sync --extra cpu  --extra mediapipe     # CPU only
 # optional: local AI assistant models  --extra llm-cuda (with cuda) / --extra llm (with cpu)
 ```
-
-> Without the CUDA extra an NVIDIA GPU is still treated as T0 (CPU). The *AI engine* dot in the top bar shows Ready / Starting / Busy / Crashed / Unavailable.
 
 Environment variables: `IMAGEPICKER_WORKER_DIR` (worker directory), `IMAGEPICKER_WORKER_CMD` (custom start command), `IMAGEPICKER_MODELS_DIR` (models directory).
 
@@ -527,7 +535,7 @@ Open with the gear icon on Home or in the top bar.
 
 | Symptom | What to do |
 |---|---|
-| Analyze says the AI engine is unavailable / the status dot is red | Make sure the `ai-worker` environment from section 3 exists (`uv` + Python 3.12); set `IMAGEPICKER_WORKER_DIR` to it; check `logs/` in the data directory |
+| Analyze says the AI engine is unavailable / the status dot is red | Install (or reinstall) the AI components in *Settings → Hardware & models*; the install log is `logs/runtime-install.log` in the data directory, worker logs are in `logs/` too |
 | NVIDIA GPU but the tier shows T0 / CPU only | Install with `--extra cuda` (driver >= 580); otherwise it is treated as CPU |
 | Model download fails / is slow | Switch to the HF mirror or ModelScope in *Settings → Hardware & models → Download source*; check that *Allow network* is on |
 | AI stars feel "off" | Thresholds are not calibrated yet; treat them as suggestions, let *My taste* adapt, adjust strictness in Settings |
