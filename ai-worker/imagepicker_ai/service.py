@@ -13,6 +13,8 @@ from typing import Any
 from . import PROTOCOL_VERSION, __version__
 from . import hw as hwmod
 from .errors import DownloadFailed, InvalidParams, RpcError
+from .masks import TARGETS as MASK_TARGETS
+from .masks import MaskGenerator
 from .models.download import Cancelled
 from .models.manager import ModelManager
 from .models.registry import Registry
@@ -40,6 +42,7 @@ class WorkerService:
         self.registry = registry or Registry.load()
         self.manager = ModelManager(self.models_dir, self.registry, self.hw)
         self.analyzer = Analyzer(self.manager, self.hw, decode_workers=decode_workers)
+        self.masks = MaskGenerator(self.manager, self.hw)
         self.io_pool = ThreadPoolExecutor(2, thread_name_prefix="io")
         self.idle_unload_s = idle_unload_s
         self.started_at = time.time()
@@ -57,6 +60,7 @@ class WorkerService:
             "models.ensure": self.models_ensure,
             "models.unload": self.models_unload,
             "analyze.batch": self.analyze_batch,
+            "mask.generate": self.mask_generate,
         }
 
     # ------------------------------------------------------------------ lifecycle
@@ -71,6 +75,7 @@ class WorkerService:
             self._sweeper.cancel()
         await self.server.stop()
         self.analyzer.shutdown()
+        self.masks.shutdown()
         self.manager.unload()
         self.io_pool.shutdown(wait=False, cancel_futures=True)
 
@@ -110,6 +115,7 @@ class WorkerService:
                 "gpu": live,
             },
             "steps": list(STEPS),
+            "mask_targets": list(MASK_TARGETS),
             "profiles": {k: list(v) for k, v in PROFILES.items()},
             "features": {"mediapipe": mediapipe_available(), "heif": _heif_ok()},
         }
@@ -123,6 +129,11 @@ class WorkerService:
             "models": self.manager.list_models(),
             "models_dir": str(self.models_dir),
             "profiles": profiles,
+            # what `models.ensure` must fetch on this machine for each mask target
+            "mask_models": {
+                t: self.masks.required_models(t) + self.masks.optional_models(t)
+                for t in MASK_TARGETS
+            },
         }
 
     async def models_ensure(self, params: Any, ctx: Ctx) -> dict[str, Any]:
@@ -174,6 +185,9 @@ class WorkerService:
 
     async def analyze_batch(self, params: Any, ctx: Ctx) -> dict[str, Any]:
         return await self.analyzer.analyze_batch(params, lambda p: ctx.progress(**p))
+
+    async def mask_generate(self, params: Any, ctx: Ctx) -> dict[str, Any]:
+        return await self.masks.generate(params, lambda p: ctx.progress(**p))
 
 
 def _model_ids(params: Any) -> list[str]:

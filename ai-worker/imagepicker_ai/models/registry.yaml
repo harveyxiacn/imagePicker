@@ -203,3 +203,129 @@
   required_for: [iqa]
   license: Apache-2.0
   resident: true
+
+# ---------------------------------------------------------------------------------------------
+# AI masks (`mask.generate`, docs/api-contract-m3.md section D, docs/03 section 6.4)
+#
+# subject / person: BiRefNet (ZhengPeng7/BiRefNet, MIT), community ONNX exports. Output = logits
+# of the foreground alpha (sigmoid -> 0..1), input NCHW float32, ImageNet mean/std, squashed to the
+# fixed export resolution. `required_for` lists mask targets (not analyze steps).
+#   birefnet-lite-512  lite variant exported at 512 px (CPU / T0 default)
+#   birefnet-lite      lite variant at 1024 px (T1 CPU)
+#   birefnet-lite-fp16 same, fp16 weights (half the download; GPU default)
+#   birefnet-fp16      full Swin-L BiRefNet at 1024 px, fp16 weights (optional quality pack, T2+)
+# ---------------------------------------------------------------------------------------------
+- id: birefnet-lite-512
+  task: [segment_subject]
+  source: { hf: studioludens/birefnet-lite-512, origin: ZhengPeng7/BiRefNet_lite }
+  files:
+    - path: onnx/model.onnx
+      sha256: 1cb0fb360dadd15af77c639085d77a9df67db0c64315560c3de005f676345ac2
+      size: 191877254
+  backend: onnx
+  precision: fp32
+  tiers: [T0]
+  vram_mb: 900
+  ram_mb: 1200
+  size_mb: 183
+  required_for: [mask.subject, mask.person]
+  license: MIT
+  resident: false
+  exclusive_group: segment_subject
+
+- id: birefnet-lite
+  task: [segment_subject]
+  source: { hf: onnx-community/BiRefNet_lite-ONNX, origin: ZhengPeng7/BiRefNet_lite }
+  files:
+    - path: onnx/model.onnx
+      sha256: 5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333
+      size: 224005088
+  backend: onnx
+  precision: fp32
+  tiers: [T1]
+  vram_mb: 1800
+  ram_mb: 2500
+  size_mb: 214
+  required_for: [mask.subject, mask.person]
+  license: MIT
+  resident: false
+  exclusive_group: segment_subject
+
+- id: birefnet-lite-fp16
+  task: [segment_subject]
+  source: { hf: onnx-community/BiRefNet_lite-ONNX, origin: ZhengPeng7/BiRefNet_lite }
+  files:
+    - path: onnx/model_fp16.onnx
+      sha256: d39b897ceb16ae654c1731f3dba0cf9b368d9cae74b5a57459b455cc8bfec402
+      size: 114538221
+  backend: onnx
+  precision: fp16
+  tiers: [T1, T2, T3]
+  vram_mb: 1500
+  ram_mb: 2000
+  size_mb: 109
+  required_for: [mask.subject, mask.person]
+  license: MIT
+  resident: false
+  exclusive_group: segment_subject
+
+- id: birefnet-fp16
+  task: [segment_subject]
+  source: { hf: onnx-community/BiRefNet-ONNX, origin: ZhengPeng7/BiRefNet }
+  files:
+    - path: onnx/model_fp16.onnx
+      sha256: 3654c741eb80bd926ada8fed1713b506ccf8d30eb1f6487e87eb9f234f33df09
+      size: 489666272
+  backend: onnx
+  precision: fp16
+  tiers: [T2, T3]
+  vram_mb: 3500
+  ram_mb: 4000
+  size_mb: 467
+  required_for: [mask.subject, mask.person]
+  license: MIT
+  resident: false
+  optional: true
+  exclusive_group: segment_subject
+
+# MediaPipe Selfie Multiclass Segmenter (256x256, float32): background / hair / body-skin /
+# face-skin / clothes / others. Run through LiteRT directly (no mediapipe dependency).
+- id: mediapipe-selfie-multiclass
+  task: [segment_person_parts]
+  source: { hf: null, origin: "google-ai-edge/mediapipe (Image Segmenter, selfie_multiclass_256x256)" }
+  files:
+    - path: selfie_multiclass_256x256.tflite
+      url: https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite
+      sha256: c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0
+      size: 16371837
+  backend: tflite
+  precision: fp32
+  tiers: [T0, T1, T2, T3]
+  vram_mb: 0
+  ram_mb: 120
+  size_mb: 15.6
+  required_for: [mask.skin, mask.hair, mask.clothes]
+  license: Apache-2.0
+  resident: false
+
+# Sky: U^2-Net sky segmenter by xiongzhu666/Sky-Segmentation-and-Post-processing (MIT), 320x320,
+# ONNX re-host JianyuanWang/skyseg. The author does not disclose the training data (product data)
+# -> flagged for the licence audit. NVIDIA SegFormer ADE20K weights (NC) are not used; the
+# worker also has a model-free heuristic fallback (masks/sky.py), so `mask.sky` works without
+# any download.
+- id: skyseg-u2net
+  task: [segment_sky]
+  source: { hf: JianyuanWang/skyseg, origin: xiongzhu666/Sky-Segmentation-and-Post-processing }
+  files:
+    - path: skyseg.onnx
+      sha256: ab9c34c64c3d821220a2886a4a06da4642ffa14d5b30e8d5339056a089aa1d39
+      size: 175997079
+  backend: onnx
+  precision: fp32
+  tiers: [T0, T1, T2, T3]
+  vram_mb: 700
+  ram_mb: 900
+  size_mb: 168
+  required_for: [mask.sky]
+  license: MIT
+  resident: false

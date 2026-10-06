@@ -32,6 +32,7 @@ Authenticate with `Authorization: Bearer <token>` or `ws://host:port/?token=<tok
 | `models.ensure` `{ids:[..]}` | downloads (HF official -> `HF_ENDPOINT` -> hf-mirror), streams `progress` `{req,kind:"model.download",model,file,phase,done,total}` |
 | `models.unload` `{id?}` | free VRAM |
 | `analyze.batch` | `{items:[{photo_id,path,orientation?}], profile?:"fast"\|"standard", steps?:[..], analysis_size, out_dir, allow_download?}`; `progress` `{req,kind:"analyze",done,total}` |
+| `mask.generate` | `{photo:{photo_id,path,orientation?}, targets:[..], person_bbox?:[x,y,w,h], size, out_dir, allow_download?}` -> `{masks,models,skipped}`; `progress` `{req,kind:"mask",done,total}` when more than one target runs (see below) |
 | `system.shutdown`, `system.ping`, `cancel {req}` | lifecycle / cancel an in-flight request |
 
 ### Steps and profiles (contract `docs/api-contract-m2.md` section A)
@@ -59,6 +60,25 @@ head per core, so it stays enabled on T0; `embed` is what is slow on CPU there).
 otherwise). Per-photo failures are reported per item (`error`), never failing the batch.
 Artifacts in `out_dir`: `<photo_id>.emb.npy` (float16, L2-normalised, 768-d), `<photo_id>.faces.npy` (identity step),
 `<photo_id>.analysis.json`.
+
+## AI masks (`mask.generate`, contract `docs/api-contract-m3.md` section D)
+
+Targets `subject sky person skin hair clothes` -> 8-bit grayscale PNG, long edge = `size`, upright (EXIF applied),
+soft 0-255 alpha, written to `out_dir/<photo_id>_<target>[_<hash>].png` (`person` with `person_bbox` adds the first 8 hex
+of sha1 of the bbox formatted `%.4f,%.4f,%.4f,%.4f`). `models` names the model per target, `skipped` maps a target to
+`model_unavailable` (not installed, `allow_download` false), `download_failed`, `out_of_memory`, `failed` or
+`unsupported_target`; the other targets are returned normally. Edges of every mask are snapped to the image with a guided
+filter on the luminance at output resolution.
+
+| target | model | notes |
+|---|---|---|
+| `subject` | BiRefNet (MIT): GPU `birefnet-lite-fp16` (optional pack `birefnet-fp16`, used when installed), CPU T1+ `birefnet-lite`, CPU T0 `birefnet-lite-512` | full-frame matting |
+| `person` | same BiRefNet | with `person_bbox` (the face box, normalised): matting on a body crop of the face, keep the connected component that covers the face, split touching people with a marker watershed using the other YuNet faces. Without bbox: union of every detected person (falls back to `subject` without faces) |
+| `skin` `hair` `clothes` | `mediapipe-selfie-multiclass` (Apache-2.0, via LiteRT) | skin = body-skin + face-skin; faces narrower than 18 % of the long edge are re-run on crops and blended back |
+| `sky` | `skyseg-u2net` (MIT repo, training data undisclosed) | without the model a colour/brightness/position/smoothness heuristic is used (`models.sky = "heuristic"`), so `sky` is never skipped |
+
+`models.list` also returns `mask_models` (`{target: [model ids]}`) for `models.ensure`. YuNet is an optional helper for
+`person` / `skin` / `hair` / `clothes` (other people, small-person crops).
 
 ## Develop
 
