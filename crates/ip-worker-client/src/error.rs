@@ -16,6 +16,9 @@ pub enum WorkerError {
     /// The connection to the worker was lost (crash / exit) while a request was pending.
     #[error("connection to the AI worker was lost")]
     Disconnected,
+    /// Remote AI: the home host rejected the device token (revoked, or never paired).
+    #[error("this device is not paired with the AI host: {0}")]
+    Unpaired(String),
     #[error("request cancelled")]
     Cancelled,
     #[error("timeout: {0}")]

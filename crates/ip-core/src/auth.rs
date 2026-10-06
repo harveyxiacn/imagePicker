@@ -52,6 +52,56 @@ pub struct SecuritySnapshot {
     pub auth_epoch: u64,
     /// Additional allowed filesystem roots (`settings.roots`).
     pub roots: Vec<String>,
+    /// Paired remote-AI devices (docs/api-contract-m8.md section C). Only token hashes.
+    pub devices: Vec<DeviceRec>,
+}
+
+/// A paired device as stored: the token itself is never kept, only its BLAKE3 digest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceRec {
+    pub device_id: String,
+    pub name: String,
+    /// Hex BLAKE3 of the 256-bit device token (the token has full entropy, so no slow KDF).
+    pub token_hash: String,
+    pub created_at: i64,
+    pub last_seen: Option<i64>,
+}
+
+/// Public view of a [`DeviceRec`] (`GET /api/remote/devices`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeviceInfo {
+    pub device_id: String,
+    pub name: String,
+    pub created_at: i64,
+    pub last_seen: Option<i64>,
+}
+
+impl From<&DeviceRec> for DeviceInfo {
+    fn from(d: &DeviceRec) -> Self {
+        Self {
+            device_id: d.device_id.clone(),
+            name: d.name.clone(),
+            created_at: d.created_at,
+            last_seen: d.last_seen,
+        }
+    }
+}
+
+/// Most devices that may be paired at once.
+pub const MAX_DEVICES: usize = 32;
+pub const MAX_DEVICE_NAME: usize = 64;
+/// `last_seen` is persisted at most this often per device.
+const LAST_SEEN_GRANULARITY_MS: i64 = 60_000;
+
+pub fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn token_digest(token: &str) -> String {
+    blake3::hash(token.as_bytes()).to_hex().to_string()
 }
 
 impl SecuritySnapshot {
@@ -211,6 +261,84 @@ impl SecurityStore {
         })
     }
 
+    // -------------------------------------------------------------- devices
+
+    /// Registers a device and returns it with its token (shown once, stored only as a digest).
+    pub fn add_device(&self, name: &str) -> Result<(DeviceInfo, String)> {
+        let name: String = name.trim().chars().take(MAX_DEVICE_NAME).collect();
+        if name.is_empty() {
+            return Err(CoreError::bad_request("device_name is required"));
+        }
+        let token = random_token();
+        let rec = DeviceRec {
+            device_id: random_token()[..16].to_string(),
+            name,
+            token_hash: token_digest(&token),
+            created_at: now_ms(),
+            last_seen: None,
+        };
+        let info = DeviceInfo::from(&rec);
+        self.update(|s| {
+            if s.devices.len() >= MAX_DEVICES {
+                return Err(CoreError::Conflict(format!(
+                    "at most {MAX_DEVICES} devices can be paired; revoke one first"
+                )));
+            }
+            s.devices.push(rec);
+            Ok(())
+        })?;
+        Ok((info, token))
+    }
+
+    /// The device owning `token`, if it is still paired (constant-time digest comparison).
+    pub fn find_device(&self, token: &str) -> Option<DeviceInfo> {
+        let digest = token_digest(token);
+        let snap = self.snapshot();
+        let mut found = None;
+        for d in &snap.devices {
+            // no early exit: the comparison time does not depend on which device matched
+            if ct_eq(&d.token_hash, &digest) {
+                found = Some(DeviceInfo::from(d));
+            }
+        }
+        found
+    }
+
+    pub fn list_devices(&self) -> Vec<DeviceInfo> {
+        self.snapshot().devices.iter().map(Into::into).collect()
+    }
+
+    /// Revokes a device. `false` if there is no such device.
+    pub fn revoke_device(&self, device_id: &str) -> Result<bool> {
+        self.update(|s| {
+            let n = s.devices.len();
+            s.devices.retain(|d| d.device_id != device_id);
+            Ok(s.devices.len() != n)
+        })
+    }
+
+    /// Records activity (persisted at most once a minute per device).
+    pub fn touch_device(&self, device_id: &str) {
+        let now = now_ms();
+        let stale = self
+            .snapshot()
+            .devices
+            .iter()
+            .find(|d| d.device_id == device_id)
+            .is_some_and(|d| {
+                d.last_seen
+                    .is_none_or(|t| now - t >= LAST_SEEN_GRANULARITY_MS)
+            });
+        if stale {
+            let _ = self.update(|s| {
+                if let Some(d) = s.devices.iter_mut().find(|d| d.device_id == device_id) {
+                    d.last_seen = Some(now);
+                }
+                Ok(())
+            });
+        }
+    }
+
     // ------------------------------------------------------------ passwords
 
     pub fn has_owner_password(&self) -> bool {
@@ -308,9 +436,158 @@ pub fn random_token() -> String {
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Pairing codes live this long.
+pub const PAIRING_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+/// A code is burnt after this many wrong guesses (from any address).
+pub const PAIRING_MAX_FAILURES: u32 = 5;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairingCode {
+    pub code: String,
+    /// ms since the Unix epoch.
+    pub expires_at: i64,
+}
+
+/// No code is pending, it was burnt, it expired or it does not match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PairingInvalid;
+
+struct Pending {
+    code: String,
+    expires: std::time::Instant,
+    failures: u32,
+}
+
+/// The one pending 6-digit pairing code (in memory; a restart invalidates it). Single use,
+/// 5 minutes, and burnt after [`PAIRING_MAX_FAILURES`] wrong guesses.
+pub struct PairingStore {
+    ttl: std::time::Duration,
+    cur: Mutex<Option<Pending>>,
+}
+
+impl Default for PairingStore {
+    fn default() -> Self {
+        Self::new(PAIRING_TTL)
+    }
+}
+
+impl PairingStore {
+    pub fn new(ttl: std::time::Duration) -> Self {
+        Self {
+            ttl,
+            cur: Mutex::new(None),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Pending>> {
+        self.cur.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Creates a fresh code (replacing any pending one).
+    pub fn start(&self) -> PairingCode {
+        let mut b = [0u8; 4];
+        let n = loop {
+            getrandom::fill(&mut b).expect("os rng");
+            let n = u32::from_le_bytes(b);
+            // rejection sampling: uniform over 000000..=999999
+            if n < u32::MAX - (u32::MAX % 1_000_000) {
+                break n % 1_000_000;
+            }
+        };
+        let code = format!("{n:06}");
+        let expires = std::time::Instant::now() + self.ttl;
+        *self.lock() = Some(Pending {
+            code: code.clone(),
+            expires,
+            failures: 0,
+        });
+        PairingCode {
+            code,
+            expires_at: now_ms() + self.ttl.as_millis() as i64,
+        }
+    }
+
+    /// Consumes the code when it matches.
+    pub fn complete(&self, code: &str) -> std::result::Result<(), PairingInvalid> {
+        let mut g = self.lock();
+        let Some(p) = g.as_mut() else {
+            return Err(PairingInvalid);
+        };
+        if std::time::Instant::now() >= p.expires {
+            *g = None;
+            return Err(PairingInvalid);
+        }
+        if ct_eq(&p.code, code.trim()) {
+            *g = None;
+            return Ok(());
+        }
+        p.failures += 1;
+        if p.failures >= PAIRING_MAX_FAILURES {
+            *g = None;
+        }
+        Err(PairingInvalid)
+    }
+
+    /// Drops the pending code.
+    pub fn cancel(&self) {
+        *self.lock() = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn devices_are_hashed_listed_and_revoked() {
+        let d = tempfile::tempdir().unwrap();
+        let s = SecurityStore::open(d.path());
+        let (info, token) = s.add_device("Pixel 8").unwrap();
+        assert_eq!(token.len(), 64);
+        assert_eq!(s.find_device(&token).unwrap(), info);
+        assert!(s.find_device("nope").is_none());
+        let raw = std::fs::read_to_string(d.path().join(FILE_NAME)).unwrap();
+        assert!(!raw.contains(&token), "the token itself is never stored");
+        assert!(s.add_device("  ").is_err());
+        s.touch_device(&info.device_id);
+        assert!(s.list_devices()[0].last_seen.is_some());
+        let s2 = SecurityStore::open(d.path());
+        assert_eq!(s2.list_devices().len(), 1);
+        assert!(s.revoke_device(&info.device_id).unwrap());
+        assert!(!s.revoke_device(&info.device_id).unwrap());
+        assert!(
+            s2.find_device(&token).is_none(),
+            "revocation is seen by other handles"
+        );
+    }
+
+    #[test]
+    fn pairing_code_is_single_use_expires_and_burns() {
+        let p = PairingStore::default();
+        let c = p.start();
+        assert_eq!(c.code.len(), 6);
+        assert!(c.code.chars().all(|c| c.is_ascii_digit()));
+        assert!(p.complete("abcdef").is_err());
+        assert!(p.complete(&c.code).is_ok());
+        assert!(p.complete(&c.code).is_err(), "single use");
+        let c = p.start();
+        let wrong = if c.code == "000000" {
+            "000001"
+        } else {
+            "000000"
+        };
+        for _ in 0..PAIRING_MAX_FAILURES {
+            assert!(p.complete(wrong).is_err());
+        }
+        assert!(
+            p.complete(&c.code).is_err(),
+            "burnt after repeated failures"
+        );
+        let p = PairingStore::new(std::time::Duration::from_millis(30));
+        let c = p.start();
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert!(p.complete(&c.code).is_err(), "expired");
+    }
 
     #[test]
     fn password_roundtrip_and_epoch() {

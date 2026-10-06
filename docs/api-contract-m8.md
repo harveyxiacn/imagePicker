@@ -49,3 +49,35 @@ Android 11+ 允许持有 `READ_MEDIA_IMAGES`（13+）/ `READ_EXTERNAL_STORAGE`�
 - 编辑：底部抽屉，横向滚动选择参数 + 单滑块；人像美化同样按人物。
 - 导入：相册列表（`list_albums`）代替文件夹浏览器。
 - 所有桌面快捷键保留（外接键盘）。
+
+## C 附录 · 远程 AI：手机侧端点与实现细节（追加）
+
+> 仅追加，不改动上文 §C。以下为已实现的行为；与上文的差异/补充单独标出。
+
+### 手机侧端点（手机核心自身的 API，仅 owner）
+
+| 方法 | 路径 | 请求 | 响应 |
+|---|---|---|---|
+| POST | `/api/remote/connect` | `{"host_url","code","device_name"?}`（`host_url` 形如 `http://192.168.1.5:7878`，缺协议时补 `http://`；`device_name` 缺省取主机名） | 同 `GET /api/remote/status`。流程：调用主机 `pair/complete` → 令牌写入 `<data_dir>/remote.json`（Unix 0600）→ 设置 `remote_ai = {enabled:true, host_url}` → 立即探测。错误：`401 invalid_pairing_code`、`429 too_many_requests`（含 `retry_after`）、`502 host_unreachable`、`502 pair_failed`、`400`（地址非法） |
+| GET | `/api/remote/status` | — | `{"enabled","host_url","connected","host_tier","last_error"}`；`connected` = 带令牌的 `GET /api/remote/ping` 成功（结果缓存 5 秒）；`host_tier` 来自主机 worker 的 `system.info`（首次连通时询问一次）；未配对/令牌属于另一主机时 `connected=false` 且 `last_error` 说明原因 |
+| DELETE | `/api/remote/connect` | — | `204`：删除 `remote.json`，设置 `remote_ai = {enabled:false, host_url:""}`，回到本地 AI |
+
+- 设置新增字段 `remote_ai: {"enabled": bool, "host_url": string}`（`PATCH /api/settings` 可改；`host_url` 必须是规范化的 `scheme://host[:port]`，否则 `422`）。**令牌永不出现在任何设置/状态响应中**。令牌与配对时的 `host_url` 绑定：把设置里的 `host_url` 改成别处不会把令牌发给新地址（状态显示「需重新配对」）。
+- 仅当 `enabled` 且存在属于该 `host_url` 的令牌时，核心才把 worker 调用路由到 `RemoteWorker`；其余情况使用本地 worker。`guest` 角色对 `/api/remote/*` 一律 `403`。
+
+### 主机侧补充与差异
+
+- **新增** `GET /api/remote/ping`（设备令牌）：`{"ok":true,"tier":string|null,"worker_state":string}`，不会启动主机 worker，供手机做连通性探测。设备端点集合为 `/api/remote/rpc`、`/api/remote/files/*`、`/api/remote/ping`（外加匿名的 `/api/health`）。
+- `pair/start` 要求主机已开启局域网模式（否则 `403 lan_disabled`）；响应在契约字段之外附加 `urls`（候选主机地址数组）；`expires_at` 为毫秒时间戳；`url` 为 `imagepicker://pair?url=<URL 编码的主机地址>&code=<code>`。配对码 6 位、5 分钟、一次性；任意来源累计输错 5 次即作废；`pair/complete` 另按来源 IP 限速（与登录同一参数，超限 `429` + `Retry-After`）。设备令牌 256 位，主机仅存 BLAKE3 摘要（`security.json` 的 `devices`），`last_seen` 至多每分钟落盘一次。最多 32 台设备。
+- 认证结果：设备端点上无令牌/未知或已吊销令牌 → `401`；owner/guest 会话或桌面令牌 → `403`。设备令牌访问其余任何 `/api/*`（照片库、设置、设备列表…）→ `403`。
+- `rpc`：multipart 字段必须先给 `method`、`params`，再给文件；文件字段名 `[A-Za-z0-9_-]{1,32}`；`params` 中图片路径字段（`items[].path`、`photo.path`、`base.path`/`source.path`、`mask`、`path`）**必须**是 `file:<字段名>`，否则 `400`（主机绝不读取其他路径）；`file:` 只允许出现在这些字段。主机把上传落到请求临时目录（保留净化后的文件名，目录结构 `in/<字段>/<文件名>`），强制 `out_dir` 为该请求的 `out/`，并强制 `allow_download=false`（手机无法让主机下载模型，缺模型走 `409`）。输入目录在处理完立即删除；输出文件保留至过期。
+- 产物：结果 JSON 中位于 `out/` 下的文件路径被改写为 `remote:<32 位十六进制 id>`；`GET /api/remote/files/{id}` 仅创建者设备可取（否则 `404`），响应头 `X-File-Name` 给出相对文件名（净化为 `[A-Za-z0-9._-]` 路径段，如 `1.emb.npy`），10 分钟后过期，后台任务每 30 秒清扫；主机重启时清空残留。
+- 限制（均可通过 `ServerOptions.remote` 调整）：请求体 ≤ 64 MB（`413 payload_too_large`）、单文件 ≤ 32 MB、每请求文件 ≤ 64、每请求产物 ≤ 256 MB（`413 result_too_large`）、产物库总量 ≤ 1 GiB（淘汰最旧）、每设备并发 ≤ 2（`429 device_busy`）、上传读取 5 分钟、`analyze.batch` 墙钟上限 30 分钟、其他方法 15 分钟（worker 自带超时通常先触发）。手机断开连接时主机取消正在进行的 `analyze.batch`。
+- 错误映射（主机 → 手机 `WorkerError`）：`409 models_missing`（附 `models`）→ `Rpc{-32010, model_unavailable}`（`CoreError::ModelsMissing`）；`503 worker_unavailable` → `Unavailable`；`504 worker_timeout`（附 `method`、`secs`）→ `CallTimeout`；`502 worker_error`（附 `worker:{code,message,kind,detail}`）→ 原样 `Rpc`；`401` → `Unpaired`；`429` → `Unavailable`；`403 method_not_allowed` 对应白名单外的方法。
+
+### 手机侧上传规则
+
+- 上传前用 `ip-imaging` 解码并按 EXIF 方向转正，**上传直立像素并把 `orientation` 改写为 1**；长边：`analyze.batch`/`mask.generate` 1536，`beauty.prepare`/`besttake.compose`/`inpaint.run`/`enhance.run`/`faces.embed` 2048；不放大。`inpaint.run` 的 `mask` 原样上传（PNG）。归一化坐标（人脸框、`rect`）与缩放无关。
+- `analyze.batch` 单请求上传超过 48 MB 时自动拆成多个请求并合并结果；无法解码/不存在的照片返回逐项错误（`kind: decode_failed`），其余照片照常分析；每个子请求完成后向 `progress` 通道发送 `{"kind":"analyze","done","total"}`。响应里的 `width/height` 是上传副本的尺寸（核心不使用）。
+- 白名单外的 RPC（`llm.plan`、`vlm.*`、`models.delete`、`models.ensure`）在手机侧直接返回 `Unavailable`；模型只能在主机上安装。
+- 断线：连接失败按 0.5/1/2 秒退避重试 3 次（请求体尚未送达，可安全重试），仍失败则 `Unavailable`；`kill()` 对远程 worker 无效（主机的 worker 不归手机管）。

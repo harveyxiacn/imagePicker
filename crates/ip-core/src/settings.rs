@@ -121,6 +121,16 @@ impl Default for AssistantSettings {
     }
 }
 
+/// `settings.remote_ai` (docs/api-contract-m8.md section C): use a home PC's AI worker. The
+/// device token is never part of the settings; it lives in `<data dir>/remote.json`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RemoteAiSettings {
+    pub enabled: bool,
+    /// Normalised `scheme://host[:port]` of the host, or empty.
+    pub host_url: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
@@ -136,6 +146,7 @@ pub struct Settings {
     /// `off` | `sidecar` | `sidecar_and_embedded`
     pub xmp_mode: String,
     pub assistant: AssistantSettings,
+    pub remote_ai: RemoteAiSettings,
 }
 
 impl Default for Settings {
@@ -151,6 +162,7 @@ impl Default for Settings {
             render: RenderSettings::default(),
             xmp_mode: "off".into(),
             assistant: AssistantSettings::default(),
+            remote_ai: RemoteAiSettings::default(),
         }
     }
 }
@@ -204,6 +216,15 @@ impl Settings {
             return Err(CoreError::Unprocessable(
                 "cache.max_gb must be within 0.1..100000".into(),
             ));
+        }
+        if !self.remote_ai.host_url.is_empty() {
+            let norm = ip_worker_client::normalize_host_url(&self.remote_ai.host_url)
+                .map_err(|e| CoreError::Unprocessable(format!("remote_ai.host_url: {e}")))?;
+            if norm != self.remote_ai.host_url {
+                return Err(CoreError::Unprocessable(
+                    "remote_ai.host_url must look like http://host:port".into(),
+                ));
+            }
         }
         if self.models.dir.contains('\0') || self.models.dir.len() > 1024 {
             return Err(CoreError::Unprocessable(
@@ -378,6 +399,7 @@ impl Core {
 
     /// Effects of settings on running parts. `old == None` at start-up.
     pub(crate) fn apply_settings(self: &Arc<Self>, old: Option<&Settings>, new: &Settings) {
+        self.remote.refresh(new);
         let opts = new.worker_options();
         if old.map(|o| o.worker_options()).as_ref() != Some(&opts) {
             // takes effect when the worker process starts next

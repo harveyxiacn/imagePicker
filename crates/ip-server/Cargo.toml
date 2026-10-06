@@ -31,3 +31,5 @@ tokio-tungstenite.workspace = true
 futures-util.workspace = true
 http-body-util.workspace = true
 image.workspace = true
+reqwest.workspace = true
+async-trait.workspace = true
