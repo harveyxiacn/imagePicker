@@ -750,6 +750,11 @@ fn push_m2_filters(q: &PhotoQuery, wheres: &mut Vec<String>, args: &mut Vec<Valu
             conds.join(" AND ")
         ));
     }
+    match q.has_edits {
+        Some(true) => wheres.push("COALESCE(p.has_edits,0) = 1".into()),
+        Some(false) => wheres.push("COALESCE(p.has_edits,0) = 0".into()),
+        None => {}
+    }
     if let Some(n) = q.faces_min {
         wheres.push(format!(
             "p.subject_face_count IS NOT NULL AND p.subject_face_count >= {n}"

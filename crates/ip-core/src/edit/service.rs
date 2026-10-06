@@ -33,7 +33,7 @@ const PROXY_BUDGET_BYTES: usize = 512 * 1024 * 1024;
 const BUCKETS: [u32; 9] = [512, 800, 1024, 1600, 2048, 3072, 4096, 6144, 8192];
 /// Long edge of the AI masks requested from the worker.
 pub const MASK_SIZE: u32 = 1024;
-const MASK_LRU: usize = 12;
+const MASK_LRU: usize = 24;
 
 pub const THUMB_QUALITY: u8 = 80;
 pub const PREVIEW_QUALITY: u8 = 88;
@@ -297,6 +297,7 @@ fn write_png_atomic(img: &image::GrayImage, path: &Path) -> Result<()> {
 
 struct PhotoMasks {
     store: Arc<MaskStore>,
+    beauty: Arc<super::beauty::BeautyStore>,
     photo: PhotoRef,
     handle: Handle,
     mode: MaskMode,
@@ -319,6 +320,13 @@ impl MaskProvider for PhotoMasks {
             Err(e) => Err(anyhow::Error::new(e)),
         }
     }
+
+    fn people(&self) -> ip_render::Result<Vec<ip_render::PersonGeometry>> {
+        let generate = self.mode == MaskMode::Strict;
+        self.beauty
+            .people(&self.photo, &self.handle, generate)
+            .map_err(anyhow::Error::new)
+    }
 }
 
 fn map_render_err(e: anyhow::Error) -> CoreError {
@@ -336,6 +344,7 @@ pub struct RenderService {
     pub renderer: Arc<dyn Renderer>,
     pub luts: Arc<LutLibrary>,
     pub masks: Arc<MaskStore>,
+    pub beauty: Arc<super::beauty::BeautyStore>,
     imaging: Arc<dyn Imaging>,
     db: Db,
     gate: Arc<Semaphore>,
@@ -357,16 +366,28 @@ pub struct ServiceParts {
     pub worker: Arc<dyn AiWorker>,
     pub luts_dir: PathBuf,
     pub masks_dir: PathBuf,
+    pub beauty_dir: PathBuf,
     pub edited_thumbs_dir: PathBuf,
     pub edited_previews_dir: PathBuf,
 }
 
 impl RenderService {
     pub fn new(p: ServiceParts) -> Self {
+        let masks = Arc::new(MaskStore::new(
+            p.db.clone(),
+            p.worker.clone(),
+            p.masks_dir,
+        ));
         Self {
             renderer: p.renderer,
             luts: Arc::new(LutLibrary::new(p.luts_dir)),
-            masks: Arc::new(MaskStore::new(p.db.clone(), p.worker, p.masks_dir)),
+            beauty: Arc::new(super::beauty::BeautyStore::new(
+                p.db.clone(),
+                p.worker,
+                p.beauty_dir,
+                masks.clone(),
+            )),
+            masks,
             imaging: p.imaging,
             db: p.db,
             gate: Arc::new(Semaphore::new(RENDER_CONCURRENCY)),
@@ -458,6 +479,7 @@ impl RenderService {
         let src = self.source(r, source_edge(r, stack, long_edge))?;
         let masks = PhotoMasks {
             store: self.masks.clone(),
+            beauty: self.beauty.clone(),
             photo: r.clone(),
             handle: handle.clone(),
             mode,

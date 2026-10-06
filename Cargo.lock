@@ -2282,6 +2282,7 @@ dependencies = [
  "image",
  "ip-core",
  "ip-imaging",
+ "ip-render",
  "serde",
  "serde_json",
  "tempfile",

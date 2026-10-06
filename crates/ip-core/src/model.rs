@@ -142,8 +142,14 @@ fn default_true() -> bool {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExportRequest {
+    /// Photos to export into `dest` (either this or `folders`).
+    #[serde(default)]
     pub ids: Vec<i64>,
     pub dest: String,
+    /// M4: `{"<subfolder name>": [photo ids]}`; each group goes to `dest/<name>/` (e.g. one
+    /// folder per person). Mutually exclusive with `ids`.
+    #[serde(default)]
+    pub folders: Option<std::collections::BTreeMap<String, Vec<i64>>>,
     #[serde(default)]
     pub long_edge: Option<u32>,
     #[serde(default = "default_quality")]
@@ -264,6 +270,9 @@ pub struct PhotoQuery {
     pub include_background: bool,
     pub faces_min: Option<i64>,
     pub faces_max: Option<i64>,
+    // ---- M4
+    /// `Some(true)`: only photos with edits; `Some(false)`: only unedited ones.
+    pub has_edits: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

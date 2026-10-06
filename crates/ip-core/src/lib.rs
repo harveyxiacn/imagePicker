@@ -129,6 +129,7 @@ impl Core {
             worker: worker.clone(),
             luts_dir: dirs.luts.clone(),
             masks_dir: dirs.masks.clone(),
+            beauty_dir: dirs.beauty.clone(),
             edited_thumbs_dir: dirs.edited_thumbs.clone(),
             edited_previews_dir: dirs.edited_previews.clone(),
         }));

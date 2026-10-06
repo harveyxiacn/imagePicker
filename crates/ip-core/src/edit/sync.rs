@@ -28,6 +28,8 @@ pub enum SyncKind {
     Local,
     Lut,
     OutputSharpen,
+    Beauty,
+    Warp,
 }
 
 impl SyncKind {
@@ -38,6 +40,8 @@ impl SyncKind {
             Self::Local => "local",
             Self::Lut => "lut",
             Self::OutputSharpen => "output_sharpen",
+            Self::Beauty => "beauty",
+            Self::Warp => "warp",
         }
     }
 }
@@ -47,22 +51,56 @@ pub fn op_type(op: &Value) -> Option<&str> {
 }
 
 /// Canonical pipeline position of an op type; unknown (future) ops keep to the end.
-fn rank(op: &Value) -> u8 {
+pub(crate) fn rank(op: &Value) -> u8 {
     match op_type(op) {
         Some("crop") => 0,
-        Some("global") => 1,
-        Some("local") => 2,
-        Some("lut") => 3,
-        Some("output_sharpen") => 4,
-        _ => 5,
+        Some("warp") => 1,
+        Some("global") => 2,
+        Some("local") => 3,
+        Some("beauty") => 4,
+        Some("lut") => 5,
+        Some("output_sharpen") => 6,
+        _ => 7,
+    }
+}
+
+/// The person an op is scoped to: `person_id` of a beauty/warp op or of a local op with an AI
+/// mask. `None` = applies to everyone / not person specific.
+pub fn op_person(op: &Value) -> Option<i64> {
+    match op_type(op) {
+        Some("beauty") | Some("warp") => op.get("person_id").and_then(Value::as_i64),
+        Some("local") => {
+            let m = op.get("mask")?;
+            if m.get("kind").and_then(Value::as_str) == Some("ai") {
+                m.get("person_id").and_then(Value::as_i64)
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
 
 /// Target ops with the `include`d kinds replaced by the source's ops of those kinds.
 pub fn merge_ops(target: &[Value], source: &[Value], include: &[SyncKind]) -> Vec<Value> {
+    merge_ops_scoped(target, source, include, None)
+}
+
+/// [`merge_ops`] for a target whose people are known: source ops scoped to a person
+/// (see [`op_person`]) are copied only when that person appears in the target.
+pub fn merge_ops_scoped(
+    target: &[Value],
+    source: &[Value],
+    include: &[SyncKind],
+    target_people: Option<&std::collections::HashSet<i64>>,
+) -> Vec<Value> {
     let wanted = |op: &Value| op_type(op).is_some_and(|t| include.iter().any(|k| k.as_str() == t));
+    let applies = |op: &Value| match (op_person(op), target_people) {
+        (Some(p), Some(people)) => people.contains(&p),
+        _ => true,
+    };
     let mut out: Vec<Value> = target.iter().filter(|o| !wanted(o)).cloned().collect();
-    out.extend(source.iter().filter(|o| wanted(o)).cloned());
+    out.extend(source.iter().filter(|o| wanted(o) && applies(o)).cloned());
     out.sort_by_key(rank); // stable
     out
 }

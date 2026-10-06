@@ -11,6 +11,9 @@ use tokio::sync::watch;
 
 use crate::analysis::vecs::write_npy_f16;
 
+/// Id of the fake model portrait retouching needs (`required_for: ["beauty"]`).
+pub const BEAUTY_MODEL: &str = "mediapipe-face";
+
 /// One synthetic face.
 #[derive(Clone, Debug)]
 pub struct FakeFace {
@@ -144,6 +147,15 @@ pub struct FakeWorker {
     mask_skipped: Mutex<Vec<String>>,
     /// Makes `mask.generate` fail as if the worker could not start.
     pub mask_unavailable: std::sync::atomic::AtomicBool,
+    /// `beauty.prepare` calls received.
+    pub beauty_calls: AtomicUsize,
+    pub last_beauty_request: Mutex<Option<BeautyPrepareRequest>>,
+    /// Makes `beauty.prepare` fail as if the worker could not start.
+    pub beauty_unavailable: std::sync::atomic::AtomicBool,
+    /// What `faces.embed` returns for every image: `(bbox, embedding)` per face.
+    embed_faces: Mutex<Vec<([f64; 4], Vec<f32>)>>,
+    pub embed_calls: AtomicUsize,
+    pub last_embed_request: Mutex<Option<FacesEmbedRequest>>,
 }
 
 impl Default for FakeWorker {
@@ -165,6 +177,12 @@ impl Default for FakeWorker {
             mask_missing: Mutex::new(vec![]),
             mask_skipped: Mutex::new(vec![]),
             mask_unavailable: std::sync::atomic::AtomicBool::new(false),
+            beauty_calls: AtomicUsize::new(0),
+            last_beauty_request: Mutex::new(None),
+            beauty_unavailable: std::sync::atomic::AtomicBool::new(false),
+            embed_faces: Mutex::new(vec![]),
+            embed_calls: AtomicUsize::new(0),
+            last_embed_request: Mutex::new(None),
         }
     }
 }
@@ -192,6 +210,10 @@ impl FakeWorker {
     }
     pub fn set_mask_skipped(&self, targets: &[&str]) {
         *self.mask_skipped.lock().unwrap() = targets.iter().map(|s| s.to_string()).collect();
+    }
+    /// Faces `faces.embed` reports for any image (embeddings are L2-normalised on the way out).
+    pub fn set_embed_faces(&self, faces: Vec<([f64; 4], Vec<f32>)>) {
+        *self.embed_faces.lock().unwrap() = faces;
     }
     pub fn set_skipped(&self, steps: &[&str]) {
         *self.skipped.lock().unwrap() = steps.iter().map(|s| s.to_string()).collect();
@@ -284,10 +306,14 @@ impl AiWorker for FakeWorker {
                 models: vec!["yunet".into(), "siglip2-base".into()],
             },
         );
+        let mut beauty = m(BEAUTY_MODEL, 12.0, &["beauty"]);
+        beauty.recommended = false;
+        beauty.optional = true;
         Ok(ModelsListing {
             models: vec![
                 m("yunet", 0.3, &["faces"]),
                 m("siglip2-base", 178.0, &["embed"]),
+                beauty,
             ],
             profiles,
         })
@@ -460,6 +486,83 @@ impl AiWorker for FakeWorker {
             resp.models.insert(t.clone(), "fake-seg".into());
         }
         Ok(resp)
+    }
+    async fn beauty_prepare(&self, req: &BeautyPrepareRequest) -> Result<BeautyPrepareResponse> {
+        self.beauty_calls.fetch_add(1, Ordering::SeqCst);
+        *self.last_beauty_request.lock().unwrap() = Some(req.clone());
+        if self.beauty_unavailable.load(Ordering::SeqCst) {
+            return Err(WorkerError::Unavailable("fake worker is down".into()));
+        }
+        let missing = self.missing.lock().unwrap().clone();
+        if missing.iter().any(|m| m == BEAUTY_MODEL) && !req.allow_download {
+            return Err(WorkerError::Rpc {
+                code: ip_worker_client::error::CODE_MODEL_UNAVAILABLE,
+                message: "model unavailable".into(),
+                kind: Some("model_unavailable".into()),
+                detail: Some(json!({ "models": [BEAUTY_MODEL] })),
+            });
+        }
+        let out = std::path::PathBuf::from(&req.out_dir);
+        std::fs::create_dir_all(&out).map_err(|e| WorkerError::Protocol(e.to_string()))?;
+        // Faces the analysis knows about, or one the worker "finds" itself.
+        let found: Vec<(Option<i64>, [f64; 4])> = if req.faces.is_empty() {
+            vec![(None, [0.3, 0.2, 0.4, 0.5])]
+        } else {
+            req.faces.iter().map(|f| (Some(f.face_id), f.bbox)).collect()
+        };
+        let pid = req.photo.photo_id;
+        let mut people = Vec::new();
+        for (i, (face_id, b)) in found.into_iter().enumerate() {
+            let mask = |name: &str, left_half: bool| -> Result<String> {
+                let img = image::GrayImage::from_fn(32, 24, |x, _| {
+                    image::Luma([if (x < 16) == left_half { 255 } else { 0 }])
+                });
+                let p = out.join(format!("{pid}_{i}_{name}.png"));
+                img.save_with_format(&p, image::ImageFormat::Png)
+                    .map_err(|e| WorkerError::Protocol(e.to_string()))?;
+                Ok(p.to_string_lossy().into_owned())
+            };
+            let (x, y, w, h) = (b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32);
+            // 478 landmarks on a ring inside the face box; 33 pose points down the frame
+            let face_landmarks = (0..478)
+                .map(|k| {
+                    let a = k as f32 / 478.0 * std::f32::consts::TAU;
+                    [x + w * (0.5 + 0.4 * a.cos()), y + h * (0.5 + 0.4 * a.sin())]
+                })
+                .collect();
+            let pose = (0..33)
+                .map(|k| [x + w * 0.5, y + h * (k as f32 / 8.0), 0.9])
+                .collect();
+            people.push(BeautyPerson {
+                face_id,
+                face_box: [x, y, w, h],
+                face_landmarks,
+                pose,
+                skin_mask: Some(mask("skin", true)?),
+                body_mask: Some(mask("body", false)?),
+                blemishes: vec![[x + w * 0.5, y + h * 0.4, 0.01]],
+            });
+        }
+        Ok(BeautyPrepareResponse {
+            people,
+            models: json!({"face_landmarks": "fake-mesh"}),
+            skipped: Default::default(),
+        })
+    }
+    async fn faces_embed(&self, req: &FacesEmbedRequest) -> Result<FacesEmbedResponse> {
+        self.embed_calls.fetch_add(1, Ordering::SeqCst);
+        *self.last_embed_request.lock().unwrap() = Some(req.clone());
+        let faces = self.embed_faces.lock().unwrap().clone();
+        let mut out = FacesEmbedResponse::default();
+        for (bbox, mut emb) in faces {
+            crate::analysis::vecs::normalize(&mut emb);
+            out.faces.push(EmbeddedFace {
+                bbox,
+                det_score: 0.99,
+            });
+            out.embeddings.push(emb);
+        }
+        Ok(out)
     }
     async fn shutdown(&self) {
         self.set_state(WorkerState::Stopped);
