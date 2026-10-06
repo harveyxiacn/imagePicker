@@ -211,6 +211,10 @@ export function Grid({ items, onOpen, onToggleStack, onToggleScene }: Props) {
     count: rows.length,
     getScrollElement: () => ref.current,
     estimateSize: rowSize,
+    getItemKey: (i) => {
+      const r = rows[i]
+      return r.kind === 'header' ? r.item.key : `p-${r.items[0].photo.id}`
+    },
     overscan: 4,
     paddingStart: PAD,
     paddingEnd: PAD,

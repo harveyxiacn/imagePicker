@@ -121,6 +121,15 @@ describe('buildGridItems', () => {
     expect(buildGridItems(photos, opts({ scenes, withHeaders: false })).some((i) => i.kind === 'header')).toBe(false)
     expect(buildGridItems(photos, opts({ scenes: [], withHeaders: true })).some((i) => i.kind === 'header')).toBe(false)
   })
+
+  it('gives each run of a non-contiguous scene its own unique header key', () => {
+    // Photo 8 belongs to scene 1 (burst 9) but sorts after a scene-2 photo, e.g. no EXIF time.
+    const interleaved = [photos[0], photos[6], makePhoto(8, { burst_id: 9, burst_size: 1, rank_in_burst: 0 })]
+    const headers = buildGridItems(interleaved, opts({ scenes, withHeaders: true })).filter((i) => i.kind === 'header')
+    expect(headers.map((h) => h.sceneId)).toEqual([1, 2, 1])
+    const keys = headers.map((h) => h.key)
+    expect(new Set(keys).size).toBe(keys.length)
+  })
 })
 
 describe('makeSceneLookup', () => {

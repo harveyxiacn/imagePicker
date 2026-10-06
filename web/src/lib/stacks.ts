@@ -121,6 +121,9 @@ export function buildGridItems(photos: Photo[], opts: StackOptions): GridItem[] 
   }
 
   const out: GridItem[] = []
+  // A scene can reappear non-contiguously (e.g. photos without EXIF time sort elsewhere);
+  // each run gets its own header, so keys must be unique per occurrence.
+  const seen = new Map<number, number>()
   let current: number | null | undefined
   let hideCurrent = false
   for (const item of flat) {
@@ -132,9 +135,11 @@ export function buildGridItems(photos: Photo[], opts: StackOptions): GridItem[] 
       if (info && sid !== null) {
         const collapsed = opts.collapsedScenes.has(sid)
         hideCurrent = collapsed
+        const occurrence = seen.get(sid) ?? 0
+        seen.set(sid, occurrence + 1)
         out.push({
           kind: 'header',
-          key: `scene-${sid}`,
+          key: occurrence === 0 ? `scene-${sid}` : `scene-${sid}-${occurrence}`,
           sceneId: sid,
           index: info.index,
           startAt: info.s.start_at,
