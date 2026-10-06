@@ -247,8 +247,32 @@ pub fn sync_args(extras: &[String]) -> Vec<String> {
 #[derive(Debug, Default)]
 pub struct ProgressParser {
     percent: u8,
-    downloads: u32,
+    /// Announced but unfinished downloads `(package, MiB)`.
+    announced: Vec<(String, f64)>,
+    total_mib: f64,
+    done_mib: f64,
     installs: u32,
+}
+
+/// `numpy (12.0MiB)` -> `("numpy", 12.0)`; unknown sizes count as 1 MiB.
+fn parse_download(rest: &str) -> (String, f64) {
+    let name = rest.split_whitespace().next().unwrap_or("").to_string();
+    let size = rest
+        .rsplit_once('(')
+        .map(|(_, s)| s.trim_end_matches(')').trim())
+        .and_then(|s| {
+            let n = s.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+            let unit = &s[n.len()..];
+            let v: f64 = n.parse().ok()?;
+            Some(match unit {
+                "GiB" => v * 1024.0,
+                "KiB" => v / 1024.0,
+                "B" => v / (1024.0 * 1024.0),
+                _ => v,
+            })
+        })
+        .unwrap_or(1.0);
+    (name, size)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -260,6 +284,14 @@ pub struct ProgressUpdate {
 impl ProgressParser {
     pub fn percent(&self) -> u8 {
         self.percent
+    }
+
+    /// 25..80 across the bytes of all announced downloads.
+    fn download_percent(&self) -> u8 {
+        if self.total_mib <= 0.0 {
+            return 25;
+        }
+        25 + (55.0 * (self.done_mib / self.total_mib).clamp(0.0, 1.0)) as u8
     }
 
     fn at_least(&mut self, p: u8) -> u8 {
@@ -294,9 +326,20 @@ impl ProgressParser {
                     return mk(self, 25, format!("Resolved {}", short(rest)));
                 }
                 if let Some(rest) = l.strip_prefix("Downloading ") {
-                    self.downloads += 1;
-                    let p = 25 + (self.downloads * 3).min(55) as u8;
+                    // "Downloading numpy (12.0MiB)": announced up front, finished by "Downloaded numpy"
+                    let (name, mib) = parse_download(rest);
+                    self.announced.push((name, mib));
+                    self.total_mib += mib;
+                    let p = self.download_percent();
                     return mk(self, p, format!("Downloading {}", short(rest)));
+                }
+                if let Some(rest) = l.strip_prefix("Downloaded ") {
+                    let name = rest.split_whitespace().next().unwrap_or("").to_string();
+                    if let Some(i) = self.announced.iter().position(|(n, _)| *n == name) {
+                        self.done_mib += self.announced.remove(i).1;
+                    }
+                    let p = self.download_percent();
+                    return mk(self, p, format!("Downloaded {}", short(rest)));
                 }
                 if let Some(rest) = l.strip_prefix("Prepared ") {
                     return mk(self, 82, format!("Prepared {}", short(rest)));
@@ -907,6 +950,10 @@ impl Core {
         let text = serde_json::to_vec_pretty(&marker).map_err(|e| fail(e.to_string()))?;
         std::fs::write(rt.root.join(MARKER_FILE), text)
             .map_err(|e| fail(format!("cannot write the install marker: {e}")))?;
+        // the download cache would double the disk use when it cannot hardlink into the venv
+        // (other drive); a repair re-downloads, which is rare
+        let cache = rt.root.join("uv-cache");
+        let _ = tokio::task::spawn_blocking(move || remove_dir_all_retry(&cache)).await;
         // older worker sources are no longer needed (the install is not editable)
         if let Ok(rd) = std::fs::read_dir(rt.root.join("worker-src")) {
             for e in rd.flatten() {

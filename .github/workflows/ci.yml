@@ -89,6 +89,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: pnpm install
         working-directory: apps/desktop
+      # Tauri's externalBin needs the pinned uv (M7 AI runtime installer); sha256-verified, git-ignored.
+      - run: bash apps/desktop/scripts/fetch-uv.sh
       # Compile-only (no installer, no release publishing); builds the SPA via beforeBuildCommand.
       - run: pnpm tauri build --no-bundle
         working-directory: apps/desktop

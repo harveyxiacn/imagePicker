@@ -153,15 +153,27 @@ fn parses_uv_progress() {
 
     let a = p.feed(Step::Sync, "Resolved 83 packages in 1ms").unwrap();
     let mut last = a.percent;
+    // all downloads are announced first, then finish one by one: progress follows the bytes
     for pkg in [
         "onnxruntime-gpu (300MiB)",
-        "nvidia-cudnn-cu13 (700MiB)",
+        "nvidia-cudnn-cu13 (0.7GiB)",
         "numpy (12MiB)",
     ] {
-        let u = p.feed(Step::Sync, &format!("Downloading {pkg}")).unwrap();
-        assert!(u.percent > last, "monotonic: {} > {last}", u.percent);
+        p.feed(Step::Sync, &format!("Downloading {pkg}")).unwrap();
+    }
+    assert_eq!(p.percent(), 25);
+    for done in ["numpy", "onnxruntime-gpu", "nvidia-cudnn-cu13"] {
+        let u = p.feed(Step::Sync, &format!(" Downloaded {done}")).unwrap();
+        assert!(u.percent >= last, "monotonic: {} >= {last}", u.percent);
         last = u.percent;
     }
+    assert_eq!(last, 80);
+    assert_eq!(
+        parse_download("numpy (12.0MiB)"),
+        ("numpy".to_string(), 12.0)
+    );
+    assert_eq!(parse_download("x (2GiB)").1, 2048.0);
+    assert_eq!(parse_download("x").1, 1.0);
     let prepared = p.feed(Step::Sync, "Prepared 83 packages in 40s").unwrap();
     assert!(prepared.percent >= last);
     let plus = p.feed(Step::Sync, " + numpy==2.2.1").unwrap();
