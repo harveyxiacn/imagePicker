@@ -227,7 +227,8 @@ fn check_op(op: &Op) -> Result<()> {
                 range(n, v, 0.0, 100.0)?;
             }
         }
-        Op::Warp(Warp::Unknown) | Op::Unknown => {}
+        // TODO(M5): validate patch rect/feather/amount and that the asset exists.
+        Op::Patch(_) | Op::Warp(Warp::Unknown) | Op::Unknown => {}
     }
     Ok(())
 }

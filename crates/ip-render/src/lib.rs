@@ -31,9 +31,10 @@ fn one() -> u32 {
 
 impl EditStack {
     pub fn is_identity(&self) -> bool {
-        self.ops
-            .iter()
-            .all(|o| matches!(o, Op::Unknown | Op::Warp(Warp::Unknown)))
+        self.ops.iter().all(|o| {
+            matches!(o, Op::Unknown | Op::Warp(Warp::Unknown))
+                || matches!(o, Op::Patch(p) if !p.enabled)
+        })
     }
 }
 
@@ -51,6 +52,9 @@ pub enum Op {
     Beauty(Beauty),
     /// Parametric geometric reshaping of a face or body (M4). Applied right after crop.
     Warp(Warp),
+    /// A generated raster layer (M5: best take, inpainting, enhancement) composited onto
+    /// the upright source before crop.
+    Patch(Patch),
     #[serde(other)]
     Unknown,
 }
@@ -307,6 +311,41 @@ fn yes() -> bool {
     true
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchKind {
+    BestTake,
+    Inpaint,
+    Denoise,
+    FaceRestore,
+    #[serde(other)]
+    Other,
+}
+
+/// A generated layer. The asset is an RGBA image whose alpha is the blend mask, placed
+/// over `rect` (normalised upright pre-crop coordinates) and resampled to fit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Patch {
+    pub kind: PatchKind,
+    /// Opaque asset id resolved through [`MaskProvider::patch`].
+    pub asset: String,
+    /// `[x, y, w, h]` where the asset is placed.
+    pub rect: [f32; 4],
+    /// Extra edge feather as a fraction of the rect's short side, 0..0.5.
+    #[serde(default)]
+    pub feather: f32,
+    /// Blend opacity 0..1 (e.g. denoise strength).
+    #[serde(default = "one_f")]
+    pub amount: f32,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Best take: whose face was replaced, and from which photo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_photo_id: Option<i64>,
+}
+
 // ------------------------------------------------------------------ images & providers
 
 /// Upright 8-bit sRGB image, tightly packed RGB.
@@ -355,6 +394,19 @@ pub trait MaskProvider: Send + Sync {
     fn people(&self) -> Result<Vec<PersonGeometry>> {
         Ok(Vec::new())
     }
+
+    /// RGBA image for a `patch` op's asset (alpha = blend mask). Default: none (skipped).
+    fn patch(&self, _asset: &str) -> Result<Option<RgbaImage>> {
+        Ok(None)
+    }
+}
+
+/// 8-bit RGBA image, tightly packed (straight alpha).
+#[derive(Debug, Clone)]
+pub struct RgbaImage {
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
 }
 
 /// A 3D LUT: `size`^3 entries of RGB in 0..1, red index fastest (`.cube` order).

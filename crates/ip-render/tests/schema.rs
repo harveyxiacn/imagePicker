@@ -4,7 +4,7 @@ use ip_render::{EditStack, MaskRef, MaskTarget, Op};
 fn parses_doc05_stack_and_ignores_future_ops() {
     let json = r#"{"version":1,"ops":[
         {"type":"crop","rect":[0.02,0.05,0.96,0.9],"angle":-1.3,"aspect":"4:5"},
-        {"type":"patch","kind":"best_take","person_id":12,"asset":"x.webp"},
+        {"type":"future_op","kind":"best_take","person_id":12,"asset":"x.webp"},
         {"type":"warp","kind":"face_slim","strength":0.25},
         {"type":"global","exposure":0.35,"contrast":12,"temp":300,
          "curve":{"rgb":[[0,0],[0.25,0.22],[0.75,0.8],[1,1]]},
@@ -106,4 +106,32 @@ fn parses_m4_portrait_ops() {
         o => panic!("{o:?}"),
     }
     assert!(!s.is_identity());
+}
+
+#[test]
+fn parses_m5_patch_op() {
+    use ip_render::PatchKind;
+    let json = r#"{"version":1,"ops":[
+        {"type":"patch","kind":"best_take","asset":"bt_12_881","rect":[0.2,0.2,0.15,0.3],"feather":0.1,"person_id":12,"source_photo_id":4229},
+        {"type":"patch","kind":"inpaint","asset":"ip_1","rect":[0,0,1,1],"enabled":false},
+        {"type":"patch","kind":"hologram","asset":"z","rect":[0,0,1,1]}
+    ]}"#;
+    let s: EditStack = serde_json::from_str(json).unwrap();
+    match &s.ops[0] {
+        Op::Patch(p) => {
+            assert_eq!(p.kind, PatchKind::BestTake);
+            assert_eq!(
+                (p.amount, p.enabled, p.source_photo_id),
+                (1.0, true, Some(4229))
+            );
+        }
+        o => panic!("{o:?}"),
+    }
+    assert!(matches!(&s.ops[2], Op::Patch(p) if p.kind == PatchKind::Other));
+    // A disabled patch alone is not an edit.
+    let only_disabled = EditStack {
+        version: 1,
+        ops: vec![s.ops[1].clone()],
+    };
+    assert!(only_disabled.is_identity());
 }
