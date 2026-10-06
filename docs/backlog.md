@@ -21,6 +21,9 @@
 | P1 | RAW/HEIC 导出只合成 EXIF（未复制原始 EXIF）；XMP/IPTC 丢失；非 sRGB 源未做色彩转换 | M5 core |
 | P2 | 生成任务没有取消接口、没有持久化任务记录 | M5 |
 | P2 | 一键全员最佳总以组内最佳为底片 | M5 core |
+| P1 | 大面积消除（超过 512px 的洞）结果偏糊、有残影；默认 LaMa，需 SDXL 增强包实测（真实照片：去除雕像） | M5 worker |
+| P1 | 雕像/海报上的人脸会被当作「路人」；界面需确认后才消除，但检测应区分真人（活体/语义） | M5 |
+| P2 | SDXL 增强包未用真实权重测试；OpenCV 构建无 AKAZE，仅 ORB 对齐 | M5 worker |
 | P2 | 身体形变后的生成式背景补全 | M4 render |
 | P2 | 皮肤蒙版回退方案未扣除眉毛 | M4 render |
 
@@ -28,6 +31,7 @@
 
 - NIMA 美学/技术质量模型：权重 Apache-2.0，训练数据 AVA / TID2013 有研究用途条款。
 - 天空分割 `skyseg-u2net`：训练数据未公开。
+- GFPGAN：FFHQ 训练数据有独立条款；Real-ESRGAN ONNX 来自 facefusion 镜像（上游 BSD-3）。
 
 ## 已在集成中修复（记录）
 
