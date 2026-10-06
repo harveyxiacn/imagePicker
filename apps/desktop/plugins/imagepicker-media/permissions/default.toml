@@ -1,0 +1,14 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "All imagepicker-media commands (Android only; the plugin is not registered on desktop)."
+permissions = [
+  "allow-request-permission",
+  "allow-list-albums",
+  "allow-share",
+  "allow-trash",
+  "allow-start-foreground",
+  "allow-stop-foreground",
+  "allow-keep-awake",
+  "allow-publish-exports",
+]

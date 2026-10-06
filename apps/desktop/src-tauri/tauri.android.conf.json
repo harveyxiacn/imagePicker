@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeDevCommand": "pnpm --dir ../../web dev --host"
+  },
+  "bundle": {
+    "externalBin": [],
+    "resources": [],
+    "android": { "minSdkVersion": 29 }
+  }
+}

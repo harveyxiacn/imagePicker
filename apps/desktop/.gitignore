@@ -1,2 +1,4 @@
 node_modules/
-src-tauri/gen/
+# src-tauri/gen/android is committed (Tauri convention); its own .gitignore covers generated files.
+src-tauri/gen/schemas/
+src-tauri/gen/android/.kotlin/

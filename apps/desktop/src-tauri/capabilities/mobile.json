@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Android: the SPA (served by the embedded server on 127.0.0.1) may call the imagepicker-media plugin (permissions, albums, share, trash, foreground service, keep-awake, publish).",
+  "windows": ["main"],
+  "platforms": ["android"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*/*", "http://localhost:*/*"]
+  },
+  "permissions": ["core:default", "imagepicker-media:default"]
+}
