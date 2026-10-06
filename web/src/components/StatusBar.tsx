@@ -8,6 +8,7 @@ import { analysisFraction, cancelAnalysis } from '@/lib/analysis'
 import { useHistory } from '@/lib/history'
 import { Link } from 'react-router-dom'
 import { useUi } from '@/stores/ui'
+import { GenTasks } from './GenTasks'
 
 interface Props {
   sessionId: number
@@ -57,6 +58,7 @@ export function StatusBar({ sessionId, session, photos }: Props) {
           </button>
         </span>
       )}
+      <GenTasks />
       {analysis?.state === 'failed' && <span className="text-danger">{analysis.error ?? t('analysis.failed')}</span>}
       {taste?.active && (
         // key = labels so the chip pops whenever personalised scoring is retrained (`taste.updated`)

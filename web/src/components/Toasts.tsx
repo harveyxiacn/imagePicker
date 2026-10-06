@@ -1,6 +1,7 @@
 import { AlertCircle, CheckCircle2, Download, Info, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAnalysisUi } from '@/stores/analysis'
+import { isGenKind } from '@/stores/gen'
 import { useToasts } from '@/stores/toasts'
 
 export function Toasts() {
@@ -18,7 +19,7 @@ export function Toasts() {
       aria-live="polite"
     >
       {Object.values(tasks)
-        .filter((task) => !(task.kind === 'model_download' && consentOpen))
+        .filter((task) => !(task.kind === 'model_download' && consentOpen) && !isGenKind(task.kind))
         .map((task) => {
         const pct = task.total > 0 ? Math.round((task.done / task.total) * 100) : 0
         return (

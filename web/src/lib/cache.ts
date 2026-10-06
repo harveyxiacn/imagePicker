@@ -26,6 +26,8 @@ export const qk = {
   collections: ['collections'] as const,
   collectionCount: (sid: number, query: string) => ['collectionCount', sid, query] as const,
   taste: ['taste'] as const,
+  bystanders: (photoId: number) => ['bystanders', photoId] as const,
+  besttake: (burstId: number) => ['besttake', burstId] as const,
   best: (sid: number, ids: number[], n: number) => ['best', sid, ids, n] as const,
 }
 
@@ -80,6 +82,8 @@ export interface ApplyDeps {
   /** Fetch one photo (defaults to the API); injectable for tests. */
   fetchPhoto?: (id: number) => Promise<Photo>
   onAnalysis?: (e: Extract<ServerEvent, { type: 'analysis.progress' }>) => void
+  /** M5: besttake.done / inpaint.done / enhance.done */
+  onGen?: (e: Extract<ServerEvent, { type: 'besttake.done' | 'inpaint.done' | 'enhance.done' }>) => void
 }
 
 /** Up to this many `analysis.updated` ids are re-fetched individually; more triggers a throttled list refetch. */
@@ -142,6 +146,7 @@ export function applyEvents(
   let peopleChanged = false
   let collectionsChanged = false
   const beautyReady = new Set<number>()
+  const genDone: Extract<ServerEvent, { type: 'besttake.done' | 'inpaint.done' | 'enhance.done' }>[] = []
   let taste: Extract<ServerEvent, { type: 'taste.updated' }> | null = null
   let worker: Extract<ServerEvent, { type: 'worker.status' }> | null = null
 
@@ -187,6 +192,11 @@ export function applyEvents(
         break
       case 'worker.status':
         worker = ev
+        break
+      case 'besttake.done':
+      case 'inpaint.done':
+      case 'enhance.done':
+        genDone.push(ev)
         break
       case 'beauty.ready':
         beautyReady.add(ev.photo_id)
@@ -272,6 +282,7 @@ export function applyEvents(
     )
   }
 
+  if (deps.onGen) for (const g of genDone) deps.onGen(g)
   if (onTask) for (const t of tasks.values()) onTask(t)
 
   return {

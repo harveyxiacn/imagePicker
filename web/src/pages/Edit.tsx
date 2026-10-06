@@ -11,6 +11,7 @@ import { EditPanel } from '@/components/edit/EditPanel'
 import { HistoryPanel } from '@/components/edit/HistoryPanel'
 import { ExportDialog } from '@/components/ExportDialog'
 import { Filmstrip } from '@/components/Filmstrip'
+import { GenTasks } from '@/components/GenTasks'
 import { HelpOverlay } from '@/components/HelpOverlay'
 import { ModelConsentDialog } from '@/components/ModelConsentDialog'
 import { qk } from '@/lib/cache'
@@ -18,6 +19,7 @@ import { flushSaves } from '@/lib/editActions'
 import { isEmptyStack } from '@/lib/edit'
 import { useHistory } from '@/lib/history'
 import { useEdit } from '@/stores/edit'
+import { useRepair } from '@/stores/repair'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { useEditActions } from './useEditActions'
@@ -53,6 +55,7 @@ export function Edit() {
         if (alive) useEdit.getState().load(photoId, res.stack)
       })
       .catch((err: unknown) => useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000))
+    useRepair.getState().reset()
     useUi.getState().setActive(photoId)
     return () => {
       alive = false
@@ -63,6 +66,7 @@ export function Edit() {
   useEffect(
     () => () => {
       void flushSaves(qc)
+      useRepair.getState().reset()
       useEdit.setState({ photoId: null, loaded: false, dragging: false, compare: 'off', cropMode: false, maskOverlay: false, activeLocal: null, historyOpen: false, copyDialog: false, autoApplied: null, flash: [] })
     },
     [qc],
@@ -170,7 +174,10 @@ export function Edit() {
           <Users size={14} />
           {t('edit.syncGroup')}
         </button>
-        <span className="ml-auto text-xs text-muted">{photos.length > 0 && photo ? `${photos.findIndex((p) => p.id === photo.id) + 1} / ${photos.length}` : ''}</span>
+        <span className="ml-auto text-xs">
+          <GenTasks />
+        </span>
+        <span className="text-xs text-muted">{photos.length > 0 && photo ? `${photos.findIndex((p) => p.id === photo.id) + 1} / ${photos.length}` : ''}</span>
       </div>
       <Filmstrip photos={photos} activeId={photoId} onPick={go} />
 

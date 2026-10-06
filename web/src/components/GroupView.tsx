@@ -1,5 +1,6 @@
 import { ArrowLeftRight, Ban, ChevronLeft, ChevronRight, Flag as FlagIcon, Link2, Link2Off, Scissors, Sparkles, Merge, ThumbsUp } from 'lucide-react'
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import type { Photo } from '@/api/types'
 import { issueBadges } from '@/lib/ai'
@@ -37,6 +38,7 @@ export function GroupView({ group, slots, onPick, onSwap, onRate }: Props) {
   const [per, setPer] = useState<Record<number, ViewState>>({})
   const [hover, setHover] = useState({ nx: 0.5, ny: 0.5 })
   const zHeld = useKeyHeld('z')
+  const navigate = useNavigate()
 
   const { burst, index, count, photos } = group
   const sceneLabel = photos[0]?.scene_type ? t(`scene_type.${photos[0].scene_type}`) : null
@@ -159,7 +161,14 @@ export function GroupView({ group, slots, onPick, onSwap, onRate }: Props) {
 
       <div className="max-h-[38%] shrink-0 overflow-y-auto border-t border-line bg-panel">
         {group.burstId !== null && (
-          <ExpressionMatrix burstId={group.burstId} photos={photos} aId={compareA} bId={activeId} onPick={pick} />
+          <ExpressionMatrix
+            burstId={group.burstId}
+            photos={photos}
+            aId={compareA}
+            bId={activeId}
+            onPick={pick}
+            onCompose={photos[0] ? () => navigate(`/s/${photos[0].session_id}/besttake/${group.burstId}`) : undefined}
+          />
         )}
       </div>
     </div>

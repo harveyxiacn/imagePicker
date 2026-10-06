@@ -13,9 +13,10 @@ import {
   hashString,
   newThumbVersion,
 } from './db'
-import { aiHandlers, filterAi, sortAi } from './ai'
+import { aiHandlers, filterAi, missingModelIds, sortAi } from './ai'
 import { editHandlers, renderEdited } from './edits'
 import { m4Handlers, recordTasteLabels } from './m4'
+import { m5Handlers } from './m5'
 import { photoSvg } from './svg'
 
 const err = (status: number, code: string, message: string) =>
@@ -168,6 +169,7 @@ export const handlers = [
   ...aiHandlers,
   ...editHandlers,
   ...m4Handlers,
+  ...m5Handlers,
 
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0-mock' })),
 
@@ -276,6 +278,11 @@ export const handlers = [
     await lat()
     const body = (await request.json()) as ExportBody
     if (!body.dest) return err(400, 'bad_request', 'dest required')
+    if (body.upscale) {
+      // M5: super-resolution needs the Real-ESRGAN model (409 models_missing -> consent dialog)
+      const miss = missingModelIds(['realesrgan-x4'])
+      if (miss.length) return HttpResponse.json({ error: { code: 'models_missing', message: 'required models are not installed' }, models: miss }, { status: 409 })
+    }
     ;(globalThis as { __lastExport?: unknown }).__lastExport = body
     const total = body.folders ? Object.values(body.folders).reduce((n, ids) => n + ids.length, 0) : (body.ids?.length ?? 0)
     return HttpResponse.json({ task_id: simulateExport(total) }, { status: 202 })

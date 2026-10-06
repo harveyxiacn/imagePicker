@@ -45,6 +45,11 @@ const MODELS: ModelInfo[] = [
   { id: 'mediapipe-pose-landmarker', task: ['pose'], size_mb: 9, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
   { id: 'selfie-multiclass', task: ['mask_skin', 'mask_person'], size_mb: 16, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
   { id: 'sam2-tiny', task: ['mask_subject', 'mask_person'], size_mb: 156, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
+  // M5 generative repair (fetched on first use of inpaint / denoise / face restore / upscale)
+  { id: 'lama', task: ['inpaint'], size_mb: 196, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
+  { id: 'scunet', task: ['denoise'], size_mb: 71, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
+  { id: 'gfpgan-v1.4', task: ['face_restore'], size_mb: 332, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
+  { id: 'realesrgan-x4', task: ['upscale'], size_mb: 64, license: 'BSD-3-Clause', noncommercial: false, installed: false, required_for: [] },
 ]
 
 /** Ids from `ids` that are not installed yet (used by the M3 mask endpoint to answer 409 models_missing). */
@@ -128,6 +133,8 @@ interface PhotoAi {
 }
 const photoAi = new Map<number, PhotoAi>()
 export const aiOf = (id: number) => photoAi.get(id)
+/** M5 mock helpers: face / burst records for the best-take plan. */
+export const faceRecOf = (id: number) => faceById.get(id)
 
 interface TrackTruth {
   pi: number
@@ -326,6 +333,7 @@ interface BurstRec {
   photo_ids: number[] // time order
 }
 const bursts = new Map<number, BurstRec>()
+export const burstRecOf = (id: number): BurstRec | undefined => bursts.get(id)
 const sceneStore = new Map<number, Scene[]>()
 let nextBurstId = 1
 let nextSceneId = 1

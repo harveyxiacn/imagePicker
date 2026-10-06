@@ -7,7 +7,8 @@
 import type { Adjust, EditStack, HslBand, LocalOp, MaskRef, Photo } from '@/api/types'
 import { HSL_BANDS } from '@/api/types'
 import { curveFn } from '@/lib/curves'
-import { getCrop, isEmptyStack, isGlobal, isLocal, isLut, isSharpen, normalizeStack } from '@/lib/edit'
+import { getCrop, isEmptyStack, isGlobal, isLocal, isLut, isPatch, isSharpen, normalizeStack } from '@/lib/edit'
+import { assetBitmap } from './assets'
 import { drawMask } from './masks'
 import { applyBeauty, applyWarps } from './portrait'
 import { photoSvg } from './svg'
@@ -226,6 +227,47 @@ async function sourceImage(p: Photo, longEdge: number): Promise<HTMLImageElement
   return img
 }
 
+// ---------------------------------------------------------------- patches (M5)
+
+/** Paste the enabled patch layers onto the upright source before crop (contract M5 A render order). */
+async function withPatches(img: CanvasImageSource, stack: EditStack, W: number, H: number): Promise<CanvasImageSource> {
+  const patches = stack.ops.filter(isPatch).filter((o) => o.enabled !== false)
+  if (!patches.length) return img
+  const sc = new OffscreenCanvas(W, H)
+  const sctx = sc.getContext('2d')!
+  sctx.drawImage(img, 0, 0, W, H)
+  for (const op of patches) {
+    const bmp = await assetBitmap(op.asset)
+    if (!bmp) continue
+    const [x, y, w, h] = op.rect
+    const dx = x * W
+    const dy = y * H
+    const dw = Math.max(1, w * W)
+    const dh = Math.max(1, h * H)
+    sctx.save()
+    sctx.globalAlpha = clamp01(op.amount ?? 1)
+    const f = clamp01((op.feather ?? 0) * 2)
+    if (f > 0.01) {
+      // extra edge feather: soften the rim of the patch
+      const tmp = new OffscreenCanvas(Math.ceil(dw), Math.ceil(dh))
+      const t = tmp.getContext('2d')!
+      t.drawImage(bmp, 0, 0, tmp.width, tmp.height)
+      t.globalCompositeOperation = 'destination-in'
+      t.translate(tmp.width / 2, tmp.height / 2)
+      t.scale(tmp.width / 2, tmp.height / 2)
+      const g = t.createRadialGradient(0, 0, 0, 0, 0, 1)
+      g.addColorStop(0, 'rgba(0,0,0,1)')
+      g.addColorStop(Math.max(0, 1 - f), 'rgba(0,0,0,1)')
+      g.addColorStop(1, 'rgba(0,0,0,0)')
+      t.fillStyle = g
+      t.fillRect(-1, -1, 2, 2)
+      sctx.drawImage(tmp, dx, dy, dw, dh)
+    } else sctx.drawImage(bmp, dx, dy, dw, dh)
+    sctx.restore()
+  }
+  return sc
+}
+
 // ---------------------------------------------------------------- main
 
 export interface MockRenderOptions {
@@ -266,9 +308,10 @@ export async function renderMock(p: Photo, stackIn: EditStack, opts: MockRenderO
     c.scale(cover, cover)
     c.translate(-W / 2, -H / 2)
   }
+  const source = await withPatches(img, stack, W, H)
   ctx.save()
   geom(ctx)
-  ctx.drawImage(img, 0, 0, W, H)
+  ctx.drawImage(source, 0, 0, W, H)
   ctx.restore()
 
   if (!isEmptyStack(stack)) {

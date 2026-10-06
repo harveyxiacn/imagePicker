@@ -21,10 +21,12 @@ interface Props {
   bId: number | null
   /** Click a cell: select that frame as B (Shift = pin as A). */
   onPick: (photoId: number, e?: React.MouseEvent) => void
+  /** Open the Best Take editor for this group (doc 04 3.3 "✨ 生成全员最佳表情合成"). */
+  onCompose?: () => void
 }
 
 /** Person x frame expression matrix (doc 04 3.3): green = eyes open + smile, yellow = so-so, red = closed/blurry. */
-export function ExpressionMatrix({ burstId, photos, aId, bId, onPick }: Props) {
+export function ExpressionMatrix({ burstId, photos, aId, bId, onPick, onCompose }: Props) {
   const { t } = useTranslation()
   const q = useBurstFaces(burstId)
   const menu = useFaceMenu()
@@ -124,11 +126,15 @@ export function ExpressionMatrix({ burstId, photos, aId, bId, onPick }: Props) {
           <Legend color="var(--warning)" label={t('matrix.ok')} />
           <Legend color="var(--danger)" label={t('matrix.bad')} />
         </span>
-        {!bestForAll && (
-          <button className="btn !h-6 text-xs text-ai" disabled title={t('common.soon')}>
-            ✨ {t('matrix.compose')}
-          </button>
-        )}
+        <button
+          className={`btn !h-6 text-xs ${bestForAll ? 'text-ai' : 'btn-primary'}`}
+          disabled={!onCompose || photos.length < 2}
+          onClick={onCompose}
+          title={t('matrix.composeHint')}
+          data-testid="matrix-compose"
+        >
+          ✨ {t('matrix.compose')}
+        </button>
       </div>
       {menu.node}
     </div>

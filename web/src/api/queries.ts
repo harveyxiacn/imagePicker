@@ -126,3 +126,24 @@ export function useCollectionCount(sessionId: number, query: string, enabled = t
 export function useTaste() {
   return useQuery({ queryKey: qk.taste, queryFn: api.taste, staleTime: 15_000 })
 }
+
+/** Non-subject faces of a photo (M5 "消除路人"). */
+export function useBystanders(photoId: number | undefined) {
+  return useQuery({
+    queryKey: qk.bystanders(photoId ?? -1),
+    queryFn: () => api.bystanders(photoId!),
+    select: (d) => d.faces,
+    enabled: photoId !== undefined,
+    staleTime: 30_000,
+  })
+}
+
+/** Best Take plan of a burst (M5): base photo + per-person candidates. */
+export function useBestTakePlan(burstId: number | null) {
+  return useQuery({
+    queryKey: qk.besttake(burstId ?? -1),
+    queryFn: () => api.bestTakePlan(burstId!),
+    enabled: burstId !== null,
+    staleTime: 15_000,
+  })
+}

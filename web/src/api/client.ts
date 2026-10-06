@@ -33,6 +33,11 @@ import type {
   FaceSearchResponse,
   PhotoPeopleResponse,
   Taste,
+  BestTakePlan,
+  BestTakeChoice,
+  BystandersResponse,
+  InpaintBody,
+  EnhanceBody,
 } from './types'
 
 export class ApiError extends Error {
@@ -220,6 +225,13 @@ export const api = {
   deleteCollection: (id: string) => request<void>('DELETE', `/collections/${encodeURIComponent(id)}`),
   taste: () => request<Taste>('GET', '/taste'),
   resetTaste: () => request<void>('POST', '/taste/reset'),
+  // ---- M5 ----
+  bestTakePlan: (burstId: number) => request<BestTakePlan>('GET', `/bursts/${burstId}/besttake`),
+  bestTake: (base_photo_id: number, choices: BestTakeChoice[]) => request<{ task_id: string }>('POST', '/besttake', { base_photo_id, choices }),
+  bestTakeAuto: (burstId: number) => request<{ task_id: string }>('POST', `/bursts/${burstId}/besttake/auto`),
+  bystanders: (id: number) => request<BystandersResponse>('GET', `/photos/${id}/bystanders`),
+  inpaint: (id: number, body: InpaintBody) => request<{ task_id: string }>('POST', `/photos/${id}/inpaint`, body),
+  enhance: (id: number, body: EnhanceBody) => request<{ task_id: string }>('POST', `/photos/${id}/enhance`, body),
   fsRoots: () => request<{ roots: string[] }>('GET', '/fs/roots'),
   fsList: (path?: string) =>
     request<FsList>('GET', `/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -250,4 +262,6 @@ export const thumbUrl = (p: Pick<Photo, 'id' | 'thumb_version'>, s: 256 | 512 = 
 export const previewUrl = (id: number, s: 1024 | 2048 | 4096 = 2048, v?: string) =>
   `${BASE}/preview/${id}?s=${s}${v ? `&v=${encodeURIComponent(v)}` : ''}`
 export const faceCropUrl = (faceId: number, s: 128 | 256 = 128) => `${BASE}/faces/${faceId}/crop?s=${s}`
+/** RGBA PNG of a patch asset (contract M5 C). */
+export const assetUrl = (photoId: number, asset: string) => `${BASE}/assets/${photoId}/${encodeURIComponent(asset)}`
 export const originalUrl = (id: number) => `${BASE}/original/${id}`

@@ -77,6 +77,7 @@ export const BINDINGS: Binding[] = [
   { id: 'edit.before', keys: ['\\'], scopes: ['edit'], group: 'edit', desc: 'beforeAfter' },
   { id: 'edit.mask', keys: ['o'], scopes: ['edit'], group: 'edit', desc: 'maskOverlay' },
   { id: 'edit.crop', keys: ['r'], scopes: ['edit'], group: 'edit', desc: 'cropMode' },
+  { id: 'edit.brush', keys: ['shift+e'], scopes: ['edit'], group: 'edit', desc: 'brushErase' },
   { id: 'edit.copy', keys: ['mod+shift+c'], scopes: ['edit'], group: 'edit', desc: 'copySettings' },
   { id: 'edit.paste', keys: ['mod+shift+v'], scopes: ['edit'], group: 'edit', desc: 'pasteSettings' },
   { id: 'select.all', keys: ['mod+a'], scopes: ['grid'], group: 'edit', desc: 'selectAll' },
