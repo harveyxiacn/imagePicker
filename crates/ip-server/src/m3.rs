@@ -118,7 +118,8 @@ pub async fn import_lut(
     State(st): State<AppState>,
     ApiJson(b): ApiJson<LutBody>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!(st.core.import_lut(b.path).await?)))
+    let path = crate::routes::whitelisted(&st, &b.path).await?;
+    Ok(Json(json!(st.core.import_lut(path).await?)))
 }
 
 #[derive(Deserialize)]

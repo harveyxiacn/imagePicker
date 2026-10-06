@@ -28,6 +28,21 @@ const DEV_API_PORT: u16 = 7878;
 
 struct ServerHandle(Mutex<Option<RunningServer>>);
 
+/// A folder the user chose through a native dialog or by dropping it on the window is allowed
+/// for the API's path whitelist (import / export / folder browser), even outside home or the
+/// removable drives.
+fn allow_root(app: &AppHandle, path: &Path) {
+    if let Some(h) = app.try_state::<ServerHandle>() {
+        if let Ok(server) = h.0.lock() {
+            if let Some(s) = server.as_ref() {
+                if let Err(e) = s.security.add_root(path) {
+                    tracing::warn!(error = %e, "could not remember the chosen folder");
+                }
+            }
+        }
+    }
+}
+
 /// Native folder picker. `None` = cancelled.
 #[tauri::command]
 async fn pick_folder(app: AppHandle) -> Option<String> {
@@ -36,10 +51,9 @@ async fn pick_folder(app: AppHandle) -> Option<String> {
         let _ = tx.send(p);
     });
     let picked = rx.await.ok().flatten()?;
-    picked
-        .into_path()
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned())
+    let path = picked.into_path().ok()?;
+    allow_root(&app, &path);
+    Some(path.to_string_lossy().into_owned())
 }
 
 /// "Reveal in Explorer/Finder" for a photo path (selects the file in its folder).
@@ -133,15 +147,17 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(app, &[&file, &view, &help])
 }
 
+/// Per-launch secret (256 bit). The server only accepts API calls that carry it: the window is
+/// opened once at `/?token=<token>`, the server answers with an HttpOnly SameSite=Strict cookie
+/// and a redirect that strips the token, so the SPA (fetch, `<img>`, WebSocket) is authenticated
+/// by the cookie and the token never reaches page JavaScript.
 fn session_token() -> String {
-    // TODO(auth): the server currently ignores this token. Once ip-server enforces a session
-    // token, forward it from the SPA (`window.__IP_SESSION_TOKEN__`) as `X-IP-Token`.
-    let mut buf = [0u8; 16];
+    let mut buf = [0u8; 32];
     getrandom::fill(&mut buf).expect("os rng");
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn start_server(app: &AppHandle) -> anyhow::Result<(RunningServer, String)> {
+fn start_server(app: &AppHandle, token: &str) -> anyhow::Result<(RunningServer, String)> {
     let dev = tauri::is_dev();
     let web_dir = if dev {
         None // Vite serves the SPA; it proxies /api to DEV_API_PORT.
@@ -163,6 +179,12 @@ fn start_server(app: &AppHandle) -> anyhow::Result<(RunningServer, String)> {
         port: if dev { DEV_API_PORT } else { 0 },
         data_dir: std::env::var_os("IMAGEPICKER_DATA_DIR").map(PathBuf::from),
         web_dir,
+        // Dev: the SPA comes from Vite (another origin that cannot do the token exchange), so
+        // the server stays in loopback-only development mode and allows the Vite origins.
+        session_token: (!dev).then(|| token.to_string()),
+        dev_cors: dev,
+        // LAN access (if enabled in settings) is picked up from `security.json` by the server.
+        ..ServerConfig::default()
     };
     let server = match tauri::async_runtime::block_on(ip_server::spawn(cfg.clone())) {
         Ok(s) => s,
@@ -184,7 +206,7 @@ fn start_server(app: &AppHandle) -> anyhow::Result<(RunningServer, String)> {
             .map(|u| u.to_string())
             .unwrap_or_else(|| "http://localhost:5173".into())
     } else {
-        server.url()
+        format!("http://127.0.0.1:{}/?token={token}", server.addr.port())
     };
     Ok((server, url))
 }
@@ -207,7 +229,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![pick_folder, reveal_in_folder])
         .setup(|app| {
             let handle = app.handle().clone();
-            let (server, url) = start_server(&handle)?;
+            let token = session_token();
+            let (server, url) = start_server(&handle, &token)?;
             app.manage(ServerHandle(Mutex::new(Some(server))));
 
             app.set_menu(build_menu(&handle)?)?;
@@ -235,17 +258,11 @@ fn main() {
                 _ => {}
             });
 
-            let token = session_token();
-            let init = format!(
-                "window.__IP_SESSION_TOKEN__ = {};",
-                serde_json::to_string(&token)?
-            );
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
                 .title("imagePicker")
                 .inner_size(1360.0, 860.0)
                 .min_inner_size(1024.0, 700.0)
                 .background_color(Color(BG.0, BG.1, BG.2, 255))
-                .initialization_script(init)
                 .build()?;
             Ok(())
         })
@@ -267,6 +284,7 @@ fn main() {
                             paths.iter().find_map(|p| p.parent().map(Path::to_path_buf))
                         });
                     if let Some(t) = target {
+                        allow_root(window.app_handle(), &t);
                         dispatch_import(&win, &t);
                     }
                 }

@@ -24,6 +24,8 @@ rusqlite.workspace = true
 dirs.workspace = true
 image.workspace = true
 async-trait.workspace = true
+argon2 = "0.6"
+getrandom.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

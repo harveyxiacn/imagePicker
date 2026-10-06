@@ -33,6 +33,17 @@ enum Command {
         /// Directory with the built web UI (default: ./web/dist if present).
         #[arg(long)]
         web_dir: Option<PathBuf>,
+        /// LAN mode: bind 0.0.0.0 and require a password from remote clients (needs a stored
+        /// password, or --password / $IMAGEPICKER_PASSWORD).
+        #[arg(long)]
+        lan: bool,
+        /// Owner password (min. 8 characters; stored as an Argon2id hash). Prefer the
+        /// IMAGEPICKER_PASSWORD environment variable: command lines are visible to other users.
+        #[arg(long)]
+        password: Option<String>,
+        /// Optional read-only guest password (also enables guest login).
+        #[arg(long)]
+        guest_password: Option<String>,
     },
     /// Import a folder without a UI, wait for thumbnails and print statistics.
     Import {
@@ -629,8 +640,16 @@ async fn main() -> Result<()> {
             host,
             data_dir,
             web_dir,
+            lan,
+            password,
+            guest_password,
         } => {
             init_tracing("info,tower_http=info");
+            let password = password.or_else(|| {
+                std::env::var("IMAGEPICKER_PASSWORD")
+                    .ok()
+                    .filter(|p| !p.is_empty())
+            });
             let web_dir = web_dir.or_else(|| {
                 let p = PathBuf::from("web/dist");
                 p.join("index.html").is_file().then_some(p)
@@ -640,6 +659,10 @@ async fn main() -> Result<()> {
                 port,
                 data_dir,
                 web_dir,
+                lan,
+                password,
+                guest_password,
+                ..ServerConfig::default()
             })
             .await
         }
@@ -782,10 +805,14 @@ mod tests {
                 host,
                 data_dir,
                 web_dir,
+                lan,
+                password,
+                guest_password,
             } => {
                 assert_eq!(port, 7878);
                 assert_eq!(host, "127.0.0.1");
                 assert!(data_dir.is_none() && web_dir.is_none());
+                assert!(!lan && password.is_none() && guest_password.is_none());
             }
             _ => panic!("wrong command"),
         }
@@ -803,6 +830,25 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(cli.command, Command::Serve { port: 9000, .. }));
+        let cli = Cli::try_parse_from([
+            "imagepicker",
+            "serve",
+            "--lan",
+            "--password",
+            "hunter22",
+            "--guest-password",
+            "visitor1",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Serve {
+                lan: true,
+                password: Some(_),
+                guest_password: Some(_),
+                ..
+            }
+        ));
     }
 
     #[test]
