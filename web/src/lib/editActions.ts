@@ -155,7 +155,7 @@ export async function autoApply(qc: QueryClient, mode: AutoMode, label: string):
 
 // ---------------------------------------------------------------- copy / paste / sync
 
-async function fetchStack(qc: QueryClient, id: number): Promise<EditStack> {
+export async function fetchStack(qc: QueryClient, id: number): Promise<EditStack> {
   const res = await api.edits(id)
   qc.setQueryData(qk.edits(id), res)
   return res.stack

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { dispatchKey, isTextEntryTarget, type Handlers } from '@/lib/keymap'
 import { useEdit } from '@/stores/edit'
+import { useRepair } from '@/stores/repair'
 import { useUi } from '@/stores/ui'
 import type { EditActions } from './useEditActions'
 
@@ -19,11 +20,17 @@ export function useEditShortcuts(actions: EditActions) {
         const st = useEdit.getState()
         st.setCropMode(!st.cropMode)
       },
+      'edit.brush': () => {
+        const r = useRepair.getState()
+        r.setBrush(!r.brush)
+        if (!r.brush) useEdit.getState().setCropMode(false)
+      },
       'edit.copy': () => actions.copy(),
       'edit.paste': () => void actions.paste(),
       'edit.close': () => {
         const st = useEdit.getState()
-        if (st.cropMode) st.setCropMode(false)
+        if (useRepair.getState().brush) useRepair.getState().setBrush(false)
+        else if (st.cropMode) st.setCropMode(false)
         else if (st.historyOpen) st.setHistoryOpen(false)
         else if (st.compare !== 'off') st.setCompare('off')
         else actions.close()

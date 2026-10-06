@@ -1,8 +1,11 @@
 import { useMutation } from '@tanstack/react-query'
-import { FolderOpen, Loader2 } from 'lucide-react'
+import { AlertTriangle, FolderOpen, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
+import { useHardware } from '@/api/queries'
+import { missingModelsOf } from '@/lib/analysis'
+import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
 import { FolderBrowser } from './FolderBrowser'
 import { Modal } from './Modal'
@@ -36,6 +39,9 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const [template, setTemplate] = useState('{name}')
   const [scope, setScope] = useState<'selected' | 'all'>('selected')
   const [browse, setBrowse] = useState(false)
+  const [upscale, setUpscale] = useState<0 | 2 | 4>(0)
+  const hardware = useHardware().data
+  const slowTier = !hardware?.tier || hardware.tier === 'T0' || hardware.tier === 'T1'
   const push = useToasts((s) => s.push)
   const updateTask = useToasts((s) => s.updateTask)
 
@@ -46,7 +52,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const longEdge = edge === 'original' ? null : edge === 'custom' ? custom : Number(edge)
 
   const mut = useMutation({
-    mutationFn: () => api.exportPhotos({ ...(byFolder ? { folders: byFolder } : { ids }), dest, long_edge: longEdge, quality, name_template: template || '{name}' }),
+    mutationFn: () => api.exportPhotos({ ...(byFolder ? { folders: byFolder } : { ids }), dest, long_edge: longEdge, quality, name_template: template || '{name}', ...(upscale ? { upscale } : {}) }),
     onSuccess: ({ task_id }) => {
       try {
         localStorage.setItem(LS_KEY, dest)
@@ -57,7 +63,12 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
       updateTask({ type: 'task.progress', task_id, kind: 'export', done: 0, total: ids.length, state: 'running' })
       onOpenChange(false)
     },
-    onError: (e) => push('error', e instanceof Error ? e.message : String(e)),
+    onError: (e) => {
+      // 409 models_missing (Real-ESRGAN): consent dialog, then export again
+      const missing = missingModelsOf(e)
+      if (missing) useAnalysisUi.getState().setConsent({ sessionId: 0, profile: 'fast', models: missing, onReady: () => mut.mutate() })
+      else push('error', e instanceof Error ? e.message : String(e))
+    },
   })
 
   const example = (template || '{name}').replaceAll('{name}', 'IMG_0001') + '.jpg'
@@ -134,6 +145,26 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
                 <input type="number" className="field w-28" min={64} max={16384} value={custom} onChange={(e) => setCustom(Math.max(64, Number(e.target.value) || 64))} aria-label={t('export.custom')} />
               )}
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1" data-testid="export-upscale">
+            <label htmlFor="exp-up" className="text-muted">
+              {t('export.upscale')}
+            </label>
+            <select id="exp-up" className="field w-fit" value={upscale} onChange={(e) => setUpscale(Number(e.target.value) as 0 | 2 | 4)}>
+              <option value={0}>{t('export.upscaleOff')}</option>
+              <option value={2}>{t('export.upscale2')}</option>
+              <option value={4}>{t('export.upscale4')}</option>
+            </select>
+            {upscale > 0 && (
+              <div
+                className={`flex items-start gap-1.5 rounded-control p-2 text-xs ${slowTier ? 'bg-warning/10 text-warning' : 'bg-panel text-muted'}`}
+                data-testid="export-upscale-hint"
+              >
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                <span>{slowTier ? t('export.upscaleSlow', { tier: hardware?.tier ?? 'T0' }) : t('export.upscaleFast', { tier: hardware?.tier ?? '' })}</span>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-1">

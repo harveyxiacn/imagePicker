@@ -20,6 +20,7 @@ export type ConnectionStatus = 'connecting' | 'open' | 'closed'
 export interface EventsOptions {
   onTask?: (e: TaskEvent) => void
   onAnalysis?: ApplyDeps['onAnalysis']
+  onGen?: ApplyDeps['onGen']
   onStatus?: (s: ConnectionStatus) => void
   /** Coalescing window in ms (server also coalesces at 100ms). */
   flushMs?: number
@@ -46,7 +47,7 @@ export function startEvents(qc: QueryClient, opts: EventsOptions = {}): () => vo
     if (!buffer.length) return
     const batch = buffer
     buffer = []
-    applyEvents(qc, batch, opts.onTask, { onAnalysis: opts.onAnalysis })
+    applyEvents(qc, batch, opts.onTask, { onAnalysis: opts.onAnalysis, onGen: opts.onGen })
   }
 
   const connect = () => {

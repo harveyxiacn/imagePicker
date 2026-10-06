@@ -26,6 +26,7 @@ import {
   type WarpBodyOp,
   type WarpFaceOp,
   type PortraitOp,
+  type PatchOp,
   type Point,
 } from '@/api/types'
 import { isIdentityCurve } from './curves'
@@ -45,6 +46,7 @@ export const isBeauty = (o: Op): o is BeautyOp => o.type === 'beauty'
 export const isWarpFace = (o: Op): o is WarpFaceOp => o.type === 'warp' && (o as { kind?: unknown }).kind === 'face'
 export const isWarpBody = (o: Op): o is WarpBodyOp => o.type === 'warp' && (o as { kind?: unknown }).kind === 'body'
 export const isPortrait = (o: Op): o is PortraitOp => isBeauty(o) || isWarpFace(o) || isWarpBody(o)
+export const isPatch = (o: Op): o is PatchOp => o.type === 'patch'
 export const isKnown = (o: Op): o is KnownOp => EDIT_SECTIONS.includes(o.type as EditSection)
 
 // ---------------------------------------------------------------- ranges
@@ -167,12 +169,13 @@ export function isNeutralPortrait(o: PortraitOp): boolean {
   return zero(o.arms) && zero(o.legs) && zero(o.waist) && zero(o.lengthen_legs)
 }
 
-export const isEmptyStack = (s: EditStack): boolean => normalizeStack(s).ops.every((o) => !isKnown(o) && !isPortrait(o))
+/** A disabled patch renders nothing (ip-render `is_identity`), so it does not make a stack "edited". */
+export const isEmptyStack = (s: EditStack): boolean => normalizeStack(s).ops.every((o) => !isKnown(o) && !isPortrait(o) && !(isPatch(o) && o.enabled !== false))
 
 // ---------------------------------------------------------------- ordering
 
-// Render order (docs/api-contract-m4.md A): crop -> warp -> global -> local -> beauty -> LUT -> sharpen.
-const RANK: Record<string, number> = { crop: 0, warp: 0.5, global: 1, local: 3, beauty: 3.5, lut: 4, output_sharpen: 5 }
+// Render order (docs/api-contract-m5.md A): patch -> crop -> warp -> global -> local -> beauty -> LUT -> sharpen.
+const RANK: Record<string, number> = { patch: -1, crop: 0, warp: 0.5, global: 1, local: 3, beauty: 3.5, lut: 4, output_sharpen: 5 }
 const rankOf = (o: Op) => RANK[o.type] ?? 2
 
 export function orderOps(ops: Op[]): Op[] {
@@ -511,4 +514,9 @@ export function cropToolStack(s: EditStack): EditStack {
 export function beforeRequest(s: EditStack): { original?: true; stack?: EditStack } {
   const crop = getCrop(s)
   return crop ? { stack: { version: s.version ?? 1, ops: [crop] } } : { original: true }
+}
+
+/** The stack without its crop: Best Take edits in full-frame coordinates (face boxes are pre-crop). */
+export function withoutCrop(s: EditStack): EditStack {
+  return { version: s.version ?? 1, ops: s.ops.filter((o) => !isCrop(o)) }
 }

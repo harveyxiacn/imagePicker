@@ -7,8 +7,10 @@ import { commitLive, setLive } from '@/lib/editActions'
 import { useElementSize } from '@/lib/hooks'
 import { FIT_VIEW, type ViewState } from '@/lib/zoom'
 import { useEdit } from '@/stores/edit'
+import { useRepair } from '@/stores/repair'
 import { ZoomPane } from '../ZoomPane'
 import { CropOverlay, MaskHandles, MaskOverlay, SplitOverlay } from './Overlays'
+import { BrushOverlay, BystanderOverlay } from './RepairOverlays'
 import { usePreviewFrame } from './usePreviewFrame'
 
 const SHOW_BADGE = __MOCK__ || import.meta.env.DEV
@@ -26,6 +28,8 @@ export function EditCanvas({ photo }: { photo: Photo }) {
   const maskOverlay = useEdit((s) => s.maskOverlay)
   const activeLocal = useEdit((s) => s.activeLocal)
   const clipping = useEdit((s) => s.clipping)
+  const brush = useRepair((s) => s.brush)
+  const hoverBystanders = useRepair((s) => s.hoverBystanders)
   const [box, size] = useElementSize<HTMLDivElement>()
   const [viewState, setViewState] = useState<{ key: string; view: ViewState }>({ key: '', view: FIT_VIEW })
   const viewKey = `${photo.id}:${cropMode}`
@@ -69,6 +73,8 @@ export function EditCanvas({ photo }: { photo: Photo }) {
       )}
       {!cropMode && !showingOriginal && maskOverlay && activeOp && <MaskOverlay photoId={photo.id} op={activeOp} aspect={frameAspect} crop={crop} />}
       {!cropMode && !showingOriginal && activeOp && activeLocal !== null && <MaskHandles index={activeLocal} op={activeOp} />}
+      {!cropMode && !showingOriginal && hoverBystanders && <BystanderOverlay photoId={photo.id} crop={crop} aspect={photoAspect} />}
+      {!cropMode && !showingOriginal && brush && <BrushOverlay crop={crop} aspect={photoAspect} />}
     </>
   )
 

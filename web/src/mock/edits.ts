@@ -33,7 +33,7 @@ function versionFor(p: Photo, stack: EditStack): string {
 export function store(p: Photo, stackIn: EditStack): { stack: EditStack; updated_at: number; thumb_version: string } {
   const stack = normalizeStack(stackIn)
   const updated_at = Date.now()
-  if (isEmptyStack(stack)) saved.delete(p.id)
+  if (stack.ops.length === 0) saved.delete(p.id)
   else saved.set(p.id, { stack, updated_at })
   p.has_edits = !isEmptyStack(stack)
   p.thumb_version = versionFor(p, stack)

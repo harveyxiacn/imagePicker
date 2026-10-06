@@ -124,6 +124,8 @@ export interface ImportBody {
 }
 
 export interface ExportBody {
+  /** M5: super-resolution factor applied after rendering (slow on CPU tiers) */
+  upscale?: 2 | 4
   /** exactly one of `ids` / `folders` (M4 C.2) */
   ids?: number[]
   /** sub-folder name -> photo ids (export by person) */
@@ -292,6 +294,9 @@ export type ServerEvent =
   | { type: 'edits.updated'; items: { id: number; has_edits: boolean; thumb_version: string }[] }
   | { type: 'worker.status'; state: WorkerState; tier: 'T0' | 'T1' | 'T2' | 'T3' | null; error: string | null }
   | { type: 'beauty.ready'; photo_id: number }
+  | { type: 'besttake.done'; photo_id: number; results: BestTakeResult[] }
+  | { type: 'inpaint.done'; photo_id: number; ok: boolean; reason: string | null }
+  | { type: 'enhance.done'; photo_id: number; op: EnhanceOp; ok: boolean; reason: string | null }
   | { type: 'taste.updated'; labels: number; active: boolean; alpha: number }
   | { type: 'collections.updated' }
 
@@ -523,13 +528,89 @@ export interface Taste {
   updated_at: number | null
 }
 
-/** Other M5 ops (patch...) are preserved verbatim and ignored by the UI. */
+// ---- M5: patch layers, best take, inpaint, enhance (docs/api-contract-m5.md; mirrors ip-render `Patch`) ----
+
+export type PatchKind = 'best_take' | 'inpaint' | 'denoise' | 'face_restore'
+export const PATCH_KINDS: PatchKind[] = ['best_take', 'inpaint', 'denoise', 'face_restore']
+
+/** A generated raster layer: RGBA PNG `asset` (alpha = blend mask) placed over `rect` of the upright, pre-crop image. */
+export interface PatchOp {
+  type: 'patch'
+  kind: PatchKind
+  asset: string
+  /** normalised [x, y, w, h], upright image, before crop */
+  rect: [number, number, number, number]
+  /** extra edge feather, fraction of the rect's short side, 0..0.5 */
+  feather?: number
+  /** blend opacity 0..1 */
+  amount?: number
+  enabled?: boolean
+  /** best take: whose face was replaced and from which photo */
+  person_id?: number
+  source_photo_id?: number
+}
+
+export type BestTakeWarning = 'large_pose_change' | 'camera_moved' | 'occlusion' | 'seam'
+
+export interface BestTakeCandidate {
+  photo_id: number
+  face_id: number
+  expression_score: number
+  composable: boolean
+  reason: string | null
+}
+export interface BestTakePerson {
+  track_id: number
+  person_id: number | null
+  person_name: string | null
+  base_face_id: number
+  /** sorted by expression score, best first */
+  candidates: BestTakeCandidate[]
+  best_photo_id: number
+}
+export interface BestTakePlan {
+  base_photo_id: number
+  people: BestTakePerson[]
+}
+export interface BestTakeChoice {
+  base_face_id: number
+  source_photo_id: number
+  source_face_id: number
+}
+export interface BestTakeResult {
+  base_face_id: number
+  ok: boolean
+  warnings: BestTakeWarning[]
+  reason: string | null
+}
+
+export interface BystandersResponse {
+  faces: { face_id: number; bbox: [number, number, number, number] }[]
+}
+
+/** Brush stroke: normalised points (upright, pre-crop); `radius` is a fraction of the image WIDTH. */
+export interface Stroke {
+  points: Point[]
+  radius: number
+}
+export type InpaintBody =
+  | { bystanders: true; model?: 'lama' | 'sdxl' }
+  | { face_ids: number[]; model?: 'lama' | 'sdxl' }
+  | { strokes: Stroke[]; model?: 'lama' | 'sdxl' }
+
+export type EnhanceOp = 'denoise' | 'face_restore'
+export interface EnhanceBody {
+  op: EnhanceOp
+  strength: number
+}
+
+/** Other ops are preserved verbatim and ignored by the UI. */
 export interface UnknownOp {
   type: string
   [k: string]: unknown
 }
 export type KnownOp = CropOp | GlobalOp | LocalOp | LutOp | OutputSharpenOp
-export type Op = KnownOp | PortraitOp | UnknownOp
+export type Op = KnownOp | PortraitOp | PatchOp | UnknownOp
 
 export interface EditStack {
   version: number
