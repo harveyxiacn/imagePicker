@@ -275,7 +275,7 @@ mod tests {
             json!({"type":"crop","rect":[0,0,1,1]}),
             json!({"type":"global","exposure":1.0}),
             json!({"type":"lut","file":"a"}),
-            json!({"type":"warp","x":1}),
+            json!({"type":"future_op","x":1}),
         ];
         let s = vec![
             json!({"type":"global","exposure":-1.0}),

@@ -175,7 +175,7 @@ async fn edits_crud_thumb_version_and_event() {
     // unknown ops survive verbatim
     let stack = json!({"version":1,"ops":[
         {"type":"global","exposure":0.5},
-        {"type":"warp","mesh":[1,2,3]}
+        {"type":"future_op","mesh":[1,2,3]}
     ]});
     let put = e.core.put_edit(id, stack.clone()).await.unwrap();
     assert_ne!(put.thumb_version, p0.thumb_version);
@@ -304,8 +304,10 @@ fn validation_rejects_bad_stacks() {
     assert!(bad(json!({"version":1,"ops":[
         {"type":"global","curve":{"rgb":[[0.5,0],[0.2,1]]}}]}))); // unsorted curve
                                                                   // unknown op types are fine
-    assert!(!bad(json!({"version":1,"ops":[{"type":"beauty","x":1}]})));
-    let ok = validate_stack(json!({"version":1,"ops":[{"type":"beauty"}]})).unwrap();
+    assert!(!bad(
+        json!({"version":1,"ops":[{"type":"future_op","x":1}]})
+    ));
+    let ok = validate_stack(json!({"version":1,"ops":[{"type":"future_op"}]})).unwrap();
     assert!(!ok.has_edits, "only unknown ops: nothing visible");
     // hash is stable
     let h = stack_hash(&json!({"version":1,"ops":[]}));
@@ -499,7 +501,7 @@ async fn user_presets_crud_and_filtering() {
         {"type":"local","mask":{"kind":"ai","target":"person","person_id":3},"adjust":{"exposure":0.3}},
         {"type":"lut","file":"film_warm","amount":0.5},
         {"type":"output_sharpen","amount":10},
-        {"type":"warp","x":1}
+        {"type":"future_op","x":1}
     ]});
     let p = e
         .core
