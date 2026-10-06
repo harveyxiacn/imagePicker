@@ -47,3 +47,14 @@ export function resolveDirEntry(parent: string, entry: string): string {
 }
 
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+/** "10月1日 14:32" style capture clock (wall time at the location, like formatDate). */
+export function formatClock(ms: number, locale?: string, offsetMin?: number | null, withDate = true): string {
+  return new Date(ms + (offsetMin ?? 0) * 60_000).toLocaleString(locale, {
+    timeZone: 'UTC',
+    hour12: false,
+    ...(withDate ? { month: 'short', day: 'numeric' } : {}),
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}

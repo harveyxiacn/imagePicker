@@ -1,7 +1,9 @@
 import { Ban, Flag as FlagIcon, Star } from 'lucide-react'
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ColorLabel, Flag } from '@/api/types'
 
+import { starFills } from '@/lib/ai'
 import { COLOR_NAMES, colorVar } from '@/lib/colors'
 
 /** Clickable 5-star control. `value` null/0 = none. Clicking the current value clears it. */
@@ -36,24 +38,40 @@ export function StarRating({
   )
 }
 
-/** AI rating slot (M1: always empty, dashed purple). */
-export function AiRatingSlot({ value }: { value: number | null }) {
+/** One star: hollow purple outline for AI ratings; `half` fills the left half. */
+function AiStar({ fill, size }: { fill: 'full' | 'half' | 'empty'; size: number }) {
+  const path = 'M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3 6.1 20.6l1.3-6.6L2.5 9.4l6.6-.8z'
+  const id = useId()
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden className="shrink-0">
+      {fill === 'half' && (
+        <defs>
+          <clipPath id={id}>
+            <rect x="0" y="0" width="12" height="24" />
+          </clipPath>
+        </defs>
+      )}
+      <path d={path} fill="none" stroke="currentColor" strokeWidth={fill === 'empty' ? 1.5 : 2} strokeLinejoin="round" opacity={fill === 'empty' ? 0.35 : 1} strokeDasharray={fill === 'empty' ? '2.5 2.5' : undefined} />
+      {fill === 'half' && <path d={path} fill="currentColor" clipPath={`url(#${id})`} opacity="0.85" />}
+    </svg>
+  )
+}
+
+/**
+ * AI rating (0.5 steps): hollow purple stars, visually distinct from the solid amber user stars.
+ * `value` null = not analysed yet.
+ */
+export function AiStars({ value, size = 14, showValue = true }: { value: number | null; size?: number; showValue?: boolean }) {
   const { t } = useTranslation()
   return (
-    <div className="flex items-center gap-1 text-ai" title={t('inspector.aiPending')}>
+    <div className="flex items-center gap-1 text-ai" title={value === null ? t('inspector.aiPending') : `${t('inspector.aiRating')} ${value.toFixed(1)}`} data-testid="ai-stars">
       <span aria-hidden>✨</span>
       <div className="flex gap-0.5">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <Star
-            key={n}
-            size={14}
-            strokeDasharray="2 2"
-            fill={value !== null && n <= value ? 'currentColor' : 'none'}
-            className="opacity-50"
-          />
+        {starFills(value).map((f, i) => (
+          <AiStar key={i} fill={f} size={size} />
         ))}
       </div>
-      <span className="ml-1 text-xs text-muted">{value === null ? t('inspector.aiPending') : value.toFixed(1)}</span>
+      {showValue && <span className="tnum ml-0.5 text-xs text-muted">{value === null ? t('inspector.aiPending') : value.toFixed(1)}</span>}
     </div>
   )
 }

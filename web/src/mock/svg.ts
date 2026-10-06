@@ -1,5 +1,7 @@
 import type { Photo } from '@/api/types'
-import { mulberry32 } from './db'
+import { faceInner } from './avatar'
+import { avatarStyleOf, renderableFaces } from './ai'
+import { burstKeyOf, mulberry32 } from './db'
 
 /** Deterministic landscape-ish placeholder "photo" as SVG, sized to the photo's aspect. */
 export function photoSvg(p: Photo, longEdge: number, label = true): string {
@@ -9,7 +11,7 @@ export function photoSvg(p: Photo, longEdge: number, label = true): string {
   const w = Math.max(16, Math.round(w0 * k))
   const h = Math.max(16, Math.round(h0 * k))
   // burst neighbours share a hue so groups look alike
-  const group = Math.floor(p.id / 5)
+  const group = burstKeyOf(p.id)
   const rnd = mulberry32(group * 7919 + 13)
   const hue = Math.floor(rnd() * 360)
   const r2 = mulberry32(p.id * 104729 + 7)
@@ -24,6 +26,17 @@ export function photoSvg(p: Photo, longEdge: number, label = true): string {
   const bright = 30 + Math.round(r2() * 20)
   const blur = (p.id % 11 === 0) ? `<filter id="b"><feGaussianBlur stdDeviation="${(w / 60).toFixed(1)}"/></filter>` : ''
   const filt = blur ? ' filter="url(#b)"' : ''
+  // Analysed photos show their (synthetic) faces so crops, boxes and expressions are visible.
+  let faces = ''
+  for (const { face, pi } of renderableFaces(p.id)) {
+    const [bx, by, bw, bh] = face.bbox
+    const st = avatarStyleOf(pi)
+    // faceInner is drawn in a 100x100 box where the head spans ~x22..78, y16..87
+    faces +=
+      `<svg x="${(bx * w).toFixed(1)}" y="${(by * h).toFixed(1)}" width="${(bw * w).toFixed(1)}" height="${(bh * h).toFixed(1)}" viewBox="14 8 72 86">` +
+      faceInner(st, face.eyes_open ?? 1, face.smile ?? 0.3) +
+      `</svg>`
+  }
   const fs = Math.max(8, Math.round(h * 0.08))
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
@@ -36,6 +49,7 @@ export function photoSvg(p: Photo, longEdge: number, label = true): string {
     (label
       ? `<text x="${Math.round(w * 0.04)}" y="${Math.round(h - h * 0.05)}" font-family="monospace" font-size="${fs}" fill="#fff" fill-opacity=".75">${p.file_name}</text>`
       : '') +
+    faces +
     `</svg>`
   )
 }

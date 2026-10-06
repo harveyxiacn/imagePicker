@@ -6,9 +6,10 @@ import type { Photo } from '@/api/types'
 import { useKeyHeld } from '@/lib/hooks'
 import { FIT_VIEW, type ViewState } from '@/lib/zoom'
 import { useUi } from '@/stores/ui'
+import { FaceBoxes } from './FaceBoxes'
 import { ZoomPane } from './ZoomPane'
 import { Filmstrip } from './Filmstrip'
-import { AiRatingSlot, StarRating } from './controls'
+import { AiStars, StarRating } from './controls'
 
 interface Props {
   photos: Photo[]
@@ -29,6 +30,7 @@ export function Loupe({ photos, photo, index, onMove, onPick, onRate }: Props) {
   const [hover, setHover] = useState({ nx: 0.5, ny: 0.5 })
   const toggleSignal = useUi((s) => s.zoomToggle)
   const zHeld = useKeyHeld('z')
+  const showFaces = useUi((s) => s.showFaces)
 
   const id = photo?.id ?? null
   const view = state.id === id ? state.view : FIT_VIEW
@@ -64,6 +66,7 @@ export function Loupe({ photos, photo, index, onMove, onPick, onRate }: Props) {
           hold={zHeld ? hover : null}
           onHover={(nx, ny) => setHover({ nx, ny })}
           onSwipe={(d) => onMove(d)}
+          overlay={showFaces && photo.analyzed ? <FaceBoxes photoId={photo.id} /> : undefined}
         />
         <button
           className="btn btn-icon absolute top-1/2 left-2 -translate-y-1/2 bg-black/50 backdrop-blur disabled:hidden"
@@ -91,7 +94,7 @@ export function Loupe({ photos, photo, index, onMove, onPick, onRate }: Props) {
             </div>
             <div className="flex items-center gap-3">
               <StarRating value={photo.user_rating} onChange={onRate} size={15} />
-              <AiRatingSlot value={photo.ai_rating} />
+              <AiStars value={photo.ai_rating} />
             </div>
           </div>
         </div>

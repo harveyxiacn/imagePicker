@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { applyEvents, type TaskEvent } from '@/lib/cache'
+import { applyEvents, type ApplyDeps, type TaskEvent } from '@/lib/cache'
 import type { ServerEvent } from './types'
 
 export interface SocketLike {
@@ -19,6 +19,7 @@ export type ConnectionStatus = 'connecting' | 'open' | 'closed'
 
 export interface EventsOptions {
   onTask?: (e: TaskEvent) => void
+  onAnalysis?: ApplyDeps['onAnalysis']
   onStatus?: (s: ConnectionStatus) => void
   /** Coalescing window in ms (server also coalesces at 100ms). */
   flushMs?: number
@@ -45,7 +46,7 @@ export function startEvents(qc: QueryClient, opts: EventsOptions = {}): () => vo
     if (!buffer.length) return
     const batch = buffer
     buffer = []
-    applyEvents(qc, batch, opts.onTask)
+    applyEvents(qc, batch, opts.onTask, { onAnalysis: opts.onAnalysis })
   }
 
   const connect = () => {

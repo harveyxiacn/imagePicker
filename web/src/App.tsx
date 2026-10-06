@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { startEvents } from '@/api/events'
 import { Home } from '@/pages/Home'
 import { Library } from '@/pages/Library'
+import { People } from '@/pages/People'
 import { Toasts } from '@/components/Toasts'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -53,6 +54,7 @@ function Shell() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/s/:sessionId" element={<Library />} />
+        <Route path="/s/:sessionId/people" element={<People />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <Toasts />

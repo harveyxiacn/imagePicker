@@ -13,6 +13,7 @@ import {
   hashString,
   newThumbVersion,
 } from './db'
+import { aiHandlers, filterAi, sortAi } from './ai'
 import { photoSvg } from './svg'
 
 const err = (status: number, code: string, message: string) =>
@@ -144,6 +145,7 @@ function filterPhotos(photos: Photo[], q: URLSearchParams): Photo[] {
     if (color && p.color_label !== color) return false
     return true
   })
+  out = filterAi(out, q)
   const sort = q.get('sort') ?? 'taken_at'
   const byId = (a: Photo, b: Photo) => a.id - b.id
   if (sort === 'taken_at')
@@ -151,6 +153,7 @@ function filterPhotos(photos: Photo[], q: URLSearchParams): Photo[] {
   else if (sort === '-taken_at')
     out = [...out].sort((a, b) => (b.taken_at ?? -Infinity) - (a.taken_at ?? -Infinity) || byId(a, b))
   else if (sort === 'name') out = [...out].sort((a, b) => a.file_name.localeCompare(b.file_name) || byId(a, b))
+  else if (sort === 'ai') out = sortAi(out)
   else if (sort === 'rating')
     out = [...out].sort((a, b) => (b.user_rating ?? -1) - (a.user_rating ?? -1) || byId(a, b))
   return out
@@ -159,6 +162,8 @@ function filterPhotos(photos: Photo[], q: URLSearchParams): Photo[] {
 const lat = () => delay(15 + Math.random() * 35)
 
 export const handlers = [
+  ...aiHandlers,
+
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0-mock' })),
 
   http.post('/api/import', async ({ request }) => {

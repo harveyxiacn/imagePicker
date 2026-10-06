@@ -25,6 +25,10 @@ export interface MockSession {
 }
 
 const sessions = new Map<number, MockSession>()
+
+/** Ground-truth burst membership (photo id -> id of the burst's first photo). Only exposed after analysis. */
+const burstKeys = new Map<number, number>()
+export const burstKeyOf = (photoId: number): number => burstKeys.get(photoId) ?? photoId
 let nextPhotoId = 1
 let nextSessionId = 1
 
@@ -80,17 +84,22 @@ export function generatePhotos(
   const photos: Photo[] = []
   let t = startMs
   let burstLeft = 0
+  let burstKey = 0
   const sep = rootPath.includes('\\') ? '\\' : '/'
   const pick = <T,>(arr: T[]) => arr[Math.floor(rnd() * arr.length)]
   for (let i = 0; i < count; i++) {
     // bursts: runs of near-identical frames a few hundred ms apart
+    const id = nextPhotoId++
     if (burstLeft > 0) {
       burstLeft--
       t += 200 + rnd() * 500
     } else {
       t += 4_000 + rnd() * 120_000
-      if (rnd() < 0.18) burstLeft = 2 + Math.floor(rnd() * 6)
+      burstKey = id
+      // runs of 2-12 shots
+      if (rnd() < 0.18) burstLeft = 1 + Math.floor(rnd() * 11)
     }
+    burstKeys.set(id, burstKey)
     let r = rnd() * 100
     let fmt = FORMATS[0]
     for (const f of FORMATS) {
@@ -100,7 +109,6 @@ export function generatePhotos(
       }
     }
     const [w, h] = pick(DIMS)
-    const id = nextPhotoId++
     const name = `IMG_${String(i + 1).padStart(4, '0')}.${fmt.ext}`
     const rated = rnd() < 0.3
     const fr = rnd()
@@ -130,6 +138,14 @@ export function generatePhotos(
       burst_id: null,
       thumb_ready: rnd() < thumbReadyRatio,
       thumb_version: (hashString(String(id)) & 0xffffff).toString(16),
+      ai_score: null,
+      issues: [],
+      rank_in_burst: null,
+      burst_size: null,
+      scene_type: null,
+      face_count: null,
+      subject_face_count: null,
+      analyzed: false,
     })
   }
   return photos
