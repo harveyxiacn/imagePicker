@@ -198,6 +198,9 @@ pub struct Person {
     pub cover_face_id: Option<i64>,
     pub photo_count: i64,
     pub hidden: bool,
+    /// A subject seen in a single photo only (docs/api-contract-m5.md D): selectable in the
+    /// portrait panel, hidden from `GET /api/people` unless `include_singletons=1`.
+    pub singleton: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

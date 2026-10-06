@@ -546,6 +546,8 @@ async fn export_copies_resizes_and_never_overwrites() {
         quality: 85,
         name_template: tpl.into(),
         apply_edits: true,
+        upscale: None,
+        strip_gps: false,
         folders: None,
     };
 

@@ -7,7 +7,10 @@ use anyhow::{Context, Result};
 use ip_imaging::{EncodedImage, ImageFormat, Metadata, ScannedFile, ThumbSource};
 
 pub use crate::fake_renderer::FakeRenderer;
-pub use crate::fake_worker::{person, unit, FakeFace, FakeSpec, FakeWorker, BEAUTY_MODEL};
+pub use crate::fake_worker::{
+    person, unit, FakeFace, FakeSpec, FakeWorker, BEAUTY_MODEL, BESTTAKE_MODEL, ENHANCE_MODEL,
+    INPAINT_MODEL,
+};
 use crate::imaging::Imaging;
 
 /// Decodes real image files with the `image` crate and produces tiny JPEG thumbnails.

@@ -151,3 +151,44 @@ async fn repeated_start_failures_become_unavailable() {
     assert!(w.system_info().await.is_err());
     assert!(t.elapsed() < Duration::from_millis(400));
 }
+
+#[tokio::test]
+async fn hung_call_times_out_kills_the_process_and_restarts_lazily() {
+    use ip_worker_client::{MaskPhoto, MaskRequest, TimeoutHandle, TimeoutWorker, WorkerTimeouts};
+    let inner = std::sync::Arc::new(ManagedWorker::new(cfg()));
+    let h = TimeoutHandle::new(WorkerTimeouts::default());
+    // the stand-in never answers `mask.generate`
+    h.set("mask.generate", Some(Duration::from_millis(500)));
+    let w = TimeoutWorker::new(inner.clone(), h);
+    let pid = inner
+        .raw_call("pid", json!({}))
+        .await
+        .unwrap()
+        .as_u64()
+        .unwrap() as u32;
+    let r = w
+        .mask_generate(&MaskRequest {
+            photo: MaskPhoto {
+                photo_id: 1,
+                path: "x.jpg".into(),
+                orientation: 1,
+            },
+            targets: vec!["subject".into()],
+            person_bbox: None,
+            size: 256,
+            out_dir: "out".into(),
+            allow_download: false,
+        })
+        .await;
+    assert!(matches!(r, Err(WorkerError::CallTimeout { .. })), "{r:?}");
+    wait_dead(pid).await;
+    // the next request starts a fresh process
+    let pid2 = inner
+        .raw_call("pid", json!({}))
+        .await
+        .unwrap()
+        .as_u64()
+        .unwrap() as u32;
+    assert_ne!(pid, pid2);
+    inner.shutdown().await;
+}

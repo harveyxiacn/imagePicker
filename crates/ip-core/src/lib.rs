@@ -8,8 +8,11 @@ pub mod edit;
 pub mod error;
 pub mod events;
 pub mod export;
+pub mod generate;
 pub mod imaging;
 pub mod import;
+pub mod jpegmeta;
+pub mod jsonfix;
 pub mod model;
 pub mod paths;
 pub mod taste;
@@ -34,12 +37,17 @@ pub use edit::{
 };
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};
+pub use generate::{
+    BestTakeChoice, BestTakePlan, BestTakeRequest, BestTakeResult, EnhanceBody, InpaintBody, Stroke,
+};
 pub use imaging::{Imaging, RealImaging};
 pub use ip_render;
 pub use model::*;
 
 use db::Db;
-use ip_worker_client::{AiWorker, ManagedWorker, WorkerConfig};
+use ip_worker_client::{
+    AiWorker, ManagedWorker, TimeoutHandle, TimeoutWorker, WorkerConfig, WorkerTimeouts,
+};
 use paths::DataDirs;
 use thumbs::Thumbs;
 
@@ -76,7 +84,10 @@ pub struct Core {
     pub events: EventBus,
     pub thumbs: Thumbs,
     pub dirs: DataDirs,
+    /// The AI worker, behind per-call timeouts ([`Core::worker_timeouts`]).
     pub worker: Arc<dyn AiWorker>,
+    /// Adjustable per-method worker timeouts (defaults + `IMAGEPICKER_WORKER_TIMEOUT*`).
+    pub worker_timeouts: TimeoutHandle,
     pub render: Arc<RenderService>,
     task_seq: AtomicU64,
     pub(crate) runs: std::sync::Mutex<std::collections::HashMap<i64, analysis::RunInfo>>,
@@ -106,6 +117,7 @@ impl Core {
             &dirs.previews,
             workers,
         );
+        let worker_timeouts = TimeoutHandle::new(WorkerTimeouts::from_env());
         let worker: Arc<dyn AiWorker> = match cfg.worker {
             Some(w) => w,
             None => {
@@ -116,6 +128,8 @@ impl Core {
                 Arc::new(ManagedWorker::new(wc))
             }
         };
+        let worker: Arc<dyn AiWorker> =
+            Arc::new(TimeoutWorker::new(worker, worker_timeouts.clone()));
         let renderer: Arc<dyn ip_render::Renderer> = match cfg.renderer {
             Some(r) => r,
             None => {
@@ -135,6 +149,7 @@ impl Core {
             beauty_dir: dirs.beauty.clone(),
             edited_thumbs_dir: dirs.edited_thumbs.clone(),
             edited_previews_dir: dirs.edited_previews.clone(),
+            edits_dir: dirs.edits.clone(),
         }));
         let core = Arc::new(Core {
             db,
@@ -143,6 +158,7 @@ impl Core {
             thumbs,
             dirs,
             worker,
+            worker_timeouts,
             render,
             task_seq: AtomicU64::new(tasks as u64),
             runs: Default::default(),
@@ -173,17 +189,25 @@ impl Core {
 
     /// Removes catalog rows and cached images; originals are never touched.
     pub async fn delete_session(&self, id: i64) -> Result<()> {
-        let keys = self
+        let (keys, orphans) = self
             .db
             .call(move |c| {
+                let orphans = catalog::session_orphans(c, id)?;
                 let keys = catalog::delete_session(c, id)?;
                 analysis::store::purge_session_groups(c, id)?;
                 analysis::store::purge_orphan_people(c)?;
-                Ok(keys)
+                Ok((keys, orphans))
             })
             .await?;
         self.runs.lock().unwrap().remove(&id);
         self.thumbs.purge(&keys);
+        // rendered (edited) thumbnails/previews and generated patch assets of the deleted photos
+        for (photo_id, fast_key, hashes) in &orphans {
+            for h in hashes {
+                self.render.purge_edited(&edit::edited_key(fast_key, h));
+            }
+            self.render.patches.remove_photo(*photo_id);
+        }
         Ok(())
     }
 
@@ -285,3 +309,5 @@ mod tests_m2;
 mod tests_m3;
 #[cfg(test)]
 mod tests_m4;
+#[cfg(test)]
+mod tests_m5;

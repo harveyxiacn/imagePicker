@@ -20,6 +20,9 @@ pub enum WorkerError {
     Cancelled,
     #[error("timeout: {0}")]
     Timeout(String),
+    /// A single RPC exceeded its per-call timeout; the worker was killed (it restarts lazily).
+    #[error("the AI worker did not answer {method} within {secs} s")]
+    CallTimeout { method: String, secs: u64 },
     #[error("protocol error: {0}")]
     Protocol(String),
     /// A JSON-RPC error answered by the worker.

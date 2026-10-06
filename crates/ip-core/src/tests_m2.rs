@@ -278,8 +278,14 @@ async fn full_pipeline_groups_scores_people() {
     assert!(people.iter().all(|p| p.cover_face_id.is_some()));
     let stranger = &d.faces;
     let _ = stranger;
+    // ... but as a single-photo subject it still has a (singleton) person of its own
     let c1 = e.core.photo_analysis(ph["c1.jpg"].id).await.unwrap();
-    assert!(c1.faces[0].person_id.is_none());
+    let single = c1.faces[0].person_id.expect("singleton person");
+    assert!(!people.iter().any(|p| p.id == single));
+    let all = e.core.people_with(Some(sid), true).await.unwrap();
+    assert_eq!(all.len(), 3);
+    let sp = all.iter().find(|p| p.id == single).unwrap();
+    assert!(sp.singleton && sp.photo_count == 1);
     // tracks within the burst: both people, one cell per photo
     let bf = e
         .core
@@ -708,7 +714,7 @@ async fn user_constraints_survive_reanalysis() {
 
     // must-link: the user says the stranger of c1 is Ann, although the embedding is far away
     let c1 = e.core.photo_analysis(ph["c1.jpg"].id).await.unwrap();
-    assert!(c1.faces[0].person_id.is_none());
+    assert!(c1.faces[0].person_id.is_some_and(|p| p != pa)); // its own singleton person
     e.core
         .set_face_person(c1.faces[0].id, Some(pa))
         .await

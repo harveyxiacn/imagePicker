@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use ip_render::EditStack;
+use ip_render::{EditStack, RgbImage};
+use ip_worker_client::{AiWorker, EnhanceRequest, MaskPhoto};
 use tokio::runtime::Handle;
 
 use crate::catalog::{self, now_ms, PhotoRef};
@@ -18,14 +19,27 @@ use crate::edit::{store, RenderService};
 use crate::error::{CoreError, Result};
 use crate::events::Event;
 use crate::imaging::Imaging;
+use crate::jpegmeta;
 use crate::model::ExportRequest;
 use crate::Core;
 
-#[derive(Debug, Clone)]
 pub struct ExportOptions {
     pub long_edge: Option<u32>,
     pub quality: u8,
     pub name_template: String,
+    /// Leave the GPS position out of re-encoded outputs.
+    pub strip_gps: bool,
+    pub upscale: Option<UpscaleExport>,
+}
+
+/// Super-resolution of exports: render -> temp PNG -> `enhance.run upscale` -> JPEG.
+pub struct UpscaleExport {
+    pub svc: Arc<RenderService>,
+    pub worker: Arc<dyn AiWorker>,
+    pub handle: Handle,
+    pub scale: u32,
+    /// Scratch directory for the intermediate PNGs and the worker's output.
+    pub tmp: PathBuf,
 }
 
 /// Saved edits to render into the output (M3): photos listed in `stacks` are rendered at full
@@ -43,7 +57,7 @@ pub struct ExportReport {
 }
 
 /// Days since 1970-01-01 -> (year, month, day), proleptic Gregorian.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
+pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -154,6 +168,101 @@ fn copy_new(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+fn jpeg_dims(img: &RgbImage) -> (u32, u32) {
+    (img.width, img.height)
+}
+
+/// Encodes a rendered picture as JPEG with the source's EXIF (minus orientation; GPS unless
+/// stripped) and an sRGB ICC profile.
+fn encode_with_meta(
+    imaging: &dyn Imaging,
+    r: &PhotoRef,
+    img: &RgbImage,
+    opts: &ExportOptions,
+) -> std::result::Result<Vec<u8>, String> {
+    let bytes = encode_jpeg(img, opts.quality).map_err(|e| format!("{e:#}"))?;
+    let is_jpeg = r.format == ip_imaging::ImageFormat::Jpeg;
+    let md = (!is_jpeg)
+        .then(|| imaging.read_metadata(&r.path, r.format).ok())
+        .flatten();
+    Ok(jpegmeta::finalize_export(
+        bytes,
+        &r.path,
+        is_jpeg,
+        md.as_ref(),
+        jpeg_dims(img),
+        opts.strip_gps,
+    ))
+}
+
+/// Upscaled export of one photo (see [`UpscaleExport`]).
+fn export_upscaled(
+    imaging: &dyn Imaging,
+    r: &PhotoRef,
+    stack: Option<&EditStack>,
+    up: &UpscaleExport,
+    opts: &ExportOptions,
+) -> std::result::Result<Vec<u8>, String> {
+    let edge = opts
+        .long_edge
+        .map(|e| (e as f64 / up.scale as f64).ceil().max(16.0) as u32);
+    let default_stack = EditStack::default();
+    let rendered = up
+        .svc
+        .render_gated(
+            r,
+            stack.unwrap_or(&default_stack),
+            edge,
+            MaskMode::Strict,
+            &up.handle,
+        )
+        .map_err(|e| e.to_string())?;
+    let dir = up.tmp.join(r.id.to_string());
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let input = dir.join("render.png");
+    image::RgbImage::from_raw(
+        rendered.image.width,
+        rendered.image.height,
+        rendered.image.data.clone(),
+    )
+    .ok_or_else(|| "bad render buffer".to_string())?
+    .save_with_format(&input, image::ImageFormat::Png)
+    .map_err(|e| e.to_string())?;
+    drop(rendered);
+    let resp = up
+        .handle
+        .block_on(up.worker.enhance_run(&EnhanceRequest {
+            photo: MaskPhoto {
+                photo_id: r.id,
+                path: input.to_string_lossy().into_owned(),
+                orientation: 1,
+            },
+            op: "upscale".into(),
+            strength: 1.0,
+            scale: Some(up.scale),
+            faces: None,
+            out_dir: dir.join("out").to_string_lossy().into_owned(),
+            allow_download: false,
+        }))
+        .map_err(|e| crate::analysis::map_worker_err(e).to_string());
+    let result = resp.and_then(|resp| {
+        let path = resp
+            .image
+            .ok_or_else(|| "enhance.run returned no image".to_string())?;
+        let big = image::open(&path)
+            .map_err(|e| format!("unreadable upscaled image: {e}"))?
+            .to_rgb8();
+        let img = RgbImage {
+            width: big.width(),
+            height: big.height(),
+            data: big.into_raw(),
+        };
+        encode_with_meta(imaging, r, &img, opts)
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
 /// Runs the export synchronously (parallel over photos). `progress(done, total)` is called after each photo.
 pub fn export_photos(
     imaging: &dyn Imaging,
@@ -165,7 +274,7 @@ pub fn export_photos(
 ) -> ExportReport {
     let edited = |r: &PhotoRef| edits.and_then(|e| e.stacks.get(&r.id));
     let names = plan_names_with(refs, &opts.name_template, dest, &|r| {
-        opts.long_edge.is_some() || edited(r).is_some()
+        opts.long_edge.is_some() || edited(r).is_some() || opts.upscale.is_some()
     });
     let done = AtomicUsize::new(0);
     let total = refs.len();
@@ -174,22 +283,35 @@ pub fn export_photos(
         .zip(names.par_iter())
         .map(|(r, out)| {
             let stack = edited(r);
-            let res = match (stack, opts.long_edge) {
-                (Some(stack), _) => {
+            let res = match (stack, &opts.upscale, opts.long_edge) {
+                (stack, Some(up), _) => export_upscaled(imaging, r, stack, up, opts)
+                    .and_then(|bytes| write_new(out, &bytes).map_err(|e| e.to_string())),
+                (Some(stack), None, _) => {
                     let e = edits.expect("edited stacks come with a render context");
                     e.svc
                         .render_gated(r, stack, opts.long_edge, MaskMode::Strict, &e.handle)
                         .map_err(|e| e.to_string())
-                        .and_then(|o| {
-                            encode_jpeg(&o.image, opts.quality).map_err(|e| format!("{e:#}"))
-                        })
+                        .and_then(|o| encode_with_meta(imaging, r, &o.image, opts))
                         .and_then(|bytes| write_new(out, &bytes).map_err(|e| e.to_string()))
                 }
-                (None, None) => copy_new(&r.path, out).map_err(|e| e.to_string()),
-                (None, Some(edge)) => imaging
+                (None, None, None) => copy_new(&r.path, out).map_err(|e| e.to_string()),
+                (None, None, Some(edge)) => imaging
                     .generate_thumbnail(&r.path, r.format, r.orientation, edge, opts.quality)
                     .map_err(|e| format!("{e:#}"))
-                    .and_then(|img| write_new(out, &img.bytes).map_err(|e| e.to_string())),
+                    .map(|img| {
+                        let md = (r.format != ip_imaging::ImageFormat::Jpeg)
+                            .then(|| imaging.read_metadata(&r.path, r.format).ok())
+                            .flatten();
+                        jpegmeta::finalize_export(
+                            img.bytes,
+                            &r.path,
+                            r.format == ip_imaging::ImageFormat::Jpeg,
+                            md.as_ref(),
+                            (img.width, img.height),
+                            opts.strip_gps,
+                        )
+                    })
+                    .and_then(|bytes| write_new(out, &bytes).map_err(|e| e.to_string())),
             };
             let d = done.fetch_add(1, Ordering::SeqCst) + 1;
             progress(d, total);
@@ -233,6 +355,12 @@ impl Core {
         }
         if !(1..=100).contains(&req.quality) {
             return Err(CoreError::bad_request("quality must be 1..100"));
+        }
+        if req.upscale.is_some_and(|s| s != 2 && s != 4) {
+            return Err(CoreError::bad_request("upscale must be 2 or 4"));
+        }
+        if req.upscale.is_some() {
+            self.preflight_models("enhance").await?;
         }
         let dest = PathBuf::from(&req.dest);
         std::fs::create_dir_all(&dest)
@@ -299,6 +427,14 @@ impl Core {
             long_edge: req.long_edge,
             quality: req.quality,
             name_template: req.name_template.clone(),
+            strip_gps: req.strip_gps,
+            upscale: req.upscale.map(|scale| UpscaleExport {
+                svc: self.render.clone(),
+                worker: self.worker.clone(),
+                handle: Handle::current(),
+                scale,
+                tmp: self.dirs.gen.join(&task_id),
+            }),
         };
         let edits = if req.apply_edits {
             let with_edits: Vec<i64> = refs

@@ -832,6 +832,8 @@ async fn export_applies_saved_edits() {
                 quality: 90,
                 name_template: "{name}".into(),
                 apply_edits: apply,
+                upscale: None,
+                strip_gps: false,
                 folders: None,
             })
             .await

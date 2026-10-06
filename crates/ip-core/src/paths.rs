@@ -34,6 +34,10 @@ pub struct DataDirs {
     /// Rendered thumbnails / previews of edited photos (keyed by edit hash).
     pub edited_thumbs: PathBuf,
     pub edited_previews: PathBuf,
+    /// Generated patch assets (`<edits>/<photo_id>/<asset>.png`, M5).
+    pub edits: PathBuf,
+    /// Scratch space handed to the worker for generative requests.
+    pub gen: PathBuf,
 }
 
 impl DataDirs {
@@ -48,6 +52,8 @@ impl DataDirs {
             beauty: root.join("cache").join("beauty"),
             edited_thumbs: root.join("cache").join("edited-thumbs"),
             edited_previews: root.join("cache").join("edited-previews"),
+            edits: root.join("edits"),
+            gen: root.join("cache").join("gen"),
             root,
         }
     }
@@ -60,6 +66,8 @@ impl DataDirs {
         std::fs::create_dir_all(&self.beauty)?;
         std::fs::create_dir_all(&self.edited_thumbs)?;
         std::fs::create_dir_all(&self.edited_previews)?;
+        std::fs::create_dir_all(&self.edits)?;
+        std::fs::create_dir_all(&self.gen)?;
         std::fs::create_dir_all(&self.logs)
     }
 }

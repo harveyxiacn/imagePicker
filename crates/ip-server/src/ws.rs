@@ -38,7 +38,9 @@ async fn handle(mut socket: WebSocket, st: AppState) {
             },
             _ = tick.tick() => {
                 for ev in co.drain() {
-                    let Ok(text) = serde_json::to_string(&ev) else { continue };
+                    let Ok(mut value) = serde_json::to_value(&ev) else { continue };
+                    ip_core::jsonfix::tidy(&mut value);
+                    let Ok(text) = serde_json::to_string(&value) else { continue };
                     if socket.send(Message::Text(text.into())).await.is_err() {
                         return;
                     }

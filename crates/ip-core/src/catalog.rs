@@ -149,6 +149,39 @@ pub fn set_cover_if_missing(conn: &Connection, session_id: i64, photo_id: i64) -
     Ok(())
 }
 
+/// The photos only this session references: `(photo id, fast_key, every edit hash they ever had)`.
+/// Read before [`delete_session`] so the edited-image caches and patch assets can be purged.
+pub fn session_orphans(conn: &Connection, id: i64) -> Result<Vec<(i64, String, Vec<String>)>> {
+    let mut st = conn.prepare(
+        "SELECT p.id, p.fast_key, p.edit_hash FROM photo p JOIN session_photo sp ON sp.photo_id=p.id
+         WHERE sp.session_id=?1
+           AND NOT EXISTS(SELECT 1 FROM session_photo o WHERE o.photo_id=p.id AND o.session_id<>?1)",
+    )?;
+    let rows = st
+        .query_map([id], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(st);
+    let mut out = Vec::with_capacity(rows.len());
+    for (pid, key, current) in rows {
+        let mut hashes: Vec<String> = current.into_iter().collect();
+        let mut st = conn.prepare("SELECT hash FROM edit_version WHERE photo_id=?1")?;
+        for h in st.query_map([pid], |r| r.get::<_, String>(0))? {
+            let h = h?;
+            if !hashes.contains(&h) {
+                hashes.push(h);
+            }
+        }
+        out.push((pid, key, hashes));
+    }
+    Ok(out)
+}
+
 /// Removes the session, its links and the photo rows no other session references.
 /// Returns `(fast_key)` of removed photos so the caller can purge caches. Never touches originals.
 pub fn delete_session(conn: &mut Connection, id: i64) -> Result<Vec<String>> {
