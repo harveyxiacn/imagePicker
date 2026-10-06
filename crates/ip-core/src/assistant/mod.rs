@@ -706,6 +706,9 @@ fn is_destructive(tool: &str, args: &Value, affects: usize) -> bool {
     match tool {
         "set_flag" => args["flag"].as_i64() == Some(-1),
         "set_rating" | "accept_ai" => affects > 1,
+        // batch edits / generative changes: undoable, but confirm before touching many photos
+        "auto_adjust" | "apply_preset" | "apply_profiles" | "besttake_auto"
+        | "remove_bystanders" => affects > 1,
         "group_keep_top" | "scene_keep_top" => args["reject_rest"].as_bool() == Some(true),
         "export" => true,
         _ => false,
@@ -973,4 +976,26 @@ fn reply_for(steps: &[PlanStep], hints: &[String], l: Locale, confirm: bool) -> 
         r.push_str(h);
     }
     r
+}
+
+#[cfg(test)]
+mod destructive_tests {
+    use serde_json::json;
+
+    #[test]
+    fn batch_edits_on_many_photos_need_confirmation() {
+        let a = json!({});
+        for tool in [
+            "auto_adjust",
+            "apply_preset",
+            "apply_profiles",
+            "besttake_auto",
+            "remove_bystanders",
+        ] {
+            assert!(super::is_destructive(tool, &a, 35), "{tool} on 35 photos");
+            assert!(!super::is_destructive(tool, &a, 1), "{tool} on one photo");
+        }
+        assert!(!super::is_destructive("filter", &a, 100));
+        assert!(super::is_destructive("set_flag", &json!({"flag": -1}), 1));
+    }
 }

@@ -368,7 +368,8 @@ async fn execute_preset_and_undo_edit_stacks() {
     assert_eq!(plan.steps[0].tool, "apply_preset");
     assert_eq!(plan.steps[0].args["preset_id"], "film_warm");
     assert_eq!(plan.steps[0].affects, 7);
-    assert!(!plan.steps[0].destructive);
+    // batch edits on many photos ask for confirmation (still undoable)
+    assert!(plan.steps[0].destructive && plan.needs_confirmation);
     let (ok, results, undo) = run_plan(&e, &plan).await;
     assert!(ok, "{results:?}");
     assert_eq!(results[0]["affected"], 7);
