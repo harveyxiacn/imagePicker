@@ -1,6 +1,7 @@
 //! M3 editing: edit stacks, presets, LUTs, previews, auto-adjust, sync and AI masks.
 //! Contract: `docs/api-contract-m3.md` (sections B, C and the core side of D).
 
+pub mod beauty;
 pub mod luts;
 pub mod service;
 pub mod store;
@@ -10,7 +11,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use ip_render::{Adjust, AutoContext, AutoMode, Backend, EditStack, MaskRef, MaskTarget, Op};
+use ip_render::{Adjust, AutoContext, AutoMode, Backend, EditStack, MaskRef, MaskTarget, Op, Warp};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -178,10 +179,103 @@ fn check_op(op: &Op) -> Result<()> {
             range("lut amount", l.amount, 0.0, 1.0)?;
         }
         Op::OutputSharpen(s) => range("output_sharpen amount", s.amount, 0.0, 100.0)?,
-        // TODO(M4): range-check beauty/warp amounts.
-        Op::Beauty(_) | Op::Warp(_) | Op::Unknown => {}
+        Op::Beauty(b) => {
+            check_person("beauty", b.person_id)?;
+            for (n, v) in [
+                ("beauty smooth", b.smooth),
+                ("beauty whiten", b.whiten),
+                ("beauty eye_brighten", b.eye_brighten),
+                ("beauty teeth_whiten", b.teeth_whiten),
+                ("beauty dark_circles", b.dark_circles),
+            ] {
+                range(n, v, 0.0, 100.0)?;
+            }
+        }
+        Op::Warp(Warp::Face {
+            person_id,
+            slim,
+            chin,
+            eyes,
+            nose,
+            ..
+        }) => {
+            check_person("warp", *person_id)?;
+            for (n, v) in [
+                ("warp slim", *slim),
+                ("warp chin", *chin),
+                ("warp eyes", *eyes),
+                ("warp nose", *nose),
+            ] {
+                range(n, v, -100.0, 100.0)?;
+            }
+        }
+        Op::Warp(Warp::Body {
+            person_id,
+            arms,
+            legs,
+            waist,
+            lengthen_legs,
+            ..
+        }) => {
+            check_person("warp", *person_id)?;
+            for (n, v) in [
+                ("warp arms", *arms),
+                ("warp legs", *legs),
+                ("warp waist", *waist),
+                ("warp lengthen_legs", *lengthen_legs),
+            ] {
+                range(n, v, 0.0, 100.0)?;
+            }
+        }
+        Op::Warp(Warp::Unknown) | Op::Unknown => {}
     }
     Ok(())
+}
+
+fn check_person(what: &str, person_id: Option<i64>) -> Result<()> {
+    match person_id {
+        Some(p) if p < 1 => Err(bad(format!(
+            "{what} person_id must be a positive id or null"
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// True when the op cannot change a pixel (unknown types, portrait ops with nothing dialled in).
+/// A stack of only such ops is not an edit (`has_edits` = false).
+pub fn op_is_noop(op: &Op) -> bool {
+    match op {
+        Op::Unknown | Op::Warp(Warp::Unknown) => true,
+        Op::Beauty(b) => {
+            !b.blemish
+                && [
+                    b.smooth,
+                    b.whiten,
+                    b.eye_brighten,
+                    b.teeth_whiten,
+                    b.dark_circles,
+                ]
+                .iter()
+                .all(|v| *v == 0.0)
+        }
+        Op::Warp(Warp::Face {
+            slim,
+            chin,
+            eyes,
+            nose,
+            ..
+        }) => [*slim, *chin, *eyes, *nose].iter().all(|v| *v == 0.0),
+        Op::Warp(Warp::Body {
+            arms,
+            legs,
+            waist,
+            lengthen_legs,
+            ..
+        }) => [*arms, *legs, *waist, *lengthen_legs]
+            .iter()
+            .all(|v| *v == 0.0),
+        _ => false,
+    }
 }
 
 /// A validated stack: the typed view, the JSON to store (as received, so ops this build does
@@ -219,7 +313,7 @@ pub fn validate_stack(raw: Value) -> Result<CheckedStack> {
     for op in &stack.ops {
         check_op(op)?;
     }
-    let has_edits = !stack.is_identity();
+    let has_edits = !stack.ops.iter().all(op_is_noop);
     Ok(CheckedStack {
         stack,
         raw,
@@ -574,7 +668,8 @@ impl Core {
                     let id = t.id;
                     let cur = store::current(c, id)?;
                     let faces = face_boxes(c, id)?;
-                    out.push((t, cur, faces));
+                    let people = person_set(c, id)?;
+                    out.push((t, cur, faces, people));
                 }
                 Ok((r, cur, out))
             })
@@ -617,11 +712,12 @@ impl Core {
         };
 
         let mut jobs = tokio::task::JoinSet::new();
-        for (t, cur, faces) in targets {
-            let merged = sync::merge_ops(
+        for (t, cur, faces, people) in targets {
+            let merged = sync::merge_ops_scoped(
                 &cur.as_ref().map(|c| ops_of(&c.stack)).unwrap_or_default(),
                 &src_ops,
                 &include,
+                Some(&people),
             );
             let svc = self.render.clone();
             jobs.spawn(async move {
@@ -654,12 +750,19 @@ impl Core {
         }
         let processed = done.len();
 
-        // Persist everything in one blocking call.
-        let mut changed_ids = Vec::new();
+        self.persist_stacks(done).await?;
+        Ok(processed)
+    }
+
+    /// Saves the given op lists as the current stacks (an empty list resets the photo), drops
+    /// the stale cached renders and broadcasts `edits.updated`. Returns the ids that changed.
+    pub(crate) async fn persist_stacks(
+        self: &Arc<Self>,
+        stacks: Vec<(catalog::PhotoRef, Vec<Value>)>,
+    ) -> Result<Vec<i64>> {
         let mut writes = Vec::new();
-        for (t, ops) in done {
-            let raw = stack_json(ops);
-            let checked = validate_stack(raw)?;
+        for (t, ops) in stacks {
+            let checked = validate_stack(stack_json(ops))?;
             writes.push((t, checked));
         }
         let results = self
@@ -680,6 +783,7 @@ impl Core {
                 Ok(res)
             })
             .await?;
+        let mut changed_ids = Vec::new();
         for (t, old, changed) in results {
             if let Some(old) = old {
                 self.render.purge_edited(&edited_key(&t.fast_key, &old));
@@ -688,8 +792,8 @@ impl Core {
                 changed_ids.push(t.id);
             }
         }
-        self.spawn_edit_refresh(changed_ids);
-        Ok(processed)
+        self.spawn_edit_refresh(changed_ids.clone());
+        Ok(changed_ids)
     }
 
     // ------------------------------------------------------------ presets
@@ -860,6 +964,14 @@ fn face_boxes(c: &rusqlite::Connection, photo_id: i64) -> Result<Vec<[f32; 4]>> 
                 f.bbox[3] as f32,
             ]
         })
+        .collect())
+}
+
+/// Ids of the people (clustered identities) that appear in the photo.
+fn person_set(c: &rusqlite::Connection, photo_id: i64) -> Result<HashSet<i64>> {
+    Ok(crate::analysis::store::faces_of_photo(c, photo_id)?
+        .iter()
+        .filter_map(|f| f.person_id)
         .collect())
 }
 

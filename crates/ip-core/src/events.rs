@@ -45,6 +45,16 @@ pub enum Event {
     GroupsUpdated { session_id: i64 },
     #[serde(rename = "people.updated")]
     PeopleUpdated { session_id: i64 },
+    #[serde(rename = "beauty.ready")]
+    BeautyReady { photo_id: i64 },
+    #[serde(rename = "taste.updated")]
+    TasteUpdated {
+        labels: i64,
+        active: bool,
+        alpha: f64,
+    },
+    #[serde(rename = "collections.updated")]
+    CollectionsUpdated {},
     #[serde(rename = "worker.status")]
     WorkerStatus {
         state: String,
@@ -95,6 +105,9 @@ pub struct Coalescer {
     analysis_ids: HashMap<i64, Vec<i64>>,
     groups: HashSet<i64>,
     people: HashSet<i64>,
+    beauty: Vec<i64>,
+    taste: Option<Event>,
+    collections: bool,
     worker: Option<Event>,
 }
 
@@ -110,6 +123,9 @@ enum Key {
     AnalysisIds(i64),
     Groups(i64),
     People(i64),
+    Beauty,
+    Taste,
+    Collections,
     Worker,
 }
 
@@ -183,6 +199,20 @@ impl Coalescer {
                 self.note(Key::People(session_id));
                 self.people.insert(session_id);
             }
+            Event::BeautyReady { photo_id } => {
+                self.note(Key::Beauty);
+                if !self.beauty.contains(&photo_id) {
+                    self.beauty.push(photo_id);
+                }
+            }
+            ev @ Event::TasteUpdated { .. } => {
+                self.note(Key::Taste);
+                self.taste = Some(ev);
+            }
+            Event::CollectionsUpdated {} => {
+                self.note(Key::Collections);
+                self.collections = true;
+            }
             ev @ Event::WorkerStatus { .. } => {
                 self.note(Key::Worker);
                 self.worker = Some(ev);
@@ -251,6 +281,22 @@ impl Coalescer {
                 Key::People(sid) => {
                     if self.people.remove(&sid) {
                         out.push(Event::PeopleUpdated { session_id: sid });
+                    }
+                }
+                Key::Beauty => {
+                    // one frame per photo: the payload is a single id
+                    for photo_id in std::mem::take(&mut self.beauty) {
+                        out.push(Event::BeautyReady { photo_id });
+                    }
+                }
+                Key::Taste => {
+                    if let Some(ev) = self.taste.take() {
+                        out.push(ev);
+                    }
+                }
+                Key::Collections => {
+                    if std::mem::take(&mut self.collections) {
+                        out.push(Event::CollectionsUpdated {});
                     }
                 }
                 Key::Worker => {

@@ -215,8 +215,15 @@ pub fn export_photos(
 impl Core {
     /// Validates and starts an export task; progress arrives as `task.progress` events.
     pub async fn export(self: &Arc<Self>, req: ExportRequest) -> Result<String> {
-        if req.ids.is_empty() {
-            return Err(CoreError::bad_request("ids must not be empty"));
+        let folders = req.folders.clone().filter(|f| !f.is_empty());
+        match (&folders, req.ids.is_empty()) {
+            (Some(_), false) => {
+                return Err(CoreError::bad_request(
+                    "give either ids or folders, not both",
+                ))
+            }
+            (None, true) => return Err(CoreError::bad_request("ids must not be empty")),
+            _ => {}
         }
         if req.dest.trim().is_empty() {
             return Err(CoreError::bad_request("dest must not be empty"));
@@ -230,10 +237,42 @@ impl Core {
         let dest = PathBuf::from(&req.dest);
         std::fs::create_dir_all(&dest)
             .map_err(|e| CoreError::bad_request(format!("cannot create destination: {e}")))?;
-        let ids = req.ids.clone();
-        let refs = self.db.call(move |c| catalog::photo_refs(c, &ids)).await?;
+        // (output directory, photos); one group unless `folders` was given
+        let mut groups: Vec<(PathBuf, Vec<PhotoRef>)> = Vec::new();
+        match folders {
+            None => {
+                let ids = req.ids.clone();
+                let refs = self.db.call(move |c| catalog::photo_refs(c, &ids)).await?;
+                groups.push((dest.clone(), refs));
+            }
+            Some(folders) => {
+                for (name, ids) in folders {
+                    let clean = sanitize(&name);
+                    if clean.is_empty() {
+                        return Err(CoreError::bad_request(format!(
+                            "folder name {name:?} is not usable"
+                        )));
+                    }
+                    let dir = dest.join(&clean);
+                    let refs = self.db.call(move |c| catalog::photo_refs(c, &ids)).await?;
+                    if refs.is_empty() {
+                        continue;
+                    }
+                    match groups.iter_mut().find(|(d, _)| *d == dir) {
+                        Some((_, existing)) => existing.extend(refs),
+                        None => groups.push((dir, refs)),
+                    }
+                }
+            }
+        }
+        let refs: Vec<PhotoRef> = groups.iter().flat_map(|(_, r)| r.iter().cloned()).collect();
         if refs.is_empty() {
             return Err(CoreError::not_found("none of the given photos exist"));
+        }
+        for (dir, _) in &groups {
+            std::fs::create_dir_all(dir).map_err(|e| {
+                CoreError::bad_request(format!("cannot create {}: {e}", dir.display()))
+            })?;
         }
         let task_id = format!("export-{}", self.next_task_seq());
         let total = refs.len();
@@ -307,23 +346,25 @@ impl Core {
             core.events.emit(ev(0, "running", None));
             let (imaging, events, tid2) = (core.imaging.clone(), core.events.clone(), tid.clone());
             let res = tokio::task::spawn_blocking(move || {
-                export_photos(
-                    &*imaging,
-                    &refs,
-                    &dest,
-                    &opts,
-                    edits.as_ref(),
-                    &|done, total| {
-                        events.emit(Event::TaskProgress {
-                            task_id: tid2.clone(),
-                            kind: "export".into(),
-                            done: done as i64,
-                            total: total as i64,
-                            state: "running".into(),
-                            error: None,
+                let mut report = ExportReport::default();
+                let mut offset = 0usize;
+                for (dir, refs) in &groups {
+                    let rep =
+                        export_photos(&*imaging, refs, dir, &opts, edits.as_ref(), &|done, _| {
+                            events.emit(Event::TaskProgress {
+                                task_id: tid2.clone(),
+                                kind: "export".into(),
+                                done: (offset + done) as i64,
+                                total: total as i64,
+                                state: "running".into(),
+                                error: None,
+                            });
                         });
-                    },
-                )
+                    offset += refs.len();
+                    report.written.extend(rep.written);
+                    report.errors.extend(rep.errors);
+                }
+                report
             })
             .await;
             let (state, error, done) = match res {

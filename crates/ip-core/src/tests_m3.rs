@@ -366,6 +366,9 @@ async fn preview_uses_saved_stack_override_and_original() {
     );
 
     e.core.put_edit(id, exposure_stack(1.0)).await.unwrap();
+    // put_edit renders the grid thumbnail in the background; let it finish so it cannot
+    // bump the renderer call count while this test is counting
+    e.core.thumb_path(id, 256).await.unwrap();
     let saved = preview(&e, id, None, 128).await;
     assert!(mean_of_jpeg(&saved.jpeg) > base + 15.0);
     assert_eq!(saved.backend, Backend::Gpu);
@@ -829,6 +832,7 @@ async fn export_applies_saved_edits() {
                 quality: 90,
                 name_template: "{name}".into(),
                 apply_edits: apply,
+                folders: None,
             })
             .await
             .unwrap();

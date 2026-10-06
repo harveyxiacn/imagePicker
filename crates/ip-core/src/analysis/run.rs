@@ -770,11 +770,19 @@ impl Core {
     // ------------------------------------------------------------ accept AI
 
     /// `user_rating = round(ai_rating)` for analysed photos among `ids`.
-    pub async fn accept_ai(&self, ids: Vec<i64>) -> Result<usize> {
+    pub async fn accept_ai(self: &Arc<Self>, ids: Vec<i64>) -> Result<usize> {
         if ids.is_empty() {
             return Err(CoreError::bad_request("ids must not be empty"));
         }
-        let updates: Vec<PhotoUpdate> = self.db.call(move |c| store::accept_ai(c, &ids)).await?;
+        let (updates, labels): (Vec<PhotoUpdate>, usize) = self
+            .db
+            .call(move |c| {
+                let updates = store::accept_ai(c, &ids)?;
+                let labels = crate::taste::record_accept(c, &updates)?;
+                Ok((updates, labels))
+            })
+            .await?;
+        self.taste_after_labels(labels);
         let n = updates.len();
         if n > 0 {
             self.events.emit(Event::PhotosUpdated { items: updates });

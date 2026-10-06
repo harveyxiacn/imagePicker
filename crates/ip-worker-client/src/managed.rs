@@ -15,6 +15,7 @@ use crate::client::{CancelToken, ProgressTx, RpcClient};
 use crate::error::{Result, WorkerError};
 use crate::process;
 use crate::protocol::*;
+use crate::protocol_m4::*;
 use crate::{AiWorker, WorkerState, WorkerStatus};
 
 #[derive(Debug, Clone)]
@@ -469,6 +470,20 @@ impl AiWorker for ManagedWorker {
             .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
         let v = self.rpc("mask.generate", params, None, None).await?;
         parse(v, "mask.generate")
+    }
+
+    async fn beauty_prepare(&self, req: &BeautyPrepareRequest) -> Result<BeautyPrepareResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("beauty.prepare", params, None, None).await?;
+        parse(v, "beauty.prepare")
+    }
+
+    async fn faces_embed(&self, req: &FacesEmbedRequest) -> Result<FacesEmbedResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("faces.embed", params, None, None).await?;
+        parse(v, "faces.embed")
     }
 
     async fn shutdown(&self) {

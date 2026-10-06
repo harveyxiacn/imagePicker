@@ -25,7 +25,8 @@ rayon = "1"
 blake3 = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 dirs = "7"
-axum = { version = "0.8", features = ["ws", "macros"] }
+axum = { version = "0.8", features = ["ws", "macros", "multipart"] }
+serde_urlencoded = "0.7"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
 clap = { version = "4", features = ["derive"] }

@@ -9,6 +9,7 @@ pub mod error;
 pub mod managed;
 pub mod process;
 pub mod protocol;
+mod protocol_m4;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -17,6 +18,7 @@ pub use client::{CancelToken, ProgressTx, RpcClient};
 pub use error::{Result, WorkerError};
 pub use managed::{ManagedWorker, WorkerConfig};
 pub use protocol::*;
+pub use protocol_m4::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -88,6 +90,19 @@ pub trait AiWorker: Send + Sync {
     async fn mask_generate(&self, _req: &MaskRequest) -> Result<MaskResponse> {
         Err(WorkerError::Unavailable(
             "this AI worker does not support mask.generate".into(),
+        ))
+    }
+    /// Per-person geometry for portrait retouching (`beauty.prepare`). Workers that predate M4
+    /// report `Unavailable`.
+    async fn beauty_prepare(&self, _req: &BeautyPrepareRequest) -> Result<BeautyPrepareResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support beauty.prepare".into(),
+        ))
+    }
+    /// Detects and embeds the faces of one image (`faces.embed`), for "search by face".
+    async fn faces_embed(&self, _req: &FacesEmbedRequest) -> Result<FacesEmbedResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support faces.embed".into(),
         ))
     }
     /// Stops the worker process (gracefully, then by killing the process tree).

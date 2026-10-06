@@ -16,6 +16,8 @@ pub struct FakeRenderer {
     /// Dimensions of the source of the last call.
     pub last_source: Mutex<Option<(u32, u32)>>,
     pub luts_seen: Mutex<Vec<String>>,
+    /// `person_id`s `MaskProvider::people()` returned for each beauty/warp op rendered.
+    pub people_seen: Mutex<Vec<Vec<Option<i64>>>>,
     pub fail: AtomicBool,
 }
 
@@ -32,6 +34,7 @@ impl FakeRenderer {
             calls: AtomicUsize::new(0),
             last_source: Mutex::new(None),
             luts_seen: Mutex::new(Vec::new()),
+            people_seen: Mutex::new(Vec::new()),
             fail: AtomicBool::new(false),
         }
     }
@@ -109,6 +112,30 @@ impl Renderer for FakeRenderer {
                     if let Some(m) = mask {
                         locals.push((m, l.amount, l.invert, l.adjust.exposure));
                     }
+                }
+                Op::Beauty(b) => {
+                    // asks for the geometry (so provider errors surface); "whiten" brightens
+                    // everything when somebody it targets is in the photo
+                    let people = req.masks.people()?;
+                    self.people_seen
+                        .lock()
+                        .unwrap()
+                        .push(people.iter().map(|p| p.person_id).collect());
+                    let hit = people
+                        .iter()
+                        .any(|p| b.person_id.is_none() || p.person_id == b.person_id);
+                    if hit {
+                        for c in &mut g {
+                            *c *= 1.0 + b.whiten / 500.0;
+                        }
+                    }
+                }
+                Op::Warp(_) => {
+                    let people = req.masks.people()?;
+                    self.people_seen
+                        .lock()
+                        .unwrap()
+                        .push(people.iter().map(|p| p.person_id).collect());
                 }
                 Op::Lut(l) => {
                     self.luts_seen.lock().unwrap().push(l.file.clone());

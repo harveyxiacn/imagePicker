@@ -466,6 +466,9 @@ pub struct Ranked {
     pub burst_size: usize,
     /// Composite after the redundancy adjustment.
     pub q: f64,
+    /// The composite before personalisation (equals `q` unless a taste model is fused in).
+    pub base_q: f64,
+    pub hard_issue: bool,
     pub ai_rating: f64,
     pub issues: Vec<Issue>,
     pub contributions: Vec<Contribution>,
@@ -557,6 +560,8 @@ pub fn rank_burst(members: Vec<BurstMember<'_>>) -> Vec<Ranked> {
             rank,
             burst_size: n,
             q,
+            base_q: q,
+            hard_issue: m.score.hard_issue,
             ai_rating,
             issues: m.score.issues.clone(),
             contributions,

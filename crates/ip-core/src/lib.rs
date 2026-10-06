@@ -2,6 +2,7 @@
 
 pub mod analysis;
 pub mod catalog;
+pub mod collections;
 pub mod db;
 pub mod edit;
 pub mod error;
@@ -11,6 +12,7 @@ pub mod imaging;
 pub mod import;
 pub mod model;
 pub mod paths;
+pub mod taste;
 pub mod thumbs;
 
 #[cfg(any(test, feature = "testutil"))]
@@ -79,6 +81,7 @@ pub struct Core {
     task_seq: AtomicU64,
     pub(crate) runs: std::sync::Mutex<std::collections::HashMap<i64, analysis::RunInfo>>,
     pub(crate) analysis_gate: tokio::sync::Semaphore,
+    pub(crate) taste_lock: tokio::sync::Mutex<()>,
 }
 
 impl Core {
@@ -129,6 +132,7 @@ impl Core {
             worker: worker.clone(),
             luts_dir: dirs.luts.clone(),
             masks_dir: dirs.masks.clone(),
+            beauty_dir: dirs.beauty.clone(),
             edited_thumbs_dir: dirs.edited_thumbs.clone(),
             edited_previews_dir: dirs.edited_previews.clone(),
         }));
@@ -143,6 +147,7 @@ impl Core {
             task_seq: AtomicU64::new(tasks as u64),
             runs: Default::default(),
             analysis_gate: tokio::sync::Semaphore::new(1),
+            taste_lock: tokio::sync::Mutex::new(()),
         });
         Core::spawn_worker_status_forwarder(&core);
         Ok(core)
@@ -210,12 +215,17 @@ impl Core {
     }
 
     /// Applies a rating/flag/colour patch and broadcasts `photos.updated`. Returns the updated count.
-    pub async fn patch_photos(&self, req: PatchRequest) -> Result<usize> {
+    pub async fn patch_photos(self: &Arc<Self>, req: PatchRequest) -> Result<usize> {
         catalog::validate_patch(&req)?;
-        let updates = self
+        let (updates, labels) = self
             .db
-            .call(move |c| catalog::patch_photos(c, &req))
+            .call(move |c| {
+                let updates = catalog::patch_photos(c, &req)?;
+                let labels = taste::record_patch(c, &req)?;
+                Ok((updates, labels))
+            })
             .await?;
+        self.taste_after_labels(labels);
         let n = updates.len();
         if n > 0 {
             self.events.emit(Event::PhotosUpdated { items: updates });
@@ -273,3 +283,5 @@ mod tests;
 mod tests_m2;
 #[cfg(test)]
 mod tests_m3;
+#[cfg(test)]
+mod tests_m4;

@@ -156,6 +156,45 @@ CREATE TABLE preset (
   created_at INTEGER
 );
 "#,
+    // v6: M4 (docs/api-contract-m4.md): portrait geometry cache, smart collections and the
+    // personalised-scoring data (preference labels + the trained model's state).
+    r#"
+ALTER TABLE photo ADD COLUMN base_score REAL;  -- ai_score before personalisation
+CREATE TABLE beauty_geometry (
+  photo_id INTEGER PRIMARY KEY REFERENCES photo(id) ON DELETE CASCADE,
+  content_key TEXT NOT NULL,              -- photo.content_key (fast_key when unknown) when prepared
+  faces_sig TEXT NOT NULL,                -- fingerprint of the analysed faces the geometry was built for
+  people INTEGER NOT NULL DEFAULT 0,
+  prepared_at INTEGER NOT NULL
+);
+CREATE TABLE smart_collection (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  query TEXT NOT NULL,                    -- URLSearchParams of GET /api/photos (no session_id/cursor/limit)
+  created_at INTEGER
+);
+CREATE TABLE preference_label (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  photo_id INTEGER NOT NULL REFERENCES photo(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                     -- rating | flag
+  value REAL NOT NULL,                    -- rating 1..5, flag +1 (pick) / -1 (reject)
+  source TEXT NOT NULL DEFAULT 'patch',   -- patch | accept_ai
+  created_at INTEGER NOT NULL,
+  UNIQUE(photo_id, kind)
+);
+CREATE TABLE taste_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  model TEXT,                             -- JSON: weights, normalisation, dimensions
+  labels_at_train INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 0,
+  alpha REAL NOT NULL DEFAULT 0,
+  holdout_accuracy REAL,
+  base_accuracy REAL,
+  pairs INTEGER NOT NULL DEFAULT 0,
+  traits TEXT,                            -- JSON [{key, params}]
+  trained_at INTEGER
+);
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.
