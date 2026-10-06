@@ -14,6 +14,7 @@ import {
   newThumbVersion,
 } from './db'
 import { aiHandlers, filterAi, sortAi } from './ai'
+import { editHandlers, renderEdited } from './edits'
 import { photoSvg } from './svg'
 
 const err = (status: number, code: string, message: string) =>
@@ -163,6 +164,7 @@ const lat = () => delay(15 + Math.random() * 35)
 
 export const handlers = [
   ...aiHandlers,
+  ...editHandlers,
 
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0-mock' })),
 
@@ -238,6 +240,7 @@ export const handlers = [
     const p = findPhoto(Number(params.id))
     if (!p) return err(404, 'not_found', 'photo not found')
     const s = Number(new URL(request.url).searchParams.get('s') ?? 256)
+    if (p.has_edits) return renderEdited(p, s)
     return new HttpResponse(photoSvg(p, s, s >= 256 && false), {
       headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000, immutable' },
     })
@@ -247,6 +250,7 @@ export const handlers = [
     const p = findPhoto(Number(params.id))
     if (!p) return err(404, 'not_found', 'photo not found')
     const s = Number(new URL(request.url).searchParams.get('s') ?? 2048)
+    if (p.has_edits) return renderEdited(p, s)
     return new HttpResponse(photoSvg(p, s, true), {
       headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000, immutable' },
     })

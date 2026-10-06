@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Photo, PhotoEditable, PhotoPatchBody } from '@/api/types'
+import type { EditStack, Photo, PhotoEditable, PhotoPatchBody } from '@/api/types'
 
 export type EditableKey = keyof PhotoEditable
 export type EditablePatch = Partial<PhotoEditable>
@@ -10,9 +10,34 @@ export interface Change {
   after: EditablePatch
 }
 
+/** Before/after edit stacks of one photo (M3: undo = PUT the previous stack). */
+export interface EditChange {
+  photoId: number
+  before: EditStack
+  after: EditStack
+}
+
 export interface HistoryEntry {
   label: string
+  /** rating / flag / label changes (empty for pure edit entries) */
   changes: Change[]
+  /** edit-stack changes; one entry may cover several photos (paste / sync) */
+  edits?: EditChange[]
+  /** commits with the same group key inside `COALESCE_MS` merge into one undo step (wheel / arrow fine-tune) */
+  group?: string
+  /** push time (ms), used for coalescing */
+  at?: number
+}
+
+export const COALESCE_MS = 900
+
+/** Merge `next` into `prev` when both are quick successive commits of the same control on the same photo. */
+export function coalesceEntry(prev: HistoryEntry | undefined, next: HistoryEntry, windowMs = COALESCE_MS): HistoryEntry | null {
+  if (!prev || !next.group || prev.group !== next.group) return null
+  if ((next.at ?? 0) - (prev.at ?? 0) > windowMs) return null
+  if (prev.edits?.length !== 1 || next.edits?.length !== 1) return null
+  if (prev.edits[0].photoId !== next.edits[0].photoId) return null
+  return { ...prev, edits: [{ ...prev.edits[0], after: next.edits[0].after }], at: next.at }
 }
 
 const KEYS: EditableKey[] = ['user_rating', 'flag', 'color_label']
@@ -69,7 +94,11 @@ export const useHistory = create<HistoryState>((set, get) => ({
   undoStack: [],
   redoStack: [],
   push: (e) =>
-    set((s) => ({ undoStack: [...s.undoStack, e].slice(-LIMIT), redoStack: [] })),
+    set((s) => {
+      const merged = coalesceEntry(s.undoStack[s.undoStack.length - 1], e)
+      const undoStack = merged ? [...s.undoStack.slice(0, -1), merged] : [...s.undoStack, e].slice(-LIMIT)
+      return { undoStack, redoStack: [] }
+    }),
   undo: () => {
     const { undoStack, redoStack } = get()
     const e = undoStack[undoStack.length - 1]

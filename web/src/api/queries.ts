@@ -86,3 +86,7 @@ export function usePeople(sessionId?: number) {
     staleTime: 15_000,
   })
 }
+
+export function usePresets() {
+  return useQuery({ queryKey: qk.presets, queryFn: api.presets, select: (d) => d.presets, staleTime: 60_000 })
+}

@@ -3,7 +3,7 @@
  * and `dispatchKey` resolves keyboard events to action ids.
  */
 
-export type Scope = 'grid' | 'loupe' | 'compare' | 'group'
+export type Scope = 'grid' | 'loupe' | 'compare' | 'group' | 'edit'
 export type Group = 'rate' | 'flag' | 'nav' | 'view' | 'zoom' | 'edit' | 'ai' | 'misc'
 
 export interface Binding {
@@ -24,6 +24,7 @@ export interface Binding {
 
 const ALL: Scope[] = ['grid', 'loupe', 'compare', 'group']
 const NAV: Scope[] = ['grid', 'loupe', 'compare', 'group']
+const WITH_EDIT: Scope[] = [...ALL, 'edit']
 
 export const COLOR_KEYS = { '6': 'red', '7': 'yellow', '8': 'green', '9': 'blue' } as const
 
@@ -67,9 +68,17 @@ export const BINDINGS: Binding[] = [
   { id: 'zoom.open', keys: ['space'], scopes: ['grid'], group: 'zoom', desc: 'open', hidden: true },
   { id: 'zoom.hold', keys: ['z'], scopes: ['loupe', 'compare', 'group'], group: 'zoom', desc: 'zoomHold', hold: true },
 
-  { id: 'edit.undo', keys: ['mod+z'], scopes: ALL, group: 'edit', desc: 'undo' },
-  { id: 'edit.redo', keys: ['mod+shift+z'], scopes: ALL, group: 'edit', desc: 'redo' },
-  { id: 'edit.redo', keys: ['mod+y'], scopes: ALL, group: 'edit', desc: 'redo', hidden: true },
+  { id: 'edit.undo', keys: ['mod+z'], scopes: WITH_EDIT, group: 'edit', desc: 'undo' },
+  { id: 'edit.redo', keys: ['mod+shift+z'], scopes: WITH_EDIT, group: 'edit', desc: 'redo' },
+  { id: 'edit.redo', keys: ['mod+y'], scopes: WITH_EDIT, group: 'edit', desc: 'redo', hidden: true },
+  { id: 'edit.open', keys: ['d'], scopes: ['grid', 'loupe'], group: 'edit', desc: 'editOpen' },
+  { id: 'edit.close', keys: ['escape'], scopes: ['edit'], group: 'edit', desc: 'editClose' },
+  { id: 'edit.close', keys: ['d'], scopes: ['edit'], group: 'edit', desc: 'editClose', hidden: true },
+  { id: 'edit.before', keys: ['\\'], scopes: ['edit'], group: 'edit', desc: 'beforeAfter' },
+  { id: 'edit.mask', keys: ['o'], scopes: ['edit'], group: 'edit', desc: 'maskOverlay' },
+  { id: 'edit.crop', keys: ['r'], scopes: ['edit'], group: 'edit', desc: 'cropMode' },
+  { id: 'edit.copy', keys: ['mod+shift+c'], scopes: ['edit'], group: 'edit', desc: 'copySettings' },
+  { id: 'edit.paste', keys: ['mod+shift+v'], scopes: ['edit'], group: 'edit', desc: 'pasteSettings' },
   { id: 'select.all', keys: ['mod+a'], scopes: ['grid'], group: 'edit', desc: 'selectAll' },
   { id: 'ai.accept', keys: ['a'], scopes: ALL, group: 'ai', desc: 'aiAccept' },
   { id: 'ai.acceptAll', keys: ['mod+shift+a'], scopes: ALL, group: 'ai', desc: 'aiAcceptAll' },
@@ -81,8 +90,8 @@ export const BINDINGS: Binding[] = [
   { id: 'group.pickNext', keys: ['shift+enter'], scopes: ['group'], group: 'ai', desc: 'groupPickNext' },
   { id: 'faces.toggle', keys: ['shift+f'], scopes: ['loupe', 'compare', 'group'], group: 'ai', desc: 'facesToggle' },
   { id: 'personFilter.open', keys: ['shift+p'], scopes: ALL, group: 'ai', desc: 'personFilter' },
-  { id: 'export.open', keys: ['mod+e'], scopes: ALL, group: 'misc', desc: 'export' },
-  { id: 'help.toggle', keys: ['?'], scopes: ALL, group: 'misc', desc: 'help' },
+  { id: 'export.open', keys: ['mod+e'], scopes: WITH_EDIT, group: 'misc', desc: 'export' },
+  { id: 'help.toggle', keys: ['?'], scopes: WITH_EDIT, group: 'misc', desc: 'help' },
 ]
 
 export interface KeyEventLike {
@@ -120,6 +129,14 @@ export function isTypingTarget(t: EventTarget | null): boolean {
   if (!el || typeof el.tagName !== 'string') return false
   const tag = el.tagName
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true
+}
+
+/** Like `isTypingTarget`, but sliders / checkboxes keep global shortcuts working after being clicked. */
+export function isTextEntryTarget(t: EventTarget | null): boolean {
+  const el = t as HTMLInputElement | null
+  if (!el || typeof el.tagName !== 'string') return false
+  if (el.tagName === 'INPUT') return !['range', 'checkbox', 'radio', 'button', 'color'].includes(el.type)
+  return isTypingTarget(t)
 }
 
 export type Handlers = Record<string, ((spec: string) => void) | undefined>

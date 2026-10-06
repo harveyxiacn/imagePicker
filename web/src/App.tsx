@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { startEvents } from '@/api/events'
 import { Home } from '@/pages/Home'
+import { Edit } from '@/pages/Edit'
 import { Library } from '@/pages/Library'
 import { People } from '@/pages/People'
 import { Toasts } from '@/components/Toasts'
@@ -55,6 +56,7 @@ function Shell() {
         <Route path="/" element={<Home />} />
         <Route path="/s/:sessionId" element={<Library />} />
         <Route path="/s/:sessionId/people" element={<People />} />
+        <Route path="/s/:sessionId/edit/:photoId" element={<Edit />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <Toasts />

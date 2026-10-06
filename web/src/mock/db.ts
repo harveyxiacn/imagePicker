@@ -146,6 +146,7 @@ export function generatePhotos(
       face_count: null,
       subject_face_count: null,
       analyzed: false,
+      has_edits: false,
     })
   }
   return photos

@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { useToasts } from '@/stores/toasts'
 import { planAcceptAi } from './ai'
+import { applyEditChanges } from './editActions'
 import { findCachedPhotos, patchPhotosInCache, qk } from './cache'
 import {
   computeChanges,
@@ -41,13 +42,19 @@ export async function editPhotos(
 
 export async function undo(qc: QueryClient): Promise<HistoryEntry | undefined> {
   const e = useHistory.getState().undo()
-  if (e) await commit(qc, e.changes, 'before')
+  if (e) {
+    if (e.changes.length) await commit(qc, e.changes, 'before')
+    if (e.edits?.length) await applyEditChanges(qc, e.edits, 'before')
+  }
   return e
 }
 
 export async function redo(qc: QueryClient): Promise<HistoryEntry | undefined> {
   const e = useHistory.getState().redo()
-  if (e) await commit(qc, e.changes, 'after')
+  if (e) {
+    if (e.changes.length) await commit(qc, e.changes, 'after')
+    if (e.edits?.length) await applyEditChanges(qc, e.edits, 'after')
+  }
   return e
 }
 

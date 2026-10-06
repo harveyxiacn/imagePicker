@@ -29,6 +29,10 @@ interface Props {
   showZoom?: boolean
   /** Drawn on top of the image, in its coordinate space (normalized 0-1 children via %). */
   overlay?: ReactNode
+  /** Fully rendered image (edit page): replaces the thumb/preview layers. */
+  src?: string | null
+  /** Pixel size of `src` (its aspect may differ from the photo after a crop). */
+  imageSize?: { w: number; h: number }
 }
 
 /** Layer that fades in when its image has loaded. */
@@ -50,9 +54,9 @@ function Layer({ src, rect, className }: { src: string; rect: React.CSSPropertie
  * Zoomable/pannable image surface. Progressive: 256 thumb -> 2048 preview -> 4096 when zoomed in.
  * Wheel zooms around the cursor; drag pans; double-click toggles fit/100%.
  */
-export const ZoomPane = memo(function ZoomPane({ photo, view, onViewChange, hold, onHover, onSwipe, toggleSignal = 0, showZoom = true, overlay }: Props) {
+export const ZoomPane = memo(function ZoomPane({ photo, view, onViewChange, hold, onHover, onSwipe, toggleSignal = 0, showZoom = true, overlay, src, imageSize }: Props) {
   const [ref, size] = useElementSize<HTMLDivElement>()
-  const img = { w: photo.width ?? 3000, h: photo.height ?? 2000 }
+  const img = imageSize ?? { w: photo.width ?? 3000, h: photo.height ?? 2000 }
   const effective = hold ? viewAt100(hold.nx, hold.ny, size, img) : clampView(view, size, img)
   const rect = imageRect(effective, size, img)
   const rectStyle: React.CSSProperties = { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
@@ -131,7 +135,7 @@ export const ZoomPane = memo(function ZoomPane({ photo, view, onViewChange, hold
   }
 
   const zoomed = effective.zoom > 1.001
-  const needHi = effective.zoom > 1.6 && Math.max(img.w, img.h) > 2048
+  const needHi = !src && effective.zoom > 1.6 && Math.max(img.w, img.h) > 2048
 
   return (
     <div
@@ -152,9 +156,22 @@ export const ZoomPane = memo(function ZoomPane({ photo, view, onViewChange, hold
       )}
       {size.w > 0 && (
         <>
-          <Layer key={`t${photo.id}`} src={thumbUrl(photo, 256)} rect={rectStyle} className="[image-rendering:auto]" />
-          <Layer key={`p${photo.id}`} src={previewUrl(photo.id, 2048)} rect={rectStyle} />
-          {needHi && <Layer key={`h${photo.id}`} src={previewUrl(photo.id, 4096)} rect={rectStyle} />}
+          {src ? (
+            <img
+              src={src}
+              alt=""
+              draggable={false}
+              className="pointer-events-none absolute max-w-none select-none"
+              style={rectStyle}
+              data-testid="render-frame"
+            />
+          ) : (
+            <>
+              <Layer key={`t${photo.id}`} src={thumbUrl(photo, 256)} rect={rectStyle} className="[image-rendering:auto]" />
+              <Layer key={`p${photo.id}`} src={previewUrl(photo.id, 2048, photo.thumb_version)} rect={rectStyle} />
+              {needHi && <Layer key={`h${photo.id}`} src={previewUrl(photo.id, 4096, photo.thumb_version)} rect={rectStyle} />}
+            </>
+          )}
           {overlay && (
             <div className="pointer-events-none absolute" style={rectStyle}>
               {overlay}

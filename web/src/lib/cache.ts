@@ -13,6 +13,10 @@ export const qk = {
   analysisStatus: (sid: number) => ['analysis', 'status', sid] as const,
   analysis: (photoId: number) => ['analysis', 'photo', photoId] as const,
   groups: (sid: number) => ['groups', sid] as const,
+  editsAll: ['edits'] as const,
+  edits: (photoId: number) => ['edits', photoId] as const,
+  presets: ['presets'] as const,
+  mask: (photoId: number, target: string, personId?: number) => ['mask', photoId, target, personId ?? null] as const,
   burstFaces: (burstId: number) => ['burstFaces', burstId] as const,
   peopleAll: ['people'] as const,
   people: (sid: number | undefined) => ['people', sid ?? 'all'] as const,
@@ -127,6 +131,7 @@ export function applyEvents(
   const analysisIds = new Map<number, Set<number>>()
   const progress = new Map<number, Extract<ServerEvent, { type: 'analysis.progress' }>>()
   const groupsChanged = new Set<number>()
+  const editedIds = new Set<number>()
   let peopleChanged = false
   let worker: Extract<ServerEvent, { type: 'worker.status' }> | null = null
 
@@ -138,6 +143,13 @@ export function applyEvents(
       case 'thumbs.ready':
         for (const { id, v } of ev.items)
           patches.set(id, { ...patches.get(id), thumb_ready: true, thumb_version: v })
+        break
+      case 'edits.updated':
+        // Merge by id, latest wins (contract C). Thumbs re-fetch automatically through the new thumb_version.
+        for (const { id, has_edits, thumb_version } of ev.items) {
+          patches.set(id, { ...patches.get(id), has_edits, thumb_version })
+          editedIds.add(id)
+        }
         break
       case 'photos.added':
         added.add(ev.session_id)
@@ -216,6 +228,10 @@ export function applyEvents(
     void qc.invalidateQueries({ queryKey: qk.groups(sid) })
     void qc.invalidateQueries({ queryKey: ['burstFaces'] })
     scheduleListRefetch(qc, sid)
+  }
+  if (editedIds.size) {
+    // Cached stacks of other photos (paste / sync) are stale now; the open photo keeps its live state.
+    void qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === 'edits' && editedIds.has(q.queryKey[1] as number) })
   }
   if (peopleChanged) void qc.invalidateQueries({ queryKey: qk.peopleAll })
 

@@ -49,6 +49,22 @@ describe('i18n', () => {
       ['keyGroup', ['ai']],
       ['scope', ['group']],
       ['view', ['group', 'grid', 'loupe', 'compare']],
+      ['adjust', ['exposure', 'contrast', 'highlights', 'shadows', 'whites', 'blacks', 'temp', 'tint', 'vibrance', 'saturation', 'clarity', 'dehaze']],
+      ['lut', ['film_warm', 'film_cool', 'teal_orange', 'matte', 'bw']],
+      ['preset', ['film_warm', 'film_cool', 'vivid', 'matte', 'bw_contrast', 'teal_orange', 'golden_hour', 'soft_portrait']],
+      ['edit', ['auto_auto', 'auto_portrait', 'auto_landscape', 'save_idle', 'save_saving', 'save_error', 'hsl_h', 'hsl_s', 'hsl_l']],
+      ['edit', ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'].map((b) => `band_${b}`)],
+      ['edit', ['subject', 'sky', 'background', 'person', 'skin', 'hair', 'clothes'].map((k) => `target_${k}`)],
+      ['edit', ['crop', 'global', 'local', 'lut', 'output_sharpen'].map((k) => `section_${k}`)],
+      ['edit', ['shadows', 'midtones', 'highlights'].map((k) => `wheel_${k}`)],
+      ['edit', ['radial', 'linear'].map((k) => `mask_${k}`)],
+      ['edit', ['original', 'free'].map((k) => `aspect_${k}`)],
+      ['keys', ['editOpen', 'editClose', 'beforeAfter', 'maskOverlay', 'cropMode', 'copySettings', 'pasteSettings']],
+      ['scope', ['edit']],
+      [
+        'history',
+        ['adjust', 'auto', 'resetBasic', 'curves', 'hsl', 'hslBand', 'grading', 'gradingWheel', 'gradingBalance', 'addLocal', 'removeLocal', 'invertMask', 'localAmount', 'localAdjust', 'moveMask', 'crop', 'straighten', 'resetCrop', 'sharpen', 'preset', 'lut', 'lutAmount', 'paste', 'sync', 'resetAll'],
+      ],
     ]
     for (const [ns, keys] of families) for (const k of keys) expect(zh.has(`${ns}.${k}`), `${ns}.${k}`).toBe(true)
   })

@@ -42,6 +42,9 @@ export interface Photo {
   face_count: number | null
   subject_face_count: number | null
   analyzed: boolean
+  // ---- M3 (docs/api-contract-m3.md B) ----
+  /** true when a non-empty edit stack is saved; thumbs/previews are then rendered */
+  has_edits: boolean
 }
 
 export type Issue = 'closed_eyes' | 'blurry' | 'overexposed' | 'underexposed' | 'noisy' | 'tilted'
@@ -281,8 +284,176 @@ export type ServerEvent =
   | { type: 'analysis.updated'; session_id: number; ids: number[] }
   | { type: 'groups.updated'; session_id: number }
   | { type: 'people.updated'; session_id: number }
+  | { type: 'edits.updated'; items: { id: number; has_edits: boolean; thumb_version: string }[] }
   | { type: 'worker.status'; state: WorkerState; tier: 'T0' | 'T1' | 'T2' | 'T3' | null; error: string | null }
 
 export interface ApiErrorBody {
   error: { code: string; message: string }
+}
+
+// ---- M3: edit stack (mirrors crates/ip-render/src/lib.rs; serde JSON shape) ----
+
+export type Point = [number, number]
+
+export interface CropOp {
+  type: 'crop'
+  /** normalised [x, y, w, h] of the kept region, measured after `angle` rotation */
+  rect: [number, number, number, number]
+  /** straighten angle in degrees, positive = counter-clockwise, |angle| <= 45 */
+  angle: number
+  /** UI hint only (e.g. "4:5") */
+  aspect?: string
+}
+
+export const HSL_BANDS = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta'] as const
+export type HslBand = (typeof HSL_BANDS)[number]
+
+export interface Hsl {
+  h: number
+  s: number
+  l: number
+}
+
+export interface Curves {
+  rgb?: Point[]
+  r?: Point[]
+  g?: Point[]
+  b?: Point[]
+}
+export type CurveChannel = keyof Curves
+
+/** Three-way colour grading; each wheel is [hue_degrees 0..360, amount 0..1]. */
+export interface Grading {
+  shadows: Point
+  midtones: Point
+  highlights: Point
+  /** -100 (favour shadows) .. 100 (favour highlights) */
+  balance: number
+}
+
+/**
+ * Slider-style adjustments. Rust serialises every numeric field; on the wire (PUT) any field may be
+ * omitted and defaults to 0 / neutral (`#[serde(default)]`), so all are optional here.
+ */
+export interface Adjust {
+  /** EV stops, -5..5 */
+  exposure?: number
+  contrast?: number
+  highlights?: number
+  shadows?: number
+  whites?: number
+  blacks?: number
+  /** Kelvin shift relative to as-shot, -3000..3000 (positive = warmer) */
+  temp?: number
+  tint?: number
+  vibrance?: number
+  saturation?: number
+  clarity?: number
+  dehaze?: number
+  curve?: Curves
+  hsl?: Partial<Record<HslBand, Partial<Hsl>>>
+  grading?: Partial<Grading>
+  /** provenance, e.g. "ai_auto@1" or "user"; not used for rendering */
+  source?: string
+}
+
+export const ADJUST_NUMERIC_KEYS = [
+  'exposure',
+  'contrast',
+  'highlights',
+  'shadows',
+  'whites',
+  'blacks',
+  'temp',
+  'tint',
+  'vibrance',
+  'saturation',
+  'clarity',
+  'dehaze',
+] as const
+export type AdjustKey = (typeof ADJUST_NUMERIC_KEYS)[number]
+
+export type MaskTarget = 'subject' | 'background' | 'sky' | 'person' | 'skin' | 'hair' | 'clothes'
+export const MASK_TARGETS: MaskTarget[] = ['subject', 'background', 'sky', 'person', 'skin', 'hair', 'clothes']
+
+export type MaskRef =
+  | { kind: 'ai'; target: MaskTarget; person_id?: number }
+  | { kind: 'radial'; center: Point; radius: Point; feather?: number }
+  | { kind: 'linear'; start: Point; end: Point }
+
+export interface GlobalOp extends Adjust {
+  type: 'global'
+}
+export interface LocalOp {
+  type: 'local'
+  mask: MaskRef
+  /** mask opacity 0..1 (default 1) */
+  amount?: number
+  invert?: boolean
+  adjust: Adjust
+}
+export interface LutOp {
+  type: 'lut'
+  file: string
+  amount?: number
+}
+export interface OutputSharpenOp {
+  type: 'output_sharpen'
+  amount: number
+}
+/** M4/M5 ops (warp, beauty, patch...) are preserved verbatim and ignored by the M3 UI. */
+export interface UnknownOp {
+  type: string
+  [k: string]: unknown
+}
+export type KnownOp = CropOp | GlobalOp | LocalOp | LutOp | OutputSharpenOp
+export type Op = KnownOp | UnknownOp
+
+export interface EditStack {
+  version: number
+  ops: Op[]
+}
+
+export type EditSection = 'crop' | 'global' | 'local' | 'lut' | 'output_sharpen'
+export const EDIT_SECTIONS: EditSection[] = ['crop', 'global', 'local', 'lut', 'output_sharpen']
+
+export interface EditsResponse {
+  photo_id: number
+  stack: EditStack
+  updated_at: number | null
+}
+export interface EditsPutResponse {
+  photo_id: number
+  stack: EditStack
+  updated_at: number
+  thumb_version: string
+}
+
+export type AutoMode = 'auto' | 'portrait' | 'landscape'
+
+export interface SyncBody {
+  from_id: number
+  to_ids: number[]
+  include: EditSection[]
+  adaptive?: boolean
+}
+
+export interface Preset {
+  id: string
+  /** built-in presets carry an i18n key such as `preset.film_warm` */
+  name: string
+  builtin: boolean
+  stack: EditStack
+}
+
+export interface PreviewBody {
+  photo_id: number
+  stack?: EditStack
+  long_edge?: number
+  original?: boolean
+}
+export interface PreviewResult {
+  blob: Blob
+  renderMs: number | null
+  backend: 'gpu' | 'cpu' | null
 }
