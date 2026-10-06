@@ -264,6 +264,67 @@ portrait stack (synthetic 3:4 portrait, people geometry from testutil)"
         ph,
         t.elapsed().as_secs_f64()
     );
+    // ---- patch stack (full-frame denoise-like + two face-sized patches)
+    println!("\npatch stack (3 patches: full-frame denoise 0.8, two face-sized, feathered)");
+    let assets = PatchAssets::default()
+        .with("dn", synth_patch(3000, 2000, 1, None))
+        .with("f1", synth_patch(512, 512, 2, Some(1.0)))
+        .with("f2", synth_patch(512, 512, 3, Some(1.0)));
+    let mk = |kind, asset: &str, rect, feather, amount| {
+        Op::Patch(Patch {
+            kind,
+            asset: asset.into(),
+            rect,
+            feather,
+            amount,
+            enabled: true,
+            person_id: None,
+            source_photo_id: None,
+        })
+    };
+    let patch_st = EditStack {
+        version: 1,
+        ops: vec![
+            mk(PatchKind::Denoise, "dn", [0.0, 0.0, 1.0, 1.0], 0.0, 0.8),
+            mk(
+                PatchKind::BestTake,
+                "f1",
+                [0.2, 0.25, 0.12, 0.18],
+                0.15,
+                1.0,
+            ),
+            mk(PatchKind::BestTake, "f2", [0.6, 0.3, 0.12, 0.18], 0.15, 1.0),
+            Op::Crop(Crop {
+                rect: [0.02, 0.03, 0.95, 0.94],
+                angle: -1.2,
+                aspect: None,
+            }),
+            Op::Global(Adjust {
+                exposure: 0.2,
+                contrast: 10.0,
+                ..Default::default()
+            }),
+        ],
+    };
+    println!("{:<34} {:>10} {:>10}", "case", "CPU ms", "GPU ms");
+    let cases: [(&str, &RgbImage, Option<u32>, usize); 3] = [
+        ("preview 1600 (from 2400 proxy)", &proxy, Some(1600), 5),
+        ("preview 1600 (from 24 MP)", &big, Some(1600), 3),
+        ("export full-res 24 MP", &big, None, 2),
+    ];
+    for (name, src, max, runs) in cases {
+        let c = time(cpu.as_ref(), src, &patch_st, &assets, max, runs);
+        let g = if gpu.backend() == Backend::Gpu {
+            format!(
+                "{:10.1}",
+                time(gpu.as_ref(), src, &patch_st, &assets, max, runs)
+            )
+        } else {
+            "      n/a".into()
+        };
+        println!("{name:<34} {c:>10.1} {g}");
+    }
+
     let people = PortraitMasks(vec![portrait.person.clone()]);
     let pst = portrait_stack();
     let pproxy = cpu

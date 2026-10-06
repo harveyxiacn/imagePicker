@@ -832,3 +832,81 @@ pub fn synth_portrait(w: u32, h: u32) -> SynthPortrait {
         skin_rgb: [SKIN[0] as u8, SKIN[1] as u8, SKIN[2] as u8],
     }
 }
+
+// ---------------------------------------------------------------- patch assets
+
+/// Synthetic RGBA patch asset: a smooth coloured pattern with some fine detail.
+/// `alpha` = `None` gives an opaque asset, otherwise a soft round alpha falling off to
+/// zero at the border (like a best-take face blend mask) with that peak value.
+pub fn synth_patch(w: u32, h: u32, seed: u64, alpha: Option<f32>) -> RgbaImage {
+    let mut r = Rng::new(seed);
+    let base = [
+        r.range(40.0, 215.0),
+        r.range(40.0, 215.0),
+        r.range(40.0, 215.0),
+    ];
+    let (fx, fy) = (r.range(2.0, 6.0), r.range(2.0, 6.0));
+    let mut data = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+            let tau = std::f32::consts::TAU;
+            let wave = (u * fx * tau).sin() * (v * fy * tau).cos();
+            for (k, b) in base.iter().enumerate() {
+                let c = b + 35.0 * wave * if k == 1 { -1.0 } else { 1.0 } + 20.0 * (u - v);
+                data.push(c.clamp(0.0, 255.0) as u8);
+            }
+            let a = match alpha {
+                None => 1.0,
+                Some(peak) => {
+                    let d = ((u - 0.5).powi(2) + (v - 0.5).powi(2)).sqrt() * 2.0;
+                    peak * (1.0 - d).clamp(0.0, 1.0).sqrt()
+                }
+            };
+            data.push((a * 255.0 + 0.5) as u8);
+        }
+    }
+    RgbaImage {
+        width: w,
+        height: h,
+        data,
+    }
+}
+
+/// Uniform-colour opaque patch asset.
+pub fn solid_patch(w: u32, h: u32, rgb: [u8; 3]) -> RgbaImage {
+    let mut data = Vec::with_capacity((w * h * 4) as usize);
+    for _ in 0..w * h {
+        data.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+    }
+    RgbaImage {
+        width: w,
+        height: h,
+        data,
+    }
+}
+
+/// Mask provider serving named patch assets and counting fetches.
+#[derive(Default)]
+pub struct PatchAssets {
+    pub assets: BTreeMap<String, RgbaImage>,
+    pub fetches: std::sync::atomic::AtomicUsize,
+}
+
+impl PatchAssets {
+    pub fn with(mut self, id: &str, img: RgbaImage) -> PatchAssets {
+        self.assets.insert(id.to_string(), img);
+        self
+    }
+}
+
+impl MaskProvider for PatchAssets {
+    fn mask(&self, _: MaskTarget, _: Option<i64>) -> Result<Option<Mask>> {
+        Ok(None)
+    }
+    fn patch(&self, asset: &str) -> Result<Option<RgbaImage>> {
+        self.fetches
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(self.assets.get(asset).cloned())
+    }
+}

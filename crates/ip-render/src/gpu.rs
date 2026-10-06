@@ -105,6 +105,8 @@ impl GpuRenderer {
 
     /// Render strictly on the GPU (errors instead of falling back).
     pub fn render_gpu_only(&self, req: &RenderRequest<'_>) -> Result<RgbImage> {
+        let patched = crate::patch::composite(req)?;
+        let req = &req.with_source(patched.as_ref());
         let plan = prep::build(req)?;
         self.device()?.render(&plan, req.source)
     }
@@ -115,6 +117,8 @@ impl Renderer for GpuRenderer {
         Backend::Gpu
     }
     fn render(&self, req: &RenderRequest<'_>) -> Result<RgbImage> {
+        let patched = crate::patch::composite(req)?;
+        let req = &req.with_source(patched.as_ref());
         let plan = prep::build(req)?;
         match self.device().and_then(|d| d.render(&plan, req.source)) {
             Ok(img) => Ok(img),
