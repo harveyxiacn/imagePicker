@@ -134,12 +134,16 @@ pub struct Coalescer {
     order: Vec<Key>,
     thumbs: Vec<ThumbItem>,
     updates: Vec<PhotoUpdate>,
+    /// photo id -> position in `updates` (merging N items must stay O(N)).
+    updates_idx: HashMap<i64, usize>,
     edits: Vec<EditUpdate>,
+    edits_idx: HashMap<i64, usize>,
     added: HashMap<i64, i64>,
     sessions: HashMap<i64, Session>,
     tasks: HashMap<String, Event>,
     analysis_progress: HashMap<i64, Event>,
     analysis_ids: HashMap<i64, Vec<i64>>,
+    analysis_seen: HashMap<i64, HashSet<i64>>,
     groups: HashSet<i64>,
     people: HashSet<i64>,
     beauty: Vec<i64>,
@@ -191,20 +195,24 @@ impl Coalescer {
             Event::PhotosUpdated { items } => {
                 self.note(Key::Updates);
                 for it in items {
-                    if let Some(e) = self.updates.iter_mut().find(|u| u.id == it.id) {
-                        *e = it;
-                    } else {
-                        self.updates.push(it);
+                    match self.updates_idx.get(&it.id) {
+                        Some(&i) => self.updates[i] = it,
+                        None => {
+                            self.updates_idx.insert(it.id, self.updates.len());
+                            self.updates.push(it);
+                        }
                     }
                 }
             }
             Event::EditsUpdated { items } => {
                 self.note(Key::Edits);
                 for it in items {
-                    if let Some(e) = self.edits.iter_mut().find(|u| u.id == it.id) {
-                        *e = it;
-                    } else {
-                        self.edits.push(it);
+                    match self.edits_idx.get(&it.id) {
+                        Some(&i) => self.edits[i] = it,
+                        None => {
+                            self.edits_idx.insert(it.id, self.edits.len());
+                            self.edits.push(it);
+                        }
                     }
                 }
             }
@@ -227,8 +235,9 @@ impl Coalescer {
             Event::AnalysisUpdated { session_id, ids } => {
                 self.note(Key::AnalysisIds(session_id));
                 let e = self.analysis_ids.entry(session_id).or_default();
+                let seen = self.analysis_seen.entry(session_id).or_default();
                 for id in ids {
-                    if !e.contains(&id) {
+                    if seen.insert(id) {
                         e.push(id);
                     }
                 }
@@ -290,12 +299,18 @@ impl Coalescer {
                 Key::Thumbs => out.push(Event::ThumbsReady {
                     items: std::mem::take(&mut self.thumbs),
                 }),
-                Key::Updates => out.push(Event::PhotosUpdated {
-                    items: std::mem::take(&mut self.updates),
-                }),
-                Key::Edits => out.push(Event::EditsUpdated {
-                    items: std::mem::take(&mut self.edits),
-                }),
+                Key::Updates => {
+                    self.updates_idx.clear();
+                    out.push(Event::PhotosUpdated {
+                        items: std::mem::take(&mut self.updates),
+                    })
+                }
+                Key::Edits => {
+                    self.edits_idx.clear();
+                    out.push(Event::EditsUpdated {
+                        items: std::mem::take(&mut self.edits),
+                    })
+                }
                 Key::Added(sid) => {
                     if let Some(count) = self.added.remove(&sid) {
                         out.push(Event::PhotosAdded {
@@ -320,6 +335,7 @@ impl Coalescer {
                     }
                 }
                 Key::AnalysisIds(sid) => {
+                    self.analysis_seen.remove(&sid);
                     if let Some(ids) = self.analysis_ids.remove(&sid) {
                         out.push(Event::AnalysisUpdated {
                             session_id: sid,

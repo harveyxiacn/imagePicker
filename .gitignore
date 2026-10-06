@@ -22,3 +22,4 @@ Thumbs.db
 # Claude Code local state (agent worktrees)
 .claude/
 target-desktop/
+target-m7perf/

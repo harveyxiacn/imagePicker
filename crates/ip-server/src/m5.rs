@@ -95,13 +95,21 @@ pub async fn tidy_json(req: Request, next: Next) -> Response {
     let Ok(bytes) = axum::body::to_bytes(body, TIDY_LIMIT).await else {
         return (StatusCode::INTERNAL_SERVER_ERROR, "response too large").into_response();
     };
-    let out = match serde_json::from_slice::<Value>(&bytes) {
+    // Most bodies (photo pages, events) are already clean: a byte scan decides, no parsing.
+    if !ip_core::jsonfix::needs_tidy(&bytes) {
+        return Response::from_parts(parts, Body::from(bytes));
+    }
+    // The parse / re-serialise pass is CPU heavy for big bodies: keep it off the async workers.
+    let fallback = bytes.clone();
+    let out = tokio::task::spawn_blocking(move || match serde_json::from_slice::<Value>(&bytes) {
         Ok(mut v) => {
             ip_core::jsonfix::tidy(&mut v);
             serde_json::to_vec(&v).unwrap_or_else(|_| bytes.to_vec())
         }
         Err(_) => bytes.to_vec(),
-    };
+    })
+    .await
+    .unwrap_or_else(|_| fallback.to_vec());
     parts.headers.remove(header::CONTENT_LENGTH);
     Response::from_parts(parts, Body::from(out))
 }

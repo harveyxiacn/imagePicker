@@ -278,11 +278,21 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
 pub async fn list_photos(
     State(st): State<AppState>,
     ApiQuery(p): ApiQuery<PhotosParams>,
-) -> ApiResult<Json<Value>> {
+) -> ApiResult<Json<PhotosOut>> {
     let page = st.core.photos(photo_query(p)?).await?;
-    Ok(Json(json!({
-        "photos": page.photos, "total": page.total, "next_cursor": page.next_cursor
-    })))
+    // Serialised straight from the rows (no intermediate `serde_json::Value` tree).
+    Ok(Json(PhotosOut {
+        photos: page.photos,
+        total: page.total,
+        next_cursor: page.next_cursor,
+    }))
+}
+
+#[derive(serde::Serialize)]
+pub struct PhotosOut {
+    photos: Vec<ip_core::Photo>,
+    total: i64,
+    next_cursor: Option<String>,
 }
 
 pub async fn get_photo(

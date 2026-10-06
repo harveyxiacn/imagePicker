@@ -16,6 +16,7 @@ pub mod imaging;
 pub mod import;
 pub mod jpegmeta;
 pub mod jsonfix;
+pub mod lazy_renderer;
 pub mod model;
 pub mod paths;
 pub mod roots;
@@ -152,9 +153,7 @@ impl Core {
                     .map(|v| v.trim().eq_ignore_ascii_case("cpu"))
                     .unwrap_or(false);
                 let cpu_setting = settings.get().render.backend == "cpu";
-                Arc::from(ip_render::create_renderer(
-                    !(cfg.force_cpu || cpu_env || cpu_setting),
-                ))
+                lazy_renderer::LazyRenderer::spawn(!(cfg.force_cpu || cpu_env || cpu_setting))
             }
         };
         let render = Arc::new(RenderService::new(edit::service::ServiceParts {
@@ -255,7 +254,10 @@ impl Core {
     // ------------------------------------------------------------ photos
 
     pub async fn photos(&self, q: PhotoQuery) -> Result<PhotosPage> {
-        self.db.call(move |c| catalog::query_photos(c, &q)).await
+        let db = self.db.clone();
+        self.db
+            .call(move |c| catalog::query_photos_cached(c, &q, Some(&db)))
+            .await
     }
 
     pub async fn photo(&self, id: i64) -> Result<Photo> {

@@ -709,24 +709,27 @@ pub fn load_active(conn: &Connection) -> Result<Option<(Model, f64)>> {
 // ------------------------------------------------------------------ labels
 
 fn upsert(conn: &Connection, photo_id: i64, kind: &str, value: f64, source: &str) -> Result<usize> {
-    Ok(conn.execute(
-        "INSERT INTO preference_label(photo_id, kind, value, source, created_at)
-         SELECT ?1,?2,?3,?4,?5 WHERE EXISTS (SELECT 1 FROM photo WHERE id=?1)
-         ON CONFLICT(photo_id, kind) DO UPDATE SET value=?3, source=?4, created_at=?5
-           WHERE value != ?3",
-        params![photo_id, kind, value, source, now_ms()],
-    )?)
+    Ok(conn
+        .prepare_cached(
+            "INSERT INTO preference_label(photo_id, kind, value, source, created_at)
+             SELECT ?1,?2,?3,?4,?5 WHERE EXISTS (SELECT 1 FROM photo WHERE id=?1)
+             ON CONFLICT(photo_id, kind) DO UPDATE SET value=?3, source=?4, created_at=?5
+               WHERE value != ?3",
+        )?
+        .execute(params![photo_id, kind, value, source, now_ms()])?)
 }
 
 fn remove(conn: &Connection, photo_id: i64, kind: &str) -> Result<usize> {
-    Ok(conn.execute(
-        "DELETE FROM preference_label WHERE photo_id=?1 AND kind=?2",
-        params![photo_id, kind],
-    )?)
+    Ok(conn
+        .prepare_cached("DELETE FROM preference_label WHERE photo_id=?1 AND kind=?2")?
+        .execute(params![photo_id, kind])?)
 }
 
 /// Records the explicit rating / flag of a user patch. Returns how many labels changed.
 pub fn record_patch(conn: &Connection, req: &PatchRequest) -> Result<usize> {
+    // one transaction: a select-all patch used to commit once per photo
+    let tx = conn.unchecked_transaction()?;
+    let conn = &*tx;
     let mut changed = 0;
     for id in &req.ids {
         match req.user_rating {
@@ -740,17 +743,21 @@ pub fn record_patch(conn: &Connection, req: &PatchRequest) -> Result<usize> {
             None => {}
         }
     }
+    tx.commit()?;
     Ok(changed)
 }
 
 /// Records the ratings a user accepted from the AI.
 pub fn record_accept(conn: &Connection, updates: &[PhotoUpdate]) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let conn = &*tx;
     let mut changed = 0;
     for u in updates {
         if let Some(r) = u.user_rating.filter(|r| *r >= 1) {
             changed += upsert(conn, u.id, "rating", r as f64, "accept_ai")?;
         }
     }
+    tx.commit()?;
     Ok(changed)
 }
 

@@ -541,13 +541,13 @@ fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
         shutter_s: r.get(13)?,
         iso: r.get(14)?,
         user_rating: r.get(15)?,
-        ai_rating: r.get(16)?,
+        ai_rating: r.get::<_, Option<f64>>(16)?.map(crate::jsonfix::tidy_f64),
         flag: r.get(17)?,
         color_label: r.get(18)?,
         burst_id: r.get(19)?,
         thumb_ready: r.get::<_, i64>(20)? >= 2,
         thumb_version: thumb_version_for(&fast_key, r.get::<_, Option<String>>(32)?.as_deref()),
-        ai_score: r.get(23)?,
+        ai_score: r.get::<_, Option<f64>>(23)?.map(crate::jsonfix::tidy_f64),
         issues: crate::analysis::scoring::Issue::from_mask(r.get::<_, i64>(24)?),
         rank_in_burst: r.get(25)?,
         burst_size: r.get(26)?,
@@ -596,6 +596,16 @@ pub const DEFAULT_LIMIT: i64 = 500;
 pub const MAX_LIMIT: i64 = 5000;
 
 pub fn query_photos(conn: &Connection, q: &PhotoQuery) -> Result<PhotosPage> {
+    query_photos_cached(conn, q, None)
+}
+
+/// [`query_photos`] that can reuse a `total` computed earlier for the same filter, as long as
+/// nothing was written to the catalog in between (`Db::generation`).
+pub fn query_photos_cached(
+    conn: &Connection,
+    q: &PhotoQuery,
+    db: Option<&crate::db::Db>,
+) -> Result<PhotosPage> {
     // The session must exist.
     get_session_exists(conn, q.session_id)?;
 
@@ -634,17 +644,20 @@ pub fn query_photos(conn: &Connection, q: &PhotoQuery) -> Result<PhotosPage> {
     } else {
         format!(" AND {}", wheres.join(" AND "))
     };
-    let from = format!(
-        "FROM photo p JOIN root_folder r ON r.id=p.root_id
-         JOIN session_photo sp ON sp.photo_id=p.id AND sp.session_id=?{base_where}"
+    // Join order is pinned (CROSS JOIN): session members first, photo rows by primary key.
+    // Without it the planner loops over `root_folder` first and scans the members once per root.
+    // A burst filter is far more selective than the session: let the planner start from it.
+    let join = if q.burst_id.is_some() {
+        "JOIN"
+    } else {
+        "CROSS JOIN"
+    };
+    let members = format!(
+        "FROM session_photo sp {join} photo p ON p.id=sp.photo_id
+         WHERE sp.session_id=?{base_where}"
     );
 
-    let total: i64 = conn.query_row(
-        &format!("SELECT COUNT(*) {from}"),
-        params_from_iter(args.iter()),
-        |r| r.get(0),
-    )?;
-
+    let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let mut page_args = args.clone();
     let mut cursor_sql = String::new();
     if let Some(c) = &q.cursor {
@@ -665,14 +678,20 @@ pub fn query_photos(conn: &Connection, q: &PhotoQuery) -> Result<PhotosPage> {
         page_args.push(Value::Integer(cur.id));
     }
 
-    let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let dir = if desc { "DESC" } else { "ASC" };
+    let collate = if text_key { " COLLATE NOCASE" } else { "" };
+    // Two steps: sort only (id, key) pairs and keep the first `limit + 1`, then read the wide
+    // rows for those ids. Sorting complete rows made every page cost O(session) row copies.
     let sql = format!(
-        "SELECT {PHOTO_COLS}, sp.session_id, {key_expr} {from}{cursor_sql}
-         ORDER BY {key_expr} {dir}, p.id ASC LIMIT {}",
-        limit + 1
+        "SELECT {PHOTO_COLS}, pg.sid, pg.k
+         FROM (SELECT p.id AS id, sp.session_id AS sid, {key_expr} AS k {members}{cursor_sql}
+               ORDER BY {key_expr} {dir}, p.id ASC LIMIT {limit1}) pg
+         CROSS JOIN photo p ON p.id=pg.id
+         CROSS JOIN root_folder r ON r.id=p.root_id
+         ORDER BY pg.k{collate} {dir}, pg.id ASC",
+        limit1 = limit + 1
     );
-    let mut st = conn.prepare(&sql)?;
+    let mut st = conn.prepare_cached(&sql)?;
     let mut rows: Vec<(Photo, serde_json::Value)> = st
         .query_map(params_from_iter(page_args.iter()), |r| {
             let photo = photo_row(r)?;
@@ -685,8 +704,39 @@ pub fn query_photos(conn: &Connection, q: &PhotoQuery) -> Result<PhotosPage> {
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
+    let more = rows.len() as i64 > limit;
+    let total: i64 = if q.cursor.is_none() && !more {
+        // the whole result is on this page
+        rows.len() as i64
+    } else {
+        let count_sql = if wheres.is_empty() {
+            "SELECT COUNT(*) FROM session_photo WHERE session_id=?".to_string()
+        } else {
+            format!("SELECT COUNT(*) {members}")
+        };
+        let compute = || -> Result<i64> {
+            let mut st = conn.prepare_cached(&count_sql)?;
+            Ok(st.query_row(params_from_iter(args.iter()), |r| r.get(0))?)
+        };
+        match db {
+            Some(db) => {
+                let generation = db.generation();
+                let key = format!("{count_sql}|{args:?}");
+                match db.cached_count(generation, &key) {
+                    Some(n) => n,
+                    None => {
+                        let n = compute()?;
+                        db.store_count(generation, key, n);
+                        n
+                    }
+                }
+            }
+            None => compute()?,
+        }
+    };
+
     let mut next_cursor = None;
-    if rows.len() as i64 > limit {
+    if more {
         rows.truncate(limit as usize);
         if let Some((p, k)) = rows.last() {
             let cur = Cursor {
