@@ -3,6 +3,10 @@
 //! Speaks just enough of the protocol: ready line, bearer-token auth, `system.info`,
 //! `system.ping`, `system.shutdown`, `models.list`, `analyze.batch` (progress + empty items),
 //! `hang` (waits for `cancel`), `crash` (exits) and `pid`.
+//! With `IP_FAKE_ANALYSIS=1` (real-server end-to-end tests) `analyze.batch` returns synthetic but
+//! deterministic `fast` results instead of empty items: the pHash is derived from the file size
+//! (frames cut from the same synthetic base image look alike, so bursts form), sharpness and
+//! exposure from the name, so the UI has groups, stacks, ratings and issue badges to show.
 //! `--sleeper` runs a process that only sleeps; with `--grandchild` the worker spawns one
 //! and reports its pid in `system.info` (to test killing the whole process tree).
 
@@ -117,6 +121,14 @@ async fn main() {
                             let _ = tx.send(json!({"jsonrpc":"2.0","id":req,"error":{"code":-32800,"message":"request cancelled","data":{"kind":"cancelled"}}}).to_string());
                         }
                     }
+                    "analyze.batch" if std::env::var_os("IP_FAKE_ANALYSIS").is_some() => {
+                        let items = synthetic_items(&v["params"]["items"]);
+                        let n = items.len();
+                        if let Some(id) = id {
+                            let _ = tx.send(json!({"jsonrpc":"2.0","method":"progress","params":{"req":id,"kind":"analyze","done":n,"total":n}}).to_string());
+                        }
+                        reply(json!({"items": items, "steps": [], "skipped_steps": [], "warnings": []}));
+                    }
                     "analyze.batch" => {
                         let n = v["params"]["items"]
                             .as_array()
@@ -134,4 +146,39 @@ async fn main() {
             }
         });
     }
+}
+
+/// Deterministic `fast`-profile results for `IP_FAKE_ANALYSIS=1`.
+fn synthetic_items(items: &Value) -> Vec<Value> {
+    items
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .map(|it| {
+            let path = it["path"].as_str().unwrap_or_default();
+            let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            let name_hash = path
+                .bytes()
+                .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+            // frames from one base image share a size, hence a pHash: they cluster into bursts
+            let phash = size.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (name_hash & 0x3);
+            let unit = |shift: u32| ((name_hash >> shift) & 0xff) as f64 / 255.0;
+            let sharp = 0.25 + 0.7 * unit(8);
+            let exposure = 0.1 + 0.8 * unit(16);
+            json!({
+                "photo_id": it["photo_id"],
+                "phash": format!("{phash:016x}"),
+                "sharpness": sharp,
+                "exposure": exposure,
+                "noise": 0.05 + 0.2 * unit(24),
+                "quality": {
+                    "mean_luminance": exposure,
+                    "clipped_highlights": if unit(32) > 0.9 { 0.2 } else { 0.0 },
+                    "crushed_shadows": if unit(40) > 0.93 { 0.3 } else { 0.0 },
+                },
+                "faces": [],
+            })
+        })
+        .collect()
 }

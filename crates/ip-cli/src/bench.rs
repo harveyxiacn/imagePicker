@@ -203,22 +203,24 @@ fn gen(dir: &Path, count: usize, megapixels: u32, seed: u64) -> Result<()> {
         ("SONY", "ILCE-7M4", "FE 35mm F1.8"),
         ("NIKON CORPORATION", "NIKON Z 6_2", "NIKKOR Z 50mm f/1.8 S"),
     ];
-    let plan: Vec<(usize, usize, i64, u64)> = times
-        .iter()
-        .enumerate()
-        .map(|(i, &t)| {
-            // 8% large frames, 20% portrait, rest landscape
+    // One base image per moment: frames of a burst (< 1.2 s apart) share it, like a real burst
+    // looks alike; 8% of the moments use the large frame, 20% are portrait.
+    let mut plan: Vec<(usize, usize, i64, u64)> = Vec::with_capacity(times.len());
+    let (mut last_t, mut base) = (i64::MIN, 0usize);
+    for (i, &t) in times.iter().enumerate() {
+        if t - last_t >= 1200 {
             let r = rng.below(100);
-            let b = if r < 8 {
+            base = if r < 8 {
                 4
             } else if r < 28 {
                 3
             } else {
                 rng.below(3) as usize
             };
-            (i, b, t, rng.next())
-        })
-        .collect();
+        }
+        last_t = t;
+        plan.push((i, base, t, rng.next()));
+    }
     plan.par_iter()
         .try_for_each(|&(i, b, t, r)| -> Result<()> {
             let (w, h, bytes) = &bases[b];
