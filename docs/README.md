@@ -9,6 +9,15 @@
 | v0.1 | 2026-10-06 | 初版：需求、架构、AI 算法、UI/UX、数据接口、项目计划 |
 | v0.2 | 2026-10-06 | 新增 Android 设计（08）、按人脸筛选（F2.13）、人脸数据隐私、目录库备份、显示色彩管理；解码改为纯 Rust + 系统 HEIF 解码器；修正快捷键与编号不一致 |
 
+## 用户文档与参考
+
+| 文档 | 内容 |
+|---|---|
+| [用户指南（中文）](user-guide/zh-CN.md) / [User Guide (English)](user-guide/en.md) | 安装、首次运行、挑片流程与快捷键、分析、人物、最佳表情、编辑、美化、修复、导出、AI 助手、局域网、XMP、设置、排错 |
+| [待办与已知问题](backlog.md) | 校准项、功能缺口、许可审计待办 |
+| API 契约（前后端对接，反映**已实现**的接口） | [M1 联调基准（导入与浏览）](api-contract-m1.md) · [M2 智能分析](api-contract-m2.md) · [M3 修图引擎](api-contract-m3.md) · [M4 人像美化](api-contract-m4.md) · [M5 最佳表情与生成式修复](api-contract-m5.md) · [M6 助手、局域网、XMP、设置](api-contract-m6.md) |
+| 截图 | [`images/`](images/)（mock 后端生成，不含真实照片；脚本 `web/scripts/docs-screenshots.mjs`） |
+
 ## 文档目录
 
 | # | 文档 | 内容 | 读者 |
