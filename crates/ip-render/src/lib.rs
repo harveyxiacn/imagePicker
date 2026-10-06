@@ -7,6 +7,8 @@
 //! Pipeline order is fixed (docs/02 §5.3): decode -> geometry (crop/rotate) ->
 //! [warp/patch: M4/M5] -> global -> local (masks) -> [beauty: M4] -> LUT -> output sharpen.
 
+#![allow(clippy::chunks_exact_to_as_chunks)]
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -328,3 +330,49 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
 }
 
 mod imp;
+
+/// Procedurally generated built-in LUT for a preset `Lut.file` id (`film_warm`, `film_cool`,
+/// `cinematic`, `bw_classic`). The renderer falls back to this when the [`LutProvider`]
+/// has nothing for an id, so providers only need to resolve imported `.cube` files.
+pub fn builtin_lut(id: &str) -> Option<Lut3d> {
+    imp::builtin_lut(id)
+}
+
+/// Serialise a LUT to `.cube` text.
+pub fn write_cube(lut: &Lut3d, title: &str) -> String {
+    cube::write_cube(lut, title)
+}
+
+/// Identity 3D LUT of the given size (2..=256).
+pub fn identity_lut(size: u32) -> Lut3d {
+    cube::identity_lut(size)
+}
+
+/// Ids of all built-in LUTs resolvable through [`builtin_lut`]: `film_warm`, `film_cool`,
+/// `bw_classic`, `teal_orange`, `fade`, `vivid`, `cinematic`.
+pub fn builtin_lut_ids() -> &'static [&'static str] {
+    presets::builtin_lut_ids()
+}
+
+/// Name of the GPU adapter `create_renderer(true)` would use, if any.
+pub fn gpu_adapter_name() -> Option<String> {
+    imp::gpu_adapter_name()
+}
+
+mod auto;
+mod color;
+mod cpu;
+mod cube;
+mod geom;
+mod gpu;
+mod prep;
+mod presets;
+/// Synthetic images and helpers for tests/benchmarks.
+#[doc(hidden)]
+pub mod testutil;
+
+/// A GPU renderer that returns an error on any GPU failure instead of silently using the
+/// CPU. `None` when no adapter is available. Intended for parity tests and diagnostics.
+pub fn create_strict_gpu_renderer() -> Option<Box<dyn Renderer>> {
+    gpu::GpuRenderer::probe().map(|g| Box::new(gpu::StrictGpu(g)) as Box<dyn Renderer>)
+}
