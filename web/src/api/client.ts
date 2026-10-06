@@ -47,6 +47,7 @@ import type {
   LanInfo,
   OnboardingInfo,
   Role,
+  RuntimeInfo,
   Settings,
   SettingsPatch,
 } from './types'
@@ -170,6 +171,11 @@ export const api = {
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),
+  // ---- M7: AI runtime ----
+  runtime: () => request<RuntimeInfo>('GET', '/runtime'),
+  installRuntime: (extras?: string[]) => request<{ task_id: string }>('POST', '/runtime/install', extras ? { extras } : {}),
+  cancelRuntime: () => request<void>('POST', '/runtime/cancel'),
+  removeRuntime: () => request<void>('DELETE', '/runtime'),
   // ---- M2 ----
   hardware: () => request<HardwareInfo>('GET', '/system/hardware'),
   models: () => request<{ models: ModelInfo[] }>('GET', '/models'),

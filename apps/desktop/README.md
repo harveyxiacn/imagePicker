@@ -16,9 +16,24 @@ Thin native shell around the same SPA + Rust server as the WebUI (docs/02-架构
 Rust (MSVC on Windows), Node 24, pnpm 10. Windows needs WebView2 (present on Win11). Linux needs
 `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev patchelf`.
 
+## AI runtime bundling (M7)
+
+A packaged app has no repo, Python or `uv`. The installer therefore ships:
+
+- `uv` as a Tauri `externalBin` (`binaries/uv-<triple>[.exe]`, installed next to the executable). It is **not
+  committed**: `bash scripts/fetch-uv.sh` downloads the pinned release (version in the script, sha256 in
+  `scripts/uv.sha256`; exits non-zero on a mismatch; idempotent). `FETCH_UV_TARGET=<triple>` or
+  `universal-apple-darwin` select another target. Run it once before `pnpm tauri dev|build` (tauri-build checks the file).
+- the worker source (`ai-worker/pyproject.toml`, `uv.lock`, `README.md`, `imagepicker_ai/`) as the resource `ai-worker/`.
+
+On consent (onboarding "下载 AI 组件", settings, or the 503 `runtime: "missing"` toast) the core copies that source to
+`<data>/runtime/worker-src/<version>`, runs `uv python install 3.12` and `uv sync --frozen --no-dev --extra <cpu|cuda>
+--extra mediapipe` into `<data>/runtime/{python,venv}` and starts the worker from there (`/api/runtime`).
+
 ## Develop
 
 ```sh
+bash apps/desktop/scripts/fetch-uv.sh
 cd web && pnpm install && cd ../apps/desktop && pnpm install
 pnpm tauri dev
 ```

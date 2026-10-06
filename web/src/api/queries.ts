@@ -54,6 +54,19 @@ export function useHardware() {
   return useQuery({ queryKey: qk.hardware, queryFn: api.hardware, select: (d) => d.worker, staleTime: 30_000, enabled: ok })
 }
 
+/** GET /api/runtime (owner only). Events keep it fresh; it polls slowly while an install runs as a safety net. */
+export function useRuntime(enabled = true) {
+  const ok = useNotGuest()
+  return useQuery({
+    queryKey: qk.runtime,
+    queryFn: api.runtime,
+    staleTime: 10_000,
+    enabled: ok && enabled,
+    retry: false,
+    refetchInterval: (q) => (q.state.data?.state === 'installing' ? 3000 : false),
+  })
+}
+
 export function useModels(enabled = true) {
   const ok = useNotGuest()
   return useQuery({ queryKey: qk.models, queryFn: api.models, select: (d) => d.models, enabled: ok && enabled, staleTime: 0 })

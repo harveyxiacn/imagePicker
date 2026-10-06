@@ -4,6 +4,7 @@ import type { AnalysisProfile, AnalysisStatus } from '@/api/types'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
 import { qk } from './cache'
+import { offerRuntimeInstall } from './runtime'
 
 /** Extracts the `models` list of a 409 models_missing response (contract C.2). */
 export function missingModelsOf(err: unknown): string[] | null {
@@ -39,6 +40,7 @@ export async function startAnalysis(
       useAnalysisUi.getState().setConsent({ sessionId, profile, photoIds, models: missing })
       return false
     }
+    if (offerRuntimeInstall(err)) return false
     useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 6000)
     return false
   }

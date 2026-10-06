@@ -3,10 +3,11 @@ import { Cpu, Download, Loader2, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import { useMe, useOnboarding } from '@/api/queries'
 import { can } from '@/lib/auth'
 import { qk } from '@/lib/cache'
+import { installRuntimeAndWait, runtimeView } from '@/lib/runtime'
 import { COACH_MARKS, shouldPostDone, visibleOverlay, type CoachMark, type OnboardingAction } from '@/lib/onboarding'
 import { useOnboardingUi } from '@/stores/onboarding'
 import { useToasts } from '@/stores/toasts'
@@ -53,12 +54,25 @@ export function Onboarding() {
 function HardwareCard({ info, onChoose }: { info: NonNullable<ReturnType<typeof useOnboarding>['data']>; onChoose: (download: boolean) => void }) {
   const { t } = useTranslation()
   const [busy, setBusy] = useState(false)
+  const [percent, setPercent] = useState<number | null>(null)
   const gpu = info.hardware.gpu
 
   const download = async () => {
     setBusy(true)
     try {
-      let ids = info.recommended_models
+      // M7: the AI runtime comes first (progress in the button), then the models
+      let freshInstall = false
+      try {
+        const rt = await api.runtime()
+        if (rt.state !== 'ready') {
+          freshInstall = true
+          await installRuntimeAndWait((r) => setPercent(runtimeView(r).percent))
+          setPercent(null)
+        }
+      } catch (e) {
+        if (!(e instanceof ApiError) || e.status !== 404) throw e // 404: a server without the runtime API
+      }
+      let ids = freshInstall ? undefined : info.recommended_models
       if (!ids) ids = (await api.models()).models.filter((m) => m.required_for.includes('standard') && !m.installed).map((m) => m.id)
       if (ids.length) {
         const { task_id } = await api.ensureModels(ids)
@@ -69,6 +83,7 @@ function HardwareCard({ info, onChoose }: { info: NonNullable<ReturnType<typeof 
       useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
     } finally {
       setBusy(false)
+      setPercent(null)
     }
   }
 
@@ -81,7 +96,7 @@ function HardwareCard({ info, onChoose }: { info: NonNullable<ReturnType<typeof 
           </button>
           <button className="btn btn-primary" disabled={busy} onClick={() => void download()} data-testid="onboarding-download">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-            {t('onboarding.download')}
+            {percent !== null ? `${t('runtime.installingHint')} ${percent}%` : t('onboarding.download')}
           </button>
         </>
       }

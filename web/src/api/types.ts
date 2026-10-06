@@ -301,7 +301,37 @@ export type ServerEvent =
   | { type: 'collections.updated' }
   | { type: 'assistant.done'; plan_id: string; ok: boolean; results: AssistantResult[]; undo: AssistantUndo }
   | { type: 'settings.updated'; settings: Settings }
+  | { type: 'runtime.updated'; runtime: RuntimeInfo }
   | { type: 'xmp.conflict'; photo_id: number; sidecar: { rating?: number | null }; catalog: { rating?: number | null } }
+
+// ---- M7: installable AI runtime (GET /api/runtime) ----
+export type RuntimeState = 'missing' | 'installing' | 'ready' | 'failed'
+
+export interface RuntimeInfo {
+  state: RuntimeState
+  /** installed runtime version (null when none) */
+  version: string | null
+  bundled_version: string
+  /** an app update left an older runtime behind: it must be re-installed */
+  outdated: boolean
+  /** installed extras, e.g. ["cuda","mediapipe"] */
+  extras: string[]
+  /** extras the installer would pick for this machine */
+  recommended_extras?: string[]
+  python: string | null
+  venv_bytes: number | null
+  error: string | null
+  can_install: boolean
+  /** why `can_install` is false */
+  reason: string | null
+  /** running step: prepare | python | sync | verify */
+  step: string | null
+  /** 0..100 while installing */
+  percent: number
+  detail: string
+  task_id: string | null
+  hardware?: { os: string; arch: string; nvidia: { name: string; driver: string } | null }
+}
 
 export interface ApiErrorBody {
   error: { code: string; message: string }

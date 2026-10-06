@@ -22,3 +22,6 @@ Thumbs.db
 # Claude Code local state (agent worktrees)
 .claude/
 target-desktop/
+
+# uv fetched at build time (apps/desktop/scripts/fetch-uv.sh)
+apps/desktop/src-tauri/binaries/

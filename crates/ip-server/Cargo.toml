@@ -8,6 +8,7 @@ license.workspace = true
 ip-core.workspace = true
 ip-imaging.workspace = true
 ip-render.workspace = true
+ip-worker-client.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

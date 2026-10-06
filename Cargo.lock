@@ -2430,6 +2430,7 @@ dependencies = [
  "ip-core",
  "ip-imaging",
  "ip-render",
+ "ip-worker-client",
  "local-ip-address",
  "qrcode",
  "serde",

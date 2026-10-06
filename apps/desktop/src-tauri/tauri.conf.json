@@ -22,7 +22,14 @@
     "longDescription": "imagePicker: fast, local-first photo culling with AI assistance.",
     "copyright": "Apache-2.0",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
-    "resources": { "../../../web/dist": "web" },
+    "externalBin": ["binaries/uv"],
+    "resources": {
+      "../../../web/dist": "web",
+      "../../../ai-worker/pyproject.toml": "ai-worker/pyproject.toml",
+      "../../../ai-worker/uv.lock": "ai-worker/uv.lock",
+      "../../../ai-worker/README.md": "ai-worker/README.md",
+      "../../../ai-worker/imagepicker_ai": "ai-worker/imagepicker_ai"
+    },
     "windows": {
       "nsis": { "installMode": "currentUser", "languages": ["SimpChinese", "English"] }
     },

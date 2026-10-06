@@ -92,6 +92,9 @@ pub enum Event {
         sidecar: serde_json::Value,
         catalog: serde_json::Value,
     },
+    /// M7: the AI runtime install state changed (payload = `GET /api/runtime` without the hardware).
+    #[serde(rename = "runtime.updated")]
+    RuntimeUpdated { runtime: serde_json::Value },
     #[serde(rename = "worker.status")]
     WorkerStatus {
         state: String,
@@ -147,6 +150,7 @@ pub struct Coalescer {
     collections: bool,
     worker: Option<Event>,
     settings: Option<Event>,
+    runtime: Option<Event>,
     /// `*.done` events: delivered one by one, in order.
     done: Vec<Event>,
 }
@@ -168,6 +172,7 @@ enum Key {
     Collections,
     Worker,
     Settings,
+    Runtime,
     Done,
 }
 
@@ -262,6 +267,10 @@ impl Coalescer {
             ev @ Event::SettingsUpdated { .. } => {
                 self.note(Key::Settings);
                 self.settings = Some(ev);
+            }
+            ev @ Event::RuntimeUpdated { .. } => {
+                self.note(Key::Runtime);
+                self.runtime = Some(ev);
             }
             ev @ (Event::BestTakeDone { .. }
             | Event::InpaintDone { .. }
@@ -360,6 +369,11 @@ impl Coalescer {
                 }
                 Key::Settings => {
                     if let Some(ev) = self.settings.take() {
+                        out.push(ev);
+                    }
+                }
+                Key::Runtime => {
+                    if let Some(ev) = self.runtime.take() {
                         out.push(ev);
                     }
                 }

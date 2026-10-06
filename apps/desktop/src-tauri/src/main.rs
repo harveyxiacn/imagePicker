@@ -174,7 +174,24 @@ fn start_server(app: &AppHandle, token: &str) -> anyhow::Result<(RunningServer, 
         );
         Some(dir)
     };
+    // M7: the AI runtime installer needs the bundled `uv` (Tauri `externalBin`, installed next to
+    // the executable) and the bundled worker source (resources). Both are absent in `tauri dev`.
+    let uv_path = std::env::current_exe().ok().and_then(|exe| {
+        let p = exe
+            .parent()?
+            .join(if cfg!(windows) { "uv.exe" } else { "uv" });
+        p.is_file().then_some(p)
+    });
+    let worker_src = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|d| d.join("ai-worker"))
+        .filter(|d| d.join("pyproject.toml").is_file());
+    tracing::info!(uv = ?uv_path, worker_src = ?worker_src, "bundled AI runtime installer");
     let mut cfg = ServerConfig {
+        uv_path,
+        worker_src,
         host: "127.0.0.1".into(),
         port: if dev { DEV_API_PORT } else { 0 },
         data_dir: std::env::var_os("IMAGEPICKER_DATA_DIR").map(PathBuf::from),

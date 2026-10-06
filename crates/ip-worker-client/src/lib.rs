@@ -6,6 +6,7 @@
 
 pub mod client;
 pub mod error;
+pub mod launch;
 pub mod managed;
 pub mod process;
 pub mod protocol;
@@ -19,6 +20,10 @@ use tokio::sync::watch;
 
 pub use client::{CancelToken, ProgressTx, RpcClient};
 pub use error::{Result, WorkerError};
+pub use launch::{
+    find_on_path, installed_python, read_marker, resolve_launch, venv_dir, venv_python, Launch,
+    LaunchInputs, LaunchSource, RuntimeLaunch, RuntimeMarker, MARKER_FILE, RUNTIME_MISSING_TAG,
+};
 pub use managed::{ManagedWorker, WorkerConfig};
 pub use protocol::*;
 pub use protocol_m4::*;

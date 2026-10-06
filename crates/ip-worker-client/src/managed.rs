@@ -13,6 +13,9 @@ use tokio::sync::{watch, Mutex as AsyncMutex};
 
 use crate::client::{CancelToken, ProgressTx, RpcClient};
 use crate::error::{Result, WorkerError};
+use crate::launch::{
+    find_on_path, resolve_launch, Launch, LaunchInputs, RuntimeLaunch, RUNTIME_MISSING_TAG,
+};
 use crate::process;
 use crate::protocol::*;
 use crate::protocol_m4::*;
@@ -34,6 +37,8 @@ pub struct WorkerConfig {
     pub backoff_base: Duration,
     /// After being declared unavailable, new requests retry only after this long.
     pub cooldown: Duration,
+    /// The installed AI runtime (`<data>/runtime`), used when there is no override or dev repo.
+    pub runtime: Option<RuntimeLaunch>,
 }
 
 impl Default for WorkerConfig {
@@ -46,6 +51,7 @@ impl Default for WorkerConfig {
             max_failures: 3,
             backoff_base: Duration::from_millis(500),
             cooldown: Duration::from_secs(30),
+            runtime: None,
         }
     }
 }
@@ -249,8 +255,10 @@ impl ManagedWorker {
                             f.count + 1
                         };
                         if f.count >= self.cfg.max_failures {
-                            self.shared
-                                .set_state(WorkerState::Unavailable, Some(msg.clone()));
+                            self.shared.set_state(
+                                WorkerState::Unavailable,
+                                Some(msg.replace(RUNTIME_MISSING_TAG, "")),
+                            );
                             return Err(WorkerError::Unavailable(msg));
                         }
                     }
@@ -268,13 +276,20 @@ impl ManagedWorker {
             .models_dir
             .clone()
             .or_else(|| self.cfg.models_dir.clone());
-        let argv = process::build_argv(
-            cmd.as_deref(),
+        let launch = resolve_launch(
+            &LaunchInputs {
+                cmd_override: cmd.as_deref(),
+                dev_dir: dir,
+                uv_on_path: find_on_path("uv").is_some(),
+                runtime: self.cfg.runtime.as_ref(),
+            },
             &token,
             std::process::id(),
             models_dir.as_deref(),
-        );
-        tracing::info!(argv = %argv[0], dir = ?dir, "starting AI worker");
+        )
+        .map_err(WorkerError::Unavailable)?;
+        let Launch { argv, dir, source } = launch;
+        tracing::info!(argv = %argv[0], dir = ?dir, ?source, "starting AI worker");
         let mut child = process::spawn_with_env(&argv, dir.as_deref(), &token, &opts.env).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 WorkerError::Unavailable(format!(
