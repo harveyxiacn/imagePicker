@@ -30,7 +30,6 @@ jobs:
   web:
     name: Web
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('web/package.json') != '' }}
     defaults:
       run:
         working-directory: web
@@ -56,7 +55,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    if: ${{ hashFiles('ai-worker/pyproject.toml') != '' }}
     defaults:
       run:
         working-directory: ai-worker
