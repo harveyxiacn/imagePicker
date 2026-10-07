@@ -6,6 +6,7 @@ import type { ColorLabel, Flag, Photo } from '@/api/types'
 import { getPlatform } from '@/platform'
 import { formatBytes, formatDate, formatDims, formatShutter } from '@/lib/format'
 import { usePhotoAnalysis } from '@/api/queries'
+import { DeviceKindIcon } from './DeviceFilterPopover'
 import { FaceStrip, ScoreBreakdown } from './ScoreBreakdown'
 import { AiStars, ColorDots, FlagButtons, StarRating } from './controls'
 
@@ -148,7 +149,19 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor, onAccep
               <Row k={t('exif.size')} v={formatBytes(photo.file_size)} />
               <Row k={t('exif.dimensions')} v={formatDims(photo.width, photo.height)} />
               <Row k={t('exif.taken')} v={formatDate(photo.taken_at, i18n.language, photo.taken_at_offset_min)} />
-              <Row k={t('exif.camera')} v={photo.camera ?? '—'} />
+              <Row
+                k={t('exif.camera')}
+                v={
+                  photo.camera ? (
+                    <span className="inline-flex items-center gap-1.5" title={t(`device.kind_${photo.device_kind ?? 'unknown'}`)}>
+                      <DeviceKindIcon kind={photo.device_kind} />
+                      {photo.camera}
+                    </span>
+                  ) : (
+                    '—'
+                  )
+                }
+              />
               <Row k={t('exif.lens')} v={photo.lens ?? '—'} />
               <Row k={t('exif.focal')} v={photo.focal_mm !== null ? `${photo.focal_mm} mm` : '—'} />
               <Row k={t('exif.exposure')} v={exposure || '—'} />

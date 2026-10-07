@@ -5,6 +5,18 @@ export type ColorLabel = 'red' | 'yellow' | 'green' | 'blue' | 'purple' | null
 export type ColorName = Exclude<ColorLabel, null>
 export type ImageFormat = 'jpeg' | 'png' | 'webp' | 'heif' | 'avif' | 'tiff' | 'raw'
 
+export type DeviceKind = 'phone' | 'camera' | 'drone' | 'action' | 'unknown'
+export const DEVICE_KINDS: DeviceKind[] = ['phone', 'camera', 'drone', 'action', 'unknown']
+
+export interface Device {
+  id: number
+  make: string | null
+  model: string | null
+  name: string
+  kind: DeviceKind
+  photo_count: number
+}
+
 export interface Photo {
   id: number
   session_id: number
@@ -17,7 +29,10 @@ export interface Photo {
   taken_at: number | null
   /** UTC offset at capture (minutes); null = unknown, taken_at is then naive wall-clock as UTC */
   taken_at_offset_min: number | null
+  /** Normalised display name, e.g. "Sony ILCE-7M4". */
   camera: string | null
+  device_id: number | null
+  device_kind: DeviceKind | null
   lens: string | null
   focal_mm: number | null
   aperture: number | null
@@ -93,6 +108,8 @@ export interface PhotosQuery {
   faces_max?: number
   /** M4: only photos with a saved non-empty edit stack (built-in "edited" collection) */
   has_edits?: boolean
+  /** Device ids and/or 'none' (photos without EXIF camera) */
+  device?: Array<number | 'none'>
   cursor?: string
   limit?: number
 }

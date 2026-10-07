@@ -92,6 +92,16 @@ export const zhCN = {
     exif: '文件与 EXIF',
     applyingTo: '操作将应用于 {{n}} 张所选照片',
   },
+  device: {
+    filter: '设备',
+    none: '无相机信息',
+    reset: '清除',
+    kind_phone: '手机',
+    kind_camera: '相机',
+    kind_drone: '无人机',
+    kind_action: '运动相机',
+    kind_unknown: '未知设备',
+  },
   exif: {
     path: '路径',
     format: '格式',

@@ -1,4 +1,5 @@
 import type {
+  Device,
   AnalysisProfile,
   AnalysisStatus,
   ApiErrorBody,
@@ -155,6 +156,7 @@ export function photosQueryString(q: PhotosQuery): string {
   if (q.include_background) p.set('include_background', '1')
   if (q.faces_min !== undefined) p.set('faces_min', String(q.faces_min))
   if (q.faces_max !== undefined) p.set('faces_max', String(q.faces_max))
+  if (q.device?.length) p.set('device', q.device.join(','))
   if (q.has_edits) p.set('has_edits', '1')
   if (q.sort) p.set('sort', q.sort)
   if (q.cursor) p.set('cursor', q.cursor)
@@ -195,6 +197,7 @@ export const api = {
   mergeGroups: (burst_ids: number[]) => request<{ burst_id: number }>('POST', '/groups/merge', { burst_ids }),
   burstFaces: (id: number) => request<BurstFaces>('GET', `/bursts/${id}/faces`),
   acceptAi: (ids: number[]) => request<{ updated: number }>('POST', '/photos/accept-ai', { ids }),
+  devices: (sessionId: number) => request<{ devices: Device[] }>('GET', `/sessions/${sessionId}/devices`),
   people: (session_id?: number) =>
     request<{ people: Person[] }>('GET', `/people${session_id !== undefined ? `?session_id=${session_id}` : ''}`),
   patchPerson: (id: number, body: { name?: string | null; hidden?: boolean }) =>

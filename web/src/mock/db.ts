@@ -1,4 +1,4 @@
-import type { ColorLabel, Flag, ImageFormat, Photo, Session } from '@/api/types'
+import type { ColorLabel, Device, Flag, ImageFormat, Photo, Session } from '@/api/types'
 
 // ---------- deterministic RNG ----------
 export function mulberry32(seed: number) {
@@ -42,7 +42,13 @@ const DIMS: [number, number][] = [
   [6000, 3376],
   [5504, 3672],
 ]
-const CAMERAS = ['SONY ILCE-7M4', 'Canon EOS R6', 'NIKON Z 6II', 'FUJIFILM X-T5', 'Apple iPhone 15 Pro']
+export const MOCK_DEVICES: Omit<Device, 'photo_count'>[] = [
+  { id: 1, make: 'SONY', model: 'ILCE-7M4', name: 'Sony ILCE-7M4', kind: 'camera' },
+  { id: 2, make: 'Apple', model: 'iPhone 15 Pro', name: 'Apple iPhone 15 Pro', kind: 'phone' },
+  { id: 3, make: 'DJI', model: 'FC3682', name: 'DJI Mini 4 Pro', kind: 'drone' },
+]
+/** Deterministic device per photo index: mostly the camera, then the phone, a few drone shots. */
+const deviceFor = (i: number) => MOCK_DEVICES[i % 10 < 6 ? 0 : i % 10 < 9 ? 1 : 2]
 const LENSES = ['FE 24-70mm F2.8 GM', 'RF 50mm F1.8', 'NIKKOR Z 85mm f/1.8', 'XF 35mm F1.4', null]
 const FORMATS: { f: ImageFormat; ext: string; w: number }[] = [
   { f: 'jpeg', ext: 'JPG', w: 62 },
@@ -125,7 +131,9 @@ export function generatePhotos(
       height: h,
       taken_at: Math.round(t),
       taken_at_offset_min: 480,
-      camera: hasExif ? CAMERAS[Math.floor(i / 400) % CAMERAS.length] : null,
+      camera: hasExif ? deviceFor(i).name : null,
+      device_id: hasExif ? deviceFor(i).id : null,
+      device_kind: hasExif ? deviceFor(i).kind : null,
       lens: hasExif ? pick(LENSES) : null,
       focal_mm: hasExif ? pick([24, 35, 50, 70, 85, 135]) : null,
       aperture: hasExif ? pick(APERTURES) : null,

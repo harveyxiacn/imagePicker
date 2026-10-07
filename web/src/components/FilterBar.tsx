@@ -1,12 +1,13 @@
 import { ChevronsUpDown, FolderPlus, Layers, Star, X } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { usePeople } from '@/api/queries'
+import { useDevices, usePeople, useSession } from '@/api/queries'
 import { ISSUES, SCENE_TYPES, type FlagFilter, type Issue, type SceneType, type SortKey } from '@/api/types'
 import { personLabel } from '@/lib/ai'
 import { facesPreset, isFilterActive, setPersonTri, type FilterState } from '@/lib/filter'
 import { useUi } from '@/stores/ui'
 import { COLOR_NAMES, colorVar } from '@/lib/colors'
+import { DeviceFilterButton } from './DeviceFilterPopover'
 import { PersonFilterButton } from './PersonFilterPopover'
 
 const FLAGS: ('all' | FlagFilter)[] = ['all', 'picked', 'not_rejected', 'unflagged', 'rejected']
@@ -61,6 +62,9 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
   const expanded = useUi((s) => s.expandedStacks)
   const setStacks = useUi((s) => s.setStacks)
   const people = usePeople(sessionId)
+  const session = useSession(sessionId)
+  const devices = useDevices(sessionId, session.data?.photo_count)
+  const devNames = useMemo(() => new Map((devices.data ?? []).map((d) => [d.id, d.name])), [devices.data])
   const fmt = (n: number) => n.toLocaleString(i18n.language)
   const active = isFilterActive(filter)
   const p = filter.person
@@ -76,7 +80,7 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
 
   const personPill = p.include.length > 0
   const preset = facesPreset(p)
-  const showPills = personPill || p.exclude.length > 0 || preset !== 'any' || filter.issueMode !== 'all' || filter.sceneType !== null || filter.bestOnly || filter.edited
+  const showPills = personPill || p.exclude.length > 0 || preset !== 'any' || filter.issueMode !== 'all' || filter.sceneType !== null || filter.device.length > 0 || filter.bestOnly || filter.edited
 
   return (
     <div className="shrink-0 border-b border-line">
@@ -147,6 +151,7 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
         </div>
 
         <PersonFilterButton sessionId={sessionId} resultCount={shown} />
+        <DeviceFilterButton sessionId={sessionId} />
 
         <label className="flex items-center gap-1.5">
           <span className="text-muted">{t('filter.issues')}</span>
@@ -299,6 +304,13 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
           {filter.edited && (
             <Pill label={t('collections.builtin_edited')} onRemove={() => setFilter({ edited: false })}>
               <span>{t('collections.builtin_edited')}</span>
+            </Pill>
+          )}
+          {filter.device.length > 0 && (
+            <Pill label={t('device.filter')} onRemove={() => setFilter({ device: [] })}>
+              <span>
+                {t('device.filter')}: {filter.device.map((d) => (d === 'none' ? t('device.none') : devNames.get(d) ?? `#${d}`)).join(' | ')}
+              </span>
             </Pill>
           )}
           {filter.sceneType && (

@@ -94,6 +94,16 @@ export const en: Messages = {
     exif: 'File & EXIF',
     applyingTo: 'Changes apply to {{n}} selected photos',
   },
+  device: {
+    filter: 'Device',
+    none: 'No camera info',
+    reset: 'Clear',
+    kind_phone: 'Phone',
+    kind_camera: 'Camera',
+    kind_drone: 'Drone',
+    kind_action: 'Action camera',
+    kind_unknown: 'Unknown device',
+  },
   exif: {
     path: 'Path',
     format: 'Format',
