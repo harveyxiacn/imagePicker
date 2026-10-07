@@ -4,6 +4,8 @@
 
 ## 校准（需要真实照片评测集）
 
+> 2026-10-07：已用本地 ComfyUI（Qwen-Image 2.1）生成 74 张合成评测图（人像 / 风景 / 合照 / 连拍变体：闭眼、动态模糊、过曝欠曝、路人 / 缺陷样本），脚本 `scripts/comfy-testset.py`，输出在主机 `~/ai/ComfyUI/output/imagepicker-testset/`（带 `manifest.json` 标签），不入库。下一步用它跑 `lite` / `standard` 档位对照阈值。
+
 | 优先级 | 项 | 说明 |
 |---|---|---|
 | P0 | 评分阈值校准 | 过曝判定只看整图高光溢出比例，白底图大量误报；美学/IQA 换算、分组松紧、星级映射均为经验初值 |
@@ -31,6 +33,9 @@
 | P2 | AUR PKGBUILD 未在 Arch 上 makepkg 实测 | M7 release |
 | P2 | 身体形变后的生成式背景补全 | M4 render |
 | P2 | 皮肤蒙版回退方案未扣除眉毛 | M4 render |
+| P1 | `ip-infer`（`infer` 特性）尚未在 Android 上链接 ONNX Runtime（NNAPI/XNNPACK）；端侧 YuNet 目前仅桌面可用，检测器为单实例互斥（分析线程间串行） | M8.1 infer |
+| P1 | Release 的 Android APK 任务（签名 keystore、`apksigner` 校验、产物路径）未在 CI 实跑；需配置 `ANDROID_KEYSTORE_*` 四个 secrets 后验证 | M8 release |
+| P2 | lite 档位的 `faces` 步骤不输出关键点 / 闭眼 / 表情（需 MediaPipe 或 ONNX 关键点模型） | M8.1 infer |
 
 ## 许可审计（商用前）
 

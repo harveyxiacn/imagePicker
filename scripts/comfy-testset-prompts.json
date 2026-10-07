@@ -1,0 +1,130 @@
+{
+  "style": "Realistic candid photograph shot on a modern mirrorless camera, natural skin texture, true-to-life colours, no text, no watermark, no logos.",
+  "categories": [
+    {
+      "name": "portraits",
+      "seed": 101000,
+      "size": "2:3",
+      "items": [
+        {"id": "p01-park-golden", "prompt": "Half-body portrait of a young East Asian woman in a linen shirt standing in a city park at golden hour, soft warm backlight on her hair, shallow depth of field, she smiles gently at the camera.", "tags": ["single", "good"]},
+        {"id": "p02-window-elder", "prompt": "An elderly man with grey hair and glasses sits by a large window reading a newspaper, soft side window light, warm wooden interior, relaxed expression.", "tags": ["single", "good", "indoor"]},
+        {"id": "p03-beach-child", "prompt": "A laughing five-year-old boy runs toward the camera on a sandy beach, late afternoon sun, sea and sky behind him, slightly windswept hair.", "tags": ["single", "child", "action"]},
+        {"id": "p04-backlit-rim", "prompt": "Portrait of a man with short beard standing against the setting sun, strong rim light around his silhouette, lens flare, face still readable, orange sky.", "tags": ["single", "backlit"]},
+        {"id": "p05-highkey-white", "prompt": "High-key studio portrait of a woman in a white blouse against a pure white seamless background, bright even lighting, white background completely blown to white, face correctly exposed.", "tags": ["single", "high-key", "white-background"]},
+        {"id": "p06-candle-dim", "prompt": "A woman in a dim restaurant lit only by a candle on the table, warm low light, dark background, slight visible grain, she looks at the camera.", "tags": ["single", "low-light"]},
+        {"id": "p07-snow-bright", "prompt": "Teenager in a red ski jacket on a snow-covered slope at noon, bright white snow everywhere, blue sky, goggles pushed up on the forehead.", "tags": ["single", "bright", "snow"]},
+        {"id": "p08-neon-night", "prompt": "Street portrait of a young man at night in a Tokyo alley lit by neon signs, magenta and cyan light on his face, wet pavement reflections.", "tags": ["single", "night"]},
+        {"id": "p09-noon-hat", "prompt": "Woman in a straw hat under harsh midday sun in a vineyard, hard shadows across her face, squinting slightly, strong contrast.", "tags": ["single", "harsh-light"]},
+        {"id": "p10-rain-umbrella", "prompt": "Man holding a clear umbrella in light rain on a city street, raindrops visible, overcast grey light, cool tones.", "tags": ["single", "overcast"]},
+        {"id": "p11-baby-closeup", "prompt": "Close-up of a baby lying on a white blanket looking up curiously, soft diffused window light, pastel colours.", "tags": ["single", "baby", "closeup"]},
+        {"id": "p12-cafe-window", "prompt": "Woman seen through a cafe window holding a coffee cup, reflections of the street in the glass, warm interior light, candid moment.", "tags": ["single", "reflection"]}
+      ]
+    },
+    {
+      "name": "landscapes",
+      "seed": 202000,
+      "size": "3:2",
+      "items": [
+        {"id": "l01-alpine-lake", "prompt": "Alpine lake at sunrise with mirror-still water reflecting snow-capped peaks, pink and orange clouds, pine trees along the shore.", "tags": ["good"]},
+        {"id": "l02-beach-sunset", "prompt": "Wide beach at sunset, long shadows, gentle waves, the sun just above the horizon, warm saturated sky.", "tags": ["good", "sunset"], "size": "16:9"},
+        {"id": "l03-snowfield-noon", "prompt": "Flat snow-covered field under a clear midday sky, nearly all white with a single bare tree and a wooden fence, very bright scene.", "tags": ["bright", "snow", "white-dominant"]},
+        {"id": "l04-fog-forest", "prompt": "Foggy pine forest in the early morning, low contrast, soft grey light, a narrow trail disappearing into the mist.", "tags": ["low-contrast"]},
+        {"id": "l05-city-night", "prompt": "City skyline at night across a river, lit skyscrapers reflected in the water, long exposure look with smooth water, deep blue sky.", "tags": ["night"], "size": "16:9"},
+        {"id": "l06-desert-dunes", "prompt": "Sand dunes in late afternoon light, crisp ridge lines, deep shadows on one side, a lone hiker far away for scale.", "tags": ["good"]},
+        {"id": "l07-rice-terraces", "prompt": "Green rice terraces on a hillside after rain, overcast soft light, water in the paddies reflecting the sky.", "tags": ["overcast"]},
+        {"id": "l08-waterfall", "prompt": "Tall waterfall in a mossy gorge, silky long-exposure water, wet rocks, lush green vegetation.", "tags": ["good"], "size": "2:3"},
+        {"id": "l09-grey-sea", "prompt": "Overcast grey sea and sky with a distant lighthouse, muted colours, flat light, slight drizzle.", "tags": ["low-contrast", "overcast"]},
+        {"id": "l10-autumn-road", "prompt": "Straight country road through an autumn forest, red and yellow leaves, dappled sunlight, leading lines to the vanishing point.", "tags": ["good"]},
+        {"id": "l11-torii-path", "prompt": "Path lined with hundreds of vermilion torii gates at Fushimi Inari, Kyoto, soft shade, no people visible.", "tags": ["travel"], "size": "2:3"},
+        {"id": "l12-milky-way", "prompt": "Milky Way over a mountain ridge at night, star-filled sky, faint light pollution on the horizon, visible high-ISO grain.", "tags": ["night", "noisy"]}
+      ]
+    },
+    {
+      "name": "groups",
+      "seed": 303000,
+      "size": "3:2",
+      "items": [
+        {"id": "g01-family-dinner", "prompt": "Family of four (parents and two children) around a dinner table at home, all looking at the camera and smiling, warm indoor lighting, dishes on the table.", "tags": ["group", "4", "indoor", "good"]},
+        {"id": "g02-summit-friends", "prompt": "Six friends in hiking gear posing together on a mountain summit, arms around each other, bright sunny day, valley far below.", "tags": ["group", "6", "outdoor", "good"]},
+        {"id": "g03-wedding-party", "prompt": "Bride and groom with four bridesmaids and groomsmen on a lawn in front of a garden, formal group pose, soft overcast light.", "tags": ["group", "6", "wedding"]},
+        {"id": "g04-two-selfie", "prompt": "Two young women taking a selfie-style photo at arm's length in front of a Ferris wheel, both grinning, close to the camera, wide angle.", "tags": ["group", "2", "selfie"]},
+        {"id": "g05-three-kids", "prompt": "Three children aged five to nine playing with a garden hose in a backyard, water droplets in the air, afternoon sun, laughing.", "tags": ["group", "3", "child", "action"]},
+        {"id": "g06-birthday-cake", "prompt": "Five friends gathered around a birthday cake with lit candles in a dim living room, faces lit by candlelight, one person about to blow out the candles.", "tags": ["group", "5", "low-light"]},
+        {"id": "g07-office-team", "prompt": "Seven colleagues standing in a bright modern office, casual business clothes, mixed ages and ethnicities, friendly smiles.", "tags": ["group", "7", "indoor"]},
+        {"id": "g08-grandparents", "prompt": "Grandfather, grandmother and a toddler grandchild on a park bench, the toddler holding a balloon, warm evening light.", "tags": ["group", "3", "good"]},
+        {"id": "g09-one-eyes-closed", "prompt": "Four friends posing for a photo at a cafe table; three smile at the camera while the person on the left has both eyes closed mid-blink.", "tags": ["group", "4", "eyes-closed"]},
+        {"id": "g10-one-looking-away", "prompt": "Five family members posing in front of a temple gate; four look at the camera while the teenage boy on the right looks away at his phone.", "tags": ["group", "5", "gaze-away"]},
+        {"id": "g11-one-motion-blur", "prompt": "Group of four at a picnic on the grass; three sit still and sharp while the child in front is moving and motion-blurred.", "tags": ["group", "4", "partial-blur"]},
+        {"id": "g12-eight-stairs", "prompt": "Eight people of mixed ages arranged on the stone steps of an old building, formal group photo, even overcast light, every face visible.", "tags": ["group", "8", "formal"]}
+      ]
+    },
+    {
+      "name": "bursts",
+      "seed": 404000,
+      "size": "3:2",
+      "items": [
+        {"id": "b01-beach-jump", "tag": "burst", "prompt": "A young woman in a yellow dress jumping in the air on a beach at sunset, arms raised, same framing and position.", "variants": [
+          {"delta": "She is mid-jump, eyes open, big smile, perfectly sharp.", "tags": ["best"]},
+          {"delta": "She is mid-jump with both eyes closed.", "tags": ["eyes-closed"]},
+          {"delta": "She is landing, her body and the dress are motion-blurred.", "tags": ["blur"]},
+          {"delta": "The sky and sand are heavily overexposed, washed-out highlights.", "tags": ["overexposed"]}
+        ]},
+        {"id": "b02-candles", "tag": "burst", "prompt": "A seven-year-old girl leaning over a birthday cake with candles in a dim dining room, family hands visible at the edges.", "variants": [
+          {"delta": "She looks at the camera, eyes open, smiling, sharp.", "tags": ["best"]},
+          {"delta": "She blows the candles with her eyes squeezed shut and cheeks puffed.", "tags": ["eyes-closed"]},
+          {"delta": "Her face is out of focus, the cake is sharp.", "tags": ["blur", "focus-miss"]},
+          {"delta": "The image is very dark and underexposed, only the candle flames bright.", "tags": ["underexposed"]}
+        ]},
+        {"id": "b03-frisbee", "tag": "burst", "prompt": "A man in a blue t-shirt throwing a frisbee in a park, dog waiting behind him, bright afternoon.", "variants": [
+          {"delta": "Frozen at the release, sharp, eyes open looking at the frisbee.", "tags": ["best"]},
+          {"delta": "His arm is motion-blurred, body slightly blurred.", "tags": ["blur"]},
+          {"delta": "He has turned his head away from the camera.", "tags": ["gaze-away"]},
+          {"delta": "The whole frame is slightly blurred by camera shake.", "tags": ["blur", "shake"]}
+        ]},
+        {"id": "b04-torii-walk", "tag": "burst", "prompt": "A couple walking hand in hand through a tunnel of vermilion torii gates in Kyoto, seen from behind at three-quarter angle.", "variants": [
+          {"delta": "Both turn their faces toward the camera and smile, sharp.", "tags": ["best"]},
+          {"delta": "Both look straight ahead, faces not visible.", "tags": ["gaze-away"]},
+          {"delta": "A stranger walks into the frame on the left, partially blocking the couple.", "tags": ["bystander"]},
+          {"delta": "The woman's eyes are closed as she turns toward the camera.", "tags": ["eyes-closed"]}
+        ]},
+        {"id": "b05-toast", "tag": "burst", "prompt": "Four friends raising wine glasses in a toast at a restaurant table, warm tungsten light.", "variants": [
+          {"delta": "Everyone looks at the camera with open eyes and smiles, sharp.", "tags": ["best"]},
+          {"delta": "The woman on the right has her eyes closed.", "tags": ["eyes-closed"]},
+          {"delta": "The glasses and hands are motion-blurred as they clink.", "tags": ["blur"]},
+          {"delta": "Heavy flash: faces overexposed and flat, background black.", "tags": ["overexposed", "flash"]}
+        ]},
+        {"id": "b06-dog-run", "tag": "burst", "prompt": "A golden retriever running toward the camera on a grassy field with its owner, a woman in a grey hoodie, jogging behind.", "variants": [
+          {"delta": "The dog is sharp and in focus, ears flying, the owner smiling.", "tags": ["best"]},
+          {"delta": "The dog is motion-blurred, the owner sharp.", "tags": ["blur"]},
+          {"delta": "The dog is much closer and partially out of the frame.", "tags": ["framing"]},
+          {"delta": "The owner's eyes are closed and she is looking down.", "tags": ["eyes-closed"]}
+        ]},
+        {"id": "b07-swing", "tag": "burst", "prompt": "A girl of about six on a playground swing at the top of her arc, dappled sunlight under trees.", "variants": [
+          {"delta": "She looks at the camera laughing, eyes open, sharp.", "tags": ["best"]},
+          {"delta": "She is motion-blurred swinging through the frame.", "tags": ["blur"]},
+          {"delta": "Her eyes are closed and her hair covers half her face.", "tags": ["eyes-closed"]},
+          {"delta": "Strong backlight makes her face dark and underexposed.", "tags": ["underexposed", "backlit"]}
+        ]},
+        {"id": "b08-street-musician", "tag": "burst", "prompt": "A street guitarist in a flat cap performing on a cobblestone square, small crowd blurred in the background.", "variants": [
+          {"delta": "He looks up at the camera, eyes open, singing, sharp.", "tags": ["best"]},
+          {"delta": "His eyes are closed as he sings.", "tags": ["eyes-closed"]},
+          {"delta": "His strumming hand is motion-blurred, the face sharp.", "tags": ["partial-blur"]},
+          {"delta": "Two tourists walk through the foreground partly blocking him.", "tags": ["bystander"]}
+        ]}
+      ]
+    },
+    {
+      "name": "defects",
+      "seed": 505000,
+      "size": "3:2",
+      "items": [
+        {"id": "d01-out-of-focus", "prompt": "A woman in a red coat standing in a park, the entire image badly out of focus, everything soft and blurry.", "tags": ["blur", "severe"]},
+        {"id": "d02-underexposed", "prompt": "A man sitting on a sofa in a living room, the photo severely underexposed, almost black with only faint details.", "tags": ["underexposed", "severe"]},
+        {"id": "d03-overexposed", "prompt": "Children on a beach, the photo severely overexposed, washed out, sky and sand pure white, faces nearly lost.", "tags": ["overexposed", "severe"]},
+        {"id": "d04-noise", "prompt": "Friends at a dim bar, extremely high ISO photo with heavy colour noise and grain, muddy shadows.", "tags": ["noisy", "severe"]},
+        {"id": "d05-tilted", "prompt": "Harbour with sailboats and a horizon tilted about 8 degrees clockwise, otherwise sharp and well exposed.", "tags": ["tilted"]},
+        {"id": "d06-haze-flare", "prompt": "Portrait of a man outdoors shooting into the sun with heavy lens flare and haze, very low contrast, milky image.", "tags": ["low-contrast", "flare"]}
+      ]
+    }
+  ]
+}
