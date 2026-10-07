@@ -130,8 +130,25 @@ async fn import_pipeline_end_to_end() {
     let img = image::open(&path).unwrap();
     assert!(img.width().max(img.height()) <= 256);
 
-    // events
-    let evs = drain(&mut rx);
+    // events: the final `SessionUpdated(Ready)` is emitted just after the state is persisted,
+    // so wait for it instead of draining once.
+    let mut evs = Vec::new();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        evs.extend(drain(&mut rx));
+        let ready = evs.iter().any(|e| {
+            matches!(e, Event::SessionUpdated { session }
+                if session.id == s.id && session.import_state == ImportState::Ready)
+        });
+        if ready {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for the Ready event"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     let added: i64 = evs
         .iter()
         .filter_map(|e| match e {

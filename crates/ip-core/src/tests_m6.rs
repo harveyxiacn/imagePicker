@@ -834,16 +834,18 @@ async fn settings_persist_and_apply_live() {
     ));
     assert_eq!(e.core.settings().cache.max_gb, 20.0);
     // persistence: a new core on the same data dir sees it
-    let dir = e.data.path().to_path_buf();
     e.core
         .patch_settings(json!({"theme":"dark","analysis":{"group_strictness":"strict"}}))
         .await
         .unwrap();
     while rx.try_recv().is_ok() {}
-    drop(e);
+    // Close the first core but keep the data dir alive: dropping the whole `Env` would delete
+    // the temp dir, and the reopened core would then start from defaults.
+    let Env { core, data, .. } = e;
+    drop(core);
     let worker = Arc::new(FakeWorker::new());
     let core = Core::open(CoreConfig {
-        data_dir: Some(dir),
+        data_dir: Some(data.path().to_path_buf()),
         imaging: Arc::new(FakeImaging::new()),
         thumb_workers: Some(1),
         worker: Some(worker.clone()),

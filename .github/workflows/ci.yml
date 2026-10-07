@@ -24,8 +24,10 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --exclude ip-desktop --all-targets -- -D warnings
-      - run: cargo test --workspace --exclude ip-desktop
+      # The tauri media plugin pulls in tauri (gtk/webkit on Linux), which this job does not
+      # install; it is compiled for the Android target in the `android` job instead.
+      - run: cargo clippy --workspace --exclude ip-desktop --exclude tauri-plugin-imagepicker-media --all-targets -- -D warnings
+      - run: cargo test --workspace --exclude ip-desktop --exclude tauri-plugin-imagepicker-media
 
   # The Rust core must keep cross-compiling for Android (docs/android-build.md). The ubuntu
   # runner image ships the Android SDK + NDK (ANDROID_NDK_HOME); scripts/android-env.sh wires up
