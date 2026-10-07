@@ -1,0 +1,13 @@
+[package]
+name = "ip-infer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "On-device ONNX Runtime inference (YuNet face detection) for the lite analysis profile"
+
+[dependencies]
+ort.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+image.workspace = true

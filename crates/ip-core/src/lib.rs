@@ -148,10 +148,10 @@ impl Core {
                 n
             }
         });
-        let lite: Arc<dyn AiWorker> = Arc::new(lite::LiteWorker::new(
-            cfg.imaging.clone(),
-            lite::default_threads(),
-        ));
+        let lite: Arc<dyn AiWorker> = Arc::new(
+            lite::LiteWorker::new(cfg.imaging.clone(), lite::default_threads())
+                .with_models_dir(&dirs.root.join("models")),
+        );
         let thumbs = Thumbs::new(
             db.clone(),
             cfg.imaging.clone(),
