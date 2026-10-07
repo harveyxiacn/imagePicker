@@ -61,10 +61,12 @@ def main() -> int:
     last_burst = None
     out_manifest = []
     for m in manifest["images"]:
-        burst = m["name"].rsplit("-", 1)[0] if m["category"] == "bursts" else None
-        if m["category"] != last_cat:
-            t += timedelta(minutes=12)
-            last_cat = m["category"]
+        # v2 manifests carry explicit scene / burst keys; v1 derives the burst from the name
+        burst = m.get("burst") or (m["name"].rsplit("-", 1)[0] if m["category"] == "bursts" else None)
+        scene = m.get("scene", m["category"])
+        if scene != last_cat:
+            t += timedelta(minutes=12) if m.get("scene") is None else timedelta(minutes=3)
+            last_cat = scene
         elif burst and burst == last_burst:
             t += timedelta(milliseconds=400)
         else:
