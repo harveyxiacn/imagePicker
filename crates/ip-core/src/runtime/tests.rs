@@ -243,6 +243,8 @@ fn fake_uv(dir: &Path) -> PathBuf {
              :sync\r\n\
              if exist \"%~dp0fail-sync\" (echo error: Failed to download onnxruntime-gpu 1>&2 & exit /b 1)\r\n\
              if exist \"%~dp0slow\" (ping -n 60 127.0.0.1 >nul)\r\n\
+             :hold\r\n\
+             if exist \"%~dp0hold\" (ping -n 2 127.0.0.1 >nul & goto hold)\r\n\
              echo Resolved 5 packages in 10ms\r\n\
              echo Downloading numpy (12MiB)\r\n\
              echo Prepared 3 packages in 2s\r\n\
@@ -264,6 +266,7 @@ fn fake_uv(dir: &Path) -> PathBuf {
              if [ \"$1\" = sync ]; then\n\
                if [ -e \"$d/fail-sync\" ]; then echo 'error: Failed to download onnxruntime-gpu' >&2; exit 1; fi\n\
                if [ -e \"$d/slow\" ]; then sleep 60; fi\n\
+               while [ -e \"$d/hold\" ]; do sleep 0.05; done\n\
                echo 'Resolved 5 packages in 10ms'; echo 'Downloading numpy (12MiB)'\n\
                echo 'Prepared 3 packages in 2s'; echo 'Installed 3 packages in 100ms'\n\
                mkdir -p \"$UV_PROJECT_ENVIRONMENT\"\n\
@@ -342,6 +345,9 @@ async fn install_runs_python_then_sync_then_verifies() {
     assert_eq!(st["state"], "missing");
     assert_eq!(st["can_install"], true);
     let mut rx = e.core.events.subscribe();
+    // hold the sync step open so the install is still running when the second call is made
+    let hold = e.tools.path().join("hold");
+    std::fs::write(&hold, "").unwrap();
 
     let task = e
         .core
@@ -357,6 +363,7 @@ async fn install_runs_python_then_sync_then_verifies() {
         e.core.runtime_install(InstallRequest::default()).await,
         Err(CoreError::Conflict(_))
     ));
+    std::fs::remove_file(&hold).unwrap();
     let st = wait_state(&e.core, "ready").await;
     assert_eq!(st["extras"], json!(["cpu", "mediapipe"]));
     assert_eq!(st["version"], RUNTIME_VERSION);
