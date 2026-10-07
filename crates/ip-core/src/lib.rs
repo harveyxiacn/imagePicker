@@ -383,3 +383,10 @@ mod tests_m4;
 mod tests_m5;
 #[cfg(test)]
 mod tests_m6;
+
+impl Drop for Core {
+    fn drop(&mut self) {
+        // Do not let the process exit while the GPU warm-up thread is inside the driver.
+        lazy_renderer::wait_for_warmup();
+    }
+}
