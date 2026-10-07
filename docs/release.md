@@ -52,6 +52,39 @@ no workflow edit needed.
 | macOS notarisation | `APPLE_ID`, `APPLE_PASSWORD` (app-specific password), `APPLE_TEAM_ID` | Only used when the signing secrets above also exist. |
 | Updater | `TAURI_SIGNING_PRIVATE_KEY` (+ `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) | Generate with `pnpm tauri signer generate -w ~/.tauri/imagepicker.key`. Also needed in the repo (not yet done): set `bundle.createUpdaterArtifacts: true`, add `tauri-plugin-updater`, put the public key and the `latest.json` endpoint (`.../releases/latest/download/latest.json`) in `plugins.updater`. `.sig` files are already collected into the Release. |
 
+## Android APK
+
+The `android` job in `release.yml` builds a **release** APK for arm64 (`aarch64`) with
+`pnpm tauri android build --apk --target aarch64` and attaches it as `imagePicker_<version>_aarch64.apk` (artifact
+`installers-android`, collected by `publish` like the desktop installers). `versionName`/`versionCode` come from
+`tauri.conf.json` `version` (checked by `scripts/bump-version.sh --check`), so no extra manifest needs bumping.
+Emulator (`x86_64`) builds are not published; use the CI debug APK for those.
+
+Signing secrets (all four must exist, otherwise the fallback below is used):
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 imagepicker-release.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_ALIAS` | key alias (e.g. `imagepicker`) |
+| `ANDROID_KEY_PASSWORD` | key password |
+
+The job writes the keystore to `$RUNNER_TEMP` and a gitignored `gen/android/app/keystore.properties`, which
+`build.gradle.kts` reads for the `release` signing config.
+
+**Fallback:** without the secrets the job sets `ANDROID_DEBUG_SIGN=true`, the APK is signed with the throwaway debug
+keystore and named `imagePicker_<version>_aarch64-debug-signed.apk`. It installs fine but cannot be updated in place by
+a later release-signed build (uninstall first). Dry runs behave the same and only upload the bundle artifact.
+
+Generate a keystore once and keep it safe (losing it means users must reinstall):
+
+```sh
+keytool -genkeypair -v -keystore imagepicker-release.jks -alias imagepicker \
+  -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Install on a device (USB debugging on): `adb install -r imagePicker_<version>_aarch64.apk`.
+
 ## AUR (CachyOS / Arch)
 
 Two packages live in `packaging/aur/`: `imagepicker-bin` (repackages the release `.deb`) and `imagepicker` (builds the tag
