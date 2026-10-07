@@ -606,3 +606,83 @@ async fn ephemeral_port_is_reported() {
     assert!(buf.contains("\"ok\":true"));
     server.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn devices_endpoint_and_filter() {
+    let e = env();
+    make_photos(e.src.path(), 3);
+    for i in 0..2 {
+        ip_core::testutil::write_jpeg(&e.src.path().join(format!("phone_{i}.jpg")), 64, 48, 9);
+    }
+    ip_core::testutil::write_jpeg(&e.src.path().join("nodev_0.jpg"), 64, 48, 50);
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/import",
+        Some(json!({"path": e.src.path().to_string_lossy()})),
+    )
+    .await;
+    let sid = r.json()["session"]["id"].as_i64().unwrap();
+    e.core
+        .wait_session_ready(sid, Duration::from_secs(30))
+        .await
+        .unwrap();
+
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/sessions/{sid}/devices"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let devs = r.json()["devices"].as_array().unwrap().clone();
+    assert_eq!(devs.len(), 2);
+    assert_eq!(devs[0]["name"], "Fake Cam 1");
+    assert_eq!(devs[0]["photo_count"], 3);
+    assert_eq!(devs[0]["kind"], "unknown");
+    assert_eq!(devs[1]["name"], "Apple iPhone 15 Pro");
+    assert_eq!(devs[1]["kind"], "phone");
+    assert_eq!(devs[1]["make"], "Apple");
+    assert_eq!(devs[1]["photo_count"], 2);
+    let phone = devs[1]["id"].as_i64().unwrap();
+
+    let r = call(&e.app, Method::GET, "/api/sessions/9999/devices", None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+
+    let list = |q: String| {
+        let app = e.app.clone();
+        async move {
+            call(
+                &app,
+                Method::GET,
+                &format!("/api/photos?session_id={sid}&{q}"),
+                None,
+            )
+            .await
+        }
+    };
+    let v = list(format!("device={phone}")).await.json();
+    assert_eq!(v["total"], 2);
+    for p in v["photos"].as_array().unwrap() {
+        assert_eq!(p["device_id"], phone);
+        assert_eq!(p["device_kind"], "phone");
+        assert_eq!(p["camera"], "Apple iPhone 15 Pro");
+    }
+    let v = list("device=none".into()).await.json();
+    assert_eq!(v["total"], 1);
+    assert!(v["photos"][0]["device_id"].is_null());
+    assert!(v["photos"][0]["device_kind"].is_null());
+    assert!(v["photos"][0]["camera"].is_null());
+    let v = list(format!("device={phone},none&sort=name&flag=not_rejected"))
+        .await
+        .json();
+    assert_eq!(v["total"], 3);
+    for bad in ["device=abc", "device=1,x"] {
+        assert_eq!(
+            list(bad.into()).await.status,
+            StatusCode::BAD_REQUEST,
+            "{bad}"
+        );
+    }
+}

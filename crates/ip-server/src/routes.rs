@@ -70,6 +70,13 @@ pub async fn get_session(
     Ok(Json(json!({ "session": st.core.session(id).await? })))
 }
 
+pub async fn session_devices(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(json!({ "devices": st.core.devices(id).await? })))
+}
+
 pub async fn delete_session(
     State(st): State<AppState>,
     ApiPath(id): ApiPath<i64>,
@@ -103,12 +110,14 @@ pub struct PhotosParams {
     faces_max: Option<i64>,
     // ---- M4
     has_edits: Option<String>,
+    // ---- devices
+    device: Option<String>,
 }
 
 impl PhotosParams {
     /// Parameters of a smart collection's `query` string (no session/paging keys allowed).
     pub(crate) fn from_collection_query(q: &str) -> Result<Self, ApiError> {
-        const KEYS: [&str; 20] = [
+        const KEYS: [&str; 21] = [
             "rating_gte",
             "flag",
             "color_label",
@@ -127,6 +136,7 @@ impl PhotosParams {
             "faces_min",
             "faces_max",
             "has_edits",
+            "device",
             "session_id",
             "cursor",
         ];
@@ -248,8 +258,25 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
             return Err(ApiError::bad_request(format!("{name} must be >= 0")));
         }
     }
+    let mut devices = Vec::new();
+    let mut device_none = false;
+    for part in p.device.as_deref().unwrap_or("").split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if part == "none" {
+            device_none = true;
+        } else {
+            devices.push(part.parse::<i64>().map_err(|_| {
+                ApiError::bad_request("device must be comma separated ids or none")
+            })?);
+        }
+    }
     Ok(PhotoQuery {
         session_id,
+        devices,
+        device_none,
         rating_gte: p.rating_gte,
         flag,
         color_label,

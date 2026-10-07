@@ -29,7 +29,9 @@ interface Photo {
   height: number | null;
   taken_at: number | null;      // ms（UTC 瞬间；无时区信息时为按 UTC 编码的拍摄地墙上时间）
   taken_at_offset_min: number | null; // 拍摄时 UTC 偏移（分钟，EXIF OffsetTimeOriginal）；UI 显示 taken_at+offset 的 UTC 渲染，即拍摄地当地时间
-  camera: string | null;        // "SONY ILCE-7M4"
+  camera: string | null;        // 规范化设备名："Sony ILCE-7M4" / "Apple iPhone 15 Pro"（见「设备」）
+  device_id: number | null;     // 拍摄设备；无 EXIF 机型/序列号时为 null
+  device_kind: "phone" | "camera" | "drone" | "action" | "unknown" | null; // device_id 为 null 时为 null
   lens: string | null;
   focal_mm: number | null;
   aperture: number | null;
@@ -67,6 +69,7 @@ interface Session {
 | GET | `/api/sessions` | — | `{"sessions": Session[]}`（按 created_at 倒序） |
 | GET | `/api/sessions/{id}` | — | `{"session": Session}` |
 | DELETE | `/api/sessions/{id}` | — | `204`（仅删除目录库记录与缓存，**绝不删除原图**） |
+| GET | `/api/sessions/{id}/devices` | — | `{"devices": SessionDevice[]}`（见「设备」；会话不存在 404） |
 | GET | `/api/photos` | 查询参数见下 | `{"photos": Photo[], "total": number, "next_cursor": string \| null}` |
 | GET | `/api/photos/{id}` | — | `{"photo": Photo}` |
 | PATCH | `/api/photos` | `{"ids": number[], "user_rating"?: number \| null, "flag"?: Flag, "color_label"?: ColorLabel}` | `{"updated": number}`；同时广播 `photos.updated` |
@@ -89,8 +92,30 @@ interface Session {
 | `sort` | `taken_at`（默认，升序，null 排最后）/ `-taken_at` / `name` / `rating`（降序） |
 | `cursor` | 不透明字符串（上一页的 `next_cursor`） |
 | `limit` | 默认 500，最大 5000 |
+| `device` | 设备 id，逗号分隔（`device=3,5`，OR）；`none` = 没有设备的照片（可与 id 混用：`3,none`）；其他值 → 400。可与其余过滤、排序组合；`total` 为过滤后的数量 |
 
 > 前端会一次性按 5000 分页把整个会话的 ID 与字段拉完（2 万张以内），客户端虚拟化渲染。
+
+## 设备
+
+拍摄设备（相机 / 手机 / 无人机 / 运动相机）由 EXIF Make/Model/序列号区分，库中 `device` 表保留**原始** make/model/serial，另存规范化的 `name` 与 `kind`。
+
+- `photo.camera` 为规范化显示名 `"{make} {model}"`：厂商写法统一（`NIKON CORPORATION` → `Nikon`，`samsung` → `Samsung`，`HMD Global` → `Nokia` 等，单个全大写词转首字母大写，其余保持原样），型号去掉重复的厂商前缀（`NIKON Z 6` → `Nikon Z 6`，`Canon EOS R5` → `Canon EOS R5`）、折叠空白。
+- `device_kind`：`phone`（Apple、Samsung `SM-`/Galaxy、Xiaomi、Huawei、HONOR、OPPO、vivo、OnePlus、Google Pixel、realme、Meizu、Nokia、Sony `XQ-`/Xperia）、`camera`（Nikon/Canon/Sony/Fujifilm/Olympus/OM System/Panasonic/Ricoh/Leica 等传统相机厂商）、`drone`（DJI 的 Mavic/Mini/Air/Phantom/FCxxxx 等）、`action`（GoPro、Insta360、DJI Osmo Action/Pocket）、`unknown`。
+- 同一型号不同序列号视为不同设备（不同 `id`），名称可以相同。
+
+```ts
+interface SessionDevice {
+  id: number;
+  make: string | null;       // 原始 EXIF
+  model: string | null;
+  name: string;              // 规范化显示名，同 photo.camera
+  kind: "phone" | "camera" | "drone" | "action" | "unknown";
+  photo_count: number;       // 该会话内、未标记 missing 的照片数
+}
+```
+
+`GET /api/sessions/{id}/devices` → `{"devices": SessionDevice[]}`，按 `photo_count` 降序、再按 `name`（不区分大小写）排序；只列出在该会话中有照片的设备。游客可读。会话不存在 → 404。会话计数（`photo_count` 等）仍为全局，不受 `device` 过滤影响。
 
 ## 行为澄清（实现后补充）
 
