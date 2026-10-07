@@ -34,6 +34,8 @@ export interface FilterState {
   issues: Issue[]
   sceneType: SceneType | null
   person: PersonFilter
+  /** Camera / phone device ids, or 'none' for photos without EXIF camera. */
+  device: Array<number | 'none'>
   /** M4: only the best shot of every burst (built-in collection "each group's best") */
   bestOnly: boolean
   /** M4: only photos that carry saved edits */
@@ -50,6 +52,7 @@ export const DEFAULT_FILTER: FilterState = {
   issues: [],
   sceneType: null,
   person: DEFAULT_PERSON_FILTER,
+  device: [],
   bestOnly: false,
   edited: false,
   sort: 'taken_at',
@@ -71,6 +74,7 @@ export function buildPhotosQuery(sessionId: number, f: FilterState): PhotosListQ
   if (f.sceneType) q.scene_type = f.sceneType
   if (f.bestOnly) q.burst_best_only = true
   if (f.edited) q.has_edits = true
+  if (f.device.length) q.device = [...f.device]
   const p = f.person
   if (p.include.length) {
     q.persons = [...p.include]
@@ -99,6 +103,7 @@ export function isFilterActive(f: FilterState): boolean {
     f.sceneType !== null ||
     f.bestOnly ||
     f.edited ||
+    f.device.length > 0 ||
     isPersonFilterActive(f.person)
   )
 }
@@ -159,4 +164,9 @@ export function applyFacesPreset(p: PersonFilter, preset: FacesPreset, manyMin =
     case 'none':
       return { ...p, facesMin: null, facesMax: 0 }
   }
+}
+
+/** Toggle one device (or 'none') in the device filter selection. */
+export function toggleDevice(sel: Array<number | 'none'>, id: number | 'none'): Array<number | 'none'> {
+  return sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]
 }

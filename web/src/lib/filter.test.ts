@@ -10,6 +10,7 @@ import {
   isFilterActive,
   personTri,
   setPersonTri,
+  toggleDevice,
   toggleState,
   type FilterState,
 } from './filter'
@@ -163,5 +164,21 @@ describe('photosQueryString', () => {
 
   it('sends rating_gte=0 only when explicitly set', () => {
     expect(photosQueryString({ session_id: 1 })).toBe('session_id=1')
+  })
+})
+
+describe('device filter', () => {
+  it('maps device ids and none to the device query param', () => {
+    expect(buildPhotosQuery(1, DEFAULT_FILTER).device).toBeUndefined()
+    const q = buildPhotosQuery(1, { ...DEFAULT_FILTER, device: [3, 5] })
+    expect(q.device).toEqual([3, 5])
+    expect(photosQueryString(q)).toBe('session_id=1&device=3%2C5')
+    expect(photosQueryString(buildPhotosQuery(1, { ...DEFAULT_FILTER, device: [2, 'none'] }))).toBe('session_id=1&device=2%2Cnone')
+  })
+
+  it('counts as an active filter and toggles', () => {
+    expect(isFilterActive({ ...DEFAULT_FILTER, device: ['none'] })).toBe(true)
+    expect(toggleDevice([], 3)).toEqual([3])
+    expect(toggleDevice([3, 'none'], 3)).toEqual(['none'])
   })
 })

@@ -111,6 +111,18 @@ export function useBurstFaces(burstId: number | null) {
   })
 }
 
+/** Devices of a session; refetched when the session's photo count changes. */
+export function useDevices(sessionId: number, photoCount?: number) {
+  const me = useQuery({ queryKey: qk.me, queryFn: api.me, staleTime: 30_000, retry: false })
+  return useQuery({
+    queryKey: [...qk.devices(sessionId), photoCount ?? 0],
+    queryFn: () => api.devices(sessionId),
+    select: (d) => d.devices,
+    staleTime: 15_000,
+    enabled: me.isSuccess,
+  })
+}
+
 export function usePeople(sessionId?: number) {
   // guests (LAN mode) have no access to people / face data
   const me = useQuery({ queryKey: qk.me, queryFn: api.me, staleTime: 30_000, retry: false })

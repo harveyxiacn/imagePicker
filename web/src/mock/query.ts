@@ -1,4 +1,5 @@
-import type { Photo } from '@/api/types'
+import type { Device, Photo } from '@/api/types'
+import { MOCK_DEVICES } from './db'
 import { filterAi, sortAi } from './ai'
 
 // ---------- query ----------
@@ -6,6 +7,7 @@ export function filterPhotos(photos: Photo[], q: URLSearchParams): Photo[] {
   const rating = q.get('rating_gte')
   const flag = q.get('flag')
   const color = q.get('color_label')
+  const devices = q.get('device')?.split(',').filter(Boolean) ?? null
   let out = photos.filter((p) => {
     if (rating && Number(rating) > 0 && (p.user_rating ?? -1) < Number(rating)) return false
     if (flag === 'picked' && p.flag !== 1) return false
@@ -14,6 +16,7 @@ export function filterPhotos(photos: Photo[], q: URLSearchParams): Photo[] {
     if (flag === 'not_rejected' && p.flag === -1) return false
     if (color && p.color_label !== color) return false
     if (q.get('has_edits') === '1' && !p.has_edits) return false
+    if (devices && !devices.some((d) => (d === 'none' ? p.device_id === null : p.device_id === Number(d)))) return false
     return true
   })
   out = filterAi(out, q)
@@ -30,3 +33,12 @@ export function filterPhotos(photos: Photo[], q: URLSearchParams): Photo[] {
   return out
 }
 
+
+/** Devices present in a photo list, sorted by photo count desc (mirrors GET /api/sessions/:id/devices). */
+export function deviceList(photos: Photo[]): Device[] {
+  const counts = new Map<number, number>()
+  for (const p of photos) if (p.device_id !== null) counts.set(p.device_id, (counts.get(p.device_id) ?? 0) + 1)
+  return MOCK_DEVICES.filter((d) => counts.has(d.id))
+    .map((d) => ({ ...d, photo_count: counts.get(d.id) ?? 0 }))
+    .sort((a, b) => b.photo_count - a.photo_count || a.id - b.id)
+}

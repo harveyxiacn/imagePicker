@@ -14,6 +14,8 @@ export function makePhoto(id: number, over: Partial<Photo> = {}): Photo {
     taken_at: id * 1000,
     taken_at_offset_min: null,
     camera: null,
+    device_id: null,
+    device_kind: null,
     lens: null,
     focal_mm: null,
     aperture: null,
