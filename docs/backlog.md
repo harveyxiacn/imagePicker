@@ -4,7 +4,7 @@
 
 ## 校准（需要真实照片评测集）
 
-> 2026-10-07：已用本地 ComfyUI（Qwen-Image 2.1）生成 74 张合成评测图（人像 / 风景 / 合照 / 连拍变体：闭眼、动态模糊、过曝欠曝、路人 / 缺陷样本），脚本 `scripts/comfy-testset.py`，输出在主机 `~/ai/ComfyUI/output/imagepicker-testset/`（带 `manifest.json` 标签），不入库。下一步用它跑 `lite` / `standard` 档位对照阈值。
+> 2026-10-07：已用本地 ComfyUI（Qwen-Image 2.1）生成 74 张合成评测图（人像 / 风景 / 合照 / 连拍变体：闭眼、动态模糊、过曝欠曝、路人 / 缺陷样本），脚本 `scripts/comfy-testset.py`，输出在主机 `~/ai/ComfyUI/output/imagepicker-testset/`（带 `manifest.json` 标签），不入库。lite 档位首轮结果与结论见 `bench/testset-lite-2026-10-07.md`（白底 / 雪地过曝误报、低对比判模糊、局部动态模糊漏报、合成连拍 pHash 距离过大需 img2img 派生）。
 
 | 优先级 | 项 | 说明 |
 |---|---|---|
