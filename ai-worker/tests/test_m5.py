@@ -360,6 +360,9 @@ def test_manager_lease_blocks_exclusive_eviction(svc):
 
     m = svc.manager
     spec_a, spec_b = svc.registry.get("sdxl-inpaint"), svc.registry.get("birefnet-lite")
+    # explicit budget: the default derives from host RAM, which must not influence this test.
+    # Holds sdxl-inpaint (12000 MB) once, but not twice, so eviction is what makes room.
+    m.budget_mb = 16000
     assert spec_a.exclusive_group != spec_b.exclusive_group
     # fake install: loaders are not called through acquire() without files, so go through _loaded
     from imagepicker_ai.models.manager import _Loaded
