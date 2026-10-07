@@ -14,6 +14,14 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Release signing: app/keystore.properties (storeFile, storePassword, keyAlias, keyPassword; gitignored,
+// written by .github/workflows/release.yml). Without it the release APK stays unsigned, unless
+// ANDROID_DEBUG_SIGN=true asks for the debug keystore (CI fallback, see docs/release.md).
+val keystoreProperties = Properties().apply {
+    val f = file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
 android {
     compileSdk = 37
     namespace = "io.github.harveyxiacn.imagepicker"
@@ -24,6 +32,16 @@ android {
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        if (keystoreProperties.containsKey("storeFile")) {
+            create("releaseKey") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -39,6 +57,11 @@ android {
             }
         }
         getByName("release") {
+            signingConfig = when {
+                keystoreProperties.containsKey("storeFile") -> signingConfigs.getByName("releaseKey")
+                System.getenv("ANDROID_DEBUG_SIGN") == "true" -> signingConfigs.getByName("debug")
+                else -> null
+            }
             optimization {
                enable = true
             }

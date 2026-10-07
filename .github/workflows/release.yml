@@ -19,6 +19,7 @@ on:
       - ".github/workflows/release.yml"
       - "apps/desktop/src-tauri/tauri.conf.json"
       - "scripts/bump-version.sh"
+      - "apps/desktop/src-tauri/gen/android/app/build.gradle.kts"
       - "cliff.toml"
 
 concurrency:
@@ -103,6 +104,7 @@ jobs:
             echo
             echo "---"
             echo "Installers are **unsigned** unless noted otherwise. Verify downloads against \`SHA256SUMS.txt\`."
+            echo "The Android APK (\`*_aarch64.apk\`, arm64) is signed with the project release key; a \`*_aarch64-debug-signed.apk\` is signed with a throwaway debug key (sideload only, cannot update a release-signed install)."
             echo "See [docs/release.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/release.md) for install hints."
           } >> RELEASE_NOTES.md
           cat RELEASE_NOTES.md
@@ -290,9 +292,106 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
 
+  android:
+    name: Build (Android APK)
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      # Optional release signing; without all four secrets the APK is signed with the debug keystore.
+      HAS_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK 27
+        run: |
+          sdkmanager --install "ndk;27.2.12479018" "platforms;android-36" "build-tools;36.0.0"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            apps/desktop/pnpm-lock.yaml
+
+      - name: Build web SPA
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Install desktop dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      # keystore.properties is read by gen/android/app/build.gradle.kts (gitignored). The keystore
+      # lives in RUNNER_TEMP, outside the repo.
+      - name: Android signing keystore
+        if: env.HAS_ANDROID_KEYSTORE == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ks="$RUNNER_TEMP/imagepicker-release.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ks"
+          cat > apps/desktop/src-tauri/gen/android/app/keystore.properties <<EOF
+          storeFile=$ks
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+
+      - name: Debug-keystore fallback
+        if: env.HAS_ANDROID_KEYSTORE != 'true'
+        run: |
+          echo "::warning::Android signing secrets missing: the APK is signed with the debug keystore"
+          echo "ANDROID_DEBUG_SIGN=true" >> "$GITHUB_ENV"
+
+      # versionName/versionCode are derived by tauri from tauri.conf.json "version" (verified by bump-version.sh).
+      - name: Build release APK (arm64)
+        working-directory: apps/desktop
+        run: pnpm tauri android build --apk --target aarch64
+
+      - name: Collect APK
+        run: |
+          set -euo pipefail
+          apk="$(find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -type f -name '*release*.apk' | head -n 1)"
+          if [ -z "$apk" ]; then echo "::error::no release APK was produced"; exit 1; fi
+          suffix=aarch64
+          if [ "$HAS_ANDROID_KEYSTORE" != 'true' ]; then suffix=aarch64-debug-signed; fi
+          mkdir -p release-assets
+          cp -v "$apk" "release-assets/imagePicker_${VERSION}_${suffix}.apk"
+          # Verify the signature (fails for an unsigned APK).
+          "$ANDROID_HOME"/build-tools/36.0.0/apksigner verify --print-certs release-assets/*.apk
+          ls -la release-assets
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-android
+          path: release-assets/*
+          if-no-files-found: error
+
   publish:
     name: Publish (draft release)
-    needs: [prepare, build]
+    needs: [prepare, build, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write

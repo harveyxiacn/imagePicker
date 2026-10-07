@@ -47,6 +47,10 @@ adb push <照片目录> /data/local/tmp/photos
 adb shell 'IMAGEPICKER_DATA_DIR=/data/local/tmp/ipdata /data/local/tmp/imagepicker analyze /data/local/tmp/photos --profile lite'
 ```
 
+## 发布 APK
+
+Release APK 的构建、签名密钥（GitHub secrets）与安装方式见 [release.md 的 Android APK 一节](release.md#android-apk)。
+
 ## 已知限制
 
 - 未集成 GLES 兜底（wgpu `gles` 特性需要 EGL 窗口系统初始化）；无 Vulkan 的旧设备走 CPU 渲染。
