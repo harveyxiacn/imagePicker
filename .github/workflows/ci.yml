@@ -136,7 +136,11 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      # The action's default package list still names the retired "tools" package, which
+      # sdkmanager 16+ no longer knows (the job failed on `sdkmanager tools`).
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install NDK 27
         run: |
           sdkmanager --install "ndk;27.2.12479018" "platforms;android-36" "build-tools;36.0.0"
