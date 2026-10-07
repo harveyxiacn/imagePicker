@@ -130,6 +130,7 @@ GROUP_SCENES = [
     ("market-stall", ["a4", "a1"], "at a vegetable market stall choosing produce, morning light", "3:2"),
     ("stadium", ["a2", "a8", "a5"], "in stadium seats wearing team scarves, cheering, floodlights", "3:2"),
 ]
+BURST_DENOISE = 0.7
 BURST_FRAMES = [
     ("eyes open, natural smile, looking at the camera, sharp focus", ["best"]),
     ("both eyes closed mid-blink, otherwise identical", ["eyes-closed"]),
@@ -287,7 +288,7 @@ def graph_ref(prompt, seed, w, h, prefix, steps, refs: list[str]):
     """Visual reference mode (vae not connected to the encoder, as in the saved Reference workflow);
     the output size comes from an EmptyLatentImage so the aspect ratio is ours."""
     g = common(prompt, seed, steps, prefix)
-    enc = {"clip": ["2", 0], "prompt": prompt, "negative_prompt": "", "resolution": 768}
+    enc = {"clip": ["2", 0], "prompt": prompt, "negative_prompt": "", "resolution": 384}
     for i, path in enumerate(refs, 1):
         g[f"1{i}"] = {"class_type": "LoadImage", "inputs": {"image": path}}
         enc[f"images.image_{i}"] = [f"1{i}", 0]
@@ -306,7 +307,21 @@ def graph_i2i(prompt, seed, prefix, steps, base: str, denoise: float):
 
 # --------------------------------------------------------------------------------------- jobs
 def actor_ref(a: str) -> str:
-    return f"{OUT}/actors/{a}_00001_.png [output]"
+    """Tight face crop of the actor portrait (made right after the portrait is generated). A small
+    face-only reference at resolution 384 keeps the identity but stops the model from copying the
+    portrait's studio backdrop, framing and clothes."""
+    return f"{OUT}/actors/{a}_face.png [output]"
+
+
+def make_face_crop(comfy: Path, a: str) -> None:
+    from PIL import Image  # system python has Pillow
+
+    src = comfy / "output" / OUT / "actors" / f"{a}_00001_.png"
+    im = Image.open(src)
+    w, h = im.size
+    # the portrait prompt centres the face and makes it fill most of the frame
+    box = (int(w * 0.22), int(h * 0.10), int(w * 0.78), int(h * 0.66))
+    im.crop(box).resize((512, 512), Image.LANCZOS).save(src.with_name(f"{a}_face.png"))
 
 
 def build_jobs(rng: random.Random) -> list[dict]:
@@ -320,22 +335,22 @@ def build_jobs(rng: random.Random) -> list[dict]:
     # actors: clean front-facing references
     for i, (a, desc) in enumerate(ACTORS.items()):
         add(phase="actors", kind="t2i", name=a, scene=f"actor-{a}", seed=900000 + i, size="1:1",
-            prompt=f"{STYLE} Head-and-shoulders portrait of {desc}, looking straight at the camera with a neutral friendly expression, wearing {ACTOR_WARDROBE[a][0]}, plain light grey studio background, soft even light, sharp focus on the eyes.",
+            prompt=f"{STYLE} Close-up headshot of {desc}, face centred and filling most of the frame, looking straight at the camera with a neutral friendly expression, plain light grey studio background, soft even light, sharp focus on the eyes.",
             tags=["actor", a])
 
     # people: every actor in every single scene (wardrobe rotates)
     for si, (sid, scene, size) in enumerate(SINGLE_SCENES):
         for ai, a in enumerate(ACTORS):
             add(phase="people", kind="ref", name=f"{sid}-{a}", scene=f"people-{sid}", seed=100000 + si * 10 + ai, size=size, refs=[a], actors=[a],
-                prompt=f"{STYLE} <image1> is the same person: keep this exact face and identity. {ACTORS[a].capitalize()} wearing {ACTOR_WARDROBE[a][(si + ai) % 4]}, {scene}.",
+                prompt=f"{STYLE} Medium or wide shot of {ACTORS[a]} wearing {ACTOR_WARDROBE[a][(si + ai) % 4]}, {scene}, surroundings visible. The face is the person in <image1> (identity reference only).",
                 tags=["single", a, sid])
 
     # groups: 30 scenes x 4 takes (seed + wardrobe vary, same actors)
     for gi, (gid, actors, scene, size) in enumerate(GROUP_SCENES):
         for take in range(4):
-            who = ", ".join(f"<image{i + 1}> is {ACTORS[a]} wearing {ACTOR_WARDROBE[a][(take + i) % 4]}" for i, a in enumerate(actors))
+            who = ", ".join(f"<image{i + 1}> {ACTORS[a]} wearing {ACTOR_WARDROBE[a][(take + i) % 4]}" for i, a in enumerate(actors))
             add(phase="groups", kind="ref", name=f"{gid}-{take + 1}", scene=f"group-{gid}", seed=200000 + gi * 10 + take, size=size, refs=list(actors), actors=list(actors),
-                prompt=f"{STYLE} Group photo of {len(actors)} people; keep each referenced face and identity exactly: {who}. They are {scene}.",
+                prompt=f"{STYLE} Wide group photo of {len(actors)} people {scene}, the whole group and the surroundings visible. From left to right: {who}. The faces are the people in the reference images in that order (identity references only).",
                 tags=["group", str(len(actors)), gid, *actors])
 
     # bursts: 30 single-actor action bases + 30 group bases, then derived frames
@@ -343,18 +358,18 @@ def build_jobs(rng: random.Random) -> list[dict]:
     for bi, action in enumerate(BURST_SINGLE_ACTIONS):
         a = actor_cycle[bi % len(actor_cycle)]
         base = f"bs{bi + 1:02d}-{a}"
-        bprompt = f"{STYLE} <image1> is the same person: keep this exact face and identity. {ACTORS[a].capitalize()} wearing {ACTOR_WARDROBE[a][bi % 4]}, {action}."
+        bprompt = f"{STYLE} Wide full-body shot of {ACTORS[a]} wearing {ACTOR_WARDROBE[a][bi % 4]}, {action}, lots of space around the person, surroundings visible. The face is the person in <image1> (identity reference only)."
         add(phase="bursts", kind="ref", name=f"{base}-00", scene=f"burst-{base}", burst=base, seed=300000 + bi, refs=[a], actors=[a],
             prompt=f"{bprompt} Eyes open, natural expression, sharp.", tags=["burst", "base", a])
         frames = rng.sample(BURST_FRAMES, k=rng.randint(4, 6))
         for fi, (delta, tags) in enumerate(frames, 1):
             add(phase="bursts", kind="i2i", name=f"{base}-{fi:02d}", scene=f"burst-{base}", burst=base, seed=300000 + bi * 10 + fi, actors=[a],
-                base=f"{OUT}/bursts/{base}-00_00001_.png [output]", denoise=0.45,
+                base=f"{OUT}/bursts/{base}-00_00001_.png [output]", denoise=BURST_DENOISE,
                 prompt=f"{bprompt} {delta}", tags=["burst", a, *tags])
     for bi, (gid, actors, scene, size) in enumerate(GROUP_SCENES):
         base = f"bg{bi + 1:02d}-{gid}"
-        who = ", ".join(f"<image{i + 1}> is {ACTORS[a]}" for i, a in enumerate(actors))
-        bprompt = f"{STYLE} Group photo of {len(actors)} people; keep each referenced face and identity exactly: {who}. They are {scene}."
+        who = ", ".join(f"<image{i + 1}> {ACTORS[a]}" for i, a in enumerate(actors))
+        bprompt = f"{STYLE} Wide group photo of {len(actors)} people {scene}, the whole group visible. From left to right: {who}. The faces are the people in the reference images in that order (identity references only)."
         add(phase="bursts", kind="ref", name=f"{base}-00", scene=f"burst-{base}", burst=base, seed=310000 + bi, size=size, refs=list(actors), actors=list(actors),
             prompt=f"{bprompt} Everyone with eyes open looking at the camera, sharp.", tags=["burst", "base", "group", *actors])
         n = rng.randint(4, 6)
@@ -362,7 +377,7 @@ def build_jobs(rng: random.Random) -> list[dict]:
             victim = rng.choice(actors)
             delta, tags = rng.choice(BURST_FRAMES[1:])
             add(phase="bursts", kind="i2i", name=f"{base}-{fi:02d}", scene=f"burst-{base}", burst=base, seed=310000 + bi * 10 + fi, actors=list(actors),
-                base=f"{OUT}/bursts/{base}-00_00001_.png [output]", denoise=0.45,
+                base=f"{OUT}/bursts/{base}-00_00001_.png [output]", denoise=BURST_DENOISE,
                 prompt=f"{bprompt} Everyone as before except the person who is {ACTORS[victim]}: {delta}.", tags=["burst", "group", f"victim:{victim}", *tags])
 
     # places
@@ -461,7 +476,7 @@ def main():
         keep = set(args.only.split(","))
         jobs = [j for j in jobs if j["phase"] in keep]
     if args.pilot:
-        jobs = [j for j in jobs if j["name"] in ("a1", "park-golden-a1", "bs01-a1-00", "bs01-a1-01", "bs01-a1-02", "bs01-a1-03")]
+        jobs = [j for j in jobs if j["name"] in ("a1", "a2", "a3", "a4", "park-golden-a1", "family-dinner-1", "bs01-a1-00", "bs01-a1-01", "bs01-a1-02", "bs01-a1-03")]
     if args.denoise is not None:
         for j in jobs:
             if j["kind"] == "i2i":
@@ -505,6 +520,8 @@ def main():
         w, h = SIZES[j["size"]]
         rec = {k: v for k, v in j.items() if k not in ("refs", "base")}
         rec.update({"category": j["phase"], "width": w, "height": h, "steps": args.steps, "files": files})
+        if j["phase"] == "actors":
+            make_face_crop(comfy, j["name"])
         manifest["images"].append(rec)
         mpath.write_text(json.dumps(manifest, ensure_ascii=False, indent=1))
         done.add(j["name"])
