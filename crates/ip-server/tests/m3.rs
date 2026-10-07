@@ -361,7 +361,10 @@ async fn render_preview_headers_stack_override_and_original() {
     assert!(mean_of(&r.body) > mean_of(&base.body) + 15.0);
     assert_eq!(e.renderer.calls.load(Ordering::SeqCst), 1);
 
-    // saved stack is used when `stack` is omitted; `original` bypasses it
+    // saved stack is used when `stack` is omitted; `original` bypasses it. Saving spawns a
+    // background grid-thumbnail refresh that also renders; wait for its `edits.updated` so its
+    // render cannot land between the call-count snapshot and the `original` assertion.
+    let mut rx = e.core.events.subscribe();
     call(
         &e.app,
         Method::PUT,
@@ -369,6 +372,15 @@ async fn render_preview_headers_stack_override_and_original() {
         Some(json!({"stack": exposure(-1.0)})),
     )
     .await;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Ok(ip_core::events::Event::EditsUpdated { .. }) = rx.recv().await {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("edits.updated");
     let saved = post(json!({"photo_id": id, "long_edge": 100})).await;
     assert!(mean_of(&saved.body) < mean_of(&base.body) - 10.0);
     let calls = e.renderer.calls.load(Ordering::SeqCst);
