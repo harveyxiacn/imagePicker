@@ -33,6 +33,14 @@ Android 11+ 允许持有 `READ_MEDIA_IMAGES`（13+）/ `READ_EXTERNAL_STORAGE`�
 - `GET /api/system/hardware` 追加字段 `lite: true`（恒为 `true`）。无法运行 Python worker 时（Android，或 `IMAGEPICKER_NO_WORKER=1`）：`{"worker": {"state": "unavailable", "error": "…", …}, "lite": true}`；`?probe=1` 在此情形不再报错而是照常返回该状态。此时 `fast`/`standard` 档位的运行返回与 worker 不可用相同的错误，`/api/runtime/install` 返回 409（`reason` 说明平台不支持）。
 - Android 默认值：路径白名单默认根为 `/storage/emulated/0/{DCIM,Pictures,Download}`（外壳可经 `extra_roots` 追加 `list_albums` 的路径）；数据目录必须由外壳传入（`ServerConfig.data_dir` / `CoreConfig.data_dir`）；渲染后端 `auto` → 存在 Vulkan 硬件适配器用 wgpu，否则 CPU；缩略图/分析线程 ≤ 4。详见 [android-build.md](android-build.md)。
 
+### B.2 `ip-infer`（可选，`infer` 特性；M8.1 第一片）
+
+- 新 crate `crates/ip-infer`（Rust `ort` 2.0.0-rc.13 + ONNX Runtime，仅 CPU 执行提供器）。`FaceDetector::load(model_path)` / `detect(rgb, w, h) -> Vec<Detection { bbox: [x,y,w,h] 归一化, score, landmarks: [[x,y];5] 归一化（YuNet 顺序：右眼、左眼、鼻尖、右嘴角、左嘴角）}>`。
+- 移植自 OpenCV `FaceDetectorYN` 与 worker `steps/faces.py`：BGR 0..255 输入、score ≥ 0.7、NMS 0.3、top-k 5000、stride 8/16/32 解码。`face_detection_yunet_2023mar.onnx` 的输入是固定 640x640：按比例缩放到该尺寸并在右/下补零，再把结果映射回原图（动态输入的模型则按 OpenCV 补到 32 的倍数）。与 OpenCV 在原尺寸上的结果存在微小差异（实测 score 差 ≤ 0.005，bbox 差 ≤ 0.01 归一化单位）。
+- `ip-core` 特性 `infer`（默认关闭，CI 与 Android 交叉编译不受影响）：找到 YuNet 模型时（`IMAGEPICKER_YUNET_MODEL`，其次 `<models_dir>/yunet/face_detection_yunet_2023mar.onnx`，用 `scripts/fetch-yunet.sh` 下载）`LiteWorker` 在 `quality` 之后增加 `faces` 步骤：每张脸输出 `bbox`、`det_score`、`sharpness`（与 `quality.py` 的 `face_sharpness` 同法：128x128 灰度裁剪的中心 60%，人脸常数），`eyes_open`/`smile`/姿态/嵌入为 `null`；`quality.sharpness_face` 为各脸均值，`sharpness` 随之取该值（与 worker 一致）。评分按可用分项重新归一。
+- `models.list` 的 `lite` 档位仅在模型可用时包含 `faces` 与 `yunet`；`/api/system/hardware` 的 `lite: true` 语义不变。无模型或未启用特性时行为与 B.1 完全相同。
+- 模型仅在本机文件系统中查找；不做下载（远程 AI 的模型安装仍只发生在主机，见 C）。
+
 ## C. 远程 AI（手机 → 家中主机）
 
 主机（桌面版或 `imagepicker serve --lan`，已开启局域网模式）向配对设备开放其 AI worker：

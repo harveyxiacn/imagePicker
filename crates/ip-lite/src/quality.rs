@@ -4,8 +4,8 @@
 //! rounding of the reported values.
 
 use crate::imgops::{
-    filter3x3, gaussian_blur, resize_area, resize_linear, rgb_to_gray, Gray32, Gray8, IMMERKAER,
-    LAPLACIAN1, SOBEL_X, SOBEL_Y,
+    filter3x3, gaussian_blur, resize_area, resize_area_emulated, resize_linear, rgb_to_gray,
+    Gray32, Gray8, IMMERKAER, LAPLACIAN1, SOBEL_X, SOBEL_Y,
 };
 
 pub const REF_LONG_EDGE: usize = 1024;
@@ -13,6 +13,10 @@ const K_LAP: f64 = 120.0;
 const K_TEN: f64 = 1500.0;
 const CENTER_MARGIN: f64 = 0.2;
 const NOISE_FULL_SCALE_SIGMA: f64 = 12.0;
+const K_LAP_FACE: f64 = 80.0;
+const K_TEN_FACE: f64 = 6000.0;
+const FACE_LAP_WEIGHT: f64 = 0.7;
+const FACE_CROP: usize = 128;
 
 /// Result of [`analyze_quality`]; field meanings follow the worker's `quality` step output.
 #[derive(Debug, Clone, PartialEq)]
@@ -89,6 +93,42 @@ pub fn focus_measures(gray: &Gray8) -> (f64, f64) {
 /// `0.5 (1 - exp(-lap/K_lap)) + 0.5 (1 - exp(-ten/K_ten))`, clamped to 0..1.
 pub fn sharpness_score(lap: f64, ten: f64) -> f64 {
     clamp01(0.5 * (1.0 - (-lap / K_LAP).exp()) + 0.5 * (1.0 - (-ten / K_TEN).exp()))
+}
+
+/// Face variant of [`sharpness_score`] (face constants, Laplacian-heavy weighting).
+pub fn sharpness_score_face(lap: f64, ten: f64) -> f64 {
+    clamp01(
+        FACE_LAP_WEIGHT * (1.0 - (-lap / K_LAP_FACE).exp())
+            + (1.0 - FACE_LAP_WEIGHT) * (1.0 - (-ten / K_TEN_FACE).exp()),
+    )
+}
+
+/// Port of the worker's `face_sharpness`: sharpness of a face given its normalised `[x, y, w, h]`
+/// box, measured on the inner 60% of a 128x128 gray crop. `None` for crops under 8 px.
+pub fn face_sharpness(rgb: &[u8], w: usize, h: usize, bbox: [f64; 4]) -> Option<f64> {
+    assert_eq!(rgb.len(), w * h * 3, "rgb buffer size");
+    let (x0, y0) = (
+        ((bbox[0] * w as f64) as i64).max(0) as usize,
+        ((bbox[1] * h as f64) as i64).max(0) as usize,
+    );
+    let x1 = (((bbox[0] + bbox[2]) * w as f64) as i64).clamp(0, w as i64) as usize;
+    let y1 = (((bbox[1] + bbox[3]) * h as f64) as i64).clamp(0, h as i64) as usize;
+    if x1 < x0 + 8 || y1 < y0 + 8 {
+        return None;
+    }
+    let gray = rgb_to_gray(rgb, w, h).crop(x0, y0, x1, y1);
+    let (cw, ch) = (gray.w, gray.h);
+    let crop = if cw.max(ch) > FACE_CROP {
+        if cw >= FACE_CROP && ch >= FACE_CROP {
+            resize_area(&gray, FACE_CROP, FACE_CROP)
+        } else {
+            resize_area_emulated(&gray, FACE_CROP, FACE_CROP)
+        }
+    } else {
+        resize_linear(&gray, FACE_CROP, FACE_CROP)
+    };
+    let (lap, ten) = focus_measures(&center_region(&crop));
+    Some(sharpness_score_face(lap, ten))
 }
 
 fn center_region(gray: &Gray8) -> Gray8 {

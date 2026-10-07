@@ -50,4 +50,4 @@ adb shell 'IMAGEPICKER_DATA_DIR=/data/local/tmp/ipdata /data/local/tmp/imagepick
 ## 已知限制
 
 - 未集成 GLES 兜底（wgpu `gles` 特性需要 EGL 窗口系统初始化）；无 Vulkan 的旧设备走 CPU 渲染。
-- `ip-infer`（ONNX Runtime）不在本任务范围；人脸 / 嵌入 / 美学步骤在端侧不可用，评分按可用分项重新归一。
+- `ip-infer`（ONNX Runtime，YuNet 人脸检测）目前仅在桌面验证（`ip-core` 的 `infer` 特性，默认关闭）；`ort` 尚未链接到 Android：Android 构建不启用该特性，也没有 Android 版 ONNX Runtime 库与 NNAPI/XNNPACK 执行提供器的接线。因此端侧人脸 / 嵌入 / 美学步骤在手机上仍不可用，评分按可用分项重新归一。
