@@ -304,23 +304,6 @@ pub struct MetaUpdate {
     pub content_key: Option<String>,
 }
 
-fn camera_string(make: Option<&str>, model: Option<&str>) -> Option<String> {
-    let make = make.map(str::trim).filter(|s| !s.is_empty());
-    let model = model.map(str::trim).filter(|s| !s.is_empty());
-    match (make, model) {
-        (Some(a), Some(b)) => {
-            if b.to_ascii_lowercase().starts_with(&a.to_ascii_lowercase()) {
-                Some(b.to_string())
-            } else {
-                Some(format!("{a} {b}"))
-            }
-        }
-        (None, Some(b)) => Some(b.to_string()),
-        (Some(a), None) => Some(a.to_string()),
-        (None, None) => None,
-    }
-}
-
 /// Writes metadata (or just marks `meta_done` when reading failed) for a batch in one transaction.
 pub fn apply_metadata(conn: &mut Connection, updates: &[MetaUpdate]) -> Result<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -334,41 +317,42 @@ pub fn apply_metadata(conn: &mut Connection, updates: &[MetaUpdate]) -> Result<(
             )?;
             continue;
         };
-        let device_id = if m.camera_make.is_some()
-            || m.camera_model.is_some()
-            || m.camera_serial.is_some()
-        {
-            let key = (
-                m.camera_make.clone(),
-                m.camera_model.clone(),
-                m.camera_serial.clone(),
-            );
-            if let Some(id) = devices.get(&key) {
-                Some(*id)
-            } else {
-                let found: Option<i64> = tx
+        let device_id =
+            if m.camera_make.is_some() || m.camera_model.is_some() || m.camera_serial.is_some() {
+                let key = (
+                    m.camera_make.clone(),
+                    m.camera_model.clone(),
+                    m.camera_serial.clone(),
+                );
+                if let Some(id) = devices.get(&key) {
+                    Some(*id)
+                } else {
+                    let found: Option<i64> = tx
                     .query_row(
                         "SELECT id FROM device WHERE make IS ?1 AND model IS ?2 AND serial IS ?3",
                         params![key.0, key.1, key.2],
                         |r| r.get(0),
                     )
                     .ok();
-                let id = match found {
-                    Some(id) => id,
-                    None => {
-                        tx.execute(
-                            "INSERT INTO device(make, model, serial, offset_source) VALUES(?1,?2,?3,'auto')",
-                            params![key.0, key.1, key.2],
-                        )?;
-                        tx.last_insert_rowid()
-                    }
-                };
-                devices.insert(key, id);
-                Some(id)
-            }
-        } else {
-            None
-        };
+                    let id = match found {
+                        Some(id) => id,
+                        None => {
+                            let (name, kind) =
+                                crate::device::describe(key.0.as_deref(), key.1.as_deref());
+                            tx.execute(
+                                "INSERT INTO device(make, model, serial, offset_source, name, kind)
+                             VALUES(?1,?2,?3,'auto',?4,?5)",
+                                params![key.0, key.1, key.2, name, kind.as_str()],
+                            )?;
+                            tx.last_insert_rowid()
+                        }
+                    };
+                    devices.insert(key, id);
+                    Some(id)
+                }
+            } else {
+                None
+            };
         let (mut w, mut h) = (m.width.map(i64::from), m.height.map(i64::from));
         if (5..=8).contains(&m.orientation) {
             std::mem::swap(&mut w, &mut h);
@@ -390,7 +374,7 @@ pub fn apply_metadata(conn: &mut Connection, updates: &[MetaUpdate]) -> Result<(
                 orientation,
                 m.taken_at_ms,
                 device_id,
-                camera_string(m.camera_make.as_deref(), m.camera_model.as_deref()),
+                crate::device::display_from_raw(m.camera_make.as_deref(), m.camera_model.as_deref()),
                 m.lens,
                 m.focal_mm.map(clean_f64),
                 m.aperture.map(clean_f64),
@@ -512,11 +496,12 @@ const PHOTO_COLS: &str = "p.id, r.path, p.rel_path, p.file_name, COALESCE(p.form
     p.user_rating, p.ai_rating, COALESCE(p.flag,0), p.color_label, p.burst_id, COALESCE(p.thumb_state,0), p.fast_key, p.taken_at_offset_min,
     p.ai_score, COALESCE(p.issues,0), p.rank_in_burst, (SELECT b.size FROM burst b WHERE b.id=p.burst_id), p.scene_type,
     p.face_count, p.subject_face_count, COALESCE(p.analysis_version,0),
-    COALESCE(p.has_edits,0), p.edit_hash";
+    COALESCE(p.has_edits,0), p.edit_hash,
+    p.device_id, (SELECT d.kind FROM device d WHERE d.id=p.device_id)";
 
 /// Number of columns in `PHOTO_COLS`; queries append the session id at this index and the
 /// sort key (for cursors) right after it. Update when adding columns.
-const PHOTO_COL_COUNT: usize = 33;
+const PHOTO_COL_COUNT: usize = 35;
 
 /// Column `PHOTO_COL_COUNT` (after PHOTO_COLS) is the session id.
 fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
@@ -556,6 +541,10 @@ fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
         subject_face_count: r.get(29)?,
         analyzed: r.get::<_, i64>(30)? > 0,
         has_edits: r.get::<_, i64>(31)? != 0,
+        device_id: r.get(33)?,
+        device_kind: r.get::<_, Option<String>>(34)?.map(|k| {
+            crate::device::DeviceKind::parse(&k).unwrap_or(crate::device::DeviceKind::Unknown)
+        }),
     })
 }
 
@@ -639,6 +628,17 @@ pub fn query_photos_cached(
         args.push(Value::Text(c.clone()));
     }
     push_m2_filters(q, &mut wheres, &mut args);
+    if !q.devices.is_empty() || q.device_none {
+        let mut parts = Vec::new();
+        if !q.devices.is_empty() {
+            let ids: Vec<String> = q.devices.iter().map(i64::to_string).collect();
+            parts.push(format!("p.device_id IN ({})", ids.join(",")));
+        }
+        if q.device_none {
+            parts.push("p.device_id IS NULL".into());
+        }
+        wheres.push(format!("({})", parts.join(" OR ")));
+    }
     let base_where = if wheres.is_empty() {
         String::new()
     } else {
@@ -848,6 +848,37 @@ fn push_m2_filters(q: &PhotoQuery, wheres: &mut Vec<String>, args: &mut Vec<Valu
             "p.subject_face_count IS NOT NULL AND p.subject_face_count <= {n}"
         ));
     }
+}
+
+/// Devices with photos in a session (not missing), most photos first.
+pub fn session_devices(conn: &Connection, session_id: i64) -> Result<Vec<SessionDevice>> {
+    get_session_exists(conn, session_id)?;
+    let mut st = conn.prepare_cached(
+        "SELECT d.id, d.make, d.model, d.name, d.kind, COUNT(*) AS n
+         FROM session_photo sp
+         CROSS JOIN photo p ON p.id=sp.photo_id AND COALESCE(p.missing,0)=0
+         CROSS JOIN device d ON d.id=p.device_id
+         WHERE sp.session_id=?1
+         GROUP BY d.id
+         ORDER BY n DESC, COALESCE(d.name,'') COLLATE NOCASE, d.id",
+    )?;
+    let rows = st
+        .query_map([session_id], |r| {
+            let kind: Option<String> = r.get(4)?;
+            Ok(SessionDevice {
+                id: r.get(0)?,
+                make: r.get(1)?,
+                model: r.get(2)?,
+                name: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                kind: kind
+                    .as_deref()
+                    .and_then(crate::device::DeviceKind::parse)
+                    .unwrap_or(crate::device::DeviceKind::Unknown),
+                photo_count: r.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 fn get_session_exists(conn: &Connection, id: i64) -> Result<()> {

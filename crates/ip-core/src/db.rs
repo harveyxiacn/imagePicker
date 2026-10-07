@@ -219,6 +219,13 @@ CREATE TABLE xmp_state (
   synced_at INTEGER
 );
 "#,
+    // v9: device naming (docs/api-contract-m1.md "设备"): normalised display name and kind.
+    // Existing rows are filled in by `device::backfill` when the catalog is opened.
+    r#"
+ALTER TABLE device ADD COLUMN name TEXT;
+ALTER TABLE device ADD COLUMN kind TEXT;
+CREATE INDEX idx_photo_device ON photo(device_id);
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.
@@ -310,6 +317,7 @@ impl Db {
         let mut first = Connection::open(path)?;
         configure(&first)?;
         migrate(&mut first)?;
+        crate::device::backfill(&first)?;
         let mut conns = vec![first];
         for _ in 1..POOL_SIZE {
             let c = Connection::open(path)?;

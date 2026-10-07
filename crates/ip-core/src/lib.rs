@@ -7,6 +7,7 @@ pub mod auth;
 pub mod catalog;
 pub mod collections;
 pub mod db;
+pub mod device;
 pub mod edit;
 pub mod error;
 pub mod events;
@@ -244,6 +245,13 @@ impl Core {
 
     pub async fn session(&self, id: i64) -> Result<Session> {
         self.db.call(move |c| catalog::get_session(c, id)).await
+    }
+
+    /// Cameras/phones that took the photos of a session (404 for an unknown session).
+    pub async fn devices(&self, session_id: i64) -> Result<Vec<SessionDevice>> {
+        self.db
+            .call(move |c| catalog::session_devices(c, session_id))
+            .await
     }
 
     pub async fn sessions(&self) -> Result<Vec<Session>> {

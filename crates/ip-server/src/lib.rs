@@ -130,6 +130,7 @@ pub fn build_router_auth(
             "/sessions/{id}",
             get(routes::get_session).delete(routes::delete_session),
         )
+        .route("/sessions/{id}/devices", get(routes::session_devices))
         .route(
             "/photos",
             get(routes::list_photos).patch(routes::patch_photos),

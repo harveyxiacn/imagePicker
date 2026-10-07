@@ -120,7 +120,7 @@ async fn import_pipeline_end_to_end() {
         .unwrap();
     assert_eq!((p0.width, p0.height), (Some(640), Some(480)));
     assert_eq!(p0.format, "jpeg");
-    assert_eq!(p0.camera.as_deref(), Some("FAKE Cam 1"));
+    assert_eq!(p0.camera.as_deref(), Some("Fake Cam 1"));
     assert_eq!(p0.session_id, s.id);
     assert!(p0.taken_at.is_some());
     assert_eq!(p0.thumb_version.len(), 8);
@@ -711,4 +711,85 @@ async fn totals_are_cached_but_never_stale() {
         .await
         .unwrap();
     assert_eq!((first.total, second.total, second.photos.len()), (4, 4, 2));
+}
+
+#[tokio::test]
+async fn devices_counts_and_filter() {
+    let env = env();
+    make_photos(env.src.path(), 3); // FAKE Cam 1
+    for i in 0..2 {
+        write_jpeg(&env.src.path().join(format!("phone_{i}.jpg")), 64, 48, 9);
+    }
+    write_jpeg(&env.src.path().join("nodev_0.jpg"), 64, 48, 50);
+    let s = import(&env, env.src.path()).await;
+    assert_eq!(s.photo_count, 6);
+
+    let devs = env.core.devices(s.id).await.unwrap();
+    assert_eq!(devs.len(), 2);
+    assert_eq!(devs[0].name, "Fake Cam 1");
+    assert_eq!(devs[0].photo_count, 3);
+    assert_eq!(devs[0].kind, crate::device::DeviceKind::Unknown);
+    assert_eq!(devs[1].name, "Apple iPhone 15 Pro");
+    assert_eq!(devs[1].kind, crate::device::DeviceKind::Phone);
+    assert_eq!(devs[1].photo_count, 2);
+    assert_eq!(devs[1].make.as_deref(), Some("Apple"), "raw make is kept");
+    assert!(env.core.devices(9999).await.is_err());
+
+    let ids = |p: &PhotosPage| {
+        p.photos
+            .iter()
+            .map(|p| p.file_name.clone())
+            .collect::<Vec<_>>()
+    };
+    let phone = env
+        .core
+        .photos(PhotoQuery {
+            devices: vec![devs[1].id],
+            ..q(s.id)
+        })
+        .await
+        .unwrap();
+    assert_eq!(phone.total, 2);
+    assert!(ids(&phone).iter().all(|n| n.starts_with("phone_")));
+    assert!(phone.photos.iter().all(|p| p.device_id == Some(devs[1].id)
+        && p.device_kind == Some(crate::device::DeviceKind::Phone)
+        && p.camera.as_deref() == Some("Apple iPhone 15 Pro")));
+
+    let none = env
+        .core
+        .photos(PhotoQuery {
+            device_none: true,
+            ..q(s.id)
+        })
+        .await
+        .unwrap();
+    assert_eq!(ids(&none), vec!["nodev_0.jpg"]);
+    assert_eq!(none.photos[0].device_id, None);
+    assert_eq!(none.photos[0].device_kind, None);
+    assert_eq!(none.photos[0].camera, None);
+
+    // combined with another filter and sort
+    let both = env
+        .core
+        .photos(PhotoQuery {
+            devices: vec![devs[0].id, devs[1].id],
+            sort: SortKey::Name,
+            limit: Some(2),
+            ..q(s.id)
+        })
+        .await
+        .unwrap();
+    assert_eq!(both.total, 5);
+    assert_eq!(both.photos.len(), 2);
+    assert!(both.next_cursor.is_some());
+    let flagged = env
+        .core
+        .photos(PhotoQuery {
+            devices: vec![devs[1].id],
+            flag: FlagFilter::Picked,
+            ..q(s.id)
+        })
+        .await
+        .unwrap();
+    assert_eq!(flagged.total, 0);
 }

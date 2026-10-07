@@ -78,13 +78,26 @@ impl Imaging for FakeImaging {
             .modified()?
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis() as i64;
+        // File-name prefixes pick the device: `phone_*` = Apple iPhone 15 Pro, `nodev_*` = no EXIF
+        // camera, anything else = FAKE / FAKE Cam 1.
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let (make, model) = if name.starts_with("nodev_") {
+            (None, None)
+        } else if name.starts_with("phone_") {
+            (Some("Apple".to_string()), Some("iPhone 15 Pro".to_string()))
+        } else {
+            (Some("FAKE".to_string()), Some("FAKE Cam 1".to_string()))
+        };
         Ok(Metadata {
             width: Some(w),
             height: Some(h),
             orientation: 1,
             taken_at_ms: Some(mtime),
-            camera_make: Some("FAKE".into()),
-            camera_model: Some("FAKE Cam 1".into()),
+            camera_make: make,
+            camera_model: model,
             lens: Some("50mm".into()),
             focal_mm: Some(50.0),
             aperture: Some(1.8),

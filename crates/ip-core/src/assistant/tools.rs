@@ -473,6 +473,8 @@ pub fn photo_query_of(session_id: i64, f: &Value, limit: Option<i64>) -> PhotoQu
     let boolean = |k: &str| get(k).and_then(Value::as_bool).unwrap_or(false);
     PhotoQuery {
         session_id,
+        devices: Vec::new(),
+        device_none: false,
         rating_gte: get("rating_gte").and_then(Value::as_i64),
         flag: get("flag")
             .and_then(Value::as_str)

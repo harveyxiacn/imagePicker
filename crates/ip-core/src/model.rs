@@ -44,6 +44,20 @@ pub struct Photo {
     pub analyzed: bool,
     // ---- M3 (docs/api-contract-m3.md)
     pub has_edits: bool,
+    // ---- devices (docs/api-contract-m1.md "设备")
+    pub device_id: Option<i64>,
+    pub device_kind: Option<crate::device::DeviceKind>,
+}
+
+/// One camera/phone in a session (`GET /api/sessions/{id}/devices`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionDevice {
+    pub id: i64,
+    pub make: Option<String>,
+    pub model: Option<String>,
+    pub name: String,
+    pub kind: crate::device::DeviceKind,
+    pub photo_count: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -281,6 +295,11 @@ pub struct PhotoQuery {
     // ---- M4
     /// `Some(true)`: only photos with edits; `Some(false)`: only unedited ones.
     pub has_edits: Option<bool>,
+    // ---- devices
+    /// Only photos from these devices (OR-ed with `device_none`); empty = no device filter.
+    pub devices: Vec<i64>,
+    /// Include photos without a device.
+    pub device_none: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
