@@ -169,13 +169,59 @@ def main() -> int:
         pred_pairs += len(ids) * (len(ids) - 1) // 2
     stacked = sum(1 for ids in groups.values() if len(ids) >= 2)
     best_hits = sum(1 for r, im in photos if "best" in im.get("tags", []) and r["best_photo_id"] == r["id"])
+    # a frame split off into a group of its own is trivially that group's best
+    best_alone = sum(1 for r, im in photos if "best" in im.get("tags", []) and r["best_photo_id"] == r["id"]
+                     and len(groups.get(r["burst_id"], ())) < 2)
     best_total = sum(1 for _, im in photos if "best" in im.get("tags", []))
     gp = both / pred_pairs if pred_pairs else float("nan")
     gr = both / truth_pairs if truth_pairs else float("nan")
     print(f"\nbursts: {len(members)} in manifest, {stacked} stacked groups found;"
-          f" pair precision {gp:.2f} recall {gr:.2f}; best frame picked {best_hits}/{best_total}")
+          f" pair precision {gp:.2f} recall {gr:.2f}; best frame picked {best_hits}/{best_total}"
+          f" ({best_alone} of them alone in their group)")
     out["bursts"] = {"manifest": len(members), "stacked": stacked, "pair_precision": gp,
-                     "pair_recall": gr, "best_hits": best_hits, "best_total": best_total}
+                     "pair_recall": gr, "best_hits": best_hits, "best_total": best_total,
+                     "best_hits_alone": best_alone}
+
+    # Duplicate-aware variant: the exact-duplicate / missing-lens edge fixtures are copies of a
+    # library photo with the same capture time, so stacking them with their source is correct
+    # although the manifest gives them no `burst`. (no-exif / clock-offset copies have no usable
+    # capture time and are not expected to stack.) Pairs of such copies count as true pairs.
+    source = {}
+    for _, im in photos:
+        if im.get("phase") != "edge":
+            source.setdefault((im.get("png"), im.get("taken_at")), im)
+
+    def copy_of(im):
+        mode = (im.get("metadata") or {}).get("metadata_mode")
+        if im.get("phase") == "edge" and mode in ("normal", "missing-lens"):
+            return source.get((im.get("png"), im.get("taken_at")))
+        return None
+
+    copied = {src["name"] for src in (copy_of(im) for _, im in photos) if src}
+
+    def stack_key(im):
+        src = copy_of(im) or (im if im["name"] in copied else None)
+        if src is not None:
+            return src.get("burst") or "dup:" + src["name"]
+        return im.get("burst")
+
+    keys = defaultdict(list)
+    for r, im in photos:
+        k = stack_key(im)
+        if k:
+            keys[k].append(r)
+    truth2 = both2 = 0
+    for ms in keys.values():
+        for i in range(len(ms)):
+            for j in range(i + 1, len(ms)):
+                truth2 += 1
+                if ms[i]["burst_id"] is not None and ms[i]["burst_id"] == ms[j]["burst_id"]:
+                    both2 += 1
+    gp2 = both2 / pred_pairs if pred_pairs else float("nan")
+    gr2 = both2 / truth2 if truth2 else float("nan")
+    print(f"bursts + exact-duplicate/missing-lens copies with their source: {len(keys)} stacks expected;"
+          f" pair precision {gp2:.2f} recall {gr2:.2f}")
+    out["bursts_with_copies"] = {"expected": len(keys), "pair_precision": gp2, "pair_recall": gr2}
 
     stars = Counter(r["ai_rating"] for r, _ in photos)
     print("\nai stars: " + "  ".join(f"{k}*:{v}" for k, v in sorted(stars.items(), key=lambda kv: (kv[0] is None, kv[0]))))
