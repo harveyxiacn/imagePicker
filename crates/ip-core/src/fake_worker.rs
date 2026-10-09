@@ -166,6 +166,9 @@ pub struct FakeWorker {
     /// Makes `mask.generate` honour `person_bbox` for `person` masks: 255 inside the box, 0
     /// elsewhere (on a 100x100 raster). Off = the legacy "left half" mask.
     pub person_mask_from_bbox: std::sync::atomic::AtomicBool,
+    /// Makes `mask.generate` answer every `person` mask with an all-black image (what the real
+    /// matting returns for small background people).
+    pub empty_person_masks: std::sync::atomic::AtomicBool,
     /// Milliseconds every non-analysis call sleeps before answering (timeout tests).
     pub call_delay_ms: AtomicUsize,
     /// Number of times the core killed this worker (after a call timeout).
@@ -230,6 +233,7 @@ impl Default for FakeWorker {
             embed_calls: AtomicUsize::new(0),
             last_embed_request: Mutex::new(None),
             person_mask_from_bbox: std::sync::atomic::AtomicBool::new(false),
+            empty_person_masks: std::sync::atomic::AtomicBool::new(false),
             call_delay_ms: AtomicUsize::new(0),
             kills: AtomicUsize::new(0),
             compose_calls: AtomicUsize::new(0),
@@ -258,7 +262,8 @@ impl Default for FakeWorker {
 /// `(caption, keywords, problems, adjust, reason)` of the fake VLM.
 type VlmScript = (String, Vec<String>, Vec<String>, serde_json::Value, String);
 
-/// Ids of the fake M6 models (`task: ["llm"]` / `["vlm"]`).
+/// Ids of the fake M6 models (`task: ["llm_plan"]` / `["vlm_suggest", "vlm_describe"]`, as in the
+/// worker's registry).
 pub const LLM_MODEL: &str = "fake-qwen-llm";
 pub const VLM_MODEL: &str = "fake-qwen-vl";
 
@@ -442,14 +447,14 @@ impl AiWorker for FakeWorker {
         let mut extra_models = Vec::new();
         if self.llm_response.lock().unwrap().is_some() {
             let mut llm = m(LLM_MODEL, 1800.0, &[]);
-            llm.task = vec!["llm".into()];
+            llm.task = vec!["llm_plan".into()];
             llm.recommended = false;
             llm.optional = true;
             extra_models.push(llm);
         }
         if self.vlm.lock().unwrap().is_some() {
             let mut vlm = m(VLM_MODEL, 3200.0, &[]);
-            vlm.task = vec!["vlm".into()];
+            vlm.task = vec!["vlm_suggest".into(), "vlm_describe".into()];
             vlm.recommended = false;
             vlm.optional = true;
             extra_models.push(vlm);
@@ -642,6 +647,9 @@ impl AiWorker for FakeWorker {
             }
             // A 32x24 mask: left half (x < 16) belongs to the target.
             let img = match (t.as_str(), req.person_bbox) {
+                ("person", _) if self.empty_person_masks.load(Ordering::SeqCst) => {
+                    image::GrayImage::new(100, 100)
+                }
                 ("person", Some(b)) if self.person_mask_from_bbox.load(Ordering::SeqCst) => {
                     image::GrayImage::from_fn(100, 100, |x, y| {
                         let (fx, fy) = (x as f64 / 100.0, y as f64 / 100.0);

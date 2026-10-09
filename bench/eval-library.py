@@ -4,7 +4,9 @@ Usage:
     python bench/eval-library.py LIBRARY_DIR DATA_DIR [--json OUT.json]
 
 LIBRARY_DIR holds manifest.json (bench/data/qwen-photo-library); DATA_DIR is the --data-dir that
-`imagepicker analyze LIBRARY_DIR/jpeg --profile lite --data-dir DATA_DIR` wrote its catalog.db to.
+`imagepicker analyze LIBRARY_DIR/jpeg --profile lite --data-dir DATA_DIR` wrote its catalog.db to
+(any profile; `closed_eyes` needs `fast` or `standard`, bench/eval-standard.py adds the people /
+expression / scene metrics of `standard`).
 
 Manifest tags are prompt intent, not verified ground truth (see the library's visual-review.json),
 so the numbers rank threshold choices against each other; they are not an absolute accuracy.
@@ -19,9 +21,12 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-ISSUE_BITS = {"blurry": 2, "overexposed": 4, "underexposed": 8, "noisy": 64}
+ISSUE_BITS = {"closed_eyes": 1, "blurry": 2, "overexposed": 4, "underexposed": 8, "noisy": 64}
 # manifest tag(s) that mean "this photo should carry the issue"
 TRUTH = {
+    # burst variants generated with someone's eyes closed (needs the faces step: fast / standard;
+    # always 0 on lite). Group variants may close more people's eyes than the `victim:` tag says.
+    "closed_eyes": lambda t, ph: "eyes-closed" in t,
     "overexposed": lambda t, ph: "overexposed" in t,
     "underexposed": lambda t, ph: "underexposed" in t,
     "noisy": lambda t, ph: "noisy" in t,
@@ -97,7 +102,8 @@ def main() -> int:
             elif pred:
                 fp += 1
                 fp_where[ph] += 1
-                for tag in t & {"document", "noon", "sunrise", "overcast", "blur", "thing", "place"}:
+                for tag in t & {"document", "noon", "sunrise", "overcast", "blur", "thing", "place",
+                                "laugh", "mid-talk", "gaze-away", "group"}:
                     fp_where["#" + tag] += 1
             elif truth:
                 fn += 1

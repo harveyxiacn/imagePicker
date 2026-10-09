@@ -14,6 +14,9 @@ live in [`REPORT.md`](REPORT.md); raw numbers in `results/*.json`.
 | `web/scripts/perf-real.mjs` | Playwright against the real server and the built UI: grid scroll frame times (requestAnimationFrame sampler) and loupe next-photo latency on a 20k session. |
 | `web/scripts/perf-trace.mjs` | Chrome trace of a fast scroll, summarised by event (where main-thread time goes). |
 | `web/scripts/e2e-real.mjs` | Real-server end-to-end test, see [`CI-E2E.md`](CI-E2E.md). |
+| `bench/eval-library.py`, `bench/eval-standard.py` | Score an analysed catalog of the synthetic photo library (`bench/data/qwen-photo-library`, labels in its `manifest.json`): issue tags incl. closed eyes, bursts and best frame; `eval-standard.py` adds people clustering vs the actor ids, expression signals, subject / bystander split, scenes, stars and GPU use. Results: [`standard-eval-2026-10-09.md`](standard-eval-2026-10-09.md). |
+| `bench/api-features.py` | Drives the AI features of a running `imagepicker serve` end to end (masks, best take, inpaint, denoise, face restore, upscale on export, portrait retouch, assistant plan / execute / undo, describe, face search, XMP round trip) and saves before / after images with numeric checks. |
+| `bench/worker-rpc.py`, `bench/besttake-align.py` | Call the AI worker's JSON-RPC methods directly (`system.info`, `models.ensure`, ...); global-alignment statistics of the library's bursts as Best Take computes them. |
 
 ## Reproduce
 
