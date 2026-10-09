@@ -24,12 +24,18 @@ Noise
   for white noise sigma. Per 16x16 block: sigma_b = 1.4826 * MAD(r_block) / 6 (MAD is robust to edges).
   Only the 25% flattest blocks (lowest mean gradient, not clipped) are used: sigma = median(sigma_b).
   noise = clamp(sigma / 12, 0, 1)
+Tilt (steps/tilt.py)
+  tilt_deg        = deviation of the dominant straight lines (horizon, verticals) from level,
+                    degrees, > 0 = content rotated clockwise; 0 when there are none
+  tilt_confidence = 0..1, how much straight, agreeing structure backs tilt_deg
 """
 
 from __future__ import annotations
 
 import cv2
 import numpy as np
+
+from .tilt import estimate_tilt
 
 REF_LONG_EDGE = 1024
 K_LAP = 120.0
@@ -160,6 +166,7 @@ def analyze_quality(
 
     exp = exposure_metrics(rgb)
     sigma = noise_sigma(gray)
+    tilt_deg, tilt_conf = estimate_tilt(gray)
     out: dict[str, float | None] = {
         "sharpness": s_face if s_face is not None else s_center,
         "sharpness_center": s_center,
@@ -172,5 +179,7 @@ def analyze_quality(
         "crushed_shadows": exp["crushed_shadows"],
         "noise": _clamp01(sigma / NOISE_FULL_SCALE_SIGMA),
         "noise_sigma": sigma,
+        "tilt_deg": tilt_deg,
+        "tilt_confidence": tilt_conf,
     }
     return {k: (None if v is None else round(float(v), 5)) for k, v in out.items()}

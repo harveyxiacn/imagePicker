@@ -256,7 +256,7 @@ export const zhCN = {
     overexposed: '高光过曝',
     underexposed: '整体欠曝',
     noisy: '噪点明显',
-    tilted: '画面倾斜',
+    tilted: '画面倾斜约 {{deg}}°',
     sharp: '对焦锐利',
     great_expression: '所有人睁眼并微笑',
     high_aesthetic: '构图与色彩出众',

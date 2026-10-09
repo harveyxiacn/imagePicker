@@ -3,8 +3,9 @@
     cd ai-worker && uv run python scripts/gen_lite_fixtures.py
 
 Writes deterministic synthetic PNGs plus `expected.json` (the worker's phash / quality output for
-each) into `crates/ip-lite/tests/fixtures/`. `crates/ip-lite/tests/parity.rs` checks the Rust
-implementation against them (pHash bit-exact, quality within float32 tolerance).
+each, quality including the tilt estimate) into `crates/ip-lite/tests/fixtures/`.
+`crates/ip-lite/tests/parity.rs` checks the Rust implementation against them (pHash bit-exact,
+quality within float32 tolerance).
 """
 
 from __future__ import annotations
@@ -60,6 +61,36 @@ def checker(w: int, h: int, cell: int, ramp: float = 0.0) -> np.ndarray:
     return np.dstack([v, v, v])
 
 
+def rotated(img: np.ndarray, deg: float) -> np.ndarray:
+    """Content rotated clockwise by `deg` about the centre (reflected borders, no black wedges)."""
+    h, w = img.shape[:2]
+    m = cv2.getRotationMatrix2D(((w - 1) / 2, (h - 1) / 2), -deg, 1.0)
+    return cv2.warpAffine(img, m, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT_101)
+
+
+def lines_scene(w: int, h: int, seed: int) -> np.ndarray:
+    """Sky / sea horizon with a few upright posts and a building block (tilt fixtures)."""
+    rng = np.random.default_rng(seed)
+    x, y = coords(w, h)
+    img = np.zeros((h, w, 3), np.float32)
+    horizon = 0.55
+    sky = np.array([150, 185, 225], np.float32)
+    sea = np.array([40, 80, 120], np.float32)
+    img[:] = np.where((y < horizon)[..., None], sky, sea)
+    img += (12 * np.sin(23 * x + 3 * y))[..., None]  # soft waves / gradients
+    for _ in range(4):
+        px = int(rng.uniform(0.1, 0.9) * w)
+        top = int(rng.uniform(0.15, 0.45) * h)
+        cv2.rectangle(img, (px, top), (px + max(3, w // 120), h - 1), (35, 30, 30), -1)
+    bx, by = int(0.62 * w), int(0.3 * h)
+    cv2.rectangle(img, (bx, by), (bx + w // 4, int(horizon * h)), (190, 170, 150), -1)
+    for i in range(1, 5):
+        ly = by + i * h // 25
+        cv2.line(img, (bx, ly), (bx + w // 4, ly), (90, 80, 70), 2)
+    # no added noise: it would make these PNGs several MB
+    return np.clip(cv2.GaussianBlur(img, (0, 0), 0.8), 0, 255).astype(np.uint8)
+
+
 def build() -> dict[str, np.ndarray]:
     s1024 = scene(1024, 768, 1)
     return {
@@ -78,6 +109,11 @@ def build() -> dict[str, np.ndarray]:
         "scene_20x20": scene(20, 20, 11),  # smaller than 32: pHash enlarges (bilinear)
         "portrait_768x1024": scene(768, 1024, 12),
         "noise_only_480x360": np.random.default_rng(13).integers(0, 256, (360, 480, 3), dtype=np.uint8),
+        # tilt: horizon + posts, level and rotated (quality also resamples the 1500 px one)
+        "lines_level_1024x768": lines_scene(1024, 768, 14),
+        "lines_cw3_1024x768": rotated(lines_scene(1024, 768, 14), 3.0),
+        "lines_ccw6_1500x1000": rotated(lines_scene(1500, 1000, 15), -6.0),
+        "lines_cw1_768x1024": rotated(lines_scene(768, 1024, 16), 1.25),
     }
 
 
@@ -92,7 +128,8 @@ def main() -> None:
             "phash": phash_hex(rgb),
             "quality": analyze_quality(rgb),
         }
-    (OUT / "expected.json").write_text(json.dumps(expected, indent=1, sort_keys=True) + "\n")
+    text = json.dumps(expected, indent=1, sort_keys=True) + "\n"
+    (OUT / "expected.json").write_text(text, encoding="utf-8", newline="\n")
     print(f"wrote {len(expected)} fixtures to {OUT}")
 
 

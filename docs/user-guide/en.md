@@ -257,7 +257,7 @@ After analysis every photo gets an AI suggested rating (0–5, half stars possib
 | Face | Eyes open, smile, looking at camera |
 | Composition | (not active yet, see below) |
 
-Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted (tilt detection is not implemented yet).
+Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted. *Tilted* means the horizon or the building verticals are 2–10° off level (the reason shows the angle, e.g. "Horizon is tilted by 3.5°"); it is only judged when the photo has clear straight lines, so many tilted photos without them are not tagged, and it never lowers the rating: fix it with *Crop & straighten* (`R`) in the editor.
 
 - Click *Accept* in the inspector, or press `A`, to write the AI rating into **your** rating; `Ctrl+Shift+A` accepts in bulk.
 - The *AI rating* filter filters by suggested stars.

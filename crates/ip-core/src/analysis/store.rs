@@ -82,8 +82,8 @@ pub fn ingest(
         tx.execute(
             "INSERT OR REPLACE INTO analysis(photo_id, profile, steps_done, model_versions, phash, embedding,
                sharpness, exposure, noise, aesthetic, iqa, mean_luminance, clipped_highlights, crushed_shadows,
-               scene_scores, explain, artifacts_dir, analyzed_at)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16,?17)",
+               scene_scores, explain, artifacts_dir, analyzed_at, tilt_deg, tilt_confidence)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16,?17,?18,?19)",
             params![
                 pid,
                 profile.as_str(),
@@ -101,7 +101,9 @@ pub fn ingest(
                 q.crushed_shadows,
                 a.scene_scores.as_ref().map(|v| v.to_string()),
                 artifacts_dir,
-                now
+                now,
+                q.tilt_deg,
+                q.tilt_confidence
             ],
         )?;
         // faces
@@ -467,7 +469,7 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
             let mut st = tx.prepare(&format!(
                 "SELECT p.id, p.burst_id, COALESCE(p.taken_at, p.mtime), p.scene_type, a.sharpness, a.exposure,
                         a.noise, a.iqa, a.aesthetic, a.clipped_highlights, a.crushed_shadows,
-                        a.mean_luminance, a.embedding
+                        a.mean_luminance, a.embedding, a.tilt_deg, a.tilt_confidence
                  FROM photo p JOIN analysis a ON a.photo_id=p.id WHERE p.burst_id IN ({ph})"
             ))?;
             let v = st
@@ -486,6 +488,8 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
                             clipped_highlights: r.get(9)?,
                             crushed_shadows: r.get(10)?,
                             mean_luminance: r.get(11)?,
+                            tilt_deg: r.get(13)?,
+                            tilt_confidence: r.get(14)?,
                             faces: Vec::new(),
                         },
                         emb: r

@@ -27,6 +27,14 @@ pub const UNDEREXPOSED_DETAIL_BELOW: f64 = 0.40;
 /// textured clean ones (foliage, water); see `bench/eval-library.py`.
 pub const NOISY_AT: f64 = 0.22;
 pub const NOISY_AT_NIGHT: f64 = 0.30;
+/// Horizon tilt (`ip_lite::tilt`, the worker's `steps/tilt.py`): flagged when the dominant
+/// straight lines are off level by at least this many degrees with at least this confidence.
+/// Larger deviations are mostly perspective (receding streets, table edges) or intentional, so
+/// they are not flagged. Calibrated on rotated library photos (`bench/eval-tilt.py`): see docs/03.
+/// A tag only: a tilt is fixed by straightening, so it never lowers the score.
+pub const TILTED_MIN_DEG: f64 = 2.0;
+pub const TILTED_MAX_DEG: f64 = 10.0;
+pub const TILTED_MIN_CONFIDENCE: f64 = 0.2;
 /// A burst member this much less sharp than the burst's sharpest frame is flagged blurry
 /// (motion blur on the subject barely moves the whole-frame measure, so a fixed threshold misses it).
 pub const BLURRY_IN_BURST_RATIO: f64 = 0.80;
@@ -128,6 +136,9 @@ pub struct PhotoFeat {
     pub clipped_highlights: Option<f64>,
     pub crushed_shadows: Option<f64>,
     pub mean_luminance: Option<f64>,
+    /// Horizon tilt in degrees (> 0 = clockwise) and its 0..1 confidence.
+    pub tilt_deg: Option<f64>,
+    pub tilt_confidence: Option<f64>,
     pub scene_type: Option<String>,
     pub faces: Vec<FaceFeat>,
 }
@@ -332,7 +343,17 @@ pub fn detect_issues(feat: &PhotoFeat, scene: &str) -> (Vec<Issue>, Vec<Issue>) 
     if feat.noise.map(|n| n >= noisy_at).unwrap_or(false) {
         issues.push(Issue::Noisy);
     }
+    if tilted_by(feat).is_some() {
+        issues.push(Issue::Tilted);
+    }
     (issues, hard)
+}
+
+/// The tilt in degrees when it is confident and in the flagged range.
+pub fn tilted_by(feat: &PhotoFeat) -> Option<f64> {
+    let deg = feat.tilt_deg?;
+    let confident = feat.tilt_confidence.unwrap_or(0.0) >= TILTED_MIN_CONFIDENCE;
+    (confident && (TILTED_MIN_DEG..=TILTED_MAX_DEG).contains(&deg.abs())).then_some(deg)
 }
 
 pub fn score_photo(feat: &PhotoFeat) -> PhotoScore {
@@ -409,6 +430,8 @@ pub fn score_photo(feat: &PhotoFeat) -> PhotoScore {
                 .collect();
             let first = ids.iter().find(|v| !v.is_null()).cloned();
             json!({"count": ids.len(), "person_id": first})
+        } else if let (Issue::Tilted, Some(deg)) = (i, tilted_by(feat)) {
+            json!({"deg": (deg.abs() * 10.0).round() / 10.0})
         } else {
             json!({})
         };
@@ -645,7 +668,7 @@ mod tests {
             crushed_shadows: Some(0.0),
             mean_luminance: Some(0.45),
             scene_type: Some("landscape".into()),
-            faces: vec![],
+            ..Default::default()
         }
     }
 
@@ -805,6 +828,29 @@ mod tests {
         let blurred = r.iter().find(|x| x.photo_id == 2).unwrap();
         assert!(!blurred.hard_issue, "relative blur is a tag, not a penalty");
         assert!(blurred.reasons.iter().any(|x| x.key == "blurry"));
+    }
+
+    #[test]
+    fn tilt_is_a_tag_with_the_angle() {
+        let mut f = good(1);
+        let base = score_photo(&f);
+        f.tilt_deg = Some(-3.46);
+        f.tilt_confidence = Some(0.5);
+        let s = score_photo(&f);
+        assert_eq!(s.issues, vec![Issue::Tilted]);
+        assert!(!s.hard_issue);
+        assert_eq!(s.q, base.q, "a tilt does not change the score");
+        let r = s.reasons.iter().find(|r| r.key == "tilted").unwrap();
+        assert_eq!(r.params, json!({"deg": 3.5}));
+        // not confident, too small, or too large (perspective / intentional): no tag
+        for (deg, conf) in [(-3.46, 0.1), (1.2, 0.9), (13.0, 0.9)] {
+            f.tilt_deg = Some(deg);
+            f.tilt_confidence = Some(conf);
+            assert!(score_photo(&f).issues.is_empty(), "{deg} {conf}");
+        }
+        f.tilt_confidence = None;
+        f.tilt_deg = Some(4.0);
+        assert!(score_photo(&f).issues.is_empty());
     }
 
     #[test]

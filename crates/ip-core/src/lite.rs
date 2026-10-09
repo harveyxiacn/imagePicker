@@ -2,8 +2,9 @@
 //!
 //! [`LiteWorker`] implements [`AiWorker`] for the `analyze.batch` method only: it decodes each
 //! photo at analysis size through [`Imaging`] and runs the pure-Rust ports of the worker's
-//! `phash` and `quality` steps (`ip-lite`). No faces, no embeddings: grouping then relies on the
-//! time line plus pHash, and scoring renormalises over the available components (M2).
+//! `phash` and `quality` steps (`ip-lite`, the latter including the horizon tilt). No faces, no
+//! embeddings: grouping then relies on the time line plus pHash, and scoring renormalises over
+//! the available components (M2).
 //!
 //! With the optional `infer` feature and a YuNet model on disk (`IMAGEPICKER_YUNET_MODEL` or
 //! `<models>/yunet/face_detection_yunet_2023mar.onnx`) a `faces` step runs after `quality`
@@ -192,6 +193,8 @@ fn analyze_one_with(
             clipped_highlights: Some(q.clipped_highlights),
             crushed_shadows: Some(q.crushed_shadows),
             noise_sigma: Some(q.noise_sigma),
+            tilt_deg: Some(q.tilt_deg),
+            tilt_confidence: Some(q.tilt_confidence),
         }),
         faces: faces.unwrap_or_default(),
         ..Default::default()
