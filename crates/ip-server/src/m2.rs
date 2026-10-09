@@ -6,8 +6,8 @@ use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ip_core::{
-    AnalysisRunRequest, MergeBurstsRequest, MergePeopleRequest, PersonPatch, SetFacePersonRequest,
-    SplitRequest,
+    AnalysisRunRequest, CreatePersonRequest, MergeBurstsRequest, MergePeopleRequest, PersonPatch,
+    SetFacePersonRequest, SplitRequest,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -214,4 +214,13 @@ pub async fn set_face_person(
     Ok(Json(
         json!({ "face": st.core.set_face_person(id, req.person_id).await? }),
     ))
+}
+
+/// "This is a new person" (search by face): `201 {"person"}`.
+pub async fn create_person(
+    State(st): State<AppState>,
+    ApiJson(req): ApiJson<CreatePersonRequest>,
+) -> ApiResult<Response> {
+    let person = st.core.create_person(req).await?;
+    Ok((StatusCode::CREATED, Json(json!({ "person": person }))).into_response())
 }

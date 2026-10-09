@@ -229,6 +229,16 @@ pub struct SetFacePersonRequest {
     pub person_id: Option<i64>,
 }
 
+/// `POST /api/people`: "this is a new person" (search by face). The faces leave whatever person
+/// they had and are locked to the new one, so re-clustering keeps them there.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreatePersonRequest {
+    pub face_ids: Vec<i64>,
+    /// Optional name; blank = unnamed.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
