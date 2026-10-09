@@ -1,11 +1,14 @@
-import { AlertCircle, CheckCircle2, Download, Info, X } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { AlertCircle, Ban, CheckCircle2, Download, Info, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { cancelTask } from '@/lib/tasks'
 import { useAnalysisUi } from '@/stores/analysis'
 import { isGenKind } from '@/stores/gen'
 import { useToasts } from '@/stores/toasts'
 
 export function Toasts() {
   const { t } = useTranslation()
+  const qc = useQueryClient()
   const toasts = useToasts((s) => s.toasts)
   const tasks = useToasts((s) => s.tasks)
   const dismiss = useToasts((s) => s.dismiss)
@@ -29,6 +32,8 @@ export function Toasts() {
                 <CheckCircle2 size={16} className="text-success" />
               ) : task.state === 'failed' ? (
                 <AlertCircle size={16} className="text-danger" />
+              ) : task.state === 'cancelled' ? (
+                <Ban size={16} className="text-muted" />
               ) : (
                 <Download size={16} className="text-accent" />
               )}
@@ -43,11 +48,18 @@ export function Toasts() {
                     ? t('export.done', { n: task.total })
                     : task.state === 'failed'
                       ? t('export.failed')
-                      : t('export.running')}
+                      : task.state === 'cancelled'
+                        ? t('export.cancelled', { n: task.done })
+                        : t('export.running')}
               </span>
               <span className="tnum text-muted">
                 {task.kind === 'model_download' ? `${Math.round(task.total > 0 ? (task.done / task.total) * 100 : 0)}%` : `${task.done}/${task.total}`}
               </span>
+              {task.kind === 'export' && task.state === 'running' && (
+                <button className="btn btn-ghost !h-6 !px-1.5 text-xs" onClick={() => void cancelTask(qc, task.task_id)} data-testid="export-cancel">
+                  {t('common.cancel')}
+                </button>
+              )}
               <button className="btn btn-ghost btn-icon !h-6 !w-6" aria-label={t('common.close')} onClick={() => dismissTask(task.task_id)}>
                 <X size={14} />
               </button>
@@ -55,7 +67,7 @@ export function Toasts() {
             {task.state === 'failed' && task.error && <div className="mt-1 text-danger">{task.error}</div>}
             <div className="mt-2 h-1.5 overflow-hidden rounded bg-line">
               <div
-                className={`h-full transition-[width] duration-200 ${task.state === 'failed' ? 'bg-danger' : task.state === 'done' ? 'bg-success' : 'bg-accent'}`}
+                className={`h-full transition-[width] duration-200 ${task.state === 'failed' ? 'bg-danger' : task.state === 'done' ? 'bg-success' : task.state === 'cancelled' ? 'bg-muted' : 'bg-accent'}`}
                 style={{ width: `${pct}%` }}
               />
             </div>

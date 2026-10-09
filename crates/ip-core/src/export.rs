@@ -10,10 +10,10 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 use ip_render::{EditStack, RgbImage};
-use ip_worker_client::{AiWorker, EnhanceRequest, MaskPhoto};
+use ip_worker_client::{AiWorker, CancelToken, EnhanceRequest, MaskPhoto};
 use tokio::runtime::Handle;
 
-use crate::catalog::{self, now_ms, PhotoRef};
+use crate::catalog::{self, PhotoRef};
 use crate::edit::service::{encode_jpeg, MaskMode};
 use crate::edit::{store, RenderService};
 use crate::error::{CoreError, Result};
@@ -33,7 +33,13 @@ pub struct ExportOptions {
     /// Crop-fit every output to this aspect ratio and, when larger, scale it down to exactly
     /// `(width, height)` (social media presets). Never upscales.
     pub fit: Option<(u32, u32)>,
+    /// Once cancelled, photos not started yet are skipped (error [`CANCELLED_PHOTO`]) and a
+    /// running upscale is cut short; files already written stay.
+    pub cancel: Option<CancelToken>,
 }
+
+/// Error text of the photos an export skipped because it was cancelled.
+pub const CANCELLED_PHOTO: &str = "cancelled";
 
 /// Center-crops `img` to the aspect ratio of `(w, h)`, then scales it down to `w x h` when it
 /// is larger.
@@ -294,21 +300,28 @@ fn export_upscaled(
     .save_with_format(&input, image::ImageFormat::Png)
     .map_err(|e| e.to_string())?;
     drop(rendered);
+    let req = EnhanceRequest {
+        photo: MaskPhoto {
+            photo_id: r.id,
+            path: input.to_string_lossy().into_owned(),
+            orientation: 1,
+        },
+        op: "upscale".into(),
+        strength: 1.0,
+        scale: Some(up.scale),
+        faces: None,
+        out_dir: dir.join("out").to_string_lossy().into_owned(),
+        allow_download: false,
+    };
+    let call = up.worker.enhance_run(&req);
     let resp = up
         .handle
-        .block_on(up.worker.enhance_run(&EnhanceRequest {
-            photo: MaskPhoto {
-                photo_id: r.id,
-                path: input.to_string_lossy().into_owned(),
-                orientation: 1,
-            },
-            op: "upscale".into(),
-            strength: 1.0,
-            scale: Some(up.scale),
-            faces: None,
-            out_dir: dir.join("out").to_string_lossy().into_owned(),
-            allow_download: false,
-        }))
+        .block_on(async {
+            match &opts.cancel {
+                Some(c) => c.scope(call).await,
+                None => call.await,
+            }
+        })
         .map_err(|e| crate::analysis::map_worker_err(e).to_string());
     let result = resp.and_then(|resp| {
         let path = resp
@@ -350,6 +363,9 @@ pub fn export_photos(
         .par_iter()
         .zip(names.par_iter())
         .map(|(r, out)| {
+            if opts.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+                return Err((r.id, CANCELLED_PHOTO.to_string()));
+            }
             let stack = edited(r);
             let res = match (stack, &opts.upscale, opts.long_edge) {
                 (stack, None, _) if opts.fit.is_some() => {
@@ -502,22 +518,19 @@ impl Core {
         }
         let task_id = format!("export-{}", self.next_task_seq());
         let total = refs.len();
+        let cancel = CancelToken::new();
         {
-            let (tid, params) = (
-                task_id.clone(),
-                serde_json::json!({"dest": req.dest, "long_edge": req.long_edge, "count": total})
-                    .to_string(),
-            );
+            let tid = task_id.clone();
+            let spec = serde_json::json!({
+                "dest": req.dest,
+                "long_edge": req.long_edge,
+                "upscale": req.upscale,
+                "count": total,
+            });
             self.db
-                .call(move |c| {
-                    c.execute(
-                        "INSERT INTO task(id, kind, status, priority, params, progress, created_at, updated_at)
-                         VALUES(?1,'export','running',0,?2,0,?3,?3)",
-                        rusqlite::params![tid, params, now_ms()],
-                    )?;
-                    Ok(())
-                })
+                .call(move |c| crate::tasks::insert(c, &tid, "export", &spec, total as i64))
                 .await?;
+            self.tasks.register(&task_id, cancel.clone(), total as i64);
         }
         let core = self.clone();
         let tid = task_id.clone();
@@ -527,6 +540,7 @@ impl Core {
             name_template: req.name_template.clone(),
             strip_gps: req.strip_gps,
             fit,
+            cancel: Some(cancel.clone()),
             upscale: req.upscale.map(|scale| UpscaleExport {
                 svc: self.render.clone(),
                 worker: self.worker.clone(),
@@ -579,17 +593,19 @@ impl Core {
                 error,
             };
             core.events.emit(ev(0, "running", None));
-            let (imaging, events, tid2) = (core.imaging.clone(), core.events.clone(), tid.clone());
+            let (imaging, core2, tid2) = (core.imaging.clone(), core.clone(), tid.clone());
             let res = tokio::task::spawn_blocking(move || {
                 let mut report = ExportReport::default();
                 let mut offset = 0usize;
                 for (dir, refs) in &groups {
                     let rep =
                         export_photos(&*imaging, refs, dir, &opts, edits.as_ref(), &|done, _| {
-                            events.emit(Event::TaskProgress {
+                            let done = (offset + done) as i64;
+                            core2.tasks.progress(&tid2, done, total as i64);
+                            core2.events.emit(Event::TaskProgress {
                                 task_id: tid2.clone(),
                                 kind: "export".into(),
-                                done: (offset + done) as i64,
+                                done,
                                 total: total as i64,
                                 state: "running".into(),
                                 error: None,
@@ -603,6 +619,10 @@ impl Core {
             })
             .await;
             let (state, error, done) = match res {
+                // stopped early: the files written so far stay, the rest was skipped
+                Ok(rep) if cancel.is_cancelled() && rep.written.len() < total => {
+                    (crate::tasks::CANCELLED, None, rep.written.len())
+                }
                 Ok(rep) if rep.errors.is_empty() => ("done", None, rep.written.len()),
                 Ok(rep) if rep.written.is_empty() => (
                     "failed",
@@ -625,13 +645,10 @@ impl Core {
             let _ = core
                 .db
                 .call(move |c| {
-                    c.execute(
-                        "UPDATE task SET status=?2, error=?3, progress=1, updated_at=?4 WHERE id=?1",
-                        rusqlite::params![tid3, st, er, now_ms()],
-                    )?;
-                    Ok(())
+                    crate::tasks::finish(c, &tid3, &st, done as i64, total as i64, er.as_deref())
                 })
                 .await;
+            core.tasks.remove(&tid);
             core.events.emit(ev(done, state, error));
         });
         Ok(task_id)

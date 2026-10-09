@@ -28,9 +28,28 @@ struct CancelInner {
     notify: Notify,
 }
 
+tokio::task_local! {
+    /// The token of the enclosing [`CancelToken::scope`].
+    static SCOPED: CancelToken;
+}
+
 impl CancelToken {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Runs `fut` with this token as the cancellation of the worker requests made inside it that
+    /// carry no token of their own (`mask.generate`, `besttake.compose`, `inpaint.run`,
+    /// `enhance.run`, ...): once the token fires, such a request sends the worker a `cancel`
+    /// notification and ends with [`WorkerError::Cancelled`]. Tasks spawned inside `fut` do not
+    /// inherit the scope.
+    pub async fn scope<F: std::future::Future>(&self, fut: F) -> F::Output {
+        SCOPED.scope(self.clone(), fut).await
+    }
+
+    /// The token of the enclosing [`scope`](Self::scope), if any.
+    pub fn scoped() -> Option<CancelToken> {
+        SCOPED.try_with(CancelToken::clone).ok()
     }
 
     pub fn cancel(&self) {
@@ -428,6 +447,19 @@ mod tests {
             c.call("echo", json!(7), None, None).await.unwrap(),
             json!(7)
         );
+    }
+
+    #[tokio::test]
+    async fn scope_exposes_its_token_only_inside() {
+        assert!(CancelToken::scoped().is_none());
+        let tok = CancelToken::new();
+        let inner = tok
+            .scope(async { CancelToken::scoped() })
+            .await
+            .expect("the scoped token");
+        tok.cancel();
+        assert!(inner.is_cancelled(), "the same token, not a copy");
+        assert!(CancelToken::scoped().is_none());
     }
 
     #[tokio::test]
