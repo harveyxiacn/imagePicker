@@ -417,9 +417,9 @@ Press `Ctrl+E` (or *Export* in the top bar):
 | Upscale | Off / ×2 / ×4 (on CPU tiers each photo can take tens of seconds) |
 | Export into one folder per person | Used from the People page |
 
-Export includes all your edits, writes JPEG, keeps EXIF and embeds an sRGB ICC profile.
+Export includes all your edits, writes JPEG and carries the original's metadata over: EXIF (for RAW and TIFF files too; maker notes are not copied), XMP (rating, keywords, title, creator…; entries that only describe the original, such as its orientation or Lightroom/darktable develop settings, are left out) and IPTC. Photos with a wide-gamut colour profile (Display P3, Adobe RGB) are converted to sRGB, as are their thumbnails and previews, and every export embeds an sRGB ICC profile. The API option `strip_gps` removes the GPS position from both EXIF and XMP. Exporting at original size without edits copies the file unchanged.
 
-> Known limitations: for RAW/HEIC sources EXIF is only synthesised (the original EXIF is not copied); XMP/IPTC are lost; colour conversion from non-sRGB sources is not done yet.
+> Known limitations: HEIC/HEIF photos cannot be exported yet; XMP stored inside DNG/CR3 files and extended XMP (over 64 KB, e.g. depth maps) is not copied (`.xmp` sidecars are); thumbnails made by an earlier version keep their colours until the cache is cleared (*Settings → Cache*).
 
 ## 14. AI assistant
 

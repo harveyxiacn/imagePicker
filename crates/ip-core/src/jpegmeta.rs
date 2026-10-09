@@ -1,16 +1,22 @@
-//! Minimal JPEG metadata handling for exports: copy the source's EXIF into the re-encoded
-//! JPEG (minus the orientation that the render already baked in, the embedded thumbnail of the
-//! unedited picture and, on request, the GPS position) and embed an sRGB ICC profile.
+//! JPEG metadata of exports: the source's EXIF (minus the orientation that the render already
+//! baked in, the embedded thumbnail of the unedited picture and, on request, the GPS position),
+//! its XMP packet and IPTC record (cleaned up the same way), and an sRGB ICC profile that
+//! matches the pixels (decoding converts sources tagged with another colour space to sRGB).
 //!
 //! No external dependencies: the EXIF TIFF block is edited in place (offsets of everything
 //! else, MakerNotes included, stay valid) and whatever is removed is zeroed so nothing of it
-//! survives in the file. Sources that are not JPEG (RAW, HEIC, PNG...) get a small EXIF block
-//! synthesised from the catalog metadata instead.
+//! survives in the file. RAW, TIFF and HEIF sources contribute the block `ip-imaging` finds or
+//! rebuilds in them; sources without EXIF (PNG, WebP...) get a small block synthesised from
+//! the catalog metadata instead.
 
 use std::path::Path;
 use std::sync::OnceLock;
 
 use ip_imaging::Metadata;
+
+use crate::xmp::doc::{NS_CRS, NS_DARKTABLE, NS_EXIF, NS_TIFF, NS_XMP, NS_XMP_NOTE};
+use crate::xmp::jpeg::{MAX_XMP, XMP_HEADER};
+use crate::xmp::Xmp;
 
 /// EXIF APP1 payloads must fit one JPEG segment.
 const MAX_EXIF: usize = 65_000;
@@ -50,34 +56,93 @@ fn text_desc(s: &str) -> Vec<u8> {
 /// 1024-entry curves), generated rather than shipped as a blob.
 pub fn srgb_icc() -> &'static [u8] {
     static ICC: OnceLock<Vec<u8>> = OnceLock::new();
-    ICC.get_or_init(build_srgb_icc)
+    ICC.get_or_init(|| {
+        build_matrix_icc(
+            "sRGB IEC61966-2.1",
+            [
+                [0.436_074_7, 0.222_504_5, 0.013_932_2],
+                [0.385_064_9, 0.716_878_6, 0.097_104_5],
+                [0.143_080_4, 0.060_616_9, 0.714_173_3],
+            ],
+            &srgb_curve(),
+            Some((b"IEC ", b"sRGB")),
+        )
+    })
 }
 
-fn build_srgb_icc() -> Vec<u8> {
-    let curve = {
-        let mut t = b"curv\0\0\0\0".to_vec();
-        t.extend(1024u32.to_be_bytes());
-        for i in 0..1024u32 {
+/// The sRGB transfer function as a 1024-entry ICC `curv` table.
+fn srgb_curve() -> Vec<u16> {
+    (0..1024u32)
+        .map(|i| {
             let v = i as f64 / 1023.0;
             let lin = if v <= 0.04045 {
                 v / 12.92
             } else {
                 ((v + 0.055) / 1.055).powf(2.4)
             };
-            t.extend(((lin * 65535.0).round() as u16).to_be_bytes());
+            (lin * 65535.0).round() as u16
+        })
+        .collect()
+}
+
+/// A Display P3 profile in the same style as [`srgb_icc`] (tests only).
+#[cfg(any(test, feature = "testutil"))]
+pub fn display_p3_icc() -> Vec<u8> {
+    build_matrix_icc(
+        "Display P3",
+        [
+            [0.515_102, 0.241_182, -0.001_050],
+            [0.291_965, 0.692_236, 0.041_882],
+            [0.157_153, 0.066_582, 0.784_378],
+        ],
+        &srgb_curve(),
+        None,
+    )
+}
+
+/// An Adobe RGB (1998) profile like Adobe's own: pure gamma 2.2 (563/256) curve (tests only).
+#[cfg(any(test, feature = "testutil"))]
+pub fn adobe_rgb_icc() -> Vec<u8> {
+    build_matrix_icc(
+        "Adobe RGB (1998)",
+        [
+            [0.609_741, 0.311_112, 0.019_470],
+            [0.205_276, 0.625_671, 0.060_867],
+            [0.149_185, 0.063_217, 0.744_568],
+        ],
+        &[0x0233],
+        None,
+    )
+}
+
+/// A matrix/TRC display profile: `colorants` are the D50-adapted XYZ of red, green and blue,
+/// `curve` is the `curv` table the three channels share (one entry = a u8.8 gamma),
+/// `device` the manufacturer / model signatures.
+fn build_matrix_icc(
+    desc: &str,
+    colorants: [[f64; 3]; 3],
+    curve: &[u16],
+    device: Option<(&[u8; 4], &[u8; 4])>,
+) -> Vec<u8> {
+    let curve = {
+        let mut t = b"curv\0\0\0\0".to_vec();
+        t.extend((curve.len() as u32).to_be_bytes());
+        for v in curve {
+            t.extend(v.to_be_bytes());
         }
         t
     };
     let mut cprt = b"text\0\0\0\0".to_vec();
     cprt.extend(b"No copyright, use freely\0");
+    let [r, g, b] = colorants;
     // (signature, data); the three curves share one table
     let tags: Vec<([u8; 4], Vec<u8>)> = vec![
-        (*b"desc", text_desc("sRGB IEC61966-2.1")),
+        (*b"desc", text_desc(desc)),
         (*b"cprt", cprt),
         (*b"wtpt", xyz_tag(0.9642, 1.0, 0.8249)),
-        (*b"rXYZ", xyz_tag(0.436_074_7, 0.222_504_5, 0.013_932_2)),
-        (*b"gXYZ", xyz_tag(0.385_064_9, 0.716_878_6, 0.097_104_5)),
-        (*b"bXYZ", xyz_tag(0.143_080_4, 0.060_616_9, 0.714_173_3)),
+        (*b"rXYZ", xyz_tag(r[0], r[1], r[2])),
+        (*b"gXYZ", xyz_tag(g[0], g[1], g[2])),
+        (*b"bXYZ", xyz_tag(b[0], b[1], b[2])),
         (*b"rTRC", curve),
     ];
     let n_tags = tags.len() + 2; // + gTRC, bTRC pointing at rTRC
@@ -117,8 +182,10 @@ fn build_srgb_icc() -> Vec<u8> {
     p[28..30].copy_from_slice(&1u16.to_be_bytes());
     p[36..40].copy_from_slice(b"acsp");
     p[40..44].copy_from_slice(b"MSFT");
-    p[48..52].copy_from_slice(b"IEC ");
-    p[52..56].copy_from_slice(b"sRGB");
+    if let Some((make, model)) = device {
+        p[48..52].copy_from_slice(make);
+        p[52..56].copy_from_slice(model);
+    }
     p[68..72].copy_from_slice(&s15(0.9642));
     p[72..76].copy_from_slice(&s15(1.0));
     p[76..80].copy_from_slice(&s15(0.8249));
@@ -172,6 +239,18 @@ fn segment(marker: u8, payload: &[u8]) -> Vec<u8> {
 
 /// Inserts an EXIF APP1 and an ICC APP2 segment right after the SOI / JFIF header.
 pub fn insert_segments(jpeg: &[u8], exif_tiff: Option<&[u8]>, icc: Option<&[u8]>) -> Vec<u8> {
+    insert_metadata(jpeg, exif_tiff, None, icc, None)
+}
+
+/// Inserts EXIF (APP1), XMP (APP1), ICC (APP2) and Photoshop image resources (APP13), in that
+/// order, right after the SOI / JFIF header. A part too large for one segment is left out.
+pub fn insert_metadata(
+    jpeg: &[u8],
+    exif_tiff: Option<&[u8]>,
+    xmp: Option<&str>,
+    icc: Option<&[u8]>,
+    irb: Option<&[u8]>,
+) -> Vec<u8> {
     if jpeg.len() < 2 || jpeg[0] != 0xFF || jpeg[1] != 0xD8 {
         return jpeg.to_vec();
     }
@@ -180,24 +259,132 @@ pub fn insert_segments(jpeg: &[u8], exif_tiff: Option<&[u8]>, icc: Option<&[u8]>
         pos += 2 + u16::from_be_bytes([jpeg[pos + 2], jpeg[pos + 3]]) as usize;
     }
     let pos = pos.min(jpeg.len());
-    let mut out = Vec::with_capacity(jpeg.len() + 4096);
+    /// (marker, segment header, payload)
+    type Part<'a> = (u8, &'a [u8], Option<&'a [u8]>);
+    let parts: [Part; 4] = [
+        (0xE1, b"Exif\0\0", exif_tiff),
+        (0xE1, XMP_HEADER, xmp.map(str::as_bytes)),
+        (0xE2, b"ICC_PROFILE\0\x01\x01", icc),
+        (0xED, PHOTOSHOP, irb),
+    ];
+    let mut out = Vec::with_capacity(jpeg.len() + 8192);
     out.extend(&jpeg[..pos]);
-    if let Some(t) = exif_tiff {
-        let mut p = b"Exif\0\0".to_vec();
-        p.extend(t);
+    for (marker, header, body) in parts {
+        let Some(body) = body else { continue };
+        let mut p = header.to_vec();
+        p.extend(body);
         if p.len() + 2 <= 0xFFFF {
-            out.extend(segment(0xE1, &p));
-        }
-    }
-    if let Some(icc) = icc {
-        let mut p = b"ICC_PROFILE\0\x01\x01".to_vec();
-        p.extend(icc);
-        if p.len() + 2 <= 0xFFFF {
-            out.extend(segment(0xE2, &p));
+            out.extend(segment(marker, &p));
         }
     }
     out.extend(&jpeg[pos..]);
     out
+}
+
+// ------------------------------------------------------------------ IPTC (Photoshop APP13)
+
+const PHOTOSHOP: &[u8] = b"Photoshop 3.0\0";
+/// Image resources kept in exports: the IPTC-IIM record (0x0404) and its digest (0x0425).
+/// The rest (thumbnails of the unedited picture, paths, slices, print settings...) is dropped.
+const IRB_KEEP: [u16; 2] = [0x0404, 0x0425];
+
+/// The Photoshop image resource block of a JPEG: its APP13 payloads joined, without headers.
+pub fn extract_irb(jpeg: &[u8]) -> Option<Vec<u8>> {
+    let segs = crate::xmp::jpeg::segments(jpeg)?;
+    let mut out = Vec::new();
+    for s in segs.iter().filter(|s| s.marker == 0xED) {
+        if let Some(rest) = jpeg[s.start + 4..s.end].strip_prefix(PHOTOSHOP) {
+            out.extend_from_slice(rest);
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// The IPTC resources of an image resource block, re-serialised; `None` without IPTC.
+pub fn iptc_resources(irb: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut has_iptc = false;
+    let mut p = 0usize;
+    while p + 12 <= irb.len() {
+        let sig = &irb[p..p + 4];
+        if !matches!(sig, b"8BIM" | b"MeSa" | b"PHUT" | b"AgHg" | b"DCSR") {
+            break;
+        }
+        let id = u16::from_be_bytes([irb[p + 4], irb[p + 5]]);
+        // Pascal name, padded to an even length
+        let size_at = p + 6 + ((irb[p + 6] as usize + 2) & !1);
+        let Some(size) = irb.get(size_at..size_at + 4) else {
+            break;
+        };
+        let size = u32::from_be_bytes(size.try_into().expect("4 bytes")) as usize;
+        let data_at = size_at + 4;
+        let Some(data) = data_at
+            .checked_add(size)
+            .and_then(|end| irb.get(data_at..end))
+        else {
+            break;
+        };
+        if sig == b"8BIM" && IRB_KEEP.contains(&id) {
+            has_iptc |= id == 0x0404;
+            out.extend_from_slice(b"8BIM");
+            out.extend_from_slice(&id.to_be_bytes());
+            out.extend_from_slice(&[0, 0]);
+            out.extend_from_slice(&(size as u32).to_be_bytes());
+            out.extend_from_slice(data);
+            if size % 2 == 1 {
+                out.push(0);
+            }
+        }
+        p = data_at + size + size % 2;
+    }
+    has_iptc.then_some(out)
+}
+
+// ------------------------------------------------------------------ XMP
+
+const NS_MWG_RS: &str = "http://www.metadataworkinggroup.com/schemas/regions/";
+const NS_MS_PHOTO: &str = "http://ns.microsoft.com/photo/1.2/";
+const NS_GCAMERA: &str = "http://ns.google.com/photos/1.0/camera/";
+const NS_GCONTAINER: &str = "http://ns.google.com/photos/1.0/container/";
+const NS_GDEPTH: &str = "http://ns.google.com/photos/1.0/depthmap/";
+const NS_GIMAGE: &str = "http://ns.google.com/photos/1.0/image/";
+const NS_HDR_GAIN_MAP: &str = "http://ns.adobe.com/hdr-gain-map/1.0/";
+const NS_APPLE_GAIN_MAP: &str = "http://ns.apple.com/HDRGainMap/1.0/";
+
+/// XMP properties that do not carry over to a rendered export: they describe the unedited
+/// file (orientation, size, thumbnails, face regions in its geometry), its development
+/// (Camera Raw settings, darktable history: applied again they would develop the export a
+/// second time), or data that only the original carries (extended XMP, depth maps, motion
+/// photo video, HDR gain maps). With `strip_gps` every `GPS*` property goes too.
+fn dropped_from_export(ns: &str, local: &str, strip_gps: bool) -> bool {
+    if strip_gps
+        && local
+            .get(..3)
+            .is_some_and(|p| p.eq_ignore_ascii_case("gps"))
+    {
+        return true;
+    }
+    match ns {
+        NS_TIFF => matches!(local, "Orientation" | "ImageWidth" | "ImageLength"),
+        NS_EXIF => matches!(local, "PixelXDimension" | "PixelYDimension"),
+        NS_XMP => local == "Thumbnails",
+        NS_XMP_NOTE => local == "HasExtendedXMP",
+        NS_DARKTABLE => local != "colorlabels",
+        NS_GCAMERA => local.starts_with("MotionPhoto") || local.starts_with("MicroVideo"),
+        NS_MS_PHOTO => local == "RegionInfo",
+        NS_CRS | NS_MWG_RS | NS_GCONTAINER | NS_GDEPTH | NS_GIMAGE | NS_HDR_GAIN_MAP
+        | NS_APPLE_GAIN_MAP => true,
+        _ => false,
+    }
+}
+
+/// The source's XMP packet as it goes into an export (see [`dropped_from_export`]). `None`
+/// when it cannot be parsed (and so not be cleaned up) or does not fit one segment.
+pub fn export_xmp(packet: &str, strip_gps: bool) -> Option<String> {
+    let mut x = Xmp::parse(packet).ok()?;
+    x.remove_properties(&|ns, local| dropped_from_export(ns, local, strip_gps));
+    let out = x.serialize();
+    (out.len() <= MAX_XMP).then_some(out)
 }
 
 // ------------------------------------------------------------------ EXIF TIFF editing
@@ -591,26 +778,62 @@ pub fn synth_exif(md: &Metadata, dims: (u32, u32), strip_gps: bool) -> Option<Ve
 
 // ------------------------------------------------------------------ export entry point
 
-/// Returns `encoded` (a baseline JPEG of `dims` pixels rendered from `source`) with the source's
-/// EXIF and an sRGB ICC profile embedded. `metadata` supplies what a non-JPEG source cannot
-/// provide itself. Never fails: metadata is best effort.
+/// What a source contributes to the metadata of its re-encoded export.
+#[derive(Debug, Clone, Default)]
+pub struct SourceMeta {
+    /// EXIF TIFF block, as stored or as rebuilt by `ip_imaging::read_exif`.
+    pub exif: Option<Vec<u8>>,
+    /// Main XMP packet: embedded (JPEG) or from the sidecar.
+    pub xmp: Option<String>,
+    /// Photoshop image resources of the APP13 segment(s) (JPEG): the IPTC-IIM record.
+    pub irb: Option<Vec<u8>>,
+    /// Catalog metadata, synthesised into EXIF when there is no usable EXIF block.
+    pub metadata: Option<Metadata>,
+}
+
+impl SourceMeta {
+    /// EXIF, XMP and IPTC from the header segments of a JPEG file.
+    pub fn of_jpeg_file(path: &Path) -> SourceMeta {
+        let Some(head) = read_head(path) else {
+            return SourceMeta::default();
+        };
+        SourceMeta {
+            exif: extract_exif(&head),
+            xmp: crate::xmp::jpeg::extract(&head),
+            irb: extract_irb(&head),
+            metadata: None,
+        }
+    }
+}
+
+/// Returns `encoded` (a baseline JPEG of `dims` sRGB pixels rendered from the source) with the
+/// source's EXIF, XMP and IPTC (cleaned up as described in the module docs) and an sRGB ICC
+/// profile embedded. Never fails: metadata is best effort.
 pub fn finalize_export(
     encoded: Vec<u8>,
-    source: &Path,
-    source_is_jpeg: bool,
-    metadata: Option<&Metadata>,
+    source: &SourceMeta,
     dims: (u32, u32),
     strip_gps: bool,
 ) -> Vec<u8> {
-    let exif = if source_is_jpeg {
-        read_head(source)
-            .and_then(|h| extract_exif(&h))
-            .and_then(|t| prepare_exif(&t, dims, strip_gps))
-    } else {
-        None
-    }
-    .or_else(|| metadata.and_then(|m| synth_exif(m, dims, strip_gps)));
-    insert_segments(&encoded, exif.as_deref(), Some(srgb_icc()))
+    let exif = source
+        .exif
+        .as_deref()
+        .and_then(|t| prepare_exif(t, dims, strip_gps))
+        .or_else(|| {
+            source
+                .metadata
+                .as_ref()
+                .and_then(|m| synth_exif(m, dims, strip_gps))
+        });
+    let xmp = source.xmp.as_deref().and_then(|x| export_xmp(x, strip_gps));
+    let irb = source.irb.as_deref().and_then(iptc_resources);
+    insert_metadata(
+        &encoded,
+        exif.as_deref(),
+        xmp.as_deref(),
+        Some(srgb_icc()),
+        irb.as_deref(),
+    )
 }
 
 fn read_head(path: &Path) -> Option<Vec<u8>> {
@@ -767,6 +990,160 @@ pub fn build_test_exif(orientation: u16, be: bool, with_gps: bool) -> Vec<u8> {
     out
 }
 
+/// An uncompressed `w x h` RGB TIFF filled with `rgb`, carrying EXIF the way cameras and raw
+/// converters write it into TIFF-structured files (tests only): Make / Model / Copyright in IFD0
+/// next to the strip layout, an Exif IFD with capture time and UTC offset, ISO, body serial,
+/// lens and a MakerNote, and a GPS IFD.
+#[cfg(any(test, feature = "testutil"))]
+pub fn build_test_tiff(w: u32, h: u32, rgb: [u8; 3]) -> Vec<u8> {
+    let maker_note = b"MAKERNOTE-WITH-PRIVATE-OFFSETS";
+    let exif = vec![
+        ascii(0x9003, "2024:02:29 12:30:45"),
+        ascii(0x9011, "+09:00"),
+        short(0x8827, 200),
+        ascii(0xA431, "SN-42"),
+        ascii(0xA434, "Lens 35mm"),
+        NewEntry {
+            tag: 0x927C,
+            typ: 7,
+            count: maker_note.len() as u32,
+            data: maker_note.to_vec(),
+        },
+    ];
+    let gps = vec![
+        ascii(0x0001, "N"),
+        rationals(0x0002, &[(48, 1), (51, 1), (30, 1)]),
+        ascii(0x0003, "E"),
+        rationals(0x0004, &[(2, 1), (21, 1), (7, 1)]),
+    ];
+    let ifd0 = |strip: u32, exif_off: u32, gps_off: u32| {
+        vec![
+            long(0x0100, w),
+            long(0x0101, h),
+            NewEntry {
+                tag: 0x0102,
+                typ: 3,
+                count: 3,
+                data: [8u16, 8, 8].iter().flat_map(|v| v.to_le_bytes()).collect(),
+            },
+            short(0x0103, 1),
+            short(0x0106, 2),
+            ascii(0x010F, "ACME Corp"),
+            ascii(0x0110, "Model One"),
+            long(0x0111, strip),
+            short(0x0112, 1),
+            short(0x0115, 3),
+            long(0x0116, h),
+            long(0x0117, w * h * 3),
+            short(0x011C, 1),
+            ascii(0x8298, "(c) Test"),
+            long(0x8769, exif_off),
+            long(0x8825, gps_off),
+        ]
+    };
+    let exif_off = 8 + ifd_size(&ifd0(0, 0, 0));
+    let gps_off = exif_off + ifd_size(&exif);
+    let strip = gps_off + ifd_size(&gps);
+    let mut out = b"II*\0".to_vec();
+    out.extend(8u32.to_le_bytes());
+    out.extend(build_ifd(
+        ifd0(strip as u32, exif_off as u32, gps_off as u32),
+        8,
+    ));
+    out.extend(build_ifd(exif, exif_off));
+    out.extend(build_ifd(gps, gps_off));
+    debug_assert_eq!(out.len(), strip);
+    for _ in 0..w * h {
+        out.extend(rgb);
+    }
+    out
+}
+
+/// IPTC-IIM application records (tests only): title, two keywords, city. Odd length.
+#[cfg(any(test, feature = "testutil"))]
+pub fn build_test_iptc() -> Vec<u8> {
+    let mut v = Vec::new();
+    for (dataset, value) in [
+        (5u8, "Temple at dawn"),
+        (25, "kyoto"),
+        (25, "temples"),
+        (90, "Kyoto"),
+    ] {
+        v.extend([0x1C, 2, dataset]);
+        v.extend((value.len() as u16).to_be_bytes());
+        v.extend(value.as_bytes());
+    }
+    v
+}
+
+/// A Photoshop image resource block (tests only): a named thumbnail of the unedited picture
+/// (0x040C), the IPTC record of [`build_test_iptc`] (0x0404), its digest (0x0425) and
+/// resolution info (0x03ED).
+#[cfg(any(test, feature = "testutil"))]
+pub fn build_test_irb() -> Vec<u8> {
+    let res = |id: u16, name: &[u8], data: &[u8]| {
+        let mut v = b"8BIM".to_vec();
+        v.extend(id.to_be_bytes());
+        v.push(name.len() as u8);
+        v.extend(name);
+        if name.len().is_multiple_of(2) {
+            v.push(0);
+        }
+        v.extend((data.len() as u32).to_be_bytes());
+        v.extend(data);
+        if data.len() % 2 == 1 {
+            v.push(0);
+        }
+        v
+    };
+    let mut irb = res(0x040C, b"thumb", b"\xFF\xD8UNEDITED-THUMBNAIL\xFF\xD9");
+    irb.extend(res(0x0404, b"", &build_test_iptc()));
+    irb.extend(res(0x0425, b"", &[7u8; 16]));
+    irb.extend(res(0x03ED, b"", &[0u8; 16]));
+    irb
+}
+
+/// An XMP packet as a camera, phone or Lightroom leaves it in a JPEG (tests only): rating,
+/// title, creator, keywords, city, GPS (EXIF and DJI style), orientation and size, Camera Raw
+/// settings, face regions, a motion-photo flag and an extended-XMP pointer.
+#[cfg(any(test, feature = "testutil"))]
+pub const TEST_XMP: &str = r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Test">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"
+    xmlns:tiff="http://ns.adobe.com/tiff/1.0/"
+    xmlns:exif="http://ns.adobe.com/exif/1.0/"
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+    xmlns:xmpNote="http://ns.adobe.com/xmp/note/"
+    xmlns:GCamera="http://ns.google.com/photos/1.0/camera/"
+    xmlns:drone-dji="http://www.dji.com/drone-dji/1.0/"
+    xmp:Rating="4"
+    xmp:CreatorTool="Camera Firmware 1.0"
+    photoshop:City="Kyoto"
+    tiff:Orientation="6"
+    tiff:ImageWidth="4000"
+    exif:PixelXDimension="4000"
+    exif:GPSLatitude="35,0.6N"
+    exif:GPSLongitude="135,46.2E"
+    drone-dji:GpsLatitude="35.01"
+    drone-dji:AbsoluteAltitude="+120.5"
+    crs:Exposure2012="+0.35"
+    xmpNote:HasExtendedXMP="0123456789ABCDEF0123456789ABCDEF"
+    GCamera:MotionPhoto="1"
+    GCamera:BurstID="b-1">
+   <dc:title><rdf:Alt><rdf:li xml:lang="x-default">Temple at dawn</rdf:li></rdf:Alt></dc:title>
+   <dc:creator><rdf:Seq><rdf:li>Jane Doe</rdf:li></rdf:Seq></dc:creator>
+   <dc:subject><rdf:Bag><rdf:li>kyoto</rdf:li><rdf:li>temple</rdf:li></rdf:Bag></dc:subject>
+   <crs:ToneCurvePV2012><rdf:Seq><rdf:li>0, 0</rdf:li><rdf:li>255, 255</rdf:li></rdf:Seq></crs:ToneCurvePV2012>
+   <mwg-rs:Regions xmlns:mwg-rs="http://www.metadataworkinggroup.com/schemas/regions/" rdf:parseType="Resource"><mwg-rs:RegionList><rdf:Bag><rdf:li rdf:parseType="Resource"><mwg-rs:Name>Jane</mwg-rs:Name></rdf:li></rdf:Bag></mwg-rs:RegionList></mwg-rs:Regions>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -882,6 +1259,128 @@ mod tests {
         assert_eq!(back, t);
         let no_gps = synth_exif(&md, (640, 480), true).unwrap();
         assert!(no_gps.len() < t.len());
+    }
+
+    #[test]
+    fn test_profiles_are_well_formed_matrix_profiles() {
+        for p in [display_p3_icc(), adobe_rgb_icc()] {
+            assert_eq!(&p[36..40], b"acsp");
+            assert_eq!(
+                u32::from_be_bytes(p[0..4].try_into().unwrap()) as usize,
+                p.len()
+            );
+            assert_ne!(p.as_slice(), srgb_icc());
+        }
+    }
+
+    #[test]
+    fn only_the_iptc_resources_are_kept() {
+        let (irb, iptc) = (build_test_irb(), build_test_iptc());
+        assert_eq!(iptc.len() % 2, 1, "exercises the padding");
+        let kept = iptc_resources(&irb).unwrap();
+        // 0x0404 then 0x0425, nothing else
+        let mut ids = Vec::new();
+        let mut p = 0;
+        while p + 12 <= kept.len() {
+            assert_eq!(&kept[p..p + 4], b"8BIM");
+            ids.push(u16::from_be_bytes([kept[p + 4], kept[p + 5]]));
+            let size = u32::from_be_bytes(kept[p + 8..p + 12].try_into().unwrap()) as usize;
+            if ids.len() == 1 {
+                assert_eq!(&kept[p + 12..p + 12 + size], iptc.as_slice());
+            }
+            p += 12 + size + size % 2;
+        }
+        assert_eq!(ids, [0x0404, 0x0425]);
+        assert_eq!(p, kept.len());
+        assert!(!kept.windows(9).any(|w| w == b"UNEDITED-"));
+        // no IPTC record -> nothing to keep; garbage and truncation are survived
+        assert!(iptc_resources(&irb[..40]).is_none());
+        assert!(iptc_resources(b"garbage, not resources").is_none());
+    }
+
+    #[test]
+    fn export_xmp_keeps_descriptions_and_drops_what_no_longer_applies() {
+        for strip in [false, true] {
+            let out = export_xmp(TEST_XMP, strip).unwrap();
+            let x = Xmp::parse(&out).unwrap();
+            let v = crate::xmp::values_of(&x);
+            assert_eq!(v.rating, Some(4));
+            assert_eq!(v.keywords, ["kyoto", "temple"]);
+            for kept in [
+                "Temple at dawn",
+                "Jane Doe",
+                "photoshop:City=\"Kyoto\"",
+                "xmp:CreatorTool=",
+                "drone-dji:AbsoluteAltitude=",
+                "GCamera:BurstID=",
+                "<?xpacket end=\"w\"?>",
+            ] {
+                assert!(out.contains(kept), "{kept} (strip={strip}): {out}");
+            }
+            for gone in [
+                "tiff:Orientation",
+                "tiff:ImageWidth",
+                "exif:PixelXDimension",
+                "crs:Exposure2012",
+                "crs:ToneCurvePV2012",
+                "xmpNote:HasExtendedXMP",
+                "GCamera:MotionPhoto",
+                "mwg-rs:Regions",
+            ] {
+                assert!(!out.contains(gone), "{gone} (strip={strip}): {out}");
+            }
+            for gps in [
+                "exif:GPSLatitude",
+                "exif:GPSLongitude",
+                "drone-dji:GpsLatitude",
+            ] {
+                assert_eq!(out.contains(gps), !strip, "{gps} (strip={strip})");
+            }
+        }
+        assert!(export_xmp("<not xmp", false).is_none());
+    }
+
+    #[test]
+    fn xmp_and_iptc_of_a_jpeg_source_reach_the_export() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = insert_metadata(
+            &jpeg_with(None),
+            Some(&build_test_exif(6, false, true)),
+            Some(TEST_XMP),
+            None,
+            Some(&build_test_irb()),
+        );
+        let p = dir.path().join("s.jpg");
+        std::fs::write(&p, &src).unwrap();
+        let meta = SourceMeta::of_jpeg_file(&p);
+        assert!(meta.exif.is_some() && meta.xmp.is_some() && meta.irb.is_some());
+        let iptc = build_test_iptc();
+        for strip in [false, true] {
+            let out = finalize_export(jpeg_with(None), &meta, (8, 8), strip);
+            let segs = crate::xmp::jpeg::segments(&out).unwrap();
+            let order: Vec<u8> = segs.iter().map(|s| s.marker).collect();
+            assert_eq!(
+                order[..5],
+                [0xE0, 0xE1, 0xE1, 0xE2, 0xED],
+                "APP0 EXIF XMP ICC IPTC"
+            );
+            let xmp = crate::xmp::jpeg::extract(&out).unwrap();
+            assert_eq!(xmp.contains("exif:GPSLatitude"), !strip);
+            assert!(!xmp.contains("tiff:Orientation"));
+            let irb = extract_irb(&out).unwrap();
+            assert!(irb.windows(iptc.len()).any(|w| w == iptc.as_slice()));
+            let md = parse(&out);
+            assert_eq!(md.gps_lat.is_some(), !strip);
+            assert_eq!(md.orientation, 1);
+        }
+        // a source without any of it gets just the profile
+        let bare = finalize_export(jpeg_with(None), &SourceMeta::default(), (8, 8), false);
+        let order: Vec<u8> = crate::xmp::jpeg::segments(&bare)
+            .unwrap()
+            .iter()
+            .map(|s| s.marker)
+            .collect();
+        assert_eq!(order[..2], [0xE0, 0xE2]);
     }
 
     #[test]

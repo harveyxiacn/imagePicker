@@ -215,7 +215,8 @@ fn upright(
     }
     let (rgb, src) = load(path, format, long_edge, embedded)?;
     let (nw, nh) = fit_dims(rgb.w, rgb.h, long_edge);
-    let rgb = resize_rgb(rgb, nw, nh)?;
+    let mut rgb = resize_rgb(rgb, nw, nh)?;
+    super::color::to_srgb(path, format, &mut rgb.data);
     let (w, h, data) = orient::apply(rgb.w, rgb.h, rgb.data, orientation);
     Ok((Rgb { w, h, data }, src))
 }

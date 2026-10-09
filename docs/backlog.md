@@ -20,7 +20,9 @@
 | P1 | 倾斜检测、构图分 | M2 |
 | P1 | RAW 预览在真实相机文件上验证（目前仅合成样本） | M1 imaging |
 | P2 | 以脸搜脸「这是新的人」 | M4 web |
-| P1 | RAW/HEIC 导出只合成 EXIF（未复制原始 EXIF）；XMP/IPTC 丢失；非 sRGB 源未做色彩转换 | M5 core |
+| P1 | HEIC/HEIF 导出与色彩：等 HEIC 解码接入后，若解码器不做色彩管理，需在 `ip-imaging` `imp/color.rs` 的 `source_space` 读取 `colr` 配置文件（iPhone 为 Display P3）；HEIF 的 EXIF 已可复制 | M5 core |
+| P2 | 导出元数据余项：DNG/CR3/HEIC 文件内部的 XMP、PNG/WebP/TIFF 内嵌 XMP/IPTC 不复制（只用 JPEG 内嵌包或 `.xmp` 侧车）；扩展 XMP（>64 KB）丢弃；导出不写入目录库的评分/关键词；RAW 预览色彩空间只看预览 JPEG 自带 ICC / DCF 标记，RAW EXIF 重建仅在合成样本上验证；原样复制（未编辑、原尺寸）时 `strip_gps` 不生效 | M5 core |
+| P2 | 色彩转换前生成的缩略图/预览缓存不会自动重建（清除缓存后重新生成）；导出只输出 sRGB（无 P3 输出），色域外颜色裁切 | M5 core |
 | P2 | 生成任务没有取消接口、没有持久化任务记录 | M5 |
 | P2 | 一键全员最佳总以组内最佳为底片 | M5 core |
 | P1 | 大面积消除（超过 512px 的洞）结果偏糊、有残影；默认 LaMa，需 SDXL 增强包实测（真实照片：去除雕像） | M5 worker |
@@ -51,4 +53,5 @@
 - 前端写死 LUT id → `GET /api/luts`（M3）
 - 内置 LUT 两套来源 → 统一由 ip-render 提供（M3）
 - M7：冷启动 500→32ms、翻页 p95 188→15ms、批量改星 20k 1213→122ms；三平台安装包 CI 试运行成功，Windows 安装包实机验证（启动、鉴权、卸载）
+- 导出色彩：带非 sRGB ICC（Display P3、Adobe RGB…）或 DCF Adobe RGB 标记的来源在解码时转换为 sRGB（moxcms，纯 Rust），缩略图、预览、渲染与导出一致；导出保留 XMP（去掉朝向、尺寸、冲印参数、人脸区域、动态照片/景深/增益图引用，`strip_gps` 时去掉所有 `GPS*`）与 IPTC（APP13 只留 IPTC 记录）；RAW/TIFF/CR3 导出复制原始 EXIF（重建 IFD0/Exif/GPS，不含 MakerNote），RAF/HEIF 原样复制（M5 core）
 - 导出保留 EXIF + 嵌入 sRGB ICC；Worker 调用超时（504）+ 自动重启；删除会话清理编辑缓存；部分几何在模型安装后刷新；单张人物可被选中；API 浮点噪声统一清理（M5）

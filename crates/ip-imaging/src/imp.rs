@@ -4,7 +4,9 @@ use std::path::Path;
 
 use super::*;
 
+mod color;
 mod container;
+mod copy_exif;
 mod dcjpeg;
 mod exif;
 mod io;
@@ -21,6 +23,7 @@ mod tests_dc;
 use io::{open_data, read_head};
 use tiff::Tiff;
 
+pub use copy_exif::read_exif;
 pub use scan::scan_dir;
 pub use thumb::{decode_rgb8, generate_thumbnail};
 

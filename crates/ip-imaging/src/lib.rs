@@ -99,6 +99,14 @@ pub fn read_metadata(path: &Path, format: ImageFormat) -> Result<Metadata> {
     imp::read_metadata(path, format)
 }
 
+/// The EXIF of a source as one self-contained TIFF block (no `Exif\0\0` prefix), for carrying
+/// it into re-encoded exports: as stored (JPEG, HEIF, RAF, PNG, WebP) or rebuilt from the
+/// directories of TIFF-based RAW files, TIFF and CR3 (descriptive IFD0 tags, the Exif IFD
+/// without MakerNote, the GPS IFD). `Ok(None)` when the file has none.
+pub fn read_exif(path: &Path, format: ImageFormat) -> Result<Option<Vec<u8>>> {
+    imp::read_exif(path, format)
+}
+
 /// Cache key from path + size + mtime (cheap, no IO). 32 hex chars.
 pub fn fast_key(path: &Path, size: u64, mtime_ms: i64) -> String {
     let mut h = blake3::Hasher::new();
@@ -146,6 +154,8 @@ pub fn generate_thumbnail(
 }
 
 /// Decode to upright RGB8 with long edge <= `max_long_edge` (analysis / render proxies).
+/// Like thumbnails, the pixels are sRGB: sources tagged with another colour space (ICC profile
+/// or the DCF Adobe RGB marker) are converted.
 pub fn decode_rgb8(
     path: &Path,
     format: ImageFormat,

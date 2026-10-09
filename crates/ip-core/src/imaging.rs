@@ -14,6 +14,11 @@ pub trait Imaging: Send + Sync {
         exclude: &[String],
     ) -> Result<Vec<ScannedFile>>;
     fn read_metadata(&self, path: &Path, format: ImageFormat) -> Result<Metadata>;
+    /// The source's EXIF as a self-contained TIFF block, for exports (see
+    /// [`ip_imaging::read_exif`]).
+    fn read_exif(&self, path: &Path, format: ImageFormat) -> Result<Option<Vec<u8>>> {
+        ip_imaging::read_exif(path, format)
+    }
     fn content_key(&self, path: &Path) -> Result<String>;
     fn fast_key(&self, path: &Path, size: u64, mtime_ms: i64) -> String {
         ip_imaging::fast_key(path, size, mtime_ms)
@@ -26,7 +31,7 @@ pub trait Imaging: Send + Sync {
         long_edge: u32,
         quality: u8,
     ) -> Result<EncodedImage>;
-    /// Upright RGB8 with long edge <= `max_long_edge` (render sources).
+    /// Upright sRGB RGB8 with long edge <= `max_long_edge` (render sources).
     fn decode_rgb8(
         &self,
         path: &Path,

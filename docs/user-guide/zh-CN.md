@@ -419,9 +419,9 @@ uv sync --extra cpu  --extra mediapipe     # 仅 CPU
 | 超分放大 | 不放大 / ×2 / ×4（CPU 档每张可能数十秒） |
 | 按人物分文件夹导出 | 在人物页使用 |
 
-导出包含你在编辑页的所有调整，输出为 JPEG，并保留 EXIF、嵌入 sRGB ICC。
+导出包含你在编辑页的所有调整，输出为 JPEG，并带上原图的元数据：EXIF（RAW、TIFF 也会复制原始 EXIF，厂商私有的 MakerNote 除外）、XMP（评分、关键词、标题、作者等；只描述原图的条目，如朝向、Lightroom/darktable 的冲印参数，不会带过去）和 IPTC。带广色域配置文件（Display P3、Adobe RGB）的照片会转换为 sRGB（缩略图与预览同样转换），每张导出都嵌入 sRGB ICC。API 选项 `strip_gps` 会同时删除 EXIF 和 XMP 中的 GPS 位置。原尺寸且未编辑的导出是原文件的原样复制。
 
-> 已知限制：RAW/HEIC 导出时只合成 EXIF（未复制原始 EXIF）；XMP/IPTC 会丢失；非 sRGB 来源的色彩转换尚未做。
+> 已知限制：HEIC/HEIF 照片暂不能导出；DNG/CR3 文件内部的 XMP 与扩展 XMP（超过 64 KB，如景深图）不复制（`.xmp` 侧车文件会复制）；旧版本生成的缩略图在清除缓存（「设置 → 缓存」）前保持原来的颜色。
 
 ## 14. AI 助手
 
