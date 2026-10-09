@@ -1,10 +1,11 @@
 # 待办与已知问题（Backlog）
 
 > 每轮集成后更新。按优先级：**P0** 发布前必须修复，**P1** 1.0 前完成，**P2** 之后。
+> 2026-10-09 的完整评审（各需求状态、文档矛盾、本表未列的缺口、验收标准与并行工作包）见 [09 完成度评审与收尾计划](09-完成度评审与收尾计划.md)。
 
 ## 校准（需要真实照片评测集）
 
-> 2026-10-07：已用本地 ComfyUI（Qwen-Image 2.1）生成 74 张合成评测图（人像 / 风景 / 合照 / 连拍变体：闭眼、动态模糊、过曝欠曝、路人 / 缺陷样本），脚本 `scripts/comfy-testset.py`，输出在主机 `~/ai/ComfyUI/output/imagepicker-testset/`（带 `manifest.json` 标签），不入库。lite 档位首轮结果与结论见 `bench/testset-lite-2026-10-07.md`（白底 / 雪地过曝误报、低对比判模糊、局部动态模糊漏报、合成连拍 pHash 距离过大需 img2img 派生）。
+> 合成评测图库：2026-10-08/09 起使用 1000 张图库 `bench/data/qwen-photo-library`（ComfyUI + Qwen-Image 2.1，`scripts/comfy-photo-library.py`（脚本尚未提交），图片不入库；`manifest.json` 标签是提示词意图，需人工核验），评测脚本 `bench/eval-library.py`。连拍变体改由 Qwen 原生编辑从底片派生，lite 档连拍分组 pairwise 精确率 0.96 / 召回 0.97（63a8ffe3）。2026-10-07 的 74 张首轮记录 `bench/testset-lite-2026-10-07.md` 仅作历史参考（其中「连拍 pHash 距离过大需 img2img 派生」已解决）。
 
 | 优先级 | 项 | 说明 |
 |---|---|---|
