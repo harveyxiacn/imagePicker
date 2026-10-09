@@ -933,6 +933,60 @@ async fn inpaint_removes_bystanders_with_person_masks_of_their_boxes() {
 }
 
 #[tokio::test]
+async fn an_empty_person_mask_falls_back_to_the_body_box() {
+    // BiRefNet keeps the main subject: for a small background person the worker answers an
+    // all-black `person` mask (no `skipped` entry). The removal must not end up empty.
+    let s = scene().await;
+    let p1 = s.ph["p1.jpg"].id;
+    s.e.worker.empty_person_masks.store(true, Ordering::SeqCst);
+    let small = faces_of(&s.e, p1)
+        .await
+        .into_iter()
+        .find(|f| !f.is_subject)
+        .unwrap();
+    let mut rx = s.e.core.events.subscribe();
+    s.e.core
+        .inpaint_start(
+            p1,
+            InpaintBody {
+                bystanders: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let seen = wait_for(&mut rx, |e| matches!(e, Event::InpaintDone { .. })).await;
+    match seen.last().unwrap() {
+        Event::InpaintDone { ok, reason, .. } => assert!(*ok, "{reason:?}"),
+        _ => unreachable!(),
+    }
+    assert_eq!(s.e.worker.mask_calls.load(Ordering::SeqCst), 1);
+    let m =
+        s.e.worker
+            .last_inpaint_mask
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap();
+    let (w, h) = (m.width() as f64, m.height() as f64);
+    let b = body_box(small.bbox);
+    let at = |x: f64, y: f64| m.get_pixel((x * w) as u32, (y * h) as u32).0[0];
+    // the face and the body below it are removed, the main subject is not
+    let (cx, cy) = (
+        small.bbox[0] + small.bbox[2] / 2.0,
+        small.bbox[1] + small.bbox[3] / 2.0,
+    );
+    assert_eq!(at(cx, cy), 255, "face centre");
+    assert_eq!(
+        at(cx, f64::from(b[1] + b[3]) - 0.01),
+        255,
+        "bottom of the body box"
+    );
+    assert_eq!(at(0.3, 0.2), 0, "the main subject is untouched");
+    assert_eq!(patches_of(&s.e, p1).await.len(), 1);
+}
+
+#[tokio::test]
 async fn inpaint_validation_and_failures() {
     let s = scene().await;
     let (p1, a1) = (s.ph["p1.jpg"].id, s.ph["a1.jpg"].id);

@@ -979,7 +979,13 @@ impl Core {
                             CoreError::Internal(anyhow::anyhow!("unreadable person mask: {e}"))
                         })?
                         .to_luma8();
-                    canvas.union(&img);
+                    // The matting keeps the photo's main subject, so small background people
+                    // often come back as an empty mask: treat that like a missing mask.
+                    if img.pixels().any(|px| px.0[0] > 127) {
+                        canvas.union(&img);
+                    } else {
+                        canvas.fill_rect(body_box(f.bbox));
+                    }
                 }
                 (None, Some(why)) if why == "model_unavailable" => {
                     return Err(CoreError::ModelsMissing(vec!["mask.person".to_string()]));
