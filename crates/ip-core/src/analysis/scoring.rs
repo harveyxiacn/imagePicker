@@ -13,12 +13,23 @@ pub const OVEREXPOSED_CLIPPED: f64 = 0.10;
 pub const OVEREXPOSED_SEVERE_CLIPPED: f64 = 0.25;
 pub const OVEREXPOSED_MEAN: f64 = 0.82;
 pub const OVEREXPOSED_SEVERE_MEAN: f64 = 0.90;
+/// A bright frame that keeps this much centre detail is high-key (white backdrop, snow, paper),
+/// not blown out; below [`OVEREXPOSED_SEVERE_MEAN`] it is not flagged.
+pub const OVEREXPOSED_DETAIL_BELOW: f64 = 0.45;
 pub const UNDEREXPOSED_CRUSHED: f64 = 0.40;
 pub const UNDEREXPOSED_SEVERE_CRUSHED: f64 = 0.60;
 pub const UNDEREXPOSED_MEAN: f64 = 0.12;
 pub const UNDEREXPOSED_SEVERE_MEAN: f64 = 0.07;
-pub const NOISY_AT: f64 = 0.60;
-pub const NOISY_AT_NIGHT: f64 = 0.80;
+/// Same idea for dark frames: a low mean with this much detail is low-key / night (neon, stage,
+/// candle light); only [`UNDEREXPOSED_SEVERE_MEAN`] or crushed shadows still flag it.
+pub const UNDEREXPOSED_DETAIL_BELOW: f64 = 0.40;
+/// Immerkaer noise is 0.12-0.49 on the noisy frames of the synthetic library and at most 0.38 on
+/// textured clean ones (foliage, water); see `bench/eval-library.py`.
+pub const NOISY_AT: f64 = 0.22;
+pub const NOISY_AT_NIGHT: f64 = 0.30;
+/// A burst member this much less sharp than the burst's sharpest frame is flagged blurry
+/// (motion blur on the subject barely moves the whole-frame measure, so a fixed threshold misses it).
+pub const BLURRY_IN_BURST_RATIO: f64 = 0.80;
 
 pub const PENALTY_CLOSED_EYES: f64 = 0.25;
 pub const PENALTY_SEVERE_BLUR: f64 = 0.30;
@@ -205,6 +216,8 @@ pub struct PhotoScore {
     pub contributions: Vec<Contribution>,
     pub reasons: Vec<Reason>,
     pub effective_scene: &'static str,
+    /// The photo's sharpness measure, also when the scene does not weigh it (burst comparison).
+    pub sharpness: Option<f64>,
 }
 
 fn scene_class(feat: &PhotoFeat) -> &'static str {
@@ -276,8 +289,12 @@ pub fn detect_issues(feat: &PhotoFeat, scene: &str) -> (Vec<Issue>, Vec<Issue>) 
             }
         }
     }
-    let over = feat.clipped_highlights.unwrap_or(0.0) >= OVEREXPOSED_CLIPPED
-        || feat.mean_luminance.unwrap_or(0.0) > OVEREXPOSED_MEAN;
+    // Without a sharpness measure, assume the detail is gone (the old behaviour).
+    let detail = feat.sharpness.unwrap_or(0.0);
+    let over = (feat.clipped_highlights.unwrap_or(0.0) >= OVEREXPOSED_CLIPPED
+        || feat.mean_luminance.unwrap_or(0.0) > OVEREXPOSED_MEAN)
+        && (detail < OVEREXPOSED_DETAIL_BELOW
+            || feat.mean_luminance.unwrap_or(0.0) > OVEREXPOSED_SEVERE_MEAN);
     if over {
         issues.push(Issue::Overexposed);
         if feat.clipped_highlights.unwrap_or(0.0) >= OVEREXPOSED_SEVERE_CLIPPED
@@ -290,7 +307,10 @@ pub fn detect_issues(feat: &PhotoFeat, scene: &str) -> (Vec<Issue>, Vec<Issue>) 
         let under = feat.crushed_shadows.unwrap_or(0.0) >= UNDEREXPOSED_CRUSHED
             || feat
                 .mean_luminance
-                .map(|m| m < UNDEREXPOSED_MEAN)
+                .map(|m| {
+                    m < UNDEREXPOSED_SEVERE_MEAN
+                        || (m < UNDEREXPOSED_MEAN && detail < UNDEREXPOSED_DETAIL_BELOW)
+                })
                 .unwrap_or(false);
         if under {
             issues.push(Issue::Underexposed);
@@ -420,6 +440,7 @@ pub fn score_photo(feat: &PhotoFeat) -> PhotoScore {
         contributions,
         reasons,
         effective_scene: scene,
+        sharpness: feat.sharpness,
     }
 }
 
@@ -496,12 +517,29 @@ pub fn rank_burst(members: Vec<BurstMember<'_>>) -> Vec<Ranked> {
             .then_with(|| ma.taken_at.cmp(&mb.taken_at))
             .then_with(|| ma.score.photo_id.cmp(&mb.score.photo_id))
     });
+    let sharpest = members
+        .iter()
+        .filter_map(|m| m.score.sharpness)
+        .fold(f64::NAN, f64::max);
     let mut out = Vec::with_capacity(n);
     for (rank, &mi) in order.iter().enumerate() {
         let m = &members[mi];
         let mut q = m.score.q;
         let mut contributions = m.score.contributions.clone();
         let mut reasons = m.score.reasons.clone();
+        let mut issues = m.score.issues.clone();
+        let blurrier = m
+            .score
+            .sharpness
+            .is_some_and(|s| s < BLURRY_IN_BURST_RATIO * sharpest);
+        if n >= 2 && blurrier && !issues.contains(&Issue::Blurry) {
+            issues.push(Issue::Blurry);
+            issues.sort();
+            reasons.push(Reason {
+                key: Issue::Blurry.key().to_string(),
+                params: json!({}),
+            });
+        }
         if n >= 2 && rank == 0 {
             reasons.insert(
                 0,
@@ -563,7 +601,7 @@ pub fn rank_burst(members: Vec<BurstMember<'_>>) -> Vec<Ranked> {
             base_q: q,
             hard_issue: m.score.hard_issue,
             ai_rating,
-            issues: m.score.issues.clone(),
+            issues,
             contributions,
             reasons,
             face_score: m.score.face_score,
@@ -698,10 +736,75 @@ mod tests {
         n.scene_type = Some("night".into());
         n.mean_luminance = Some(0.05);
         n.crushed_shadows = Some(0.7);
-        n.noise = Some(0.7);
+        n.noise = Some((NOISY_AT + NOISY_AT_NIGHT) / 2.0);
         let s = score_photo(&n);
         assert!(!s.issues.contains(&Issue::Underexposed));
         assert!(!s.issues.contains(&Issue::Noisy));
+        n.scene_type = Some("landscape".into());
+        assert!(score_photo(&n).issues.contains(&Issue::Noisy));
+    }
+
+    #[test]
+    fn bright_or_dark_frames_with_detail_are_not_exposure_errors() {
+        // white backdrop portrait: clipped background, sharp subject
+        let mut f = good(1);
+        f.clipped_highlights = Some(0.35);
+        f.mean_luminance = Some(0.75);
+        f.sharpness = Some(0.6);
+        assert!(!score_photo(&f).issues.contains(&Issue::Overexposed));
+        // the same brightness with the detail gone is blown out
+        f.sharpness = Some(0.1);
+        assert!(score_photo(&f).issues.contains(&Issue::Overexposed));
+        // extremely bright is overexposed however much detail is left
+        f.sharpness = Some(0.9);
+        f.mean_luminance = Some(0.95);
+        assert!(score_photo(&f).issues.contains(&Issue::Overexposed));
+
+        // neon street at night (no scene classifier): dark but detailed
+        let mut d = good(2);
+        d.scene_type = None;
+        d.mean_luminance = Some(0.10);
+        d.crushed_shadows = Some(0.1);
+        d.sharpness = Some(0.5);
+        assert!(!score_photo(&d).issues.contains(&Issue::Underexposed));
+        d.sharpness = Some(0.1);
+        assert!(score_photo(&d).issues.contains(&Issue::Underexposed));
+        d.sharpness = Some(0.5);
+        d.mean_luminance = Some(0.05);
+        assert!(score_photo(&d).issues.contains(&Issue::Underexposed));
+    }
+
+    #[test]
+    fn blurrier_burst_frames_are_flagged() {
+        let e = [1.0f32, 0.0];
+        let (a, ea) = member(1, 0.70, &e);
+        let (b, eb) = member(2, 0.50, &e); // motion blur: 0.71 x the sharpest frame
+        let (c, ec) = member(3, 0.62, &e); // 0.89 x: an ordinary variation
+        assert!(b.issues.is_empty(), "above the absolute threshold");
+        let r = rank_burst(vec![
+            BurstMember {
+                score: a,
+                taken_at: Some(1),
+                emb: Some(&ea),
+            },
+            BurstMember {
+                score: b,
+                taken_at: Some(2),
+                emb: Some(&eb),
+            },
+            BurstMember {
+                score: c,
+                taken_at: Some(3),
+                emb: Some(&ec),
+            },
+        ]);
+        let issues = |id| &r.iter().find(|x| x.photo_id == id).unwrap().issues;
+        assert!(issues(2).contains(&Issue::Blurry));
+        assert!(!issues(1).contains(&Issue::Blurry));
+        assert!(!issues(3).contains(&Issue::Blurry));
+        let blurred = r.iter().find(|x| x.photo_id == 2).unwrap();
+        assert!(!blurred.hard_issue, "relative blur is a tag, not a penalty");
+        assert!(blurred.reasons.iter().any(|x| x.key == "blurry"));
     }
 
     #[test]

@@ -99,6 +99,14 @@ pub fn read_metadata(path: &Path, format: ImageFormat) -> Result<Metadata> {
     imp::read_metadata(path, format)
 }
 
+/// The EXIF of a source as one self-contained TIFF block (no `Exif\0\0` prefix), for carrying
+/// it into re-encoded exports: as stored (JPEG, HEIF, RAF, PNG, WebP) or rebuilt from the
+/// directories of TIFF-based RAW files, TIFF and CR3 (descriptive IFD0 tags, the Exif IFD
+/// without MakerNote, the GPS IFD). `Ok(None)` when the file has none.
+pub fn read_exif(path: &Path, format: ImageFormat) -> Result<Option<Vec<u8>>> {
+    imp::read_exif(path, format)
+}
+
 /// Cache key from path + size + mtime (cheap, no IO). 32 hex chars.
 pub fn fast_key(path: &Path, size: u64, mtime_ms: i64) -> String {
     let mut h = blake3::Hasher::new();
@@ -116,7 +124,7 @@ pub fn content_key(path: &Path) -> Result<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThumbSource {
-    /// Embedded EXIF thumbnail or RAW embedded preview.
+    /// Embedded EXIF thumbnail, RAW embedded preview or HEIF thumbnail item.
     Embedded,
     /// JPEG decoded with DCT-domain downscaling (1/2, 1/4, 1/8).
     DctScaled,
@@ -135,6 +143,8 @@ pub struct EncodedImage {
 
 /// Produce an upright JPEG whose long edge is <= `long_edge` (never upscales).
 /// Fastest path first: embedded preview if large enough -> DCT-scaled decode -> full decode.
+/// HEIF/AVIF: embedded JPEG -> OS codec (WIC / ImageIO) -> libheif -> smaller embedded JPEG;
+/// the error names what is missing when none works.
 pub fn generate_thumbnail(
     path: &Path,
     format: ImageFormat,
@@ -146,6 +156,8 @@ pub fn generate_thumbnail(
 }
 
 /// Decode to upright RGB8 with long edge <= `max_long_edge` (analysis / render proxies).
+/// Like thumbnails, the pixels are sRGB: sources tagged with another colour space (ICC profile
+/// or the DCF Adobe RGB marker) are converted.
 pub fn decode_rgb8(
     path: &Path,
     format: ImageFormat,
@@ -153,6 +165,15 @@ pub fn decode_rgb8(
     max_long_edge: u32,
 ) -> Result<(u32, u32, Vec<u8>)> {
     imp::decode_rgb8(path, format, orientation, max_long_edge)
+}
+
+/// Where to look for a libheif shared library when the OS cannot decode a HEIF/AVIF file
+/// (e.g. the copy pillow-heif installs into the AI runtime); replaces the previous list and
+/// retries a failed lookup. On Windows a library found there is loaded from a private copy in
+/// `private_dir`, so the runtime stays removable. `IMAGEPICKER_LIBHEIF` (path of the library)
+/// and the system `libheif.so.1` (Linux) are tried first. No-op on Android.
+pub fn set_heif_library_dirs(dirs: Vec<PathBuf>, private_dir: Option<PathBuf>) {
+    imp::set_heif_library_dirs(dirs, private_dir)
 }
 
 /// On-disk thumbnail cache layout: `<root>/<k[0..2]>/<k[2..4]>/<key>_<size>.jpg`.

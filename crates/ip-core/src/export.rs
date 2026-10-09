@@ -27,7 +27,7 @@ pub struct ExportOptions {
     pub long_edge: Option<u32>,
     pub quality: u8,
     pub name_template: String,
-    /// Leave the GPS position out of re-encoded outputs.
+    /// Leave the GPS position out of re-encoded outputs (EXIF GPS IFD, XMP `GPS*` properties).
     pub strip_gps: bool,
     pub upscale: Option<UpscaleExport>,
     /// Crop-fit every output to this aspect ratio and, when larger, scale it down to exactly
@@ -215,8 +215,36 @@ fn jpeg_dims(img: &RgbImage) -> (u32, u32) {
     (img.width, img.height)
 }
 
-/// Encodes a rendered picture as JPEG with the source's EXIF (minus orientation; GPS unless
-/// stripped) and an sRGB ICC profile.
+/// The XMP sidecar of a source (`<stem>.xmp` / `<file>.xmp`), unless unreasonably large.
+fn sidecar_xmp(path: &Path) -> Option<String> {
+    let p = crate::xmp::find_sidecar(path)?;
+    if std::fs::metadata(&p).ok()?.len() > 4 << 20 {
+        return None;
+    }
+    std::fs::read_to_string(p).ok()
+}
+
+/// What the source contributes to the metadata of a re-encoded export: a JPEG its own EXIF,
+/// XMP (else the sidecar's) and IPTC; other formats their EXIF (copied or rebuilt by the
+/// imaging layer, else synthesised from the catalog metadata) and the sidecar XMP.
+fn source_meta(imaging: &dyn Imaging, r: &PhotoRef) -> jpegmeta::SourceMeta {
+    if r.format == ip_imaging::ImageFormat::Jpeg {
+        let mut m = jpegmeta::SourceMeta::of_jpeg_file(&r.path);
+        if m.xmp.is_none() {
+            m.xmp = sidecar_xmp(&r.path);
+        }
+        return m;
+    }
+    jpegmeta::SourceMeta {
+        exif: imaging.read_exif(&r.path, r.format).ok().flatten(),
+        xmp: sidecar_xmp(&r.path),
+        irb: None,
+        metadata: imaging.read_metadata(&r.path, r.format).ok(),
+    }
+}
+
+/// Encodes a rendered (sRGB) picture as JPEG with the source's metadata (EXIF minus
+/// orientation, XMP, IPTC; GPS unless stripped) and an sRGB ICC profile.
 fn encode_with_meta(
     imaging: &dyn Imaging,
     r: &PhotoRef,
@@ -224,15 +252,9 @@ fn encode_with_meta(
     opts: &ExportOptions,
 ) -> std::result::Result<Vec<u8>, String> {
     let bytes = encode_jpeg(img, opts.quality).map_err(|e| format!("{e:#}"))?;
-    let is_jpeg = r.format == ip_imaging::ImageFormat::Jpeg;
-    let md = (!is_jpeg)
-        .then(|| imaging.read_metadata(&r.path, r.format).ok())
-        .flatten();
     Ok(jpegmeta::finalize_export(
         bytes,
-        &r.path,
-        is_jpeg,
-        md.as_ref(),
+        &source_meta(imaging, r),
         jpeg_dims(img),
         opts.strip_gps,
     ))
@@ -369,14 +391,9 @@ pub fn export_photos(
                     .generate_thumbnail(&r.path, r.format, r.orientation, edge, opts.quality)
                     .map_err(|e| format!("{e:#}"))
                     .map(|img| {
-                        let md = (r.format != ip_imaging::ImageFormat::Jpeg)
-                            .then(|| imaging.read_metadata(&r.path, r.format).ok())
-                            .flatten();
                         jpegmeta::finalize_export(
                             img.bytes,
-                            &r.path,
-                            r.format == ip_imaging::ImageFormat::Jpeg,
-                            md.as_ref(),
+                            &source_meta(imaging, r),
                             (img.width, img.height),
                             opts.strip_gps,
                         )

@@ -159,7 +159,9 @@ The first time an AI feature needs models, the *AI models required* dialog lists
 - *Remove session* only removes the catalog record and caches; **originals are untouched**.
 - The *Import from SD card / phone* button is disabled for now.
 
-Known limitations: HEIC/HEIF thumbnails rely on a system decoder and are not supported yet; RAW previews were only verified with synthetic samples, so reports on real camera files are welcome.
+HEIC/HEIF (phone photos) need a decoder, tried in this order: a JPEG preview inside the file → the system decoder (Windows: install *HEIF Image Extensions* and *HEVC Video Extensions* from the Microsoft Store; built into macOS) → libheif (Linux: install `libheif` with its HEVC plugin; with the AI components installed, the libheif they ship is used automatically). Without any of them these photos have no thumbnails, see [Troubleshooting](#19-troubleshooting--faq).
+
+Known limitations: RAW previews were only verified with synthetic samples, so reports on real camera files are welcome.
 
 ## 5. Culling workflow & shortcuts
 
@@ -264,7 +266,7 @@ Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best o
 
 *My taste* (on Home) learns from your ratings, flags and in-group choices and blends the base score with your taste using a weight α (0–0.6). It only turns on after it beats the base score on a held-out set; all data stays local and can be reset any time.
 
-> **Honest note:** score thresholds are empirical starting values and have not been calibrated on a large real-photo set. For example "overexposed" only looks at the share of clipped highlights, so white backgrounds can false-positive. Treat AI stars as suggestions.
+> **Honest note:** the issue thresholds were tuned on a 1000-image synthetic test library, not yet on a large set of real photos. Bright or dark frames that keep their detail (white backdrops, paper, neon streets at night) are no longer tagged over- or underexposed; inside a burst, a frame clearly softer than the sharpest one is tagged "blurry". Soft-background portraits can still be tagged blurry. Treat AI stars as suggestions.
 
 ## 7. Groups & stacks
 
@@ -417,9 +419,9 @@ Press `Ctrl+E` (or *Export* in the top bar):
 | Upscale | Off / ×2 / ×4 (on CPU tiers each photo can take tens of seconds) |
 | Export into one folder per person | Used from the People page |
 
-Export includes all your edits, writes JPEG, keeps EXIF and embeds an sRGB ICC profile.
+Export includes all your edits, writes JPEG and carries the original's metadata over: EXIF (for RAW and TIFF files too; maker notes are not copied), XMP (rating, keywords, title, creator…; entries that only describe the original, such as its orientation or Lightroom/darktable develop settings, are left out) and IPTC. Photos with a wide-gamut colour profile (Display P3, Adobe RGB) are converted to sRGB, as are their thumbnails and previews, and every export embeds an sRGB ICC profile. The API option `strip_gps` removes the GPS position from both EXIF and XMP. Exporting at original size without edits copies the file unchanged.
 
-> Known limitations: for RAW/HEIC sources EXIF is only synthesised (the original EXIF is not copied); XMP/IPTC are lost; colour conversion from non-sRGB sources is not done yet.
+> Known limitations: HEIC/HEIF photos can only be re-encoded on export where a HEIF decoder is available (as for thumbnails, see [Importing photos](#4-importing-photos)), and HDR (PQ/HLG) content is not tone-mapped; XMP stored inside DNG/CR3 files and extended XMP (over 64 KB, e.g. depth maps) is not copied (`.xmp` sidecars are); thumbnails made by an earlier version keep their colours until the cache is cleared (*Settings → Cache*).
 
 ## 14. AI assistant
 
@@ -543,7 +545,7 @@ Open with the gear icon on Home or in the top bar.
 | Model download fails / is slow | Switch to the HF mirror or ModelScope in *Settings → Hardware & models → Download source*; check that *Allow network* is on |
 | AI stars feel "off" | Thresholds are not calibrated yet; treat them as suggestions, let *My taste* adapt, adjust strictness in Settings |
 | Burst grouping too loose / tight | *Settings → Analysis → Burst grouping strictness*, or *Split / Merge* by hand in group view |
-| HEIC photos have no thumbnails | HEIC/HEIF thumbnails are not supported yet (backlog P1) |
+| HEIC photos have no thumbnails | No HEIF decoder is available (the log says what is missing): on Windows install *HEIF Image Extensions* + *HEVC Video Extensions* from the Microsoft Store, or the AI components; on Linux install `libheif` with its HEVC plugin (e.g. `libheif-plugin-libde265`). Restart the app and browse again; blurry small thumbnails can be rebuilt by clearing thumbnails in *Settings → Cache* |
 | Cannot drop folders in the browser | Browser mode does not receive OS drops; use *Choose folder* or the desktop app |
 | "This folder is not in an allowed directory" | Add it under *Settings → LAN → Allowed folders* |
 | LAN devices cannot connect | LAN access enabled and owner password set, firewall allows the port (default 7878), same network; restart after changing the port |

@@ -200,6 +200,7 @@ pub fn ingest(
 struct GRow {
     id: i64,
     t: Option<i64>,
+    device: Option<i64>,
     name: String,
     burst_id: Option<i64>,
     manual: bool,
@@ -241,7 +242,7 @@ pub fn regroup_session(
     let rows: Vec<GRow> = {
         let mut st = tx.prepare(
             "SELECT p.id, COALESCE(p.taken_at, p.mtime), p.file_name, p.burst_id,
-                    COALESCE(b.manual,0) AND b.session_id=?1, a.phash, a.embedding
+                    COALESCE(b.manual,0) AND b.session_id=?1, a.phash, a.embedding, p.device_id
              FROM photo p
              JOIN session_photo sp ON sp.photo_id=p.id AND sp.session_id=?1
              JOIN analysis a ON a.photo_id=p.id
@@ -260,6 +261,7 @@ pub fn regroup_session(
                         .get::<_, Option<Vec<u8>>>(6)?
                         .map(|b| decode_f16(&b))
                         .filter(|e| !e.is_empty()),
+                    device: r.get(7)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -278,6 +280,7 @@ pub fn regroup_session(
         .map(|r| GroupItem {
             id: r.id,
             t: r.t,
+            device: r.device,
             phash: r.phash,
             emb: r.emb.clone(),
         })

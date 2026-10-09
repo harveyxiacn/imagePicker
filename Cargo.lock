@@ -2464,11 +2464,14 @@ dependencies = [
  "image",
  "jpeg-decoder",
  "jpeg-encoder",
+ "libloading 0.8.9",
  "memmap2",
+ "moxcms",
  "rayon",
  "serde",
  "tempfile",
  "thiserror 2.0.21",
+ "windows",
 ]
 
 [[package]]

@@ -178,7 +178,7 @@ pub struct ExportRequest {
     /// *result* (the render is made at `long_edge / upscale` first).
     #[serde(default)]
     pub upscale: Option<u32>,
-    /// M5: leave the GPS position out of the EXIF of re-encoded outputs.
+    /// M5: leave the GPS position out of the EXIF and XMP of re-encoded outputs.
     #[serde(default)]
     pub strip_gps: bool,
 }

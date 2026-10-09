@@ -1791,6 +1791,247 @@ async fn exports_of_non_jpeg_sources_get_synthesised_metadata() {
     assert!(icc_of(&out.join("x.jpg")).is_some());
 }
 
+// ------------------------------------------------------------------ export: colour, XMP / IPTC, RAW EXIF
+
+/// Reference conversion of a Display P3 or Adobe RGB (1998) colour to sRGB, from the colour
+/// spaces' primaries (independent of the CMS the decoder uses).
+fn to_srgb_ref(px: [u8; 3], adobe: bool) -> [u8; 3] {
+    const P3: [[f64; 3]; 3] = [
+        [1.224_940_2, -0.224_940_4, 0.0],
+        [-0.042_056_9, 1.042_057_1, 0.0],
+        [-0.019_637_6, -0.078_636_1, 1.098_273_5],
+    ];
+    const ADOBE: [[f64; 3]; 3] = [
+        [1.398_283_2, -0.398_283_1, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -0.042_938_3, 1.042_938_3],
+    ];
+    let lin = |v: u8| {
+        let c = v as f64 / 255.0;
+        if adobe {
+            c.powf(563.0 / 256.0)
+        } else if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let enc = |l: f64| {
+        let l = l.clamp(0.0, 1.0);
+        let c = if l <= 0.003_130_8 {
+            12.92 * l
+        } else {
+            1.055 * l.powf(1.0 / 2.4) - 0.055
+        };
+        (c * 255.0).round() as u8
+    };
+    let m = if adobe { ADOBE } else { P3 };
+    let l = px.map(lin);
+    [0, 1, 2].map(|i| enc(m[i][0] * l[0] + m[i][1] * l[1] + m[i][2] * l[2]))
+}
+
+fn center_px(path: &Path) -> [u8; 3] {
+    let img = image::open(path).unwrap().to_rgb8();
+    img.get_pixel(img.width() / 2, img.height() / 2).0
+}
+
+fn close(a: [u8; 3], b: [u8; 3], tol: u8) -> bool {
+    a.iter().zip(&b).all(|(x, y)| x.abs_diff(*y) <= tol)
+}
+
+/// A flat-colour JPEG, tagged with `icc` when given.
+fn tagged_jpeg(path: &Path, px: [u8; 3], icc: Option<&[u8]>) {
+    let img = image::RgbImage::from_pixel(320, 240, image::Rgb(px));
+    let mut bytes = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 100)
+        .encode_image(&img)
+        .unwrap();
+    std::fs::write(path, crate::jpegmeta::insert_segments(&bytes, None, icc)).unwrap();
+}
+
+#[tokio::test]
+async fn wide_gamut_sources_are_converted_to_srgb_on_export() {
+    let e = env();
+    let px = [230u8, 60, 40];
+    let (p3, adobe) = (
+        crate::jpegmeta::display_p3_icc(),
+        crate::jpegmeta::adobe_rgb_icc(),
+    );
+    tagged_jpeg(&e.src.path().join("p3.jpg"), px, Some(&p3));
+    tagged_jpeg(&e.src.path().join("adobe.jpg"), px, Some(&adobe));
+    tagged_jpeg(&e.src.path().join("plain.jpg"), px, None);
+    // the values as stored (JPEG round trip), and what they mean in sRGB
+    let stored = center_px(&e.src.path().join("plain.jpg"));
+    let want = [
+        ("p3.jpg", to_srgb_ref(stored, false)),
+        ("adobe.jpg", to_srgb_ref(stored, true)),
+        ("plain.jpg", stored),
+    ];
+    assert!(!close(want[0].1, stored, 10) && !close(want[1].1, stored, 10));
+    let sid = import_dir(&e, e.src.path()).await;
+    let ph = by_name(&e, sid).await;
+    let crop = json!({"version":1,"ops":[{"type":"crop","rect":[0.1,0.1,0.8,0.8]}]});
+    for (n, _) in &want {
+        e.core.put_edit(ph[*n].id, crop.clone()).await.unwrap();
+    }
+
+    // edited render (decode -> render -> encode)
+    let out = e.src.path().join("edited");
+    let mut req = export_req(want.iter().map(|(n, _)| ph[*n].id).collect(), &out, None);
+    req.quality = 100;
+    let (state, err) = run_export(&e, req).await;
+    assert_eq!((state.as_str(), err), ("done", None));
+    for (n, w) in &want {
+        let got = center_px(&out.join(n));
+        assert!(
+            close(got, *w, 3),
+            "{n}: got {got:?}, want {w:?} (stored {stored:?})"
+        );
+        assert_eq!(
+            icc_of(&out.join(n)).as_deref(),
+            Some(crate::jpegmeta::srgb_icc()),
+            "{n}"
+        );
+    }
+
+    // the resize path of the real imaging layer (thumbnail pipeline) converts too
+    let r = |n: &str| crate::catalog::PhotoRef {
+        id: ph[n].id,
+        path: e.src.path().join(n),
+        file_name: n.to_string(),
+        format: ip_imaging::ImageFormat::Jpeg,
+        orientation: 1,
+        fast_key: "0".repeat(32),
+        taken_at: None,
+        mtime_ms: None,
+        edit_hash: None,
+        width: None,
+        height: None,
+    };
+    let opts = crate::export::ExportOptions {
+        long_edge: Some(160),
+        quality: 100,
+        name_template: "{name}".into(),
+        strip_gps: false,
+        upscale: None,
+        fit: None,
+    };
+    let out = e.src.path().join("resized");
+    std::fs::create_dir_all(&out).unwrap();
+    let refs: Vec<_> = want.iter().map(|(n, _)| r(n)).collect();
+    let rep =
+        crate::export::export_photos(&crate::RealImaging, &refs, &out, &opts, None, &|_, _| {});
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    for (n, w) in &want {
+        let got = center_px(&out.join(n));
+        assert!(close(got, *w, 3), "resized {n}: got {got:?}, want {w:?}");
+        assert!(icc_of(&out.join(n)).is_some());
+    }
+}
+
+#[tokio::test]
+async fn xmp_and_iptc_survive_jpeg_exports_and_strip_gps_cleans_them() {
+    let e = env();
+    let src = e.src.path().join("m.jpg");
+    write_jpeg(&src, 320, 240, 90);
+    let bytes = std::fs::read(&src).unwrap();
+    std::fs::write(
+        &src,
+        crate::jpegmeta::insert_metadata(
+            &bytes,
+            Some(&crate::jpegmeta::build_test_exif(6, false, true)),
+            Some(crate::jpegmeta::TEST_XMP),
+            None,
+            Some(&crate::jpegmeta::build_test_irb()),
+        ),
+    )
+    .unwrap();
+    let sid = import_dir(&e, e.src.path()).await;
+    let id = by_name(&e, sid).await["m.jpg"].id;
+    e.core.put_edit(id, exposure(0.3)).await.unwrap();
+    let iptc = crate::jpegmeta::build_test_iptc();
+    for (dir, strip, long_edge) in [
+        ("rendered", false, None),
+        ("rendered-nogps", true, None),
+        ("resized", false, Some(100)),
+        ("resized-nogps", true, Some(100)),
+    ] {
+        let out = e.src.path().join(dir);
+        let mut req = export_req(vec![id], &out, long_edge);
+        req.strip_gps = strip;
+        let (state, err) = run_export(&e, req).await;
+        assert_eq!((state.as_str(), err), ("done", None), "{dir}");
+        let file = std::fs::read(out.join("m.jpg")).unwrap();
+        // XMP: descriptive data kept, orientation / develop settings gone, GPS on request
+        let xmp = crate::xmp::jpeg::extract(&file).expect(dir);
+        let v = crate::xmp::values_of(&crate::xmp::Xmp::parse(&xmp).unwrap());
+        assert_eq!(v.rating, Some(4), "{dir}");
+        assert_eq!(v.keywords, ["kyoto", "temple"], "{dir}");
+        assert!(xmp.contains("Temple at dawn"), "{dir}");
+        assert!(xmp.contains("photoshop:City=\"Kyoto\""), "{dir}");
+        assert!(!xmp.contains("tiff:Orientation"), "{dir}");
+        assert!(!xmp.contains("crs:Exposure2012"), "{dir}");
+        assert_eq!(xmp.contains("exif:GPSLatitude"), !strip, "{dir}");
+        assert_eq!(xmp.contains("drone-dji:GpsLatitude"), !strip, "{dir}");
+        // IPTC: the record byte for byte, without the stale thumbnail resource
+        let irb = crate::jpegmeta::extract_irb(&file).expect(dir);
+        assert!(
+            irb.windows(iptc.len()).any(|w| w == iptc.as_slice()),
+            "{dir}"
+        );
+        assert!(!irb.windows(9).any(|w| w == b"UNEDITED-"), "{dir}");
+        // EXIF as before
+        let md = read_md(&out.join("m.jpg"));
+        assert_eq!(md.gps_lat.is_some(), !strip, "{dir}");
+        assert_eq!(md.orientation, 1, "{dir}");
+        assert_eq!(md.camera_make.as_deref(), Some("ACME Corp"), "{dir}");
+    }
+    // a plain copy (edits not applied, no resize) is still the original file, byte for byte
+    let out = e.src.path().join("copy");
+    let mut req = export_req(vec![id], &out, None);
+    req.apply_edits = false;
+    run_export(&e, req).await;
+    assert_eq!(
+        std::fs::read(out.join("m.jpg")).unwrap(),
+        std::fs::read(&src).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn exports_of_tiff_structured_sources_copy_their_own_exif() {
+    let e = env();
+    std::fs::write(
+        e.src.path().join("scan.tif"),
+        crate::jpegmeta::build_test_tiff(64, 48, [120, 130, 140]),
+    )
+    .unwrap();
+    let sid = import_dir(&e, e.src.path()).await;
+    let id = by_name(&e, sid).await["scan.tif"].id;
+    e.core.put_edit(id, exposure(0.2)).await.unwrap();
+    for strip in [false, true] {
+        let out = e.src.path().join(format!("out-{strip}"));
+        let mut req = export_req(vec![id], &out, None);
+        req.strip_gps = strip;
+        let (state, err) = run_export(&e, req).await;
+        assert_eq!((state.as_str(), err), ("done", None));
+        // the file's own EXIF rather than one synthesised from the catalog (which FakeImaging
+        // fills with "FAKE" / "FAKE Cam 1")
+        let md = read_md(&out.join("scan.jpg"));
+        assert_eq!(md.camera_make.as_deref(), Some("ACME Corp"));
+        assert_eq!(md.camera_model.as_deref(), Some("Model One"));
+        assert_eq!(md.camera_serial.as_deref(), Some("SN-42"));
+        assert_eq!(md.lens.as_deref(), Some("Lens 35mm"));
+        assert_eq!(md.iso, Some(200));
+        assert_eq!(md.taken_at_offset_min, Some(540), "OffsetTimeOriginal kept");
+        assert_eq!(md.gps_lat.is_some(), !strip);
+        assert_eq!((md.width, md.height), (Some(64), Some(48)));
+        let bytes = std::fs::read(out.join("scan.jpg")).unwrap();
+        assert!(!bytes.windows(9).any(|w| w == b"MAKERNOTE"));
+        let exif = crate::jpegmeta::extract_exif(&bytes).unwrap();
+        assert!(exif.windows(8).any(|w| w == b"(c) Test"), "copyright kept");
+    }
+}
+
 // ------------------------------------------------------------------ worker timeouts
 
 #[tokio::test]

@@ -15,7 +15,12 @@ pub const NS_DC: &str = "http://purl.org/dc/elements/1.1/";
 pub const NS_LR: &str = "http://ns.adobe.com/lightroom/1.0/";
 pub const NS_XMPDM: &str = "http://ns.adobe.com/xmp/1.0/DynamicMedia/";
 pub const NS_DARKTABLE: &str = "http://darktable.sf.net/";
+pub const NS_TIFF: &str = "http://ns.adobe.com/tiff/1.0/";
+pub const NS_EXIF: &str = "http://ns.adobe.com/exif/1.0/";
+pub const NS_CRS: &str = "http://ns.adobe.com/camera-raw-settings/1.0/";
+pub const NS_XMP_NOTE: &str = "http://ns.adobe.com/xmp/note/";
 const NS_XML: &str = "http://www.w3.org/XML/1998/namespace";
+const NS_META: &str = "adobe:ns:meta/";
 
 #[derive(Debug)]
 pub struct XmpError(pub String);
@@ -887,6 +892,63 @@ impl Xmp {
     pub fn set_hierarchical_keywords(&mut self, items: &[String]) -> Res<()> {
         self.set_array(NS_LR, "lr", "hierarchicalSubject", items)
     }
+
+    /// Removes every property, in attribute or element form and at any depth (struct fields
+    /// and array items included), whose namespace URI and local name satisfy `drop`. The RDF
+    /// and `x:xmpmeta` syntax itself is never removed. Returns how many properties went.
+    pub fn remove_properties(&mut self, drop: &dyn Fn(&str, &str) -> bool) -> usize {
+        prune(&mut self.nodes, &Scope::new(), drop, 0)
+    }
+}
+
+fn removable(ns: Option<&str>, local: &str, drop: &dyn Fn(&str, &str) -> bool) -> bool {
+    match ns {
+        Some(ns) if ns != NS_RDF && ns != NS_META && ns != NS_XML => drop(ns, local),
+        _ => false,
+    }
+}
+
+/// See [`Xmp::remove_properties`].
+fn prune(
+    nodes: &mut Vec<Node>,
+    scope: &Scope,
+    drop: &dyn Fn(&str, &str) -> bool,
+    depth: usize,
+) -> usize {
+    if depth > MAX_DEPTH {
+        return 0;
+    }
+    let mut removed = 0;
+    let mut i = 0;
+    while i < nodes.len() {
+        let Node::Elem(e) = &mut nodes[i] else {
+            i += 1;
+            continue;
+        };
+        let sc = scope_with(scope, e);
+        let (ns, local) = elem_name(&sc, &e.qname);
+        if removable(ns.as_deref(), &local, drop) {
+            nodes.remove(i);
+            removed += 1;
+            // and the indentation in front of it
+            if i > 0 && matches!(&nodes[i - 1], Node::Text(t) if t.trim().is_empty()) {
+                nodes.remove(i - 1);
+                i -= 1;
+            }
+            continue;
+        }
+        let before = e.attrs.len();
+        e.attrs.retain(|a| {
+            a.qname.starts_with("xmlns") || {
+                let (ans, al) = attr_name(&sc, &a.qname);
+                !removable(ans.as_deref(), &al, drop)
+            }
+        });
+        removed += before - e.attrs.len();
+        removed += prune(&mut e.children, &sc, drop, depth + 1);
+        i += 1;
+    }
+    removed
 }
 
 const EMPTY_PACKET: &str = "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"imagePicker\">\n <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n  <rdf:Description rdf:about=\"\"/>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>";
@@ -1076,6 +1138,30 @@ mod tests {
         assert!(y.set_rating(Some(1)).is_err());
         // BOM
         assert!(Xmp::parse("\u{feff}<a/>").is_ok());
+    }
+
+    #[test]
+    fn properties_are_removed_in_every_form_and_depth() {
+        let s = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+ <rdf:Description rdf:about="" xmlns:exif="http://ns.adobe.com/exif/1.0/" xmlns:tiff="http://ns.adobe.com/tiff/1.0/" xmlns:ext="http://iptc.org/std/Iptc4xmpExt/2008-02-29/" exif:GPSLatitude="48,51.5N" tiff:Make="ACME">
+  <exif:GPSLongitude>2,21.1E</exif:GPSLongitude>
+  <ext:LocationShown><rdf:Bag><rdf:li rdf:parseType="Resource"><ext:City>Paris</ext:City><exif:GPSAltitude>35/1</exif:GPSAltitude></rdf:li></rdf:Bag></ext:LocationShown>
+ </rdf:Description></rdf:RDF></x:xmpmeta>"#;
+        let mut x = Xmp::parse(s).unwrap();
+        let n = x.remove_properties(&|ns, local| ns == NS_EXIF && local.starts_with("GPS"));
+        assert_eq!(n, 3);
+        let out = x.serialize();
+        assert!(!out.contains("GPS"), "{out}");
+        assert!(out.contains("<ext:City>Paris</ext:City>"), "{out}");
+        let y = Xmp::parse(&out).unwrap();
+        assert_eq!(y.simple(NS_TIFF, "Make").as_deref(), Some("ACME"));
+        // the RDF syntax stays, whatever the predicate says
+        let mut z = y.clone();
+        z.remove_properties(&|_, _| true);
+        let out = z.serialize();
+        assert!(out.contains("<rdf:Description rdf:about=\"\""), "{out}");
+        assert!(!out.contains("ACME") && !out.contains("Paris"), "{out}");
+        assert!(Xmp::parse(&out).is_ok());
     }
 
     #[test]

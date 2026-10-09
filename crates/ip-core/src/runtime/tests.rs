@@ -519,3 +519,17 @@ impl InstallRequest {
         }
     }
 }
+
+#[test]
+fn heif_library_dirs_follow_pillow_heif_layouts() {
+    let t = tempfile::tempdir().unwrap();
+    let venv = t.path().join("venv");
+    let site = if cfg!(windows) {
+        venv.join("Lib").join("site-packages")
+    } else {
+        venv.join("lib").join("python3.12").join("site-packages")
+    };
+    std::fs::create_dir_all(site.join("pillow_heif.libs")).unwrap();
+    let dirs = heif_library_dirs(&[venv, t.path().join("missing")]);
+    assert_eq!(dirs, vec![site.join("pillow_heif.libs"), site]);
+}
