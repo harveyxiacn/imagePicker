@@ -6,21 +6,31 @@ use axum::http::{header, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use ip_core::{BestTakeRequest, EnhanceBody, InpaintBody};
+use ip_core::{BestTakeAutoBody, BestTakeRequest, EnhanceBody, InpaintBody};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::error::{ApiJson, ApiPath, ApiResult};
+use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult};
 use crate::routes::AppState;
 
 fn accepted(task_id: String) -> Response {
     (StatusCode::ACCEPTED, Json(json!({ "task_id": task_id }))).into_response()
 }
 
+#[derive(Deserialize)]
+pub struct PlanParams {
+    #[serde(default)]
+    base_photo_id: Option<i64>,
+}
+
 pub async fn besttake_plan(
     State(st): State<AppState>,
     ApiPath(id): ApiPath<i64>,
+    ApiQuery(p): ApiQuery<PlanParams>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!(st.core.besttake_plan(id).await?)))
+    Ok(Json(json!(
+        st.core.besttake_plan(id, p.base_photo_id).await?
+    )))
 }
 
 pub async fn besttake(
@@ -30,11 +40,22 @@ pub async fn besttake(
     Ok(accepted(st.core.besttake_start(req).await?))
 }
 
+/// The body is optional: none, empty or `null` = the automatically chosen base.
 pub async fn besttake_auto(
     State(st): State<AppState>,
     ApiPath(id): ApiPath<i64>,
+    body: axum::body::Bytes,
 ) -> ApiResult<Response> {
-    Ok(accepted(st.core.besttake_auto(id).await?))
+    let body: BestTakeAutoBody = if body.iter().all(u8::is_ascii_whitespace) {
+        BestTakeAutoBody::default()
+    } else {
+        serde_json::from_slice::<Option<BestTakeAutoBody>>(&body)
+            .map_err(|e| ApiError::bad_request(e.to_string()))?
+            .unwrap_or_default()
+    };
+    Ok(accepted(
+        st.core.besttake_auto(id, body.base_photo_id).await?,
+    ))
 }
 
 pub async fn bystanders(

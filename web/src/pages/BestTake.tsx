@@ -12,7 +12,7 @@ import { HelpOverlay } from '@/components/HelpOverlay'
 import { ModelConsentDialog } from '@/components/ModelConsentDialog'
 import { qk } from '@/lib/cache'
 import { redo, undo } from '@/lib/actions'
-import { alreadyBest, autoChoices, buildPlanView, choiceFor, frameNumber, type CandidateView, type PersonView } from '@/lib/besttake'
+import { alreadyBest, autoChoices, baseWhy, buildPlanView, choiceFor, frameNumber, frameWork, type CandidateView, type PersonView } from '@/lib/besttake'
 import { changeStack, flushSaves } from '@/lib/editActions'
 import { runGen } from '@/lib/gen'
 import { useHistory } from '@/lib/history'
@@ -199,6 +199,11 @@ export function BestTake() {
   const improvable = view.filter((p) => p.bestSwap).length
   const baseNum = baseId !== null ? frameNumber(order, baseId) : null
   const isAutoBase = plan !== undefined && baseId === plan.base_photo_id && chosenBase === null
+  const why = plan && isAutoBase ? baseWhy(plan, order) : undefined
+  const optionTitle = (p: { id: number; file_name: string }) => {
+    const n = frameWork(plan, p.id)
+    return n === undefined ? p.file_name : `${p.file_name} · ${t('besttake.frameWork', { n })}`
+  }
   const done = alreadyBest(view).length === view.length && view.length > 0
 
   return (
@@ -214,7 +219,7 @@ export function BestTake() {
             {t('besttake.title')}
           </span>
           <span className="relative">
-            <button className="btn" onClick={() => setBaseMenu((v) => !v)} aria-expanded={baseMenu} data-testid="bt-base-button">
+            <button className="btn" onClick={() => setBaseMenu((v) => !v)} aria-expanded={baseMenu} title={why ? t(why.key, why.params) : undefined} data-testid="bt-base-button">
               {t('besttake.base')} #{baseNum ?? '?'}
               <span className="text-xs font-normal text-muted">{isAutoBase ? t('besttake.autoPicked') : ''}</span>
               <ChevronDown size={13} />
@@ -231,7 +236,7 @@ export function BestTake() {
                       setBaseMenu(false)
                       setSelected(null)
                     }}
-                    title={p.file_name}
+                    title={optionTitle(p)}
                     data-testid="bt-base-option"
                   >
                     <img src={thumbUrl(p, 256)} alt="" className="h-14 w-20 object-cover" draggable={false} />
