@@ -1,12 +1,13 @@
 //! Classic technical-quality metrics, a port of `ai-worker/imagepicker_ai/steps/quality.py`
-//! without the face-box branch (the on-device profile has no face detector): sharpness of the
-//! central region, exposure statistics and Immerkaer noise. Same constants, same 5-digit
-//! rounding of the reported values.
+//! without the face-box branch (faces are measured separately, [`face_sharpness`]): sharpness of
+//! the central region, exposure statistics, Immerkaer noise and the horizon tilt
+//! ([`crate::tilt`]). Same constants, same rounding of the reported values.
 
 use crate::imgops::{
     filter3x3, gaussian_blur, resize_area, resize_area_emulated, resize_linear, rgb_to_gray,
     Gray32, Gray8, IMMERKAER, LAPLACIAN1, SOBEL_X, SOBEL_Y,
 };
+use crate::tilt::estimate_tilt;
 
 pub const REF_LONG_EDGE: usize = 1024;
 const K_LAP: f64 = 120.0;
@@ -31,6 +32,11 @@ pub struct Quality {
     pub crushed_shadows: f64,
     pub noise: f64,
     pub noise_sigma: f64,
+    /// Deviation of the dominant straight lines from level in degrees, positive = clockwise
+    /// ([`crate::tilt`]); 0 when there are none.
+    pub tilt_deg: f64,
+    /// 0..1 confidence of `tilt_deg` (0 = no straight structure to judge by).
+    pub tilt_confidence: f64,
 }
 
 fn clamp01(x: f64) -> f64 {
@@ -244,6 +250,7 @@ pub fn analyze_quality(rgb: &[u8], w: usize, h: usize) -> Quality {
     let s_center = sharpness_score(lap, ten);
     let (exposure, mean, hi, lo) = exposure_metrics(rgb, w, h);
     let sigma = noise_sigma(&gray);
+    let tilt = estimate_tilt(&gray);
     Quality {
         sharpness: r5(s_center),
         sharpness_center: r5(s_center),
@@ -255,6 +262,8 @@ pub fn analyze_quality(rgb: &[u8], w: usize, h: usize) -> Quality {
         crushed_shadows: r5(lo),
         noise: r5(clamp01(sigma / NOISE_FULL_SCALE_SIGMA)),
         noise_sigma: r5(sigma),
+        tilt_deg: tilt.deg,
+        tilt_confidence: tilt.confidence,
     }
 }
 

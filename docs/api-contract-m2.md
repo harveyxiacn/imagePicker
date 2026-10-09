@@ -12,6 +12,7 @@
 |---|---|---|
 | `identity` | 每张人脸 `identity_index: number`；照片级 `identity_file: string` | `<out_dir>/<photo_id>.faces.npy`：float16，形状 `(n_faces, 512)`，L2 归一化，行序与 `faces[]` 一致（无人脸则不写文件、字段为 null）。模型：AuraFace（Apache-2.0） |
 | `aesthetic` | `aesthetic: number`（0–1，越高越好） | 美学分；实现可选（SigLIP 特征上的线性头 / pyiqa 模型），在 `aesthetic_model` 中注明模型 id |
+| `quality`（增强） | `quality.tilt_deg: number`（度，±15，> 0 = 画面顺时针转，地平线右低；无直线时为 0）；`quality.tilt_confidence: number`（0–1） | 倾斜检测（doc 03 §3.1.1），lite 档由 `ip-lite` 计算同样两个字段；旧 worker 缺这两个字段时 Core 视为未知（不判倾斜） |
 | `iqa` | `iqa: number`（0–1，越高越好） | 无参考技术质量；`iqa_model` 注明模型 id。（M0 中 `iqa` 为 `quality` 的别名，M2 起为独立步骤） |
 | `scene` | `scene_type: string`；`scene_scores: {[k]: number}` | SigLIP2 零样本，类别固定：`portrait` `group` `landscape` `food` `architecture` `night` `pet` `other` |
 | `faces`（增强） | 每张人脸新增 `gaze: number \| null`（0–1，看镜头程度，虹膜相对眼眶位置 + 头部姿态） | |
@@ -23,7 +24,7 @@
 - **Worker 进程管理**（新 crate `ip-worker-client`）：开发模式下在仓库 `ai-worker/` 执行 `uv run imagepicker-ai serve --host 127.0.0.1 --port 0 --token <随机> --parent-pid <core pid>`，读取 stdout 第一行 `{"event":"ready","port":N}`；可用 `IMAGEPICKER_WORKER_CMD`（完整命令行）与 `IMAGEPICKER_WORKER_DIR` 覆盖。懒启动（首次分析时）、崩溃自动重启（指数退避，最多 3 次）、退出时杀进程树。
 - **存储**：`analysis`、`face`、`person`、`burst`、`scene` 表按 doc 05 §1；嵌入从 worker 产物文件读入 BLOB（f16）。
 - **分组**（doc 03 §2.2）、**评分与星级**（§3.2）、**人物聚类**（§4.3：连拍组内轨迹关联 + 跨组按 cos ≥ 阈值的并查集/平均链接；用户合并/命名作为约束）、**is_subject**（§4.2）、`face_count`/`subject_face_count` 全部在 Rust 中完成。
-- **问题标签**（`issues`）：`closed_eyes`（任一主体人脸 eyes_open < 0.45）、`blurry`、`overexposed`、`underexposed`、`noisy`、`tilted`（M2 可不实现）。
+- **问题标签**（`issues`）：`closed_eyes`（任一主体人脸 eyes_open < 0.45）、`blurry`、`overexposed`、`underexposed`、`noisy`、`tilted`（置信度 ≥ 0.2 且 2° ≤ |tilt_deg| ≤ 10°，只是标签不扣分；doc 03 §3.1.1）。`analysis` 表存 `tilt_deg`、`tilt_confidence`（v10 迁移）。
 
 ## C. REST 新增 / 变更
 
@@ -79,7 +80,7 @@ type SceneType = "portrait" | "group" | "landscape" | "food" | "architecture" | 
   "scores": { "sharpness": 0.82, "exposure": 0.74, "noise": 0.12, "iqa": 0.71, "aesthetic": 0.64, "face": 0.58, "composition": null },
   "ai_score": 0.68, "ai_rating": 4.0,
   "contributions": [ { "key": "face", "label_key": "score.face", "delta": -0.12 } ],  // 对综合分的贡献（可正可负）
-  "reasons": [ { "key": "closed_eyes", "params": { "person": "小红" } } ],          // 前端按 key 本地化
+  "reasons": [ { "key": "closed_eyes", "params": { "person": "小红" } } ],          // 前端按 key 本地化；tilted 带 { "deg": 3.5 }（|倾角|，0.1°）
   "scene_type": "group",
   "faces": [ Face ]
 }

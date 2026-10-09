@@ -258,7 +258,7 @@ export const en: Messages = {
     overexposed: 'Highlights are blown out',
     underexposed: 'Underexposed overall',
     noisy: 'Visible noise',
-    tilted: 'Horizon is tilted',
+    tilted: 'Horizon is tilted by {{deg}}°',
     sharp: 'Crisp focus',
     great_expression: 'Everyone has open eyes and smiles',
     high_aesthetic: 'Strong composition and colour',
