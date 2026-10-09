@@ -65,6 +65,7 @@ describe('i18n', () => {
         'history',
         ['adjust', 'auto', 'resetBasic', 'curves', 'hsl', 'hslBand', 'grading', 'gradingWheel', 'gradingBalance', 'addLocal', 'removeLocal', 'invertMask', 'localAmount', 'localAdjust', 'moveMask', 'crop', 'straighten', 'resetCrop', 'sharpen', 'preset', 'lut', 'lutAmount', 'paste', 'sync', 'resetAll'],
       ],
+      ['besttake', ['group_best', 'group_best_issue', 'fewer_missing', 'fewer_replacements', 'fewer_below_best', 'less_work', 'manual'].map((k) => `why_${k}`)],
       ['beauty', ['smooth', 'whiten', 'eye_brighten', 'teeth_whiten', 'dark_circles', 'slim', 'chin', 'eyes', 'nose', 'arms', 'legs', 'waist', 'lengthen_legs', 'level_natural', 'level_standard', 'level_refined']],
       ['collections', ['best_per_group', 'has_closed_eyes', 'undecided', 'edited'].map((k) => `builtin_${k}`)],
       ['taste', ['low_saturation', 'bright_exposure', 'warm_tone', 'smile_over_sharp', 'centered_subject', 'dislikes_blur'].map((k) => `trait_${k}`)],

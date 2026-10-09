@@ -317,15 +317,15 @@ Someone blinked in the group shot? In group view click **Compose best expression
 
 ![Best take editor](../images/besttake.png)
 
-1. Pick the **base** frame at the top (the most suitable frame is chosen automatically);
-2. **Best for everyone** automatically chooses the best composable expression for everyone who can improve; *Best for everyone on this base* keeps your chosen base frame;
+1. Pick the **base** frame at the top (the most suitable frame is chosen automatically: fewest and smallest faces to replace, nobody missing, not blurry or badly exposed; the group's best photo only gives way when another frame clearly needs less compositing. Hover the base button to see why; the frame list shows how many faces each frame would need replaced);
+2. **Best for everyone** uses that base and chooses the best composable expression for everyone who can clearly improve (gains under 4 points are skipped to avoid compositing artefacts); *Best for everyone on this base* keeps your chosen base frame;
 3. Or go manual: click a face in the photo and the right panel lists that person's **candidate expressions (score)**; click one to paste it onto the base; the *base* entry restores the original;
 4. Tune *Blend strength* and *Edge feather*; *Compare original* (`\`); *Restore this person*;
 5. *Done* returns to the library. The result is a generated layer in the edit stack; undoable, original untouched.
 
 Candidates that cannot be composed are greyed out with a reason (head turned too much, face occluded, face too small, face not found); camera movement, occlusion or seams may produce warnings.
 
-> Known limitation: "best for everyone" always starts from the best frame of the group as the base. It needs the AI components and their models (face landmarks, portrait segmentation, BiRefNet).
+> Known limitation: the automatic base only looks at expression scores, face sizes, missing people and blur/exposure issues; camera movement is detected only while compositing. It needs the AI components and their models (face landmarks, portrait segmentation, BiRefNet).
 
 ## 10. Editing
 

@@ -49,7 +49,8 @@ pub use edit::{
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};
 pub use generate::{
-    BestTakeChoice, BestTakePlan, BestTakeRequest, BestTakeResult, EnhanceBody, InpaintBody, Stroke,
+    BaseChoice, BaseFrame, BestTakeAutoBody, BestTakeChoice, BestTakePlan, BestTakeRequest,
+    BestTakeResult, EnhanceBody, InpaintBody, Stroke,
 };
 pub use imaging::{Imaging, RealImaging};
 pub use ip_render;
