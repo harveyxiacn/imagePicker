@@ -189,14 +189,19 @@ pub fn kill_tree(pid: u32) {
     let _ = pid; // no worker process is ever spawned on Android
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
+        // `taskkill` / `tasklist` answer "access denied" after ~5 s for some restricted accounts
+        // (seen over OpenSSH), even for their own children, and the worker lives on. Kill
+        // natively; `taskkill` stays as the fallback when the root survives.
+        if !win::kill_tree(pid) {
+            use std::os::windows::process::CommandExt;
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+        }
     }
     #[cfg(all(unix, not(target_os = "android")))]
     {
@@ -214,15 +219,7 @@ pub fn kill_tree(pid: u32) {
 pub fn pid_alive(pid: u32) -> bool {
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        let out = std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-        out.map(|o| String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")))
-            .unwrap_or(false)
+        win::pid_alive(pid)
     }
     #[cfg(target_os = "android")]
     {
@@ -237,6 +234,173 @@ pub fn pid_alive(pid: u32) -> bool {
             .status()
             .map(|s| s.success())
             .unwrap_or(false)
+    }
+}
+
+/// Process liveness and tree kill through kernel32 directly (no `tasklist` / `taskkill`).
+#[cfg(windows)]
+mod win {
+    use std::collections::HashMap;
+    use std::ffi::c_void;
+
+    type Handle = *mut c_void;
+
+    const PROCESS_TERMINATE: u32 = 0x0001;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    const TH32CS_SNAPPROCESS: u32 = 0x0000_0002;
+    const WAIT_TIMEOUT: u32 = 0x0000_0102;
+    const ERROR_ACCESS_DENIED: u32 = 5;
+    const INVALID_HANDLE_VALUE: Handle = -1isize as Handle;
+
+    /// `PROCESSENTRY32W`; most fields only exist for the layout.
+    #[repr(C)]
+    #[allow(dead_code)]
+    struct ProcessEntry32W {
+        dw_size: u32,
+        cnt_usage: u32,
+        th32_process_id: u32,
+        th32_default_heap_id: usize,
+        th32_module_id: u32,
+        cnt_threads: u32,
+        th32_parent_process_id: u32,
+        pc_pri_class_base: i32,
+        dw_flags: u32,
+        sz_exe_file: [u16; 260],
+    }
+
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+        fn CloseHandle(h: Handle) -> i32;
+        fn GetLastError() -> u32;
+        fn WaitForSingleObject(h: Handle, ms: u32) -> u32;
+        fn TerminateProcess(h: Handle, code: u32) -> i32;
+        fn GetProcessTimes(
+            h: Handle,
+            created: *mut u64,
+            exited: *mut u64,
+            kernel: *mut u64,
+            user: *mut u64,
+        ) -> i32;
+        fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> Handle;
+        fn Process32FirstW(snap: Handle, entry: *mut ProcessEntry32W) -> i32;
+        fn Process32NextW(snap: Handle, entry: *mut ProcessEntry32W) -> i32;
+    }
+
+    /// Closes the handle on drop.
+    struct Owned(Handle);
+
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            // SAFETY: `self.0` is a valid handle owned by this value and closed exactly once.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    fn open(access: u32, pid: u32) -> Option<Owned> {
+        // SAFETY: plain call; a null result means failure and is never wrapped.
+        let h = unsafe { OpenProcess(access, 0, pid) };
+        (!h.is_null()).then_some(Owned(h))
+    }
+
+    pub fn pid_alive(pid: u32) -> bool {
+        match open(SYNCHRONIZE, pid) {
+            // A process handle is signalled once the process has exited.
+            Some(h) => {
+                // SAFETY: `h` is a valid process handle opened with SYNCHRONIZE.
+                let r = unsafe { WaitForSingleObject(h.0, 0) };
+                r == WAIT_TIMEOUT
+            }
+            // It exists, it just belongs to someone we may not open.
+            None => {
+                // SAFETY: plain call, reads this thread's last error from the failed OpenProcess.
+                let e = unsafe { GetLastError() };
+                e == ERROR_ACCESS_DENIED
+            }
+        }
+    }
+
+    /// Creation time (100 ns ticks) of a running process.
+    fn created(pid: u32) -> Option<u64> {
+        let h = open(PROCESS_QUERY_LIMITED_INFORMATION, pid)?;
+        let (mut c, mut e, mut k, mut u) = (0u64, 0u64, 0u64, 0u64);
+        // SAFETY: `h` is valid; the four out-pointers are live, 8-byte aligned FILETIME-sized slots.
+        let ok = unsafe { GetProcessTimes(h.0, &mut c, &mut e, &mut k, &mut u) };
+        (ok != 0).then_some(c)
+    }
+
+    /// `(pid, parent pid)` of every process.
+    fn snapshot() -> Vec<(u32, u32)> {
+        let mut out = Vec::new();
+        // SAFETY: plain call; the result is checked before use.
+        let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if snap == INVALID_HANDLE_VALUE || snap.is_null() {
+            return out;
+        }
+        let snap = Owned(snap);
+        // SAFETY: all-zero is a valid bit pattern for this plain-data struct.
+        let mut e: ProcessEntry32W = unsafe { std::mem::zeroed() };
+        e.dw_size = std::mem::size_of::<ProcessEntry32W>() as u32;
+        // SAFETY: `snap` is a valid snapshot handle and `e` a live entry with `dw_size` set.
+        let mut more = unsafe { Process32FirstW(snap.0, &mut e) } != 0;
+        while more {
+            out.push((e.th32_process_id, e.th32_parent_process_id));
+            // SAFETY: as above.
+            more = unsafe { Process32NextW(snap.0, &mut e) } != 0;
+        }
+        out
+    }
+
+    #[cfg(test)]
+    pub fn children_of(pid: u32) -> Vec<u32> {
+        snapshot()
+            .into_iter()
+            .filter(|&(p, parent)| parent == pid && p != pid)
+            .map(|(p, _)| p)
+            .collect()
+    }
+
+    fn terminate(pid: u32) -> bool {
+        match open(PROCESS_TERMINATE, pid) {
+            Some(h) => {
+                // SAFETY: `h` is a valid process handle opened with PROCESS_TERMINATE.
+                let ok = unsafe { TerminateProcess(h.0, 1) };
+                ok != 0 || !pid_alive(pid)
+            }
+            None => !pid_alive(pid),
+        }
+    }
+
+    /// Terminates `pid` and its descendants, children first. False when `pid` itself survives.
+    pub fn kill_tree(pid: u32) -> bool {
+        let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+        for (p, parent) in snapshot() {
+            if p != parent {
+                children.entry(parent).or_default().push(p);
+            }
+        }
+        // Windows keeps the parent pid of orphans and reuses pids, so a "child" that started
+        // before its parent is a stranger that inherited a recycled pid.
+        let mut tree = vec![pid];
+        let mut i = 0;
+        while i < tree.len() {
+            let born = created(tree[i]);
+            for &c in children.get(&tree[i]).into_iter().flatten() {
+                let stranger = matches!((born, created(c)), (Some(b), Some(cb)) if cb < b);
+                if !stranger && !tree.contains(&c) {
+                    tree.push(c);
+                }
+            }
+            i += 1;
+        }
+        let mut root_gone = false;
+        for &p in tree.iter().rev() {
+            let gone = terminate(p);
+            if p == pid {
+                root_gone = gone;
+            }
+        }
+        root_gone
     }
 }
 
@@ -281,5 +445,34 @@ mod tests {
     fn models_dir_is_forwarded() {
         let a = build_argv(None, "T", 1, Some(Path::new("/m")));
         assert!(a.windows(2).any(|w| w[0] == "--models-dir"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_liveness_and_tree_kill() {
+        use std::os::windows::process::CommandExt;
+        assert!(pid_alive(std::process::id()));
+        // cmd -> ping: a parent with a child, like the uv shim and its Python
+        let mut parent = std::process::Command::new("cmd")
+            .args(["/C", "ping -n 30 127.0.0.1 >NUL"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .unwrap();
+        let pid = parent.id();
+        let child = (0..100)
+            .find_map(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                win::children_of(pid).first().copied()
+            })
+            .expect("cmd never started ping");
+        assert!(pid_alive(pid) && pid_alive(child));
+        kill_tree(pid);
+        parent.wait().unwrap();
+        assert!(!pid_alive(pid));
+        let gone = (0..100).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            !pid_alive(child)
+        });
+        assert!(gone, "child {child} survived kill_tree");
     }
 }
