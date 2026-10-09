@@ -99,8 +99,8 @@ pub fn load(path: &Path, long_edge: u32, embedded: bool) -> Result<Loaded> {
         return Ok(loaded(rgb, ThumbSource::Embedded, false, Via::Jpeg(j)));
     }
     let mut why = Vec::new();
-    if info.missing_codec_config {
-        why.push("the image has no decoder configuration (damaged file)".to_string());
+    if info.undecodable {
+        why.push("no decodable image in the file (damaged or incomplete)".to_string());
     } else {
         match os_decode(path, long_edge) {
             Some(Ok(rgb)) => {

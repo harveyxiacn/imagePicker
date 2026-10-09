@@ -291,10 +291,11 @@ pub struct HeifInfo<'a> {
     pub jpeg_previews: Vec<&'a [u8]>,
     /// The primary item's colour space (`colr`); an ICC profile wins over `nclx`.
     pub colr: Option<Colr<'a>>,
-    /// The primary image is HEVC / AV1 coded but lacks its decoder configuration (`hvcC` /
-    /// `av1C`): a damaged file no decoder can read. Handing it to an OS decoder anyway is
-    /// pointless and risks a crash inside that decoder.
-    pub missing_codec_config: bool,
+    /// No decoder can read this file: there is no primary image item (no `meta`, `pitm` or
+    /// matching `iinf` entry), or the primary image is HEVC / AV1 coded without its decoder
+    /// configuration (`hvcC` / `av1C`). Handing such a file to an OS decoder is pointless and
+    /// crashed macOS ImageIO (SIGTRAP), so the loader does not.
+    pub undecodable: bool,
 }
 
 /// A `clap` clean aperture inside the coded (`ispe`) image.
@@ -529,7 +530,10 @@ pub fn heif_orientation(props: &[([u8; 4], &[u8])]) -> u8 {
 }
 
 pub fn parse_heif(data: &[u8]) -> HeifInfo<'_> {
-    let mut info = HeifInfo::default();
+    let mut info = HeifInfo {
+        undecodable: true,
+        ..HeifInfo::default()
+    };
     let Some((_, meta)) = iter_boxes(data).into_iter().find(|(t, _)| t == b"meta") else {
         return info;
     };
@@ -651,8 +655,10 @@ pub fn parse_heif(data: &[u8]) -> HeifInfo<'_> {
         Some(b"av01") => Some(b"av1C"),
         _ => None,
     };
-    if let (Some(c), Some(props)) = (config, &primary_props) {
-        info.missing_codec_config = !props.contains(c);
-    }
+    info.undecodable = match (primary_type, config, &primary_props) {
+        (None, _, _) => true,
+        (Some(_), Some(c), Some(props)) => !props.contains(c),
+        _ => false,
+    };
     info
 }

@@ -338,7 +338,7 @@ fn heif_without_decoder_degrades_to_small_preview_or_errors() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("cannot decode HEIF/AVIF"), "{err}");
-    assert!(err.contains("no decoder configuration"), "{err}");
+    assert!(err.contains("no decodable image"), "{err}");
     // with a configuration the decoders are tried and say what is missing (Windows: no HEIF
     // codec for this account / on CI, no libheif)
     #[cfg(windows)]
@@ -362,9 +362,9 @@ fn heif_without_decoder_degrades_to_small_preview_or_errors() {
 }
 
 #[test]
-fn hevc_or_av1_without_decoder_configuration_is_flagged() {
+fn undecodable_heif_files_are_flagged() {
     // phone-like file: HEVC primary without `hvcC`
-    assert!(container::parse_heif(&phone_like()).missing_codec_config);
+    assert!(container::parse_heif(&phone_like()).undecodable);
     let item = |typ: &'static [u8; 4], props: Vec<u8>| Item {
         id: 1,
         typ,
@@ -378,12 +378,15 @@ fn hevc_or_av1_without_decoder_configuration_is_flagged() {
             &[ispe(64, 48), bx(config, &[1; 8])],
         )
     };
-    assert!(!container::parse_heif(&with(b"hvc1", b"hvcC")).missing_codec_config);
-    assert!(!container::parse_heif(&with(b"av01", b"av1C")).missing_codec_config);
-    assert!(container::parse_heif(&with(b"av01", b"hvcC")).missing_codec_config);
+    assert!(!container::parse_heif(&with(b"hvc1", b"hvcC")).undecodable);
+    assert!(!container::parse_heif(&with(b"av01", b"av1C")).undecodable);
+    assert!(container::parse_heif(&with(b"av01", b"hvcC")).undecodable);
     // other primary types (grid, JPEG) are not judged here
     let grid = build_heif(1, &[item(b"grid", vec![1])], &[ispe(64, 48)]);
-    assert!(!container::parse_heif(&grid).missing_codec_config);
+    assert!(!container::parse_heif(&grid).undecodable);
+    // no primary item at all: only an `ftyp` (the file macOS ImageIO crashed on)
+    assert!(container::parse_heif(b"\0\0\0\x18ftypheic\0\0\0\0mif1heic").undecodable);
+    assert!(container::parse_heif(&with(b"hvc1", b"hvcC")[..24]).undecodable);
 }
 
 #[test]
