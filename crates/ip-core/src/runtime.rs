@@ -428,6 +428,47 @@ fn has_worker_src(dir: &Path) -> bool {
     dir.join("pyproject.toml").is_file() && dir.join("imagepicker_ai").is_dir()
 }
 
+// ------------------------------------------------------------------------ HEIF decoding
+
+/// Lets HEIC/HEIF decoding fall back to the libheif that pillow-heif installed into the managed
+/// runtime (or the dev worker's `.venv`) when the OS has no HEIF codec (docs/02, "HEIF/HEIC
+/// 解码"). Windows loads it from a private copy under `<data>/libheif` so that removing or
+/// re-installing the runtime is not blocked by a loaded DLL.
+pub(crate) fn configure_heif_decoding(runtime_root: &Path, data_root: &Path) {
+    if cfg!(target_os = "android") {
+        return;
+    }
+    let mut venvs = vec![venv_dir(runtime_root)];
+    venvs.extend(process::find_worker_dir().map(|w| w.join(".venv")));
+    ip_imaging::set_heif_library_dirs(heif_library_dirs(&venvs), Some(data_root.join("libheif")));
+}
+
+/// Where pillow-heif keeps libheif in these venvs: site-packages itself (Windows wheels),
+/// `pillow_heif.libs/` (manylinux) or `pillow_heif/.dylibs/` (macOS).
+pub fn heif_library_dirs(venvs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for venv in venvs {
+        let site: Vec<PathBuf> = if cfg!(windows) {
+            vec![venv.join("Lib").join("site-packages")]
+        } else {
+            std::fs::read_dir(venv.join("lib"))
+                .map(|rd| {
+                    rd.flatten()
+                        .filter(|e| e.file_name().to_string_lossy().starts_with("python"))
+                        .map(|e| e.path().join("site-packages"))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        for sp in site {
+            let libs = sp.join("pillow_heif.libs");
+            let dylibs = sp.join("pillow_heif").join(".dylibs");
+            out.extend([libs, dylibs, sp].into_iter().filter(|d| d.is_dir()));
+        }
+    }
+    out
+}
+
 // ------------------------------------------------------------------------ manager
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -769,6 +810,10 @@ impl Core {
                     g.step = Some("done");
                     g.detail = "Ready".into();
                 }
+            }
+            if state == RuntimeState::Ready {
+                // pillow-heif's libheif can now decode HEIC where the OS cannot
+                configure_heif_decoding(&core.runtime.root, &core.dirs.root);
             }
             // a worker that failed before the runtime existed must retry right away
             core.worker.kill().await;

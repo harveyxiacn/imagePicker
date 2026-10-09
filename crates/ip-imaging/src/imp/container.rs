@@ -274,9 +274,197 @@ pub fn raw_preview(data: &[u8]) -> Option<&[u8]> {
 
 #[derive(Default)]
 pub struct HeifInfo<'a> {
+    /// Stored (untransformed) size of the primary image; the largest `ispe` when the primary
+    /// item's properties cannot be resolved.
     pub width: u32,
     pub height: u32,
     pub exif_tiff: Option<&'a [u8]>,
+    /// EXIF-style orientation (1..=8) of the primary item's `irot`/`imir` properties; `None`
+    /// when its property associations were not found.
+    pub orientation: Option<u8>,
+    /// The primary image itself when it is JPEG-coded (legal, if rare).
+    pub primary_jpeg: Option<&'a [u8]>,
+    /// JPEG thumbnails/previews: other JPEG-coded items and the EXIF IFD1 thumbnail.
+    pub jpeg_previews: Vec<&'a [u8]>,
+}
+
+/// Big-endian unsigned integer of `n` bytes at `*pos` (`n == 0` reads 0), advancing `pos`.
+fn be_uint(b: &[u8], pos: &mut usize, n: usize) -> Option<u64> {
+    let s = b.get(*pos..pos.checked_add(n)?)?;
+    *pos += n;
+    Some(s.iter().fold(0u64, |a, &x| (a << 8) | x as u64))
+}
+
+/// One `iloc` entry: construction method (0 file, 1 `idat`) and the first extent.
+struct ItemLoc {
+    id: u32,
+    method: u8,
+    offset: u64,
+    len: u64,
+    extents: u64,
+}
+
+fn parse_iloc(p: &[u8]) -> Vec<ItemLoc> {
+    let mut out = Vec::new();
+    if p.len() < 8 {
+        return out;
+    }
+    let ver = p[0];
+    let osz = (p[4] >> 4) as usize;
+    let lsz = (p[4] & 15) as usize;
+    let bsz = (p[5] >> 4) as usize;
+    let isz = if ver == 1 || ver == 2 {
+        (p[5] & 15) as usize
+    } else {
+        0
+    };
+    let idsz = if ver < 2 { 2 } else { 4 };
+    let mut pos = 6usize;
+    let Some(count) = be_uint(p, &mut pos, idsz) else {
+        return out;
+    };
+    for _ in 0..count.min(4096) {
+        let Some(id) = be_uint(p, &mut pos, idsz) else {
+            break;
+        };
+        let mut method = 0;
+        if ver == 1 || ver == 2 {
+            let Some(v) = be_uint(p, &mut pos, 2) else {
+                break;
+            };
+            method = (v & 15) as u8;
+        }
+        let (Some(_dref), Some(base), Some(ec)) = (
+            be_uint(p, &mut pos, 2),
+            be_uint(p, &mut pos, bsz),
+            be_uint(p, &mut pos, 2),
+        ) else {
+            break;
+        };
+        let mut first = None;
+        for _ in 0..ec {
+            if be_uint(p, &mut pos, isz).is_none() {
+                return out;
+            }
+            let (Some(off), Some(len)) = (be_uint(p, &mut pos, osz), be_uint(p, &mut pos, lsz))
+            else {
+                return out;
+            };
+            first = first.or(Some((off, len)));
+        }
+        if let Some((off, len)) = first {
+            out.push(ItemLoc {
+                id: id as u32,
+                method,
+                offset: base.saturating_add(off),
+                len,
+                extents: ec,
+            });
+        }
+    }
+    out
+}
+
+/// Bytes of the first extent (length 0 = to the end of the source).
+fn item_bytes<'a>(data: &'a [u8], idat: Option<&'a [u8]>, l: &ItemLoc) -> Option<&'a [u8]> {
+    let src = match l.method {
+        0 => data,
+        1 => idat?,
+        _ => return None,
+    };
+    let start = usize::try_from(l.offset).ok()?;
+    let end = if l.len == 0 {
+        src.len()
+    } else {
+        start.checked_add(usize::try_from(l.len).ok()?)?
+    };
+    src.get(start..end)
+}
+
+/// `iinf`: (item id, item type) of every `infe` (version >= 2).
+fn parse_iinf(p: &[u8]) -> Vec<(u32, [u8; 4])> {
+    let mut out = Vec::new();
+    if p.len() <= 6 {
+        return out;
+    }
+    let body = if p[0] == 0 {
+        &p[6..]
+    } else {
+        &p[8.min(p.len())..]
+    };
+    for (t, e) in iter_boxes(body) {
+        if &t != b"infe" || e.len() < 12 || e[0] < 2 {
+            continue;
+        }
+        let (id, ty) = if e[0] == 2 {
+            (u16::from_be_bytes([e[4], e[5]]) as u32, &e[8..12])
+        } else if e.len() >= 14 {
+            (u32::from_be_bytes(e[4..8].try_into().unwrap()), &e[10..14])
+        } else {
+            continue;
+        };
+        out.push((id, ty.try_into().unwrap()));
+    }
+    out
+}
+
+/// `ipma`: item id -> 1-based `ipco` property indices, in association order.
+fn parse_ipma(p: &[u8], out: &mut Vec<(u32, Vec<usize>)>) {
+    if p.len() < 8 {
+        return;
+    }
+    let idsz = if p[0] < 1 { 2 } else { 4 };
+    let wide = p[3] & 1 == 1;
+    let mut pos = 4usize;
+    let Some(n) = be_uint(p, &mut pos, 4) else {
+        return;
+    };
+    for _ in 0..n.min(65536) {
+        let (Some(id), Some(cnt)) = (be_uint(p, &mut pos, idsz), be_uint(p, &mut pos, 1)) else {
+            return;
+        };
+        let mut props = Vec::with_capacity(cnt as usize);
+        for _ in 0..cnt {
+            let Some(v) = be_uint(p, &mut pos, if wide { 2 } else { 1 }) else {
+                return;
+            };
+            // the top bit is the `essential` flag
+            props.push((v & if wide { 0x7FFF } else { 0x7F }) as usize);
+        }
+        out.push((id as u32, props));
+    }
+}
+
+/// EXIF orientation equivalent to HEIF transformative properties applied in order. The state
+/// is `(r, f)`: mirror left-right if `f`, then rotate `r` quarter turns clockwise.
+pub fn heif_orientation(props: &[([u8; 4], &[u8])]) -> u8 {
+    let (mut r, mut f) = (0u8, false);
+    for (t, p) in props {
+        match t {
+            // irot: anticlockwise quarter turns
+            b"irot" if !p.is_empty() => r = (r + 4 - (p[0] & 3)) % 4,
+            // imir: axis 1 mirrors left-right, axis 0 top-bottom (= left-right + 180°), as
+            // libheif reads it. Mirroring after a rotation negates the rotation.
+            b"imir" if !p.is_empty() => {
+                r = (4 - r) % 4;
+                f = !f;
+                if p[0] & 1 == 0 {
+                    r = (r + 2) % 4;
+                }
+            }
+            _ => {}
+        }
+    }
+    match (r, f) {
+        (0, false) => 1,
+        (0, true) => 2,
+        (2, false) => 3,
+        (2, true) => 4,
+        (3, true) => 5,
+        (1, false) => 6,
+        (1, true) => 7,
+        _ => 8,
+    }
 }
 
 pub fn parse_heif(data: &[u8]) -> HeifInfo<'_> {
@@ -287,119 +475,94 @@ pub fn parse_heif(data: &[u8]) -> HeifInfo<'_> {
     if meta.len() < 4 {
         return info;
     }
-    let meta = &meta[4..];
-    let boxes = iter_boxes(meta);
-    // dimensions: largest ispe in iprp/ipco
-    for (t, p) in &boxes {
-        if t == b"iprp" {
-            for (t2, p2) in iter_boxes(p) {
-                if &t2 == b"ipco" {
-                    for (t3, p3) in iter_boxes(p2) {
-                        if &t3 == b"ispe" && p3.len() >= 12 {
-                            let w = u32::from_be_bytes(p3[4..8].try_into().unwrap());
-                            let h = u32::from_be_bytes(p3[8..12].try_into().unwrap());
-                            if w as u64 * h as u64 > info.width as u64 * info.height as u64 {
-                                info.width = w;
-                                info.height = h;
-                            }
-                        }
+    let mut primary = None;
+    let mut items = Vec::new();
+    let mut locs = Vec::new();
+    let mut idat = None;
+    let mut ipco: Vec<([u8; 4], &[u8])> = Vec::new();
+    let mut ipma = Vec::new();
+    for (t, p) in iter_boxes(&meta[4..]) {
+        match &t {
+            b"pitm" if p.len() >= 6 => {
+                let mut pos = 4;
+                primary = be_uint(p, &mut pos, if p[0] == 0 { 2 } else { 4 }).map(|v| v as u32);
+            }
+            b"iinf" => items = parse_iinf(p),
+            b"iloc" => locs = parse_iloc(p),
+            b"idat" => idat = Some(p),
+            b"iprp" => {
+                for (t2, p2) in iter_boxes(p) {
+                    match &t2 {
+                        b"ipco" => ipco = iter_boxes(p2),
+                        b"ipma" => parse_ipma(p2, &mut ipma),
+                        _ => {}
                     }
+                }
+            }
+            _ => {}
+        }
+    }
+    let ispe = |p: &[u8]| -> Option<(u32, u32)> {
+        let w = u32::from_be_bytes(p.get(4..8)?.try_into().ok()?);
+        let h = u32::from_be_bytes(p.get(8..12)?.try_into().ok()?);
+        Some((w, h))
+    };
+    // primary item: size and transformative properties
+    if let Some(props) = primary.and_then(|id| ipma.iter().find(|(i, _)| *i == id)) {
+        let props: Vec<([u8; 4], &[u8])> = props
+            .1
+            .iter()
+            .filter_map(|&k| ipco.get(k.checked_sub(1)?).copied())
+            .collect();
+        if let Some((w, h)) = props
+            .iter()
+            .find(|(t, _)| t == b"ispe")
+            .and_then(|&(_, p)| ispe(p))
+        {
+            info.width = w;
+            info.height = h;
+        }
+        info.orientation = Some(heif_orientation(&props));
+    }
+    if info.width == 0 {
+        // no associations: the largest `ispe` (the primary image or its grid)
+        for &(_, p) in ipco.iter().filter(|(t, _)| t == b"ispe") {
+            if let Some((w, h)) = ispe(p) {
+                if w as u64 * h as u64 > info.width as u64 * info.height as u64 {
+                    info.width = w;
+                    info.height = h;
                 }
             }
         }
     }
-    // Exif item id
-    let mut exif_id = None;
-    for (t, p) in &boxes {
-        if t == b"iinf" && p.len() > 6 {
-            let ver = p[0];
-            let body = if ver == 0 {
-                &p[6..]
-            } else {
-                &p[8.min(p.len())..]
-            };
-            for (t2, p2) in iter_boxes(body) {
-                if &t2 == b"infe" && p2.len() >= 12 && p2[0] >= 2 {
-                    let (id, ty) = if p2[0] == 2 {
-                        (u16::from_be_bytes([p2[4], p2[5]]) as u32, &p2[8..12])
-                    } else if p2.len() >= 14 {
-                        (
-                            u32::from_be_bytes(p2[4..8].try_into().unwrap()),
-                            &p2[10..14],
-                        )
+    for (id, ty) in &items {
+        let Some(loc) = locs.iter().find(|l| l.id == *id) else {
+            continue;
+        };
+        match ty {
+            b"Exif" if info.exif_tiff.is_none() => {
+                // 4-byte offset to the TIFF header, then the EXIF block
+                let tiff = item_bytes(data, idat, loc).and_then(|item| {
+                    let skip = u32::from_be_bytes(item.get(0..4)?.try_into().ok()?) as usize;
+                    item.get(4..)?.get(skip..)
+                });
+                if let Some(t) = tiff.filter(|t| Tiff::new(t).is_some()) {
+                    info.exif_tiff = Some(t);
+                    info.jpeg_previews.extend(exif_thumbnail(t));
+                }
+            }
+            b"jpeg" if loc.extents == 1 => {
+                if let Some(j) =
+                    item_bytes(data, idat, loc).filter(|j| usable_jpeg_dims(j).is_some())
+                {
+                    if Some(*id) == primary {
+                        info.primary_jpeg = Some(j);
                     } else {
-                        continue;
-                    };
-                    if ty == b"Exif" {
-                        exif_id = Some(id);
+                        info.jpeg_previews.push(j);
                     }
                 }
             }
-        }
-    }
-    let Some(exif_id) = exif_id else { return info };
-    for (t, p) in &boxes {
-        if t == b"iloc" && p.len() >= 8 {
-            let ver = p[0];
-            let osz = (p[4] >> 4) as usize;
-            let lsz = (p[4] & 15) as usize;
-            let bsz = (p[5] >> 4) as usize;
-            let isz = if ver == 1 || ver == 2 {
-                (p[5] & 15) as usize
-            } else {
-                0
-            };
-            let rd = |b: &[u8], pos: &mut usize, n: usize| -> Option<u64> {
-                let s = b.get(*pos..*pos + n)?;
-                *pos += n;
-                Some(s.iter().fold(0u64, |a, &x| (a << 8) | x as u64))
-            };
-            let mut pos = 6usize;
-            let count = if ver < 2 {
-                rd(p, &mut pos, 2)
-            } else {
-                rd(p, &mut pos, 4)
-            };
-            let Some(count) = count else { continue };
-            for _ in 0..count.min(4096) {
-                let id = if ver < 2 {
-                    rd(p, &mut pos, 2)
-                } else {
-                    rd(p, &mut pos, 4)
-                };
-                let Some(id) = id else { break };
-                let mut cm = 0;
-                if ver == 1 || ver == 2 {
-                    cm = rd(p, &mut pos, 2).unwrap_or(0) & 15;
-                }
-                let _dref = rd(p, &mut pos, 2);
-                let base = rd(p, &mut pos, bsz).unwrap_or(0);
-                let Some(ec) = rd(p, &mut pos, 2) else { break };
-                for k in 0..ec {
-                    if isz > 0 {
-                        let _ = rd(p, &mut pos, isz);
-                    }
-                    let (Some(off), Some(len)) = (rd(p, &mut pos, osz), rd(p, &mut pos, lsz))
-                    else {
-                        break;
-                    };
-                    if id as u32 == exif_id && k == 0 && cm == 0 {
-                        let start = (base + off) as usize;
-                        if let Some(item) = data.get(start..start.saturating_add(len as usize)) {
-                            if item.len() > 4 {
-                                let skip =
-                                    u32::from_be_bytes(item[0..4].try_into().unwrap()) as usize;
-                                let body = &item[4..];
-                                if let Some(tb) = body.get(skip..) {
-                                    if Tiff::new(tb).is_some() {
-                                        info.exif_tiff = Some(tb);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            _ => {}
         }
     }
     info

@@ -163,6 +163,7 @@ impl Core {
         );
         let worker_timeouts = TimeoutHandle::new(WorkerTimeouts::from_env());
         let runtime = runtime::RuntimeManager::new(&dirs.root, dirs.logs.clone());
+        runtime::configure_heif_decoding(runtime.root(), &dirs.root);
         let worker: Arc<dyn AiWorker> = match cfg.worker {
             Some(w) => w,
             None if ip_worker_client::worker_unsupported() => Arc::new(UnavailableWorker::new(

@@ -1,4 +1,5 @@
 //! Thumbnail / proxy pipeline: embedded preview -> DCT-scaled decode -> full decode, SIMD resize.
+//! HEIF/AVIF pixels come from `heif.rs`.
 use std::path::Path;
 
 use anyhow::{anyhow, bail, Context};
@@ -15,7 +16,7 @@ pub struct Rgb {
     pub data: Vec<u8>,
 }
 
-fn fit_dims(w: u32, h: u32, long_edge: u32) -> (u32, u32) {
+pub(super) fn fit_dims(w: u32, h: u32, long_edge: u32) -> (u32, u32) {
     let long = w.max(h);
     if long <= long_edge {
         return (w, h);
@@ -142,13 +143,14 @@ fn decode_with_image(path: &Path) -> Result<Rgb> {
     })
 }
 
-/// Load pixels (not yet oriented) with long edge >= min(`long_edge`, original) where cheap.
+/// Load pixels with long edge >= min(`long_edge`, original) where cheap. The flag is true when
+/// the decoder already applied the orientation (otherwise the pixels are as stored).
 fn load(
     path: &Path,
     format: ImageFormat,
     long_edge: u32,
     allow_embedded_thumb: bool,
-) -> Result<(Rgb, ThumbSource)> {
+) -> Result<(Rgb, ThumbSource, bool)> {
     match format {
         ImageFormat::Jpeg => {
             let data = read_all(path)?;
@@ -163,7 +165,7 @@ fn load(
                                     < 0.02 * (info.width as f64 / info.height as f64);
                             if tw.max(th) >= long_edge && aspect_ok {
                                 if let Ok((rgb, _)) = decode_jpeg(tb, long_edge) {
-                                    return Ok((rgb, ThumbSource::Embedded));
+                                    return Ok((rgb, ThumbSource::Embedded, false));
                                 }
                             }
                         }
@@ -178,6 +180,7 @@ fn load(
                 } else {
                     ThumbSource::FullDecode
                 },
+                false,
             ))
         }
         ImageFormat::Raw => {
@@ -189,16 +192,13 @@ fn load(
                 )
             })?;
             let (rgb, _) = decode_jpeg(prev, long_edge)?;
-            Ok((rgb, ThumbSource::Embedded))
+            Ok((rgb, ThumbSource::Embedded, false))
         }
         ImageFormat::Png | ImageFormat::Webp | ImageFormat::Tiff => {
-            Ok((decode_with_image(path)?, ThumbSource::FullDecode))
+            Ok((decode_with_image(path)?, ThumbSource::FullDecode, false))
         }
         ImageFormat::Heif | ImageFormat::Avif => {
-            bail!(
-                "HEIF/AVIF not supported yet (no pure-Rust decoder available): {}",
-                path.display()
-            )
+            super::heif::load(path, long_edge, allow_embedded_thumb)
         }
     }
 }
@@ -213,10 +213,11 @@ fn upright(
     if long_edge == 0 {
         bail!("long_edge must be > 0");
     }
-    let (rgb, src) = load(path, format, long_edge, embedded)?;
+    let (rgb, src, oriented) = load(path, format, long_edge, embedded)?;
     let (nw, nh) = fit_dims(rgb.w, rgb.h, long_edge);
     let mut rgb = resize_rgb(rgb, nw, nh)?;
     super::color::to_srgb(path, format, &mut rgb.data);
+    let orientation = if oriented { 1 } else { orientation };
     let (w, h, data) = orient::apply(rgb.w, rgb.h, rgb.data, orientation);
     Ok((Rgb { w, h, data }, src))
 }

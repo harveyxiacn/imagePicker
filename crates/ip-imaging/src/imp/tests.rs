@@ -198,14 +198,14 @@ fn full_exif_tiff(le: bool) -> Vec<u8> {
     build_tiff(le, &ifd0)
 }
 
-fn bx(typ: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+pub fn bx(typ: &[u8; 4], payload: &[u8]) -> Vec<u8> {
     let mut v = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
     v.extend_from_slice(typ);
     v.extend_from_slice(payload);
     v
 }
 
-fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+pub fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
     let p = dir.join(name);
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     fs::write(&p, bytes).unwrap();
@@ -221,7 +221,7 @@ fn is_red(p: [u8; 3]) -> bool {
     p[0] > 180 && p[1] < 90 && p[2] < 90
 }
 
-fn decode_out(e: &EncodedImage) -> Vec<u8> {
+pub fn decode_out(e: &EncodedImage) -> Vec<u8> {
     let img = image::load_from_memory_with_format(&e.bytes, image::ImageFormat::Jpeg)
         .unwrap()
         .to_rgb8();
@@ -687,6 +687,6 @@ fn raw_without_preview_and_heif_errors() {
     let err = generate_thumbnail(&h, ImageFormat::Heif, 1, 256, 80)
         .unwrap_err()
         .to_string();
-    assert!(err.contains("not supported yet"), "{err}");
+    assert!(err.contains("cannot decode HEIF/AVIF"), "{err}");
     assert!(read_metadata(&h, ImageFormat::Heif).is_ok());
 }

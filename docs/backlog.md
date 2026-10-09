@@ -16,7 +16,8 @@
 
 | 优先级 | 项 | 来源 |
 |---|---|---|
-| P1 | HEIC/HEIF 缩略图（系统解码器：WIC / ImageIO / libheif） | M1 imaging |
+| P1 | HEIC/HEIF 解码路径的实机验证：本机只验证了 libheif（AI 组件自带）与内嵌 JPEG 两层；Windows WIC + HEIF/HEVC 扩展、macOS ImageIO 未实测；真实 iPhone / 安卓样张（网格、HDR、`imir`）与 AVIF 未测 | M1 imaging |
+| P2 | Android 端 HEIC 缩略图：Rust 侧只有内嵌 JPEG，需经媒体插件接入 `ImageDecoder` / `loadThumbnail` | M8 |
 | P1 | 倾斜检测、构图分 | M2 |
 | P1 | RAW 预览在真实相机文件上验证（目前仅合成样本） | M1 imaging |
 | P2 | 以脸搜脸「这是新的人」 | M4 web |
@@ -48,6 +49,7 @@
 ## 已在集成中修复（记录）
 
 - 拍摄时间按查看者时区显示 → 改为拍摄地当地时间（M1）
+- HEIC/HEIF 缩略图：内嵌 JPEG → WIC / ImageIO → 运行时加载 libheif（含 AI 组件自带）分层降级，方向以 `irot`/`imir` 为准（M1，见 02 §5.1）
 - EXIF 浮点噪声、AI 一键数值噪声（M1、M3）
 - 网格场景标题 key 重复导致重叠（M2）
 - 前端写死 LUT id → `GET /api/luts`（M3）

@@ -9,21 +9,31 @@ mod container;
 mod copy_exif;
 mod dcjpeg;
 mod exif;
+mod heif;
+#[cfg(target_os = "macos")]
+mod imageio;
 mod io;
+#[cfg(not(target_os = "android"))]
+mod libheif;
 mod orient;
 mod scan;
 mod thumb;
 mod tiff;
+#[cfg(windows)]
+mod wic;
 
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_dc;
+#[cfg(test)]
+mod tests_heif;
 
 use io::{open_data, read_head};
 use tiff::Tiff;
 
 pub use copy_exif::read_exif;
+pub use heif::set_library_dirs as set_heif_library_dirs;
 pub use scan::scan_dir;
 pub use thumb::{decode_rgb8, generate_thumbnail};
 
@@ -161,6 +171,11 @@ pub fn read_metadata(path: &Path, format: ImageFormat) -> Result<Metadata> {
             }
             if let Some(t) = h.exif_tiff.and_then(Tiff::new) {
                 exif::fill_from_tiff(&mut md, &t);
+            }
+            // `irot`/`imir` are normative in HEIF; the EXIF orientation tag is informative and
+            // often stale (writers that rotate the pixels keep it).
+            if let Some(o) = h.orientation {
+                md.orientation = o;
             }
         }
     }

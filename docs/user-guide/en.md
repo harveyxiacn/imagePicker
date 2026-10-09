@@ -159,7 +159,9 @@ The first time an AI feature needs models, the *AI models required* dialog lists
 - *Remove session* only removes the catalog record and caches; **originals are untouched**.
 - The *Import from SD card / phone* button is disabled for now.
 
-Known limitations: HEIC/HEIF thumbnails rely on a system decoder and are not supported yet; RAW previews were only verified with synthetic samples, so reports on real camera files are welcome.
+HEIC/HEIF (phone photos) need a decoder, tried in this order: a JPEG preview inside the file → the system decoder (Windows: install *HEIF Image Extensions* and *HEVC Video Extensions* from the Microsoft Store; built into macOS) → libheif (Linux: install `libheif` with its HEVC plugin; with the AI components installed, the libheif they ship is used automatically). Without any of them these photos have no thumbnails, see [Troubleshooting](#19-troubleshooting--faq).
+
+Known limitations: RAW previews were only verified with synthetic samples, so reports on real camera files are welcome.
 
 ## 5. Culling workflow & shortcuts
 
@@ -543,7 +545,7 @@ Open with the gear icon on Home or in the top bar.
 | Model download fails / is slow | Switch to the HF mirror or ModelScope in *Settings → Hardware & models → Download source*; check that *Allow network* is on |
 | AI stars feel "off" | Thresholds are not calibrated yet; treat them as suggestions, let *My taste* adapt, adjust strictness in Settings |
 | Burst grouping too loose / tight | *Settings → Analysis → Burst grouping strictness*, or *Split / Merge* by hand in group view |
-| HEIC photos have no thumbnails | HEIC/HEIF thumbnails are not supported yet (backlog P1) |
+| HEIC photos have no thumbnails | No HEIF decoder is available (the log says what is missing): on Windows install *HEIF Image Extensions* + *HEVC Video Extensions* from the Microsoft Store, or the AI components; on Linux install `libheif` with its HEVC plugin (e.g. `libheif-plugin-libde265`). Restart the app and browse again; blurry small thumbnails can be rebuilt by clearing thumbnails in *Settings → Cache* |
 | Cannot drop folders in the browser | Browser mode does not receive OS drops; use *Choose folder* or the desktop app |
 | "This folder is not in an allowed directory" | Add it under *Settings → LAN → Allowed folders* |
 | LAN devices cannot connect | LAN access enabled and owner password set, firewall allows the port (default 7878), same network; restart after changing the port |
