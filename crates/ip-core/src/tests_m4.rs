@@ -806,6 +806,147 @@ async fn face_search_by_upload_and_by_face_id() {
     ));
 }
 
+/// Faces of `photo` as `(face id, person id)`, left to right.
+async fn faces_of(e: &Env, photo: i64) -> Vec<(i64, Option<i64>)> {
+    let mut faces = e.core.photo_analysis(photo).await.unwrap().faces;
+    faces.sort_by(|a, b| a.bbox[0].partial_cmp(&b.bbox[0]).unwrap());
+    faces.into_iter().map(|f| (f.id, f.person_id)).collect()
+}
+
+#[tokio::test]
+async fn new_person_from_search_results_is_locked_and_survives_reclustering() {
+    let s = scene().await;
+    let id = |n: &str| s.ph[n].id;
+    // similar faces say who they belong to now
+    s.e.worker
+        .set_embed_faces(vec![([0.3, 0.3, 0.3, 0.3], person(0, 5.0))]);
+    let out =
+        s.e.core
+            .faces_search_image(jpeg_bytes(), Some(s.sid), None)
+            .await
+            .unwrap();
+    assert!(out.similar_faces.iter().all(|f| f.person_id == Some(s.a)));
+    let a_count = s.e.core.people(Some(s.sid)).await.unwrap();
+    let a_count = a_count.iter().find(|p| p.id == s.a).unwrap().photo_count;
+
+    // "this is a new person": A's faces of b1 and b2 belong to somebody else
+    let fb1 = faces_of(&s.e, id("b1.jpg")).await[0].0;
+    let fb2 = faces_of(&s.e, id("b2.jpg")).await[0].0;
+    let mut rx = s.e.core.events.subscribe();
+    let ben =
+        s.e.core
+            .create_person(CreatePersonRequest {
+                face_ids: vec![fb1, fb2, fb1],
+                name: Some("  Ben ".into()),
+            })
+            .await
+            .unwrap();
+    assert_eq!(ben.name.as_deref(), Some("Ben"));
+    assert_eq!(ben.photo_count, 2);
+    assert!(!ben.hidden && !ben.singleton);
+    assert!(ben.cover_face_id == Some(fb1) || ben.cover_face_id == Some(fb2));
+    assert_eq!(faces_of(&s.e, id("b1.jpg")).await[0].1, Some(ben.id));
+    assert_eq!(faces_of(&s.e, id("b2.jpg")).await[0].1, Some(ben.id));
+    let people = s.e.core.people(Some(s.sid)).await.unwrap();
+    assert_eq!(
+        people.iter().find(|p| p.id == s.a).unwrap().photo_count,
+        a_count - 2
+    );
+    assert!(people.iter().any(|p| p.id == ben.id));
+    let ben_id = ben.id;
+    let locked: i64 =
+        s.e.core
+            .db
+            .call(move |c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM face WHERE person_locked=1 AND person_id=?1",
+                    [ben_id],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+    assert_eq!(locked, 2, "the user's word is a lock");
+    let mut people_updated = false;
+    while let Ok(ev) = rx.try_recv() {
+        people_updated |= matches!(ev, Event::PeopleUpdated { session_id } if session_id == s.sid);
+    }
+    assert!(people_updated);
+    // the new person is a search candidate now
+    let out = s.e.core.faces_search_face(fb1, Some(s.sid)).await.unwrap();
+    assert!(out.candidates.iter().any(|c| c.person_id == ben.id));
+
+    // bad requests change nothing
+    let n_people = s.e.core.people_with(Some(s.sid), true).await.unwrap().len();
+    let [fa1, fb_a1] = <[(i64, Option<i64>); 2]>::try_from(faces_of(&s.e, id("a1.jpg")).await)
+        .unwrap()
+        .map(|f| f.0);
+    for (ids, bad_request) in [
+        (vec![], true),
+        (vec![fa1, fb_a1], true), // one person appears once per photo
+        (vec![fa1, 31_337_000], false),
+    ] {
+        let r =
+            s.e.core
+                .create_person(CreatePersonRequest {
+                    face_ids: ids,
+                    name: None,
+                })
+                .await;
+        if bad_request {
+            assert!(matches!(r, Err(CoreError::BadRequest(_))), "{r:?}");
+        } else {
+            assert!(matches!(r, Err(CoreError::NotFound(_))), "{r:?}");
+        }
+    }
+    assert_eq!(
+        s.e.core.people_with(Some(s.sid), true).await.unwrap().len(),
+        n_people
+    );
+    assert_eq!(faces_of(&s.e, id("a1.jpg")).await[0].1, Some(s.a));
+
+    // taking every face of a person empties it: the unnamed stranger disappears
+    let fc1 = faces_of(&s.e, id("c1.jpg")).await[0].0;
+    let carl =
+        s.e.core
+            .create_person(CreatePersonRequest {
+                face_ids: vec![fc1],
+                name: Some("   ".into()),
+            })
+            .await
+            .unwrap();
+    assert!(carl.name.is_none() && carl.photo_count == 1 && !carl.singleton);
+    let all = s.e.core.people_with(Some(s.sid), true).await.unwrap();
+    assert!(all.iter().all(|p| Some(p.id) != s.stranger));
+    assert!(all.iter().any(|p| p.id == carl.id));
+
+    // a full re-analysis re-creates the faces; the locked assignments win
+    s.e.core
+        .analysis_run(AnalysisRunRequest {
+            session_id: s.sid,
+            profile: Profile::Standard,
+            photo_ids: None,
+            force: true,
+            allow_download: false,
+        })
+        .await
+        .unwrap();
+    for _ in 0..1200 {
+        if s.e.core.analysis_status(s.sid).state != RunState::Running {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(s.e.core.analysis_status(s.sid).state, RunState::Done);
+    assert_eq!(faces_of(&s.e, id("b1.jpg")).await[0].1, Some(ben.id));
+    assert_eq!(faces_of(&s.e, id("b2.jpg")).await[0].1, Some(ben.id));
+    assert_eq!(faces_of(&s.e, id("c1.jpg")).await[0].1, Some(carl.id));
+    let people = s.e.core.people(Some(s.sid)).await.unwrap();
+    let ben_now = people.iter().find(|p| p.id == ben.id).unwrap();
+    assert_eq!(ben_now.name.as_deref(), Some("Ben"));
+    assert!(ben_now.photo_count >= 2);
+}
+
 // ------------------------------------------------------------------ collections
 
 #[tokio::test]

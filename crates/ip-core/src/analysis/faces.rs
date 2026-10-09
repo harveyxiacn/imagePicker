@@ -164,6 +164,10 @@ pub struct Candidate {
 pub struct SimilarFace {
     pub face_id: i64,
     pub photo_id: i64,
+    /// The person the face belongs to now (`None` = unassigned), so the UI can show what
+    /// "this is a new person" takes it away from.
+    pub person_id: Option<i64>,
+    pub person_name: Option<String>,
     pub similarity: f64,
 }
 
@@ -235,7 +239,8 @@ pub fn search_embedding(
     let mut faces: Vec<SimilarFace> = Vec::new();
     {
         let sql = format!(
-            "SELECT f.id, f.photo_id, f.embedding FROM face f{scope_join}
+            "SELECT f.id, f.photo_id, f.embedding, f.person_id, pe.name FROM face f{scope_join}
+             LEFT JOIN person pe ON pe.id=f.person_id
              WHERE f.embedding IS NOT NULL"
         );
         let mut st = conn.prepare(&sql)?;
@@ -244,10 +249,12 @@ pub fn search_embedding(
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
                 r.get::<_, Vec<u8>>(2)?,
+                r.get::<_, Option<i64>>(3)?,
+                r.get::<_, Option<String>>(4)?,
             ))
         })?;
         for row in rows {
-            let (id, photo_id, emb) = row?;
+            let (id, photo_id, emb, person_id, person_name) = row?;
             if Some(id) == exclude_face {
                 continue;
             }
@@ -256,6 +263,8 @@ pub fn search_embedding(
                 faces.push(SimilarFace {
                     face_id: id,
                     photo_id,
+                    person_id,
+                    person_name,
                     similarity: sim4(s),
                 });
             }

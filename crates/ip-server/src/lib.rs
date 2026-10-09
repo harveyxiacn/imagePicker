@@ -157,7 +157,7 @@ pub fn build_router_auth(
         .route("/bursts/{id}/faces", get(m2::burst_faces))
         .route("/faces/{id}/crop", get(m2::face_crop))
         .route("/faces/{id}/person", post(m2::set_face_person))
-        .route("/people", get(m2::people))
+        .route("/people", get(m2::people).post(m2::create_person))
         .route("/people/merge", post(m2::merge_people))
         .route("/people/{id}", patch(m2::patch_person))
         .route(

@@ -967,4 +967,30 @@ export const aiHandlers = [
     if (sid !== undefined) emit({ type: 'people.updated', session_id: sid })
     return HttpResponse.json({ face: toFace(f) })
   }),
+  // "this is a new person" (search by face): the faces move to a new person
+  http.post('/api/people', async ({ request }) => {
+    await lat()
+    const { face_ids, name } = (await request.json()) as { face_ids?: number[]; name?: string | null }
+    const ids = [...new Set(face_ids ?? [])]
+    if (!ids.length) return err(400, 'bad_request', 'face_ids must not be empty')
+    const faces: FaceRec[] = []
+    for (const id of ids) {
+      const f = faceById.get(id)
+      if (!f) return err(404, 'not_found', `face ${id} not found`)
+      faces.push(f)
+    }
+    if (new Set(faces.map((f) => f.photo_id)).size !== faces.length)
+      return err(400, 'bad_request', 'two of the faces are in the same photo; a person appears at most once per photo')
+    const id = nextPersonId++
+    const trimmed = name?.trim() || null
+    people.set(id, { id, name: trimmed, hidden: false, style: faces[0].pi })
+    for (const f of faces) {
+      f.assigned = true
+      f.person_id = id
+      f.person_name = trimmed
+    }
+    const sid = [...runs.keys()][0]
+    if (sid !== undefined) emit({ type: 'people.updated', session_id: sid })
+    return HttpResponse.json({ person: peopleList(null).find((x) => x.id === id) }, { status: 201 })
+  }),
 ]

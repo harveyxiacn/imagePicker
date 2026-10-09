@@ -510,6 +510,99 @@ async fn face_search_multipart_and_json() {
 }
 
 #[tokio::test]
+async fn new_person_from_face_search_over_http() {
+    let e = env();
+    let s = scene(&e).await;
+    let analysis = |name: &str| format!("/api/photos/{}/analysis", s.ids[name]);
+    let a1_faces = call(&e.app, Method::GET, &analysis("a1.jpg"), None)
+        .await
+        .json()["faces"]
+        .clone();
+    let a1_face = a1_faces[0]["id"].as_i64().unwrap();
+    let b1_face = call(&e.app, Method::GET, &analysis("b1.jpg"), None)
+        .await
+        .json()["faces"][0]["id"]
+        .as_i64()
+        .unwrap();
+
+    // similar faces carry their current person
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/faces/search",
+        Some(json!({"face_id": a1_face, "session_id": s.sid})),
+    )
+    .await;
+    let similar = r.json()["similar_faces"].as_array().unwrap().clone();
+    let b1 = similar
+        .iter()
+        .find(|f| f["face_id"] == b1_face)
+        .expect("b1's face is similar");
+    assert_eq!(b1["person_id"], s.a);
+    assert!(b1.get("person_name").is_some());
+
+    // the query face and b1's face are somebody new
+    let mut rx = e.core.events.subscribe();
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/people",
+        Some(json!({"face_ids": [a1_face, b1_face], "name": " Ann "})),
+    )
+    .await;
+    assert_eq!(
+        r.status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&r.body)
+    );
+    let p = r.json()["person"].clone();
+    let ann = p["id"].as_i64().unwrap();
+    assert_ne!(ann, s.a);
+    assert_eq!(p["name"], "Ann");
+    assert_eq!(p["photo_count"], 2);
+    assert!(p["cover_face_id"] == a1_face || p["cover_face_id"] == b1_face);
+    for name in ["a1.jpg", "b1.jpg"] {
+        let f = call(&e.app, Method::GET, &analysis(name), None)
+            .await
+            .json()["faces"][0]
+            .clone();
+        assert_eq!(f["person_id"], ann, "{name}");
+        assert_eq!(f["person_name"], "Ann", "{name}");
+    }
+    let people = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/people?session_id={}", s.sid),
+        None,
+    )
+    .await
+    .json()["people"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert!(people
+        .iter()
+        .any(|p| p["id"] == ann && p["photo_count"] == 2));
+    let mut seen = false;
+    while let Ok(ev) = rx.try_recv() {
+        seen |= matches!(ev, Event::PeopleUpdated { session_id } if session_id == s.sid);
+    }
+    assert!(seen, "people.updated");
+
+    // validation (two faces of one photo cannot be the same person)
+    let (left, right) = (a1_faces[0]["id"].clone(), a1_faces[1]["id"].clone());
+    for (body, status) in [
+        (json!({"face_ids": []}), StatusCode::BAD_REQUEST),
+        (json!({"face_ids": [99_999_999]}), StatusCode::NOT_FOUND),
+        (json!({"face_ids": [left, right]}), StatusCode::BAD_REQUEST),
+    ] {
+        let r = call(&e.app, Method::POST, "/api/people", Some(body.clone())).await;
+        assert_eq!(r.status, status, "{body}");
+    }
+}
+
+#[tokio::test]
 async fn collections_over_http_and_queries_filter() {
     let e = env();
     let s = scene(&e).await;

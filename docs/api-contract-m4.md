@@ -69,13 +69,15 @@ interface BeautyProfile {           // 不含 person_id；应用时填入
 | 方法 | 路径 | 请求 | 响应 |
 |---|---|---|---|
 | GET | `/api/people/best?session_id=&ids=1,2&n=3` | — | `{"people":[{"person_id","photos":[{"photo_id","score"}]}]}`（03 §4.4：该人表情分 × 照片综合分，同连拍组只取一张） |
-| POST | `/api/faces/search` | `multipart/form-data` 字段 `image`，或 JSON `{"face_id"}`；可选 `session_id` | `{"faces_detected":[[x,y,w,h]],"query_face":0,"candidates":[{"person_id","person_name","similarity"}],"similar_faces":[{"face_id","photo_id","similarity"}]}`（多张脸时可再带 `face_index` 重试） |
+| POST | `/api/faces/search` | `multipart/form-data` 字段 `image`，或 JSON `{"face_id"}`；可选 `session_id` | `{"faces_detected":[[x,y,w,h]],"query_face":0,"candidates":[{"person_id","person_name","similarity"}],"similar_faces":[{"face_id","photo_id","person_id":number\|null,"person_name":string\|null,"similarity"}]}`（多张脸时可再带 `face_index` 重试；`similar_faces` 的 `person_id` 为该脸当前所属人物，`null` = 未归属） |
+| POST | `/api/people` | `{"face_ids": number[], "name"?: string\|null}` | `201 {"person"}`：「这是新的人」，见下 |
 | GET | `/api/collections` | — | `{"collections":[{"id","name","query":string /*URLSearchParams，与 /api/photos 相同参数，不含 session_id/cursor/limit*/,"builtin":bool}]}`；内置：`best_per_group`、`has_closed_eyes`、`undecided`、`edited` |
 | POST | `/api/collections` | `{"name","query"}` | `201 {"collection"}` |
 | PATCH/DELETE | `/api/collections/{id}` | `{"name"?,"query"?}` | `{"collection"}` / `204`（内置不可改删 → 400） |
 | GET | `/api/taste` | — | `{"labels":number,"active":bool,"alpha":number /*0..0.6 融合权重*/,"holdout_accuracy":number\|null,"traits":[{"key","params"}] /*「你偏好低饱和」等，i18n key*/,"updated_at"}` |
 | POST | `/api/taste/reset` | — | `204`（清空偏好数据，回到基础评分） |
 
+- 「这是新的人」（以脸搜脸结果里勾选同一个人的脸；以库内人脸搜索时查询脸本身也计入）：`POST /api/people` 新建人物，`face_ids` 中的人脸离开原人物（或「未归属」）并**锁定**到新人物——与「不是此人」/合并相同的用户约束，重新聚类与强制重新分析都不改变（锁定的脸按位置继承人物）。`name` 去空白后为空 = 未命名。原人物重算封面与中心，没有脸且未命名时删除；新人物的中心参与之后的聚类（相似的未锁定人脸可能自动归入）。同一照片的两张脸 → `400`（一个人在一张照片中只出现一次）；`face_ids` 为空 → `400`；未知人脸 → `404`。广播 `people.updated`（主角因此变化时另有 `analysis.updated`）。没有撤销（与合并、「不是此人」一致）：用合并或「不是此人」改回。
 - 个性化（03 §3.3）：Core 在用户评分/旗标/组内选择时记录偏好（显式评分、成对：选中 A 而淘汰同组 B ⇒ A ≻ B），每新增 50 条自动后台重训（Rust，排序头：嵌入 ⊕ 分项 ⊕ 场景），保留集上不优于基础分时自动停用；启用后 `ai_score`/`ai_rating` 为融合结果并广播 `analysis.updated`。
 - `/api/export` 新增 `"folders"?: {"<子文件夹名>": number[]}`：按人物等分组导出到子文件夹（与 `ids` 二选一）。
 
