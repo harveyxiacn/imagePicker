@@ -263,6 +263,51 @@ async fn besttake_plan_post_and_auto_over_http() {
     ] {
         assert!(people[0]["candidates"][0].get(k).is_some(), "missing {k}");
     }
+    // why this base: a2 would need no compositing but is blurry
+    let why = &j["base_choice"];
+    assert_eq!(
+        (why["mode"].as_str(), why["reason"].as_str()),
+        (Some("auto"), Some("group_best"))
+    );
+    assert_eq!(why["group_best_photo_id"], a1);
+    assert_eq!(why["auto_photo_id"], a1);
+    let frames = why["frames"].as_array().unwrap();
+    assert_eq!(frames.len(), 2);
+    for k in [
+        "photo_id",
+        "replacements",
+        "below_best",
+        "missing",
+        "issues",
+        "cost",
+    ] {
+        assert!(frames[0].get(k).is_some(), "missing {k}");
+    }
+    assert_eq!(frames[0]["replacements"], 1);
+    assert_eq!(frames[1]["issues"], json!(["blurry"]));
+    // a manual base; it must be a photo of the burst
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/bursts/{}/besttake?base_photo_id={a2}", s.burst),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["base_photo_id"], a2);
+    assert_eq!(r.json()["base_choice"]["mode"], "manual");
+    assert_eq!(r.json()["base_choice"]["auto_photo_id"], a1);
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/bursts/{}/besttake?base_photo_id=999999", s.burst),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "unprocessable")
+    );
     assert_eq!(
         call(&e.app, Method::GET, "/api/bursts/999999/besttake", None)
             .await
@@ -431,6 +476,38 @@ async fn besttake_plan_post_and_auto_over_http() {
         .status,
         StatusCode::NOT_FOUND
     );
+    // auto onto a chosen base (optional body)
+    let auto = format!("/api/bursts/{}/besttake/auto", s.burst);
+    let r = call(
+        &e.app,
+        Method::POST,
+        &auto,
+        Some(json!({"base_photo_id": 999_999})),
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "unprocessable")
+    );
+    let r = call(
+        &e.app,
+        Method::POST,
+        &auto,
+        Some(json!({"base_photo_id": "a1"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let mut rx = e.core.events.subscribe();
+    let r = call(
+        &e.app,
+        Method::POST,
+        &auto,
+        Some(json!({"base_photo_id": a2})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    let done = wait_event(&mut rx, |ev| matches!(ev, Event::BestTakeDone { .. })).await;
+    assert_eq!(serde_json::to_value(&done).unwrap()["photo_id"], a2);
 
     // PUT validation of patch ops
     let put = |stack: Value| {

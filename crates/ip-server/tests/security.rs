@@ -499,8 +499,10 @@ async fn login_rate_limit() {
 #[tokio::test]
 async fn login_rate_limit_window_expires() {
     let e = env();
+    // The window must outlast five password hashes: in debug builds on a slow CI runner
+    // (macOS) they took longer than 300 ms, so the first failures had expired already.
     let app = e.lan_app(|o| {
-        o.login_window = Duration::from_millis(300);
+        o.login_window = Duration::from_secs(3);
     });
     for _ in 0..5 {
         login(&app, "bad password").await;
@@ -509,7 +511,7 @@ async fn login_rate_limit_window_expires() {
         login(&app, OWNER_PW).await.status,
         StatusCode::TOO_MANY_REQUESTS
     );
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    tokio::time::sleep(Duration::from_millis(3_200)).await;
     assert_eq!(login(&app, OWNER_PW).await.status, StatusCode::OK);
 }
 

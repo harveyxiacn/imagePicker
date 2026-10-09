@@ -619,9 +619,36 @@ export interface BestTakePerson {
   candidates: BestTakeCandidate[]
   best_photo_id: number
 }
+/** How a frame would do as the best-take base (`base_choice.frames`). */
+export interface BestTakeBaseFrame {
+  photo_id: number
+  /** faces "best for everyone" would paste into this frame */
+  replacements: number
+  /** people whose expression would stay clearly below their best */
+  below_best: number
+  /** people of the burst missing from this frame */
+  missing: number
+  /** issues compositing cannot repair: blurry / overexposed / underexposed */
+  issues: string[]
+  /** compositing work and leftover flaws weighted by face size (lower is better) */
+  cost: number
+}
+export type BestTakeBaseReason = 'group_best' | 'group_best_issue' | 'fewer_missing' | 'fewer_replacements' | 'fewer_below_best' | 'less_work' | 'manual'
+/** Why the plan's base was chosen (doc 03 section 5). */
+export interface BestTakeBaseChoice {
+  mode: 'auto' | 'manual'
+  reason: BestTakeBaseReason
+  group_best_photo_id: number
+  /** the frame the automatic rule picks */
+  auto_photo_id: number
+  /** every frame, best-ranked first */
+  frames: BestTakeBaseFrame[]
+}
 export interface BestTakePlan {
   base_photo_id: number
   people: BestTakePerson[]
+  /** absent from older servers */
+  base_choice?: BestTakeBaseChoice | null
 }
 export interface BestTakeChoice {
   base_face_id: number

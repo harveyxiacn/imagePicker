@@ -7,7 +7,7 @@
 //! `edits.updated` followed by the matching `*.done` event. Patches are never copied to other
 //! photos by sync / presets.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::analysis::map_worker_err;
+use crate::analysis::scoring::Issue;
 use crate::analysis::store as astore;
 use crate::analysis::types::{BurstFacesOut, Face};
 use crate::catalog::{self, PhotoRef};
@@ -36,6 +37,23 @@ pub const MAX_CHOICES: usize = 32;
 pub const INPAINT_MASK_EDGE: u32 = 1024;
 /// Edge feather stored on generated patches (fraction of the rect's short side).
 const PATCH_FEATHER: f32 = 0.08;
+/// A person gets a new face only when a composable face of theirs beats the base face by more
+/// than this (expression score 0-1): smaller gains are not worth the compositing risk. The base
+/// choice uses the same margin ("good enough" = within this of the person's best).
+pub const MIN_GAIN: f64 = 0.04;
+/// Base choice: cost per unit of expression a person stays below their best (beyond
+/// [`MIN_GAIN`]) in the composite; closed eyes that cannot be replaced cost about two face
+/// replacements.
+pub const BELOW_BEST_COST: f64 = 6.0;
+/// Base choice: cost of a person of the burst who is missing from the frame (nobody can be
+/// pasted in).
+pub const MISSING_COST: f64 = 3.0;
+/// Base choice: the best-ranked frame whose cost is within this of the cheapest frame becomes
+/// the base, i.e. leaving a better-ranked frame must save more than a quarter of a full-size
+/// face replacement.
+pub const BASE_SWITCH_MARGIN: f64 = 0.25;
+/// Photo issues compositing cannot repair: frames with one are bases of last resort.
+const BASE_BLOCKING_ISSUES: [Issue; 3] = [Issue::Blurry, Issue::Overexposed, Issue::Underexposed];
 
 // ------------------------------------------------------------------ wire types
 
@@ -56,7 +74,7 @@ pub struct BestTakePerson {
     pub base_face_id: i64,
     pub candidates: Vec<BestTakeCandidate>,
     /// Photo with this person's best expression among the base and its composable candidates
-    /// (the base itself when nothing beats it).
+    /// (the base itself when nothing beats it by more than [`MIN_GAIN`]).
     pub best_photo_id: i64,
 }
 
@@ -64,6 +82,50 @@ pub struct BestTakePerson {
 pub struct BestTakePlan {
     pub base_photo_id: i64,
     pub people: Vec<BestTakePerson>,
+    /// Why this base (additive to the M5 contract); `None` for a burst without photos.
+    pub base_choice: Option<BaseChoice>,
+}
+
+/// How a frame would do as the base: the work "best for everyone" leaves on it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct BaseFrame {
+    pub photo_id: i64,
+    /// Faces "best for everyone" would paste into this frame.
+    pub replacements: usize,
+    /// People whose expression would stay more than [`MIN_GAIN`] below their best (no good
+    /// enough composable face).
+    pub below_best: usize,
+    /// People of the burst (subjects seen in at least half of the frames) missing here.
+    pub missing: usize,
+    /// Issues compositing cannot repair (`blurry`, `overexposed`, `underexposed`).
+    pub issues: Vec<String>,
+    /// Replacements, leftover flaws and missing people weighted by face size (lower is better).
+    pub cost: f64,
+}
+
+/// Why the plan's base was chosen.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct BaseChoice {
+    /// `auto` (the rule below) or `manual` (the caller's `base_photo_id`).
+    pub mode: String,
+    /// `group_best` (the burst's best photo is also the best base), `group_best_issue`,
+    /// `fewer_missing`, `fewer_replacements`, `fewer_below_best`, `less_work` (smaller faces to
+    /// replace), or `manual`.
+    pub reason: String,
+    /// The burst's best-ranked photo.
+    pub group_best_photo_id: i64,
+    /// The frame the rule picks (the base unless `manual`).
+    pub auto_photo_id: i64,
+    /// Every frame of the burst, best-ranked first.
+    pub frames: Vec<BaseFrame>,
+}
+
+/// Body of `POST /api/bursts/{id}/besttake/auto` (optional).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct BestTakeAutoBody {
+    /// Compose onto this frame instead of the automatically chosen base.
+    #[serde(default)]
+    pub base_photo_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -136,25 +198,211 @@ pub fn pose_delta(a: &Face, b: &Face) -> f64 {
     d(a.yaw, b.yaw).max(d(a.pitch, b.pitch))
 }
 
-/// Builds the best-take plan of a burst from its face tracks (`burst_faces`): the base is the
-/// burst's best photo (rank 0); every track with a face in the base becomes a person entry
+/// Expression score for replacements and the base choice (unknown = 0).
+fn expr(f: &Face) -> f64 {
+    f.expression_score.unwrap_or(0.0).clamp(0.0, 1.0)
+}
+
+/// One face track of the burst, frames in rank order.
+struct TrackFaces<'a> {
+    faces: Vec<Option<&'a Face>>,
+    /// Face size (sqrt of the mean area) relative to the largest track's.
+    weight: f64,
+    /// Best expression anywhere in the burst.
+    best: f64,
+    /// A subject seen in at least two frames and at least half of them: missing it counts.
+    expected: bool,
+}
+
+fn track_faces(out: &BurstFacesOut) -> Vec<TrackFaces<'_>> {
+    let n = out.photo_ids.len();
+    let mut tracks: Vec<TrackFaces<'_>> = out
+        .tracks
+        .iter()
+        .map(|t| {
+            let faces: Vec<Option<&Face>> = out
+                .photo_ids
+                .iter()
+                .map(|p| t.cells.get(&p.to_string()).and_then(Option::as_ref))
+                .collect();
+            let present: Vec<&Face> = faces.iter().flatten().copied().collect();
+            let area = present
+                .iter()
+                .map(|f| (f.bbox[2] * f.bbox[3]).max(0.0))
+                .sum::<f64>()
+                / present.len().max(1) as f64;
+            TrackFaces {
+                weight: area.sqrt(),
+                best: present.iter().map(|f| expr(f)).fold(0.0, f64::max),
+                expected: present.iter().any(|f| f.is_subject)
+                    && present.len() >= 2
+                    && 2 * present.len() >= n,
+                faces,
+            }
+        })
+        .collect();
+    let largest = tracks.iter().map(|t| t.weight).fold(0.0, f64::max);
+    for t in &mut tracks {
+        t.weight = if largest > 0.0 {
+            t.weight / largest
+        } else {
+            1.0
+        };
+    }
+    tracks
+}
+
+/// The face "best for everyone" pastes over the track's face in frame `base`: the best
+/// composable face of another frame (ties: better rank) when it beats the base face by more
+/// than [`MIN_GAIN`]. `(frame index, expression)`.
+fn replacement(faces: &[Option<&Face>], base: usize) -> Option<(usize, f64)> {
+    let b = faces[base]?;
+    let mut best: Option<(usize, f64)> = None;
+    for (i, f) in faces.iter().enumerate() {
+        let Some(f) = f else {
+            continue;
+        };
+        if i == base || pose_delta(b, f) > POSE_LIMIT_DEG {
+            continue;
+        }
+        let better = match best {
+            Some((_, s)) => expr(f) > s,
+            None => true,
+        };
+        if better {
+            best = Some((i, expr(f)));
+        }
+    }
+    best.filter(|(_, s)| *s > expr(b) + MIN_GAIN)
+}
+
+/// Every frame as a candidate base (rank order) with its unrounded cost.
+fn base_frames(
+    out: &BurstFacesOut,
+    tracks: &[TrackFaces<'_>],
+    issues: &HashMap<i64, i64>,
+) -> Vec<(BaseFrame, f64)> {
+    out.photo_ids
+        .iter()
+        .enumerate()
+        .map(|(i, &photo_id)| {
+            let (mut replacements, mut below_best, mut missing, mut cost) = (0, 0, 0, 0.0);
+            for t in tracks {
+                let Some(face) = t.faces[i] else {
+                    if t.expected {
+                        missing += 1;
+                        cost += t.weight * MISSING_COST;
+                    }
+                    continue;
+                };
+                let mut fin = expr(face);
+                if let Some((_, s)) = replacement(&t.faces, i) {
+                    replacements += 1;
+                    cost += t.weight;
+                    fin = s;
+                }
+                let gap = t.best - fin - MIN_GAIN;
+                if gap > 1e-9 {
+                    below_best += 1;
+                    cost += t.weight * BELOW_BEST_COST * gap;
+                }
+            }
+            let mask = issues.get(&photo_id).copied().unwrap_or(0);
+            let frame = BaseFrame {
+                photo_id,
+                replacements,
+                below_best,
+                missing,
+                issues: BASE_BLOCKING_ISSUES
+                    .iter()
+                    .filter(|x| mask & x.bit() != 0)
+                    .map(|x| x.key().to_string())
+                    .collect(),
+                cost: (cost * 10_000.0).round() / 10_000.0,
+            };
+            (frame, cost)
+        })
+        .collect()
+}
+
+/// Index of the automatic base: among the frames without a blocking issue (all frames when
+/// every one has one), the best-ranked whose cost is within [`BASE_SWITCH_MARGIN`] of the
+/// cheapest.
+fn pick_base(frames: &[(BaseFrame, f64)]) -> usize {
+    let clean: Vec<usize> = (0..frames.len())
+        .filter(|&i| frames[i].0.issues.is_empty())
+        .collect();
+    let pool = if clean.is_empty() {
+        (0..frames.len()).collect()
+    } else {
+        clean
+    };
+    let cheapest = pool
+        .iter()
+        .map(|&i| frames[i].1)
+        .fold(f64::INFINITY, f64::min);
+    pool.into_iter()
+        .find(|&i| frames[i].1 <= cheapest + BASE_SWITCH_MARGIN)
+        .unwrap_or(0)
+}
+
+/// The main reason `chosen` beat the group's best frame.
+fn base_reason(chosen: &BaseFrame, group_best: &BaseFrame) -> &'static str {
+    if chosen.photo_id == group_best.photo_id {
+        "group_best"
+    } else if !group_best.issues.is_empty() && chosen.issues.is_empty() {
+        "group_best_issue"
+    } else if chosen.missing < group_best.missing {
+        "fewer_missing"
+    } else if chosen.replacements < group_best.replacements {
+        "fewer_replacements"
+    } else if chosen.below_best < group_best.below_best {
+        "fewer_below_best"
+    } else {
+        "less_work"
+    }
+}
+
+/// Builds the best-take plan of a burst from its face tracks (`burst_faces`, frames in rank
+/// order) and the photos' `issues` masks. The base is `manual` when given, else the frame that
+/// leaves the least compositing work and risk (docs/03 section 5): frames with a blocking issue
+/// (blur, over/underexposure) only when all have one; cost = per face to replace its size
+/// relative to the largest face, plus [`BELOW_BEST_COST`] per unit of expression someone stays
+/// below their best, plus [`MISSING_COST`] per missing person; the best-ranked frame within
+/// [`BASE_SWITCH_MARGIN`] of the cheapest wins, so the group's best stays the base unless
+/// another frame clearly saves work. Every track with a face in the base becomes a person entry
 /// whose candidates are the faces of the same track in the other photos, best expression first.
-pub fn plan_from_tracks(out: &BurstFacesOut) -> Option<BestTakePlan> {
-    let base = *out.photo_ids.first()?;
+/// `None` when the burst has no photos or `manual` is not one of them.
+pub fn plan_from_tracks(
+    out: &BurstFacesOut,
+    issues: &HashMap<i64, i64>,
+    manual: Option<i64>,
+) -> Option<BestTakePlan> {
+    let group_best = *out.photo_ids.first()?;
+    let tracks = track_faces(out);
+    let frames = base_frames(out, &tracks, issues);
+    let auto = pick_base(&frames);
+    let at = match manual {
+        Some(id) => out.photo_ids.iter().position(|p| *p == id)?,
+        None => auto,
+    };
+    let base = out.photo_ids[at];
     let mut people = Vec::new();
-    for t in &out.tracks {
-        let Some(Some(base_face)) = t.cells.get(&base.to_string()) else {
+    for (t, tf) in out.tracks.iter().zip(&tracks) {
+        let Some(base_face) = tf.faces[at] else {
             continue;
         };
         let mut candidates: Vec<BestTakeCandidate> = Vec::new();
-        for pid in out.photo_ids.iter().skip(1) {
-            let Some(Some(f)) = t.cells.get(&pid.to_string()) else {
+        for (i, f) in tf.faces.iter().enumerate() {
+            let Some(f) = f else {
                 continue;
             };
-            let delta = pose_delta(base_face, f);
-            let composable = delta <= POSE_LIMIT_DEG;
+            if i == at {
+                continue;
+            }
+            let composable = pose_delta(base_face, f) <= POSE_LIMIT_DEG;
             candidates.push(BestTakeCandidate {
-                photo_id: *pid,
+                photo_id: out.photo_ids[i],
                 face_id: f.id,
                 expression_score: f.expression_score,
                 composable,
@@ -167,24 +415,31 @@ pub fn plan_from_tracks(out: &BurstFacesOut) -> Option<BestTakePlan> {
                 .partial_cmp(&score_key(a.expression_score))
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        let mut best = (score_key(base_face.expression_score), base);
-        for c in candidates.iter().filter(|c| c.composable) {
-            if score_key(c.expression_score) > best.0 {
-                best = (score_key(c.expression_score), c.photo_id);
-            }
-        }
         people.push(BestTakePerson {
             track_id: t.track_id,
             person_id: t.person_id,
             person_name: t.person_name.clone(),
             base_face_id: base_face.id,
             candidates,
-            best_photo_id: best.1,
+            best_photo_id: replacement(&tf.faces, at)
+                .map(|(i, _)| out.photo_ids[i])
+                .unwrap_or(base),
         });
     }
+    let (mode, reason) = match manual {
+        Some(_) => ("manual", "manual"),
+        None => ("auto", base_reason(&frames[auto].0, &frames[0].0)),
+    };
     Some(BestTakePlan {
         base_photo_id: base,
         people,
+        base_choice: Some(BaseChoice {
+            mode: mode.to_string(),
+            reason: reason.to_string(),
+            group_best_photo_id: group_best,
+            auto_photo_id: out.photo_ids[auto],
+            frames: frames.into_iter().map(|(f, _)| f).collect(),
+        }),
     })
 }
 
@@ -583,16 +838,35 @@ impl Core {
 
     // -------------------------------------------------------------- best take
 
-    /// `GET /api/bursts/{id}/besttake`.
-    pub async fn besttake_plan(&self, burst_id: i64) -> Result<BestTakePlan> {
-        let out = self
+    /// `GET /api/bursts/{id}/besttake[?base_photo_id=]`: the plan on the automatically chosen
+    /// base, or on `base` (422 when it is not a photo of the burst).
+    pub async fn besttake_plan(&self, burst_id: i64, base: Option<i64>) -> Result<BestTakePlan> {
+        let (out, issues) = self
             .db
-            .call(move |c| astore::burst_faces(c, burst_id))
+            .call(move |c| {
+                let out = astore::burst_faces(c, burst_id)?;
+                let mut st =
+                    c.prepare("SELECT id, COALESCE(issues, 0) FROM photo WHERE burst_id=?1")?;
+                let issues = st
+                    .query_map([burst_id], |r| {
+                        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<HashMap<i64, i64>>>()?;
+                Ok((out, issues))
+            })
             .await?;
-        Ok(plan_from_tracks(&out).unwrap_or(BestTakePlan {
-            base_photo_id: 0,
-            people: Vec::new(),
-        }))
+        if let Some(b) = base.filter(|b| !out.photo_ids.contains(b)) {
+            return Err(CoreError::Unprocessable(format!(
+                "photo {b} is not in burst {burst_id}"
+            )));
+        }
+        Ok(
+            plan_from_tracks(&out, &issues, base).unwrap_or(BestTakePlan {
+                base_photo_id: 0,
+                people: Vec::new(),
+                base_choice: None,
+            }),
+        )
     }
 
     /// `POST /api/besttake`: validates the choices and starts the task.
@@ -661,9 +935,13 @@ impl Core {
         Ok(task_id)
     }
 
-    /// `POST /api/bursts/{id}/besttake/auto`.
-    pub async fn besttake_auto(self: &Arc<Self>, burst_id: i64) -> Result<String> {
-        let plan = self.besttake_plan(burst_id).await?;
+    /// `POST /api/bursts/{id}/besttake/auto`: everyone's best onto the plan's base (or `base`).
+    pub async fn besttake_auto(
+        self: &Arc<Self>,
+        burst_id: i64,
+        base: Option<i64>,
+    ) -> Result<String> {
+        let plan = self.besttake_plan(burst_id, base).await?;
         let choices = auto_choices(&plan);
         if choices.is_empty() {
             // nothing to improve: a task that finishes at once, so clients follow one flow

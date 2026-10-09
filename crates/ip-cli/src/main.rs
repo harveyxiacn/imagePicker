@@ -99,13 +99,17 @@ enum Command {
         #[arg(long, default_value_t = 92)]
         quality: u8,
     },
-    /// Print the best-take plan of a burst (who could get a better expression from which
-    /// frame); with `--auto` also compose the best takes into the base photo's edit stack.
+    /// Print the best-take plan of a burst (which base frame and why, who could get a better
+    /// expression from which frame); with `--auto` also compose the best takes into the base
+    /// photo's edit stack.
     Besttake {
         burst_id: i64,
         /// Run the automatic choice (needs the AI worker and its best-take models).
         #[arg(long)]
         auto: bool,
+        /// Use this photo of the burst as the base instead of the automatic choice.
+        #[arg(long)]
+        base: Option<i64>,
         #[arg(long)]
         data_dir: Option<PathBuf>,
     },
@@ -161,6 +165,27 @@ const GEN_WAIT: Duration = Duration::from_secs(30 * 60);
 
 fn print_plan(plan: &BestTakePlan) {
     println!("base photo:    {}", plan.base_photo_id);
+    if let Some(c) = &plan.base_choice {
+        println!(
+            "base choice:   {} ({}); group best {}, automatic choice {}",
+            c.mode, c.reason, c.group_best_photo_id, c.auto_photo_id
+        );
+        for f in &c.frames {
+            println!(
+                "  frame:       photo {} replacements {} below best {} missing {} cost {:.3}{}",
+                f.photo_id,
+                f.replacements,
+                f.below_best,
+                f.missing,
+                f.cost,
+                if f.issues.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", f.issues.join(", "))
+                }
+            );
+        }
+    }
     if plan.people.is_empty() {
         println!("people:        none (no face of the base photo appears in other frames)");
     }
@@ -190,18 +215,20 @@ fn print_plan(plan: &BestTakePlan) {
     }
 }
 
-/// The plan of a burst and, with `auto`, the outcome of composing it (`besttake.done`).
+/// The plan of a burst (on `base`, else the automatic base) and, with `auto`, the outcome of
+/// composing it (`besttake.done`).
 async fn besttake_headless(
     core: &Arc<Core>,
     burst_id: i64,
+    base: Option<i64>,
     auto: bool,
 ) -> Result<(BestTakePlan, Option<Vec<BestTakeResult>>)> {
-    let plan = core.besttake_plan(burst_id).await?;
+    let plan = core.besttake_plan(burst_id, base).await?;
     if !auto {
         return Ok((plan, None));
     }
     let mut rx = core.events.subscribe();
-    core.besttake_auto(burst_id).await?;
+    core.besttake_auto(burst_id, base).await?;
     let wait = async {
         loop {
             match rx.recv().await {
@@ -790,11 +817,12 @@ async fn main() -> Result<()> {
         Command::Besttake {
             burst_id,
             auto,
+            base,
             data_dir,
         } => {
             init_tracing("warn");
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
-            let res = besttake_headless(&core, burst_id, auto).await;
+            let res = besttake_headless(&core, burst_id, base, auto).await;
             core.worker.shutdown().await;
             let (plan, results) = res?;
             print_plan(&plan);
@@ -1144,6 +1172,17 @@ mod tests {
             Command::Besttake {
                 burst_id: 7,
                 auto: true,
+                base: None,
+                ..
+            }
+        ));
+        let cli = Cli::try_parse_from(["imagepicker", "besttake", "7", "--base", "12"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Besttake {
+                burst_id: 7,
+                auto: false,
+                base: Some(12),
                 ..
             }
         ));
@@ -1246,9 +1285,13 @@ mod tests {
         .is_err());
         let burst = first.burst_id;
         if let Some(b) = burst {
-            let (plan, res) = besttake_headless(&core, b, false).await.unwrap();
+            let (plan, res) = besttake_headless(&core, b, None, false).await.unwrap();
             assert!(res.is_none());
             print_plan(&plan);
+            // a manual base must be a photo of the burst
+            assert!(besttake_headless(&core, b, Some(999_999), false)
+                .await
+                .is_err());
         }
     }
 

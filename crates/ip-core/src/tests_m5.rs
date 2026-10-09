@@ -10,6 +10,7 @@ use std::time::Duration;
 use ip_render::Backend;
 use serde_json::{json, Value};
 
+use crate::analysis::scoring::Issue;
 use crate::analysis::*;
 use crate::edit::sync::SyncKind;
 use crate::edit::{validate_stack, SyncRequest};
@@ -327,9 +328,24 @@ async fn plan_lists_candidates_by_expression_with_composability() {
         "a1 is the burst's best frame"
     );
 
-    let plan = s.e.core.besttake_plan(s.burst).await.unwrap();
+    let plan = s.e.core.besttake_plan(s.burst, None).await.unwrap();
     assert_eq!(plan.base_photo_id, a1);
     assert_eq!(plan.people.len(), 2);
+    // a2 needs no compositing but is blurry: the group's best stays the base
+    let why = plan.base_choice.as_ref().unwrap();
+    assert_eq!(
+        (why.mode.as_str(), why.reason.as_str()),
+        ("auto", "group_best")
+    );
+    assert_eq!((why.group_best_photo_id, why.auto_photo_id), (a1, a1));
+    let frames: Vec<(i64, usize, Vec<String>)> = why
+        .frames
+        .iter()
+        .map(|f| (f.photo_id, f.replacements, f.issues.clone()))
+        .collect();
+    assert_eq!(frames[0], (a1, 2, vec![]));
+    assert_eq!(frames[1].2, vec!["blurry".to_string()]);
+    assert_eq!(frames.len(), 3);
     let pa = plan
         .people
         .iter()
@@ -370,7 +386,7 @@ async fn plan_lists_candidates_by_expression_with_composability() {
 
     // unknown burst
     assert!(matches!(
-        s.e.core.besttake_plan(999_999).await,
+        s.e.core.besttake_plan(999_999, None).await,
         Err(CoreError::NotFound(_))
     ));
 }
@@ -420,16 +436,27 @@ fn plan_from_tracks_handles_missing_faces_and_unknown_poses() {
             },
         ],
     };
-    let plan = plan_from_tracks(&out).unwrap();
+    // photo 11 would need no compositing; the test is about photo 10 as the base
+    assert_eq!(
+        plan_from_tracks(&out, &HashMap::new(), None)
+            .unwrap()
+            .base_photo_id,
+        11
+    );
+    let plan = plan_from_tracks(&out, &HashMap::new(), Some(10)).unwrap();
     assert_eq!(plan.base_photo_id, 10);
     assert_eq!(plan.people.len(), 1);
     assert_eq!(plan.people[0].candidates.len(), 1);
     assert!(plan.people[0].candidates[0].composable);
     assert_eq!(plan.people[0].best_photo_id, 11);
-    assert!(plan_from_tracks(&BurstFacesOut {
-        photo_ids: vec![],
-        tracks: vec![]
-    })
+    assert!(plan_from_tracks(
+        &BurstFacesOut {
+            photo_ids: vec![],
+            tracks: vec![]
+        },
+        &HashMap::new(),
+        None
+    )
     .is_none());
 }
 
@@ -667,7 +694,7 @@ async fn besttake_auto_composes_the_best_take_of_every_person() {
     let s = scene().await;
     let (a1, a2, a3) = (s.ph["a1.jpg"].id, s.ph["a2.jpg"].id, s.ph["a3.jpg"].id);
     let mut rx = s.e.core.events.subscribe();
-    let task = s.e.core.besttake_auto(s.burst).await.unwrap();
+    let task = s.e.core.besttake_auto(s.burst, None).await.unwrap();
     assert!(task.starts_with("besttake-"));
     let seen = wait_for(&mut rx, |e| matches!(e, Event::BestTakeDone { .. })).await;
     let results = match seen.last().unwrap() {
@@ -697,12 +724,446 @@ async fn besttake_auto_composes_the_best_take_of_every_person() {
         .map(|b| b.id);
     if let Some(burst) = lonely {
         let mut rx = s.e.core.events.subscribe();
-        s.e.core.besttake_auto(burst).await.unwrap();
+        s.e.core.besttake_auto(burst, None).await.unwrap();
         let seen = wait_for(&mut rx, |e| matches!(e, Event::BestTakeDone { .. })).await;
         assert!(
             matches!(seen.last(), Some(Event::BestTakeDone { results, .. }) if results.is_empty())
         );
     }
+}
+
+// ------------------------------------------------------------------ best take base choice
+
+/// Frame `i` (rank order) of a synthetic burst is photo `F0 + i`.
+const F0: i64 = 100;
+
+/// A synthetic burst: `rows[i][p]` is person `p`'s expression score in frame `i` (`None` = not
+/// in the frame), `sides[p]` the side of person `p`'s face box. Every face is a subject facing
+/// the camera.
+fn burst(rows: &[&[Option<f64>]], sides: &[f64]) -> BurstFacesOut {
+    let photo_ids: Vec<i64> = (0..rows.len() as i64).map(|i| F0 + i).collect();
+    let tracks = (0..sides.len())
+        .map(|p| TrackOut {
+            track_id: p as i64,
+            person_id: Some(p as i64 + 1),
+            person_name: None,
+            cells: photo_ids
+                .iter()
+                .zip(rows)
+                .map(|(&pid, row)| {
+                    let face = row[p].map(|s| Face {
+                        id: pid * 10 + p as i64,
+                        photo_id: pid,
+                        person_id: Some(p as i64 + 1),
+                        person_name: None,
+                        bbox: [0.05 + 0.3 * p as f64, 0.2, sides[p], sides[p]],
+                        eyes_open: None,
+                        smile: None,
+                        gaze: None,
+                        yaw: Some(0.0),
+                        pitch: Some(0.0),
+                        roll: None,
+                        sharpness: None,
+                        expression_score: Some(s),
+                        is_subject: true,
+                    });
+                    (pid.to_string(), face)
+                })
+                .collect(),
+            best_photo_ids: vec![],
+        })
+        .collect();
+    BurstFacesOut { photo_ids, tracks }
+}
+
+/// Turns person `p`'s head in frame `i` by `yaw` degrees.
+fn turn(out: &mut BurstFacesOut, i: usize, p: usize, yaw: f64) {
+    let key = out.photo_ids[i].to_string();
+    let face = out.tracks[p].cells.get_mut(&key).unwrap().as_mut().unwrap();
+    face.yaw = Some(yaw);
+}
+
+/// The automatic plan with the given photo issues.
+fn auto_plan(out: &BurstFacesOut, issues: &[(i64, Issue)]) -> BestTakePlan {
+    let mut masks: HashMap<i64, i64> = HashMap::new();
+    for (photo, issue) in issues {
+        *masks.entry(*photo).or_default() |= issue.bit();
+    }
+    plan_from_tracks(out, &masks, None).unwrap()
+}
+
+/// `(base, reason)` of a plan.
+fn base_of(plan: &BestTakePlan) -> (i64, String) {
+    let why = plan.base_choice.as_ref().unwrap();
+    assert_eq!(why.auto_photo_id, plan.base_photo_id);
+    (plan.base_photo_id, why.reason.clone())
+}
+
+/// Replacements per frame (rank order).
+fn replacements(plan: &BestTakePlan) -> Vec<usize> {
+    let why = plan.base_choice.as_ref().unwrap();
+    why.frames.iter().map(|f| f.replacements).collect()
+}
+
+#[test]
+fn base_stays_the_group_best_when_everyone_is_good_there() {
+    // within MIN_GAIN of their best, nobody needs a new face in frame 0
+    let out = burst(
+        &[
+            &[Some(0.90), Some(0.88), Some(0.91)],
+            &[Some(0.92), Some(0.60), Some(0.91)],
+            &[Some(0.50), Some(0.90), Some(0.93)],
+        ],
+        &[0.2, 0.2, 0.2],
+    );
+    let plan = auto_plan(&out, &[]);
+    assert_eq!(base_of(&plan), (F0, "group_best".to_string()));
+    assert_eq!(replacements(&plan), [0, 1, 1]);
+    let why = plan.base_choice.as_ref().unwrap();
+    assert_eq!(why.mode, "auto");
+    assert_eq!(why.group_best_photo_id, F0);
+    assert_eq!((why.frames[0].below_best, why.frames[0].cost), (0, 0.0));
+    // gains of 0.02 are not worth compositing: nothing to do
+    assert!(plan.people.iter().all(|p| p.best_photo_id == F0));
+    assert!(auto_choices(&plan).is_empty());
+    assert_eq!(plan.people.len(), 3);
+    assert_eq!(plan.people[1].base_face_id, F0 * 10 + 1);
+}
+
+#[test]
+fn another_frame_that_needs_fewer_replacements_becomes_the_base() {
+    let out = burst(
+        &[
+            &[Some(0.40), Some(0.50), Some(0.90)],
+            &[Some(0.90), Some(0.90), Some(0.88)],
+            &[Some(0.92), Some(0.45), Some(0.90)],
+        ],
+        &[0.2, 0.2, 0.2],
+    );
+    let plan = auto_plan(&out, &[]);
+    assert_eq!(base_of(&plan), (F0 + 1, "fewer_replacements".to_string()));
+    assert_eq!(replacements(&plan), [2, 0, 1]);
+    assert_eq!(plan.base_choice.as_ref().unwrap().group_best_photo_id, F0);
+    // the plan is relative to the chosen base: its faces, the group's best as a candidate
+    for (i, p) in plan.people.iter().enumerate() {
+        assert_eq!(p.base_face_id, (F0 + 1) * 10 + i as i64);
+        assert_eq!(p.best_photo_id, F0 + 1);
+        assert!(p.candidates.iter().any(|c| c.photo_id == F0));
+        assert!(p.candidates.iter().all(|c| c.photo_id != F0 + 1));
+    }
+    assert!(auto_choices(&plan).is_empty());
+}
+
+#[test]
+fn base_ties_go_to_the_better_ranked_frame() {
+    // one replacement each: the group's best stays
+    let even = burst(
+        &[&[Some(0.4), Some(0.9)], &[Some(0.9), Some(0.4)]],
+        &[0.2, 0.2],
+    );
+    assert_eq!(base_of(&auto_plan(&even, &[])).0, F0);
+    // frame 1 only replaces a slightly smaller face: not worth leaving the group's best
+    let close = burst(
+        &[&[Some(0.4), Some(0.9)], &[Some(0.9), Some(0.4)]],
+        &[0.2, 0.18],
+    );
+    assert_eq!(base_of(&auto_plan(&close, &[])).0, F0);
+    // frames 1 and 2 are equally good: the better-ranked one, whatever the people order
+    let rows: &[&[Option<f64>]] = &[
+        &[Some(0.4), Some(0.4)],
+        &[Some(0.9), Some(0.9)],
+        &[Some(0.9), Some(0.9)],
+    ];
+    let mut out = burst(rows, &[0.2, 0.2]);
+    let plan = auto_plan(&out, &[]);
+    assert_eq!(base_of(&plan), (F0 + 1, "fewer_replacements".to_string()));
+    assert_eq!(auto_plan(&out, &[]), plan, "deterministic");
+    out.tracks.reverse();
+    assert_eq!(base_of(&auto_plan(&out, &[])).0, F0 + 1);
+}
+
+#[test]
+fn frames_with_hard_issues_are_not_chosen() {
+    let out = burst(
+        &[&[Some(0.4), Some(0.4)], &[Some(0.9), Some(0.9)]],
+        &[0.2, 0.2],
+    );
+    assert_eq!(base_of(&auto_plan(&out, &[])).0, F0 + 1);
+    // frame 1 needs no compositing but is blurry: compositing cannot fix that
+    let plan = auto_plan(&out, &[(F0 + 1, Issue::Blurry)]);
+    assert_eq!(base_of(&plan), (F0, "group_best".to_string()));
+    let why = plan.base_choice.as_ref().unwrap();
+    assert_eq!(why.frames[1].issues, ["blurry"]);
+    assert!(why.frames[0].issues.is_empty());
+    // closed eyes / noise / tilt are not blocking (compositing or editing repairs them)
+    let plan = auto_plan(&out, &[(F0 + 1, Issue::ClosedEyes), (F0 + 1, Issue::Noisy)]);
+    assert_eq!(base_of(&plan).0, F0 + 1);
+    // every frame has one: the work decides
+    let plan = auto_plan(
+        &out,
+        &[(F0, Issue::Underexposed), (F0 + 1, Issue::Overexposed)],
+    );
+    assert_eq!(base_of(&plan), (F0 + 1, "fewer_replacements".to_string()));
+    // the group's best has an issue, another frame is as good otherwise
+    let same = burst(
+        &[&[Some(0.9), Some(0.9)], &[Some(0.9), Some(0.9)]],
+        &[0.2, 0.2],
+    );
+    let plan = auto_plan(&same, &[(F0, Issue::Underexposed)]);
+    assert_eq!(base_of(&plan), (F0 + 1, "group_best_issue".to_string()));
+}
+
+#[test]
+fn a_big_face_with_closed_eyes_does_not_make_the_base() {
+    // person 0 is twice the size of the others and blinks in the group's best frame
+    let out = burst(
+        &[
+            &[Some(0.45), Some(0.9), Some(0.9)],
+            &[Some(0.9), Some(0.5), Some(0.9)],
+            &[Some(0.9), Some(0.9), Some(0.5)],
+        ],
+        &[0.4, 0.2, 0.2],
+    );
+    let plan = auto_plan(&out, &[]);
+    // one replacement everywhere, but replacing the big face is the most work
+    assert_eq!(replacements(&plan), [1, 1, 1]);
+    assert_eq!(base_of(&plan), (F0 + 1, "less_work".to_string()));
+    let costs: Vec<f64> = plan
+        .base_choice
+        .as_ref()
+        .unwrap()
+        .frames
+        .iter()
+        .map(|f| f.cost)
+        .collect();
+    assert_eq!(costs, [1.0, 0.5, 0.5]);
+    let choices = auto_choices(&plan);
+    assert_eq!(choices.len(), 1);
+    assert_eq!(choices[0].base_face_id, (F0 + 1) * 10 + 1);
+
+    // the open-eyed faces are turned away from the group's best: the blink cannot be fixed
+    // there, so a frame that needs a replacement is still the better base
+    let mut out = burst(
+        &[
+            &[Some(0.45), Some(0.9)],
+            &[Some(0.9), Some(0.5)],
+            &[Some(0.88), Some(0.5)],
+        ],
+        &[0.3, 0.3],
+    );
+    turn(&mut out, 1, 0, 40.0);
+    turn(&mut out, 2, 0, 40.0);
+    let plan = auto_plan(&out, &[]);
+    assert_eq!(base_of(&plan), (F0 + 1, "fewer_below_best".to_string()));
+    let why = plan.base_choice.as_ref().unwrap();
+    assert_eq!(
+        (why.frames[0].replacements, why.frames[0].below_best),
+        (0, 1)
+    );
+    assert_eq!(
+        (why.frames[1].replacements, why.frames[1].below_best),
+        (1, 0)
+    );
+    // on the group's best (manual) the turned faces are offered but not composable
+    let manual = plan_from_tracks(&out, &HashMap::new(), Some(F0)).unwrap();
+    let p0 = &manual.people[0];
+    assert!(p0
+        .candidates
+        .iter()
+        .all(|c| !c.composable && c.reason.as_deref() == Some("large_pose_change")));
+    assert_eq!(p0.best_photo_id, F0);
+}
+
+#[test]
+fn a_frame_missing_a_person_is_not_chosen() {
+    // person 0 is missing from the group's best; person 3 is in one frame only (no one misses
+    // them elsewhere)
+    let out = burst(
+        &[
+            &[None, Some(0.9), Some(0.9), None],
+            &[Some(0.5), Some(0.9), Some(0.9), None],
+            &[Some(0.9), Some(0.9), Some(0.5), Some(0.9)],
+        ],
+        &[0.2, 0.2, 0.2, 0.2],
+    );
+    let plan = auto_plan(&out, &[]);
+    assert_eq!(base_of(&plan), (F0 + 1, "fewer_missing".to_string()));
+    let missing: Vec<usize> = plan
+        .base_choice
+        .as_ref()
+        .unwrap()
+        .frames
+        .iter()
+        .map(|f| f.missing)
+        .collect();
+    assert_eq!(missing, [1, 0, 0]);
+    assert_eq!(plan.people.len(), 3, "people of the base only");
+}
+
+#[test]
+fn a_manual_base_is_honoured() {
+    let out = burst(
+        &[
+            &[Some(0.40), Some(0.50), Some(0.90)],
+            &[Some(0.90), Some(0.90), Some(0.88)],
+            &[Some(0.92), Some(0.45), Some(0.90)],
+        ],
+        &[0.2, 0.2, 0.2],
+    );
+    let mut masks = HashMap::new();
+    masks.insert(F0 + 2, Issue::Blurry.bit());
+    let plan = plan_from_tracks(&out, &masks, Some(F0 + 2)).unwrap();
+    assert_eq!(plan.base_photo_id, F0 + 2);
+    let why = plan.base_choice.as_ref().unwrap();
+    assert_eq!(
+        (why.mode.as_str(), why.reason.as_str()),
+        ("manual", "manual")
+    );
+    assert_eq!(why.auto_photo_id, F0 + 1, "what the rule would pick");
+    assert!(plan
+        .people
+        .iter()
+        .enumerate()
+        .all(|(i, p)| p.base_face_id == (F0 + 2) * 10 + i as i64));
+    // only person 1 needs a new face on this base
+    let choices = auto_choices(&plan);
+    assert_eq!(choices.len(), 1);
+    assert_eq!(
+        (choices[0].base_face_id, choices[0].source_photo_id),
+        ((F0 + 2) * 10 + 1, F0 + 1)
+    );
+    assert!(plan_from_tracks(&out, &masks, Some(999)).is_none());
+}
+
+/// b1 b2 b3 (one burst): b1 is the best-ranked frame (sharpest, best looking) but A and B both
+/// look weak there; A is at their best in b2, B in b3.
+async fn base_scene() -> (Env, i64, [i64; 3], [i64; 2]) {
+    let e = env();
+    let d = e.src.path();
+    for (n, t) in [("b1.jpg", 0), ("b2.jpg", 1), ("b3.jpg", 2)] {
+        photo(d, n, t);
+    }
+    let look = |who: usize, bbox: [f64; 4], smile: f64, gaze: f64| FakeFace {
+        gaze: Some(gaze),
+        ..at(face(bbox, who, 0.5), 0.95, smile, 2.0)
+    };
+    let spec = |angle: f32, sharp: f64, iqa: f64, a: (f64, f64), b: (f64, f64)| {
+        let mut s = FakeSpec::at(angle)
+            .sharp(sharp)
+            .with_faces(vec![look(0, FA, a.0, a.1), look(1, FB, b.0, b.1)]);
+        s.iqa = Some(iqa);
+        s.aesthetic = Some(iqa);
+        s
+    };
+    e.worker
+        .set("b1.jpg", spec(0.0, 0.99, 1.0, (0.1, 0.3), (0.1, 0.3)));
+    e.worker
+        .set("b2.jpg", spec(2.0, 0.95, 0.7, (0.9, 0.9), (0.1, 0.3)));
+    e.worker
+        .set("b3.jpg", spec(3.0, 0.95, 0.5, (0.3, 0.9), (0.9, 0.9)));
+    let sid = import_dir(&e, d).await;
+    analyze(&e, sid).await;
+    let ph = by_name(&e, sid).await;
+    let ids = [ph["b1.jpg"].id, ph["b2.jpg"].id, ph["b3.jpg"].id];
+    let burst = ph["b1.jpg"].burst_id.expect("b1 is in a burst");
+    assert!(ids.iter().all(|i| {
+        ph.values()
+            .find(|p| p.id == *i)
+            .is_some_and(|p| p.burst_id == Some(burst))
+    }));
+    let faces = faces_of(&e, ids[0]).await;
+    let people = [
+        faces[0].person_id.expect("person A"),
+        faces[1].person_id.expect("person B"),
+    ];
+    (e, burst, ids, people)
+}
+
+#[tokio::test]
+async fn besttake_auto_picks_the_base_that_needs_the_least_compositing() {
+    let (e, burst, [b1, b2, b3], [pa, pb]) = base_scene().await;
+    let sid = e.core.photo(b1).await.unwrap().session_id;
+    let g = e.core.groups(sid).await.unwrap();
+    let group = g
+        .scenes
+        .iter()
+        .flat_map(|sc| &sc.bursts)
+        .find(|b| b.id == burst)
+        .unwrap();
+    assert_eq!(group.best_photo_id, Some(b1), "b1 is the group's best");
+
+    // b1 needs two new faces, b2 one (B from b3)
+    let plan = e.core.besttake_plan(burst, None).await.unwrap();
+    assert_eq!(plan.base_photo_id, b2);
+    let why = plan.base_choice.clone().unwrap();
+    assert_eq!(
+        (why.mode.as_str(), why.reason.as_str()),
+        ("auto", "fewer_replacements")
+    );
+    assert_eq!((why.group_best_photo_id, why.auto_photo_id), (b1, b2));
+    let work: Vec<(i64, usize)> = why
+        .frames
+        .iter()
+        .map(|f| (f.photo_id, f.replacements))
+        .collect();
+    assert_eq!(work[0], (b1, 2));
+    assert!(work.contains(&(b2, 1)));
+    let best = |plan: &BestTakePlan, person: i64| {
+        plan.people
+            .iter()
+            .find(|p| p.person_id == Some(person))
+            .unwrap()
+            .best_photo_id
+    };
+    assert_eq!((best(&plan, pa), best(&plan, pb)), (b2, b3));
+
+    // auto composes onto that base only
+    let mut rx = e.core.events.subscribe();
+    e.core.besttake_auto(burst, None).await.unwrap();
+    let seen = wait_for(&mut rx, |ev| matches!(ev, Event::BestTakeDone { .. })).await;
+    match seen.last().unwrap() {
+        Event::BestTakeDone { photo_id, results } => {
+            assert_eq!(*photo_id, b2);
+            assert_eq!(results.len(), 1);
+            assert!(results[0].ok, "{results:?}");
+        }
+        _ => unreachable!(),
+    }
+    let ps = patches_of(&e, b2).await;
+    assert_eq!(ps.len(), 1);
+    assert_eq!(ps[0]["person_id"], json!(pb));
+    assert_eq!(ps[0]["source_photo_id"], json!(b3));
+    assert!(patches_of(&e, b1).await.is_empty());
+
+    // a manual base: the plan and auto follow it
+    let manual = e.core.besttake_plan(burst, Some(b1)).await.unwrap();
+    assert_eq!(manual.base_photo_id, b1);
+    let why = manual.base_choice.clone().unwrap();
+    assert_eq!((why.mode.as_str(), why.auto_photo_id), ("manual", b2));
+    assert_eq!((best(&manual, pa), best(&manual, pb)), (b2, b3));
+    let mut rx = e.core.events.subscribe();
+    e.core.besttake_auto(burst, Some(b1)).await.unwrap();
+    let seen = wait_for(&mut rx, |ev| matches!(ev, Event::BestTakeDone { .. })).await;
+    assert!(
+        matches!(seen.last(), Some(Event::BestTakeDone { photo_id, results })
+        if *photo_id == b1 && results.len() == 2 && results.iter().all(|r| r.ok))
+    );
+    assert_eq!(patches_of(&e, b1).await.len(), 2);
+    assert_eq!(
+        patches_of(&e, b2).await.len(),
+        1,
+        "the other base is untouched"
+    );
+
+    // a base outside the burst
+    assert!(matches!(
+        e.core.besttake_plan(burst, Some(999_999)).await,
+        Err(CoreError::Unprocessable(_))
+    ));
+    assert!(matches!(
+        e.core.besttake_auto(burst, Some(999_999)).await,
+        Err(CoreError::Unprocessable(_))
+    ));
 }
 
 // ------------------------------------------------------------------ inpaint

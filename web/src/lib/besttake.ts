@@ -28,7 +28,7 @@ export interface PersonView {
   candidates: CandidateView[]
   /** highest-scoring composable candidate (may be the base photo) */
   best: CandidateView | undefined
-  /** best composable candidate that is NOT the base and improves on it, i.e. what "best for everyone" would paste */
+  /** best composable candidate that is NOT the base and improves on it by more than MIN_GAIN, i.e. what "best for everyone" would paste */
   bestSwap: CandidateView | undefined
   current: CandidateView | undefined
   replaced: boolean
@@ -44,6 +44,9 @@ export interface PlanViewOptions {
   /** face id of a track in another photo (burst faces matrix); used when the base is not the plan's base */
   faceIdOf?: (trackId: number, photoId: number) => number | undefined
 }
+
+/** A face is only worth replacing when a candidate beats it by more than this (core `MIN_GAIN`). */
+export const MIN_GAIN = 0.04
 
 export const scoreOf = (c: Pick<BestTakeCandidate, 'expression_score'>): number => Math.round(Math.max(0, Math.min(1, c.expression_score)) * 100)
 
@@ -73,7 +76,7 @@ export function buildPlanView(plan: BestTakePlan, opts: PlanViewOptions = {}): P
       isCurrent: currentPhoto !== undefined && c.photo_id === currentPhoto,
       score: scoreOf(c),
     }))
-    const bestSwap = candidates.find((c) => c.composable && !c.isBase && (!base || c.expression_score > base.expression_score))
+    const bestSwap = candidates.find((c) => c.composable && !c.isBase && (!base || c.expression_score > base.expression_score + MIN_GAIN))
     const current = candidates.find((c) => c.isCurrent)
     return {
       key: p.track_id,
@@ -120,3 +123,14 @@ export function sortedWarnings(w: readonly BestTakeWarning[] | undefined): BestT
 
 /** Face boxes need the frame number of a photo for the title ("底片 #3"). */
 export const frameNumber = (order: number[], photoId: number): number | null => (order.indexOf(photoId) >= 0 ? order.indexOf(photoId) + 1 : null)
+
+/** Why the plan picked its base: i18n key (`besttake.why_*`) and params; undefined when the server sends no `base_choice`. */
+export function baseWhy(plan: BestTakePlan, order: number[]): { key: string; params: { n: number; m: number; frame: number | string } } | undefined {
+  const c = plan.base_choice
+  if (!c) return undefined
+  const work = (id: number) => c.frames.find((f) => f.photo_id === id)?.replacements ?? 0
+  return { key: `besttake.why_${c.reason}`, params: { n: work(plan.base_photo_id), m: work(c.group_best_photo_id), frame: frameNumber(order, c.group_best_photo_id) ?? '?' } }
+}
+
+/** Faces "best for everyone" would replace if `photoId` were the base (from the plan's `base_choice`). */
+export const frameWork = (plan: BestTakePlan | undefined, photoId: number): number | undefined => plan?.base_choice?.frames.find((f) => f.photo_id === photoId)?.replacements
