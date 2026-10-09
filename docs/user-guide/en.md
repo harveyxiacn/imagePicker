@@ -398,9 +398,9 @@ The **Repair** panel on the edit page:
 | **Denoise** | Set *Denoise strength* and run |
 | **Generated layers** | Each result is a layer you can hide / show / delete; stored in the edit stack |
 
-Generative tasks show progress and offer retry on failure. Upscaling is chosen at [export](#13-export--presets).
+Generative tasks show progress and a *Cancel* button (in the Repair panel, the library status bar and the best-take editor's footer); a cancelled task leaves the photo untouched and stops the AI work in progress. Failures offer a retry. Every generative task is listed under *Settings → Task history*. Upscaling is chosen at [export](#13-export--presets).
 
-> Known limitations: large removals (holes over 512 px) come out blurry or with ghosting; faces on statues or posters can be taken for bystanders, which is why you confirm before erasing; generative tasks cannot be cancelled yet.
+> Known limitations: large removals (holes over 512 px) come out blurry or with ghosting; faces on statues or posters can be taken for bystanders, which is why you confirm before erasing.
 
 ## 13. Export & presets
 
@@ -418,6 +418,8 @@ Press `Ctrl+E` (or *Export* in the top bar):
 | Naming template | `{name}` is the original file name; a live example is shown |
 | Upscale | Off / ×2 / ×4 (on CPU tiers each photo can take tens of seconds) |
 | Export into one folder per person | Used from the People page |
+
+While an export runs, its progress shows at the bottom right with a *Cancel* button: files already written stay, the remaining photos are skipped.
 
 Export includes all your edits, writes JPEG and carries the original's metadata over: EXIF (for RAW and TIFF files too; maker notes are not copied), XMP (rating, keywords, title, creator…; entries that only describe the original, such as its orientation or Lightroom/darktable develop settings, are left out) and IPTC. Photos with a wide-gamut colour profile (Display P3, Adobe RGB) are converted to sRGB, as are their thumbnails and previews, and every export embeds an sRGB ICC profile. The API option `strip_gps` removes the GPS position from both EXIF and XMP. Exporting at original size without edits copies the file unchanged.
 
@@ -526,6 +528,7 @@ Open with the gear icon on Home or in the top bar.
 | **Analysis** | Default profile, analyse after import, burst-grouping strictness |
 | **Faces & privacy** | Face recognition switch, wipe all face data, allow network |
 | **Cache** | Usage per cache kind, clear, cache limit (default 20 GB; least recently used is evicted) |
+| **Task history** | Recent best take, removal, enhancement, export and analysis tasks with their outcome (the last 200 are kept); running ones can be cancelled; tasks still running when the app exited are marked *Interrupted*. *Tasks* in the library status bar opens it too |
 | **Rendering** | Render backend: Auto / GPU / CPU |
 | **LAN / WebUI** | See section 15; also *Allowed folders* (import, export and folder browsing are limited to these roots) |
 | **Interop (XMP)** | See section 17 |

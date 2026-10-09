@@ -6,10 +6,13 @@ import { useGen, type GenTask } from '@/stores/gen'
 import { useToasts } from '@/stores/toasts'
 import { emptyStack } from './edit'
 import { useHistory } from './history'
-import { beforeFor, finalizeGen, genOnDone, genOnTask, resolveAfter } from './gen'
+import { ApiError } from '@/api/client'
+import { beforeFor, cancelGen, finalizeGen, genOnDone, genOnTask, resolveAfter } from './gen'
 
 const server = new Map<number, EditStack>()
 const putCalls: { id: number; stack: EditStack }[] = []
+const cancelCalls: string[] = []
+let cancelError: Error | null = null
 
 vi.mock('@/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client')
@@ -22,6 +25,11 @@ vi.mock('@/api/client', async () => {
         putCalls.push({ id, stack })
         server.set(id, stack)
         return { photo_id: id, stack, updated_at: 2, thumb_version: 'v' }
+      }),
+      cancelTask: vi.fn(async (id: string) => {
+        cancelCalls.push(id)
+        if (cancelError) throw cancelError
+        return { task: { id, status: 'cancelling' } }
       }),
     },
   }
@@ -50,6 +58,8 @@ describe('generative task results', () => {
     qc = new QueryClient()
     server.clear()
     putCalls.length = 0
+    cancelCalls.length = 0
+    cancelError = null
     useHistory.getState().clear()
     useGen.setState({ tasks: {}, results: {}, autoBase: null })
     useToasts.setState({ toasts: [], tasks: {} })
@@ -150,5 +160,55 @@ describe('generative task results', () => {
     expect(e.photoId).toBe(9)
     expect(e.before).toEqual(snap)
     expect(e.after.ops.some((o) => o.type === 'patch')).toBe(true)
+  })
+
+  it('cancel: asks the server once, shows the task as cancelling, and a refused cancel can be retried', async () => {
+    useGen.getState().begin(task())
+    await cancelGen(qc, 't1')
+    await cancelGen(qc, 't1') // already cancelling: no second request
+    expect(cancelCalls).toEqual(['t1'])
+    expect(useGen.getState().tasks.t1.cancelling).toBe(true)
+    // already over on the server (409): not an error toast, the button comes back
+    useGen.getState().begin(task({ taskId: 't2' }))
+    cancelError = new ApiError(409, 'conflict', 'task t2 is not running (done)')
+    await cancelGen(qc, 't2')
+    expect(useGen.getState().tasks.t2.cancelling).toBe(false)
+    expect(useToasts.getState().toasts).toHaveLength(0)
+  })
+
+  it('a cancelled task ends without a history entry and with an info toast, not an error', async () => {
+    server.set(7, emptyStack())
+    useGen.getState().begin(task())
+    genOnDone(qc, { type: 'inpaint.done', photo_id: 7, ok: false, reason: 'cancelled' })
+    genOnTask(qc, { type: 'task.progress', task_id: 't1', kind: 'inpaint', done: 1, total: 4, state: 'cancelled' })
+    await vi.waitFor(() => expect(useGen.getState().tasks.t1).toBeUndefined())
+    await new Promise((r) => setTimeout(r, 20))
+    expect(useHistory.getState().undoStack).toHaveLength(0)
+    const toasts = useToasts.getState().toasts
+    expect(toasts.some((x) => x.kind === 'error')).toBe(false)
+    expect(toasts.filter((x) => x.kind === 'info')).toHaveLength(1)
+  })
+
+  it('a cancelled best take stores no per-face failures', async () => {
+    useGen.getState().begin(task({ kind: 'besttake', label: 'Best take' }))
+    genOnDone(qc, {
+      type: 'besttake.done',
+      photo_id: 7,
+      results: [
+        { base_face_id: 31, ok: false, warnings: [], reason: 'cancelled' },
+        { base_face_id: 32, ok: false, warnings: [], reason: 'cancelled' },
+      ],
+    })
+    await vi.waitFor(() => expect(useGen.getState().tasks.t1).toBeUndefined())
+    expect(useGen.getState().results).toEqual({})
+    expect(useToasts.getState().toasts.some((x) => x.kind === 'error')).toBe(false)
+    expect(useToasts.getState().toasts.some((x) => x.kind === 'info')).toBe(true)
+  })
+
+  it('task.progress `cancelled` alone also ends the task as cancelled', async () => {
+    useGen.getState().begin(task())
+    genOnTask(qc, { type: 'task.progress', task_id: 't1', kind: 'inpaint', done: 0, total: 2, state: 'cancelled' })
+    await vi.waitFor(() => expect(useGen.getState().tasks.t1).toBeUndefined())
+    expect(useToasts.getState().toasts.some((x) => x.kind === 'error')).toBe(false)
   })
 })

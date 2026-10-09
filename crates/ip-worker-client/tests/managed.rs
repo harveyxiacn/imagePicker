@@ -192,3 +192,61 @@ async fn hung_call_times_out_kills_the_process_and_restarts_lazily() {
     assert_ne!(pid, pid2);
     inner.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_scoped_cancel_stops_a_generation_call_on_the_worker() {
+    use ip_worker_client::{InpaintRequest, MaskPhoto};
+    let w = std::sync::Arc::new(ManagedWorker::new(cfg()));
+    // started first, so the cancel below reaches an in-flight request
+    w.raw_call("pid", json!({})).await.unwrap();
+    let tok = CancelToken::new();
+    let (w2, t2) = (w.clone(), tok.clone());
+    let call = tokio::spawn(async move {
+        let req = InpaintRequest {
+            photo: MaskPhoto {
+                photo_id: 1,
+                path: "x.jpg".into(),
+                orientation: 1,
+            },
+            mask: "mask.png".into(),
+            model: "lama".into(),
+            out_dir: "out".into(),
+            allow_download: false,
+        };
+        t2.scope(w2.inpaint_run(&req)).await
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !call.is_finished(),
+        "the stand-in only answers once cancelled"
+    );
+    let t = std::time::Instant::now();
+    tok.cancel();
+    let r = tokio::time::timeout(Duration::from_secs(10), call)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(r, Err(WorkerError::Cancelled)), "{r:?}");
+    // answered by the worker (-32800), not by the client giving up after its grace period
+    assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+    let stopped = w.raw_call("cancelled", json!({})).await.unwrap();
+    assert_eq!(stopped.as_array().map(Vec::len), Some(1), "{stopped}");
+    // an already cancelled scope does not even send the request
+    let r = tok
+        .scope(w.inpaint_run(&InpaintRequest {
+            photo: MaskPhoto {
+                photo_id: 2,
+                path: "x.jpg".into(),
+                orientation: 1,
+            },
+            mask: "mask.png".into(),
+            model: "lama".into(),
+            out_dir: "out".into(),
+            allow_download: false,
+        }))
+        .await;
+    assert!(matches!(r, Err(WorkerError::Cancelled)), "{r:?}");
+    let stopped = w.raw_call("cancelled", json!({})).await.unwrap();
+    assert_eq!(stopped.as_array().map(Vec::len), Some(1), "{stopped}");
+    w.shutdown().await;
+}

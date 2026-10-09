@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { queryToFilter } from '@/lib/collections'
 import { buildPhotosQuery, type FilterState } from '@/lib/filter'
 import { qk } from '@/lib/cache'
+import { isLive } from '@/lib/tasks'
 import { mergeSettings } from '@/lib/settingsForm'
 import { useToasts } from '@/stores/toasts'
 import type { Settings, SettingsPatch } from './types'
@@ -11,7 +12,7 @@ import { api, fetchAllPhotos } from './client'
 
 /**
  * Read-only guests get 403 for people, faces, taste, settings, assistant, system, fs, xmp, cache, onboarding,
- * masks, models, besttake and analysis: those queries wait for `/auth/me` and never run for a guest.
+ * masks, models, besttake, analysis and tasks: those queries wait for `/auth/me` and never run for a guest.
  */
 function useNotGuest(): boolean {
   const me = useQuery({ queryKey: qk.me, queryFn: api.me, staleTime: 30_000, retry: false })
@@ -64,6 +65,19 @@ export function useRuntime(enabled = true) {
     enabled: ok && enabled,
     retry: false,
     refetchInterval: (q) => (q.state.data?.state === 'installing' ? 3000 : false),
+  })
+}
+
+/** GET /api/tasks (owner only): the task history, newest first; polls while a task is still running. */
+export function useTasks(limit = 50, enabled = true) {
+  const ok = useNotGuest()
+  return useQuery({
+    queryKey: [...qk.tasks, limit],
+    queryFn: () => api.tasks(limit),
+    select: (d) => d.tasks,
+    enabled: ok && enabled,
+    staleTime: 0,
+    refetchInterval: (q) => (q.state.data?.tasks.some((t) => isLive(t.status)) ? 2000 : false),
   })
 }
 

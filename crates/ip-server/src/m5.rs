@@ -1,4 +1,4 @@
-//! M5 routes (docs/api-contract-m5.md section C) and the response float cleanup.
+//! M5 routes (docs/api-contract-m5.md sections C and F) and the response float cleanup.
 
 use axum::body::Body;
 use axum::extract::{Request, State};
@@ -79,6 +79,28 @@ pub async fn enhance(
     ApiJson(body): ApiJson<EnhanceBody>,
 ) -> ApiResult<Response> {
     Ok(accepted(st.core.enhance_start(id, body).await?))
+}
+
+#[derive(Deserialize)]
+pub struct TasksParams {
+    limit: Option<i64>,
+}
+
+/// `GET /api/tasks?limit=`: recorded tasks (generation, export, analysis), newest first.
+pub async fn tasks(
+    State(st): State<AppState>,
+    ApiQuery(p): ApiQuery<TasksParams>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(json!({ "tasks": st.core.tasks_list(p.limit).await? })))
+}
+
+/// `POST /api/tasks/{id}/cancel`: `202 {"task"}` (`cancelling`); 404 unknown, 409 not running.
+pub async fn cancel_task(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<String>,
+) -> ApiResult<Response> {
+    let task = st.core.task_cancel(&id).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "task": task }))).into_response())
 }
 
 pub async fn asset(

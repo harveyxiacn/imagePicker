@@ -162,7 +162,29 @@ export interface FsList {
 
 // ---- WebSocket events (server -> client) ----
 
-export type TaskState = 'running' | 'done' | 'failed'
+export type TaskState = 'running' | 'done' | 'failed' | 'cancelled'
+
+// ---- task history (GET /api/tasks, docs/api-contract-m5.md F) ----
+
+/** `cancelling` = cancel requested, still winding down; `interrupted` = the app exited while it ran. */
+export type TaskStatus = TaskState | 'cancelling' | 'interrupted'
+
+export interface TaskRecord {
+  id: string
+  /** besttake | inpaint | enhance | export | analysis */
+  kind: string
+  status: TaskStatus
+  /** what was asked, per kind (photo_id, op, count, dest, session_id, ...) */
+  params: Record<string, unknown> | null
+  done: number
+  total: number
+  error: string | null
+  created_at: number
+  updated_at: number
+  finished_at: number | null
+  /** POST /api/tasks/{id}/cancel would stop it */
+  cancellable: boolean
+}
 
 export interface PhotoUpdateItem {
   id: number

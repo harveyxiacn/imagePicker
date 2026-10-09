@@ -39,6 +39,7 @@ export const qk = {
   lan: ['lan'] as const,
   remoteStatus: ['remote', 'status'] as const,
   remoteDevices: ['remote', 'devices'] as const,
+  tasks: ['tasks'] as const,
 }
 
 /** Photo fields owned by the analysis pipeline (never user-editable, safe to overwrite from the server). */

@@ -21,6 +21,8 @@ export interface GenTask {
   done: number
   total: number
   state: 'running' | 'done' | 'failed'
+  /** the user asked to stop it; the server still has to wind it down (`task.progress` `cancelled`) */
+  cancelling?: boolean
   startedAt: number
 }
 
@@ -37,6 +39,7 @@ interface GenState {
   autoBase: { photoId: number; nonce: number } | null
   begin: (t: GenTask) => void
   progress: (taskId: string, done: number, total: number) => void
+  setCancelling: (taskId: string, on: boolean) => void
   remove: (taskId: string) => GenTask | undefined
   setResults: (photoId: number, results: BestTakeResult[]) => void
   clearResult: (baseFaceId: number) => void
@@ -52,6 +55,11 @@ export const useGen = create<GenState>((set, get) => ({
     set((s) => {
       const t = s.tasks[taskId]
       return t ? { tasks: { ...s.tasks, [taskId]: { ...t, done, total } } } : s
+    }),
+  setCancelling: (taskId, on) =>
+    set((s) => {
+      const t = s.tasks[taskId]
+      return t ? { tasks: { ...s.tasks, [taskId]: { ...t, cancelling: on } } } : s
     }),
   remove: (taskId) => {
     const t = get().tasks[taskId]

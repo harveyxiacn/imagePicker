@@ -199,6 +199,8 @@ pub fn build_router_auth(
         .route("/photos/{id}/inpaint", post(m5::inpaint))
         .route("/photos/{id}/enhance", post(m5::enhance))
         .route("/assets/{photo_id}/{asset}", get(m5::asset))
+        .route("/tasks", get(m5::tasks))
+        .route("/tasks/{id}/cancel", post(m5::cancel_task))
         .route("/taste", get(m4::taste))
         .route("/taste/reset", post(m4::taste_reset))
         .route("/assistant/status", get(m6::assistant_status))

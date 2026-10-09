@@ -40,7 +40,7 @@
 | POST | `/api/photos/{id}/enhance` | `{"op":"denoise"\|"face_restore","strength":0..1}` | `202 {"task_id"}`；追加/替换同类补丁 |
 | GET | `/api/assets/{photo_id}/{asset}` | — | `image/png`（调试/前端预览补丁用） |
 
-- 所有生成任务：模型缺失 → `409 models_missing`；worker 不可用 → `503`；进度走 `task.progress`（`kind`: `besttake`/`inpaint`/`enhance`）。
+- 所有生成任务：模型缺失 → `409 models_missing`；worker 不可用 → `503`；进度走 `task.progress`（`kind`: `besttake`/`inpaint`/`enhance`）。生成任务可取消并留有记录，见 F 节。
 - `/api/export` 新增 `"upscale"?: 2 | 4`：渲染后经 `enhance.run upscale` 放大再编码。
 - 重编码的导出（应用编辑 / `long_edge` / `upscale` / 裁切适配）的元数据：像素为 sRGB（带非 sRGB ICC 或 DCF Adobe RGB 标记的来源在解码时已转换），嵌入 sRGB ICC；EXIF 取自原文件（JPEG/HEIF/RAF 原样；TIFF 类 RAW、TIFF、CR3 由 IFD0/Exif/GPS 重建，不含 MakerNote；都没有时按目录元数据合成），去掉朝向与 IFD1 缩略图并改写像素尺寸；XMP 取 JPEG 内嵌包，否则取 `.xmp` 侧车，去掉 `tiff:Orientation`/尺寸、`crs:*`、darktable 历史、`xmp:Thumbnails`、人脸区域、动态照片/景深/增益图与扩展 XMP 引用；IPTC 只保留 APP13 中的 IPTC 记录（0x0404/0x0425）。`"strip_gps": true` 删除 EXIF GPS IFD 与 XMP 中所有 `GPS*` 属性。原样复制的导出不改动文件。
 
@@ -56,3 +56,31 @@
 { "type": "inpaint.done",  "photo_id": 4231, "ok": true, "reason": null }
 { "type": "enhance.done",  "photo_id": 4231, "op": "denoise", "ok": true, "reason": null }
 ```
+
+- 被取消的生成任务仍先发 `*.done`：`inpaint.done` / `enhance.done` 为 `ok:false, reason:"cancelled"`；`besttake.done` 中每个选择都是 `ok:false, reason:"cancelled"`。随后 `task.progress` 的 `state` 为 `cancelled`（`error` 为空）。
+
+## F. 任务记录与取消
+
+生成任务（`besttake` / `inpaint` / `enhance`）、导出（`export`）与分析（`analysis`）开始时写入 `task` 表，结束时更新；只保留最新 200 条（新任务开始时删除更旧的已结束记录）。进行中的任务登记在内存中，可按 id 取消。
+
+| 方法 | 路径 | 请求 | 响应 |
+|---|---|---|---|
+| GET | `/api/tasks?limit=50` | `limit` 1..200，默认 50 | `{"tasks":[TaskRecord]}`，按开始时间倒序 |
+| POST | `/api/tasks/{id}/cancel` | — | `202 {"task": TaskRecord}`（`status:"cancelling"`）；未知 id → `404 not_found`；任务不在运行 → `409 conflict` |
+
+```jsonc
+// TaskRecord
+{ "id": "inpaint-12", "kind": "inpaint",
+  "status": "running" | "cancelling" | "done" | "failed" | "cancelled" | "interrupted",
+  "params": { "photo_id": 4231, "faces": 1, "strokes": 0, "model": "lama" },  // 按 kind：
+  //  besttake {photo_id, choices}；enhance {photo_id, op, strength}；export {dest, long_edge, upscale, count}；analysis {session_id, profile, count}
+  "done": 1, "total": 2, "error": null,
+  "created_at": 1760000000000, "updated_at": 1760000001000, "finished_at": null,   // 毫秒
+  "cancellable": true }
+```
+
+- **取消语义**：取消令牌会传到正在进行的 worker 调用（JSON-RPC `cancel {req}` 通知，worker 以 `-32800` 结束该请求），任务随即结束为 `cancelled`。生成任务在**提交结果之前**都可取消：补丁只有在全部生成完、任务未被取消时才导入为资产并写入编辑栈，所以取消后不会留下资产或编辑。已进入提交阶段的任务不再中断，正常以 `done` 结束。
+- 导出取消后不再开始新的照片，进行中的超分请求被中止；已写出的文件保留，`done` 为已写出的张数。分析取消与 `POST /api/analysis/cancel` 相同（已完成的批次保留），其 `task.progress` 终态为 `cancelled`。
+- `cancelling` 只出现在列表中（已请求取消、尚未结束）；数据库中不保存。
+- 打开目录库时，仍为 `running` 的记录属于已退出的进程，改记为 `interrupted`（并删除其临时目录）。任务 id 的序号从已有记录的最大序号继续，不会与保留的记录冲突。
+- 访客（只读）无权访问 `/api/tasks`（参数里有导出目录等路径）。

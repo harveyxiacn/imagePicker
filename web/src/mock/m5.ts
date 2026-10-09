@@ -31,6 +31,7 @@ import { emit } from './bus'
 import { findPhoto } from './db'
 import { savedStack, store } from './edits'
 import { photoSvg } from './svg'
+import { endTask, isCancelled, taskProgress, trackTask } from './tasks'
 
 const err = (status: number, code: string, message: string) => HttpResponse.json({ error: { code, message } }, { status })
 const lat = () => delay(15 + Math.random() * 30)
@@ -219,30 +220,56 @@ async function faceRestorePatch(photo: Photo, box: Box, n: number): Promise<{ as
 
 let taskSeq = 0
 
-/** Emit `task.progress` steps, run `work` at the end, then broadcast. Mirrors the real task lifecycle. */
-function startTask(kind: 'besttake' | 'inpaint' | 'enhance', steps: number, work: () => Promise<void>): string {
+interface TaskSpec {
+  /** recorded in the task history (`GET /api/tasks`) */
+  params: Record<string, unknown>
+  /** the `*.done` event of a cancelled task (`reason: "cancelled"`) */
+  onCancel: () => void
+}
+
+/**
+ * Emit `task.progress` steps, run `work` at the end, then broadcast. Mirrors the real task lifecycle, including the
+ * task history and `POST /api/tasks/:id/cancel` (checked between steps; a cancelled task writes nothing).
+ */
+function startTask(kind: 'besttake' | 'inpaint' | 'enhance', steps: number, work: () => Promise<void>, spec: TaskSpec): string {
   const task_id = `${kind}-${++taskSeq}`
+  const total = steps + 1
+  trackTask(task_id, kind, spec.params, total)
   const failTask = takeFail('task')
   let done = 0
   const tick = () => {
     const stepMs = dbg().__m5StepMs ?? 260
+    if (isCancelled(task_id)) {
+      endTask(task_id, 'cancelled')
+      spec.onCancel()
+      emit({ type: 'task.progress', task_id, kind, done, total, state: 'cancelled' })
+      return
+    }
     if (done < steps) {
       done += 1
-      emit({ type: 'task.progress', task_id, kind, done, total: steps + 1, state: 'running' })
+      taskProgress(task_id, done, total)
+      emit({ type: 'task.progress', task_id, kind, done, total, state: 'running' })
       setTimeout(tick, stepMs)
       return
     }
     if (failTask) {
-      emit({ type: 'task.progress', task_id, kind, done, total: steps + 1, state: 'failed', error: 'worker out of memory' })
+      endTask(task_id, 'failed', 'worker out of memory')
+      emit({ type: 'task.progress', task_id, kind, done, total, state: 'failed', error: 'worker out of memory' })
       return
     }
     void work()
       .catch(() => undefined)
-      .then(() => emit({ type: 'task.progress', task_id, kind, done: steps + 1, total: steps + 1, state: 'done' }))
+      .then(() => {
+        endTask(task_id, 'done')
+        emit({ type: 'task.progress', task_id, kind, done: total, total, state: 'done' })
+      })
   }
   setTimeout(tick, 180)
   return task_id
 }
+
+const cancelledResults = (choices: BestTakeChoice[]): BestTakeResult[] =>
+  choices.map((c) => ({ base_face_id: c.base_face_id, ok: false, warnings: [], reason: 'cancelled' }))
 
 function saveStack(p: Photo, stack: EditStack) {
   store(p, stack)
@@ -383,10 +410,18 @@ export const m5Handlers = [
     if (!body.choices?.length) return err(400, 'bad_request', 'choices required')
     const burst = base.burst_id !== null ? burstRecOf(base.burst_id) : undefined
     const order = burst?.photo_ids ?? []
-    const task_id = startTask('besttake', 3, async () => {
-      const results = await composeChoices(base, body.choices, order)
-      emit({ type: 'besttake.done', photo_id: base.id, results })
-    })
+    const task_id = startTask(
+      'besttake',
+      3,
+      async () => {
+        const results = await composeChoices(base, body.choices, order)
+        emit({ type: 'besttake.done', photo_id: base.id, results })
+      },
+      {
+        params: { photo_id: base.id, choices: body.choices.length },
+        onCancel: () => emit({ type: 'besttake.done', photo_id: base.id, results: cancelledResults(body.choices) }),
+      },
+    )
     return HttpResponse.json({ task_id }, { status: 202 })
   }),
 
@@ -406,10 +441,18 @@ export const m5Handlers = [
       if (!mine || !best || best.photo_id === baseId || best.expression_score <= mine.expression_score + 0.02) continue
       choices.push({ base_face_id: mine.face_id, source_photo_id: best.photo_id, source_face_id: best.face_id })
     }
-    const task_id = startTask('besttake', 4, async () => {
-      const results = await composeChoices(base, choices, rec.photo_ids)
-      emit({ type: 'besttake.done', photo_id: base.id, results })
-    })
+    const task_id = startTask(
+      'besttake',
+      4,
+      async () => {
+        const results = await composeChoices(base, choices, rec.photo_ids)
+        emit({ type: 'besttake.done', photo_id: base.id, results })
+      },
+      {
+        params: { photo_id: base.id, choices: choices.length },
+        onCancel: () => emit({ type: 'besttake.done', photo_id: base.id, results: cancelledResults(choices) }),
+      },
+    )
     return HttpResponse.json({ task_id }, { status: 202 })
   }),
 
@@ -432,6 +475,10 @@ export const m5Handlers = [
     if (strokes && !strokes.some((s) => s.points.length > 0)) return err(400, 'bad_request', 'empty strokes')
     const faces = 'bystanders' in body ? bystandersOf(p) : 'face_ids' in body ? bystandersOf(p).filter((f) => body.face_ids.includes(f.face_id)) : []
     if (!strokes && faces.length === 0) return err(400, 'bad_request', 'nothing to remove')
+    const spec: TaskSpec = {
+      params: { photo_id: p.id, faces: faces.length, strokes: strokes?.length ?? 0, model: 'lama' },
+      onCancel: () => emit({ type: 'inpaint.done', photo_id: p.id, ok: false, reason: 'cancelled' }),
+    }
     const task_id = startTask('inpaint', 3, async () => {
       let stack = savedStack(p.id)
       if (strokes) {
@@ -449,7 +496,7 @@ export const m5Handlers = [
       }
       saveStack(p, stack)
       emit({ type: 'inpaint.done', photo_id: p.id, ok: true, reason: null })
-    })
+    }, spec)
     return HttpResponse.json({ task_id }, { status: 202 })
   }),
 
@@ -463,6 +510,10 @@ export const m5Handlers = [
     const miss = missingModelIds([body.op === 'denoise' ? 'scunet' : 'gfpgan-v1.4'])
     if (miss.length) return missing409(miss)
     const strength = clamp01(Number(body.strength ?? 0.6))
+    const spec: TaskSpec = {
+      params: { photo_id: p.id, op: body.op, strength },
+      onCancel: () => emit({ type: 'enhance.done', photo_id: p.id, op: body.op, ok: false, reason: 'cancelled' }),
+    }
     const task_id = startTask('enhance', 3, async () => {
       let stack = savedStack(p.id)
       if (body.op === 'denoise') {
@@ -484,7 +535,7 @@ export const m5Handlers = [
       }
       saveStack(p, stack)
       emit({ type: 'enhance.done', photo_id: p.id, op: body.op, ok: true, reason: null })
-    })
+    }, spec)
     return HttpResponse.json({ task_id }, { status: 202 })
   }),
 

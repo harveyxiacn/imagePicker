@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use super::store::{self, IngestItem};
 use super::types::*;
 use super::vecs::{decode_f16, normalize, parse_npy};
-use crate::catalog::{self, now_ms};
+use crate::catalog;
 use crate::error::{CoreError, Result};
 use crate::events::Event;
 use crate::model::PhotoUpdate;
@@ -279,6 +279,7 @@ impl Core {
     }
 
     fn emit_run(&self, session_id: i64, task_id: &str, st: &AnalysisStatus) {
+        self.tasks.progress(task_id, st.done, st.total);
         self.events.emit(Event::AnalysisProgress {
             session_id,
             state: st.state,
@@ -294,6 +295,8 @@ impl Core {
             state: match st.state {
                 RunState::Running => "running",
                 RunState::Failed => "failed",
+                // a run only ends idle when it was cancelled
+                RunState::Idle => "cancelled",
                 _ => "done",
             }
             .into(),
@@ -394,21 +397,19 @@ impl Core {
             );
         }
         {
-            let (tid, params) = (
-                task_id.clone(),
-                json!({"session_id": sid, "profile": req.profile.as_str(), "count": refs.len()})
-                    .to_string(),
-            );
-            self.db
-                .call(move |c| {
-                    c.execute(
-                        "INSERT INTO task(id, kind, status, priority, params, progress, created_at, updated_at)
-                         VALUES(?1,'analysis','running',0,?2,0,?3,?3)",
-                        rusqlite::params![tid, params, now_ms()],
-                    )?;
-                    Ok(())
-                })
-                .await?;
+            let (tid, total) = (task_id.clone(), refs.len() as i64);
+            let spec =
+                json!({"session_id": sid, "profile": req.profile.as_str(), "count": refs.len()});
+            let recorded = self
+                .db
+                .call(move |c| crate::tasks::insert(c, &tid, "analysis", &spec, total))
+                .await;
+            if let Err(e) = recorded {
+                self.runs.lock().unwrap().remove(&sid);
+                return Err(e);
+            }
+            // `POST /api/tasks/{id}/cancel` stops the run like `POST /api/analysis/cancel`
+            self.tasks.register(&task_id, cancel.clone(), total);
         }
         self.emit_run(sid, &task_id, &status);
         let core = self.clone();
@@ -644,7 +645,7 @@ impl Core {
                 s.done = s.total;
             }
         });
-        let (tid, status, err) = (
+        let (tid, status, err, done, total) = (
             task_id.clone(),
             match state {
                 RunState::Failed => "failed",
@@ -652,18 +653,15 @@ impl Core {
                 _ => "done",
             },
             error,
+            st.done,
+            st.total,
         );
         let _ = self
             .db
-            .call(move |c| {
-                c.execute(
-                    "UPDATE task SET status=?2, error=?3, progress=1, updated_at=?4 WHERE id=?1",
-                    rusqlite::params![tid, status, err, now_ms()],
-                )?;
-                Ok(())
-            })
+            .call(move |c| crate::tasks::finish(c, &tid, status, done, total, err.as_deref()))
             .await;
         self.emit_run(sid, &task_id, &st);
+        self.tasks.remove(&task_id);
     }
 
     /// Grouping, scoring, clustering and the final refresh events.
