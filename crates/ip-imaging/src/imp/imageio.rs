@@ -126,7 +126,7 @@ pub fn decode(path: &Path, long_edge: u32) -> Result<Rgb, String> {
         CGContextDrawImage(ctx.0, rect, image.0);
         drop(ctx);
         let mut data = Vec::with_capacity(tw as usize * th as usize * 3);
-        for px in buf.chunks_exact(4) {
+        for px in buf.as_chunks::<4>().0 {
             data.extend_from_slice(&px[..3]);
         }
         Ok(Rgb { w: tw, h: th, data })
