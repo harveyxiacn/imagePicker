@@ -11,3 +11,9 @@ ar = "llvm-ar"
 [target.x86_64-linux-android]
 linker = "x86_64-linux-android24-clang"
 ar = "llvm-ar"
+
+# TEMPORARY (debug branch only, do not merge): serial, uncaptured test output to find a macOS crash.
+[env]
+RUST_TEST_THREADS = "1"
+RUST_TEST_NOCAPTURE = "1"
+RUST_BACKTRACE = "1"
