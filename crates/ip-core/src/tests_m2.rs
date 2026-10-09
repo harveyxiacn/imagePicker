@@ -133,7 +133,8 @@ fn face_b() -> [f64; 4] {
 }
 
 /// Scene used by several tests:
-///  burst 1: a1 a2 a3 (t=0,1,2) similar frames, sharpness .5 / .95 / .7
+///  burst 1: a1 a2 a3 (t=0,1,2) similar frames, sharpness .5 / .95 / .7 (a1 and a3 are under
+///           0.8 x the sharpest frame, so they carry the relative "blurry" tag)
 ///  burst 2: b1 b2 (t=1h) with the same two people, b2 has person B with closed eyes
 ///  burst 3: c1 (t=2h) alone, a stranger
 fn build_scene(e: &Env) {
@@ -428,12 +429,12 @@ async fn filters_by_people_state_counts_and_ai() {
     );
     // issues
     let none = page(q(&|q| q.issues_none = true)).await;
-    assert_eq!(none.total, 5);
+    assert_eq!(names(&none), vec!["a2.jpg", "b1.jpg", "c1.jpg"]);
     let closed = page(q(&|q| {
         q.issues_any = vec![Issue::ClosedEyes, Issue::Blurry]
     }))
     .await;
-    assert_eq!(names(&closed), vec!["b2.jpg"]);
+    assert_eq!(names(&closed), vec!["a1.jpg", "a3.jpg", "b2.jpg"]);
     // burst filters
     let best = page(q(&|q| q.burst_best_only = true)).await;
     assert_eq!(best.total, 3); // one per burst

@@ -626,8 +626,9 @@ async fn full_flow_over_http() {
     assert_eq!(q(format!("&exclude_persons={pb}")).await, 0);
     assert_eq!(q("&faces_min=2".into()).await, 4);
     assert_eq!(q("&faces_max=0".into()).await, 0);
-    assert_eq!(q("&issues_none=1".into()).await, 3);
-    assert_eq!(q("&issues_any=closed_eyes,blurry".into()).await, 1);
+    // a1 (0.6) and a3 (0.7) are under 0.8 x the burst's sharpest frame (0.9): relative "blurry"
+    assert_eq!(q("&issues_none=1".into()).await, 1);
+    assert_eq!(q("&issues_any=closed_eyes,blurry".into()).await, 3);
     assert_eq!(q("&burst_best_only=1".into()).await, 2);
     assert_eq!(q(format!("&burst_id={burst}")).await, 3);
     assert_eq!(

@@ -264,7 +264,7 @@ Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best o
 
 *My taste* (on Home) learns from your ratings, flags and in-group choices and blends the base score with your taste using a weight α (0–0.6). It only turns on after it beats the base score on a held-out set; all data stays local and can be reset any time.
 
-> **Honest note:** score thresholds are empirical starting values and have not been calibrated on a large real-photo set. For example "overexposed" only looks at the share of clipped highlights, so white backgrounds can false-positive. Treat AI stars as suggestions.
+> **Honest note:** the issue thresholds were tuned on a 1000-image synthetic test library, not yet on a large set of real photos. Bright or dark frames that keep their detail (white backdrops, paper, neon streets at night) are no longer tagged over- or underexposed; inside a burst, a frame clearly softer than the sharpest one is tagged "blurry". Soft-background portraits can still be tagged blurry. Treat AI stars as suggestions.
 
 ## 7. Groups & stacks
 
