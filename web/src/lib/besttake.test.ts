@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BestTakeCandidate, BestTakePlan, EditStack, PatchOp } from '@/api/types'
-import { alreadyBest, autoChoices, baseFaceIdFor, buildPlanView, choiceFor, scoreOf, sortedWarnings, visibleCandidates } from './besttake'
+import { alreadyBest, autoChoices, baseFaceIdFor, baseWhy, buildPlanView, choiceFor, frameWork, scoreOf, sortedWarnings, visibleCandidates } from './besttake'
 
 const cand = (photo_id: number, score: number, composable = true, reason: string | null = null): BestTakeCandidate => ({
   photo_id,
@@ -97,6 +97,24 @@ describe('besttake plan view-model', () => {
     expect(baseFaceIdFor(p, plan, 5)).toBe(51) // from the candidate list
     expect(baseFaceIdFor({ ...p, candidates: [] }, plan, 5, (track, photo) => track * 1000 + photo)).toBe(1005)
     expect(buildPlanView(plan, { order, baseId: 1 })[0].baseFaceId).toBe(11)
+  })
+
+  it('does not swap for gains within MIN_GAIN (not worth compositing)', () => {
+    const close: BestTakePlan = { ...plan, people: [{ ...plan.people[0], candidates: [cand(5, 0.43), cand(3, 0.4)] }] }
+    expect(buildPlanView(close, { order })[0].bestSwap).toBeUndefined()
+    expect(buildPlanView(close, { order })[0].best?.photo_id).toBe(5)
+    const clear: BestTakePlan = { ...plan, people: [{ ...plan.people[0], candidates: [cand(5, 0.45), cand(3, 0.4)] }] }
+    expect(buildPlanView(clear, { order })[0].bestSwap?.photo_id).toBe(5)
+  })
+
+  it('explains the base choice of the plan', () => {
+    expect(baseWhy(plan, order)).toBeUndefined()
+    const frames = [1, 3, 5].map((photo_id, i) => ({ photo_id, replacements: [2, 1, 3][i], below_best: 0, missing: 0, issues: [], cost: [2, 1, 3][i] }))
+    const chosen: BestTakePlan = { ...plan, base_choice: { mode: 'auto', reason: 'fewer_replacements', group_best_photo_id: 1, auto_photo_id: 3, frames } }
+    expect(baseWhy(chosen, order)).toEqual({ key: 'besttake.why_fewer_replacements', params: { n: 1, m: 2, frame: 1 } })
+    expect(frameWork(chosen, 5)).toBe(3)
+    expect(frameWork(chosen, 4)).toBeUndefined()
+    expect(frameWork(undefined, 3)).toBeUndefined()
   })
 
   it('orders warnings for display and drops duplicates', () => {

@@ -481,13 +481,13 @@ impl Core {
             .await?;
         let mut n = 0;
         for b in bursts {
-            let plan = self.besttake_plan(b).await?;
+            let plan = self.besttake_plan(b, None).await?;
             if plan.base_photo_id == 0 || crate::generate::auto_choices(&plan).is_empty() {
                 continue;
             }
             self.snapshot_edits(&[plan.base_photo_id], undo).await?;
             let mut rx = self.events.subscribe();
-            self.besttake_auto(b).await?;
+            self.besttake_auto(b, None).await?;
             let base = plan.base_photo_id;
             let wait = async {
                 loop {

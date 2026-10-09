@@ -32,9 +32,9 @@
 
 | 方法 | 路径 | 请求 | 响应 |
 |---|---|---|---|
-| GET | `/api/bursts/{id}/besttake` | — | `{"base_photo_id","people":[{"track_id","person_id","person_name","base_face_id","candidates":[{"photo_id","face_id","expression_score","composable":bool,"reason":string\|null}],"best_photo_id"}]}`（底片 = 组内最佳；候选按表情分降序） |
+| GET | `/api/bursts/{id}/besttake[?base_photo_id=]` | — | `{"base_photo_id","people":[{"track_id","person_id","person_name","base_face_id","candidates":[{"photo_id","face_id","expression_score","composable":bool,"reason":string\|null}],"best_photo_id"}],"base_choice":{"mode":"auto"\|"manual","reason","group_best_photo_id","auto_photo_id","frames":[{"photo_id","replacements","below_best","missing","issues":[...],"cost"}]}}`（底片按 [03 §5](03-AI与算法设计.md)「选底片」自动选择，或用 `base_photo_id` 指定（须为本组照片，否则 422）；`best_photo_id` 只在可合成且表情分高出 0.04 以上时不是底片；候选按表情分降序） |
 | POST | `/api/besttake` | `{"base_photo_id", "choices":[{"base_face_id","source_photo_id","source_face_id"}]}` | `202 {"task_id"}`；完成后底片编辑栈中**替换/插入**对应人物的 `best_take` 补丁并广播 `edits.updated`；每个选择的结果经 `besttake.done {photo_id, results:[{base_face_id, ok, warnings, reason}]}` 推送 |
-| POST | `/api/bursts/{id}/besttake/auto` | — | `202 {"task_id"}`：自动选底片 + 每人最佳可合成表情，同上 |
+| POST | `/api/bursts/{id}/besttake/auto` | 可选 `{"base_photo_id"}` | `202 {"task_id"}`：底片 = 计划的底片（或指定的，同上 422）+ 每人最佳可合成表情（即计划中 `best_photo_id` 不是底片的人），同上 |
 | GET | `/api/photos/{id}/bystanders` | — | `{"faces":[{"face_id","bbox"}]}`（非主体人脸） |
 | POST | `/api/photos/{id}/inpaint` | `{"bystanders": true}` 或 `{"face_ids":[...]}` 或 `{"strokes":[{"points":[[x,y],...],"radius":0.02}]}`（归一化，正向裁剪前坐标）；可选 `"model":"lama"\|"sdxl"` | `202 {"task_id"}`；完成后追加 `inpaint` 补丁，广播 `edits.updated` 与 `inpaint.done {photo_id, ok, reason}` |
 | POST | `/api/photos/{id}/enhance` | `{"op":"denoise"\|"face_restore","strength":0..1}` | `202 {"task_id"}`；追加/替换同类补丁 |
