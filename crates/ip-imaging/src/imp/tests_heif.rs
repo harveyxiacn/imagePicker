@@ -3,7 +3,10 @@
 //! tested deterministically; `real_heic_files_match_libheif_display` covers real decoders.
 use std::path::{Path, PathBuf};
 
-use super::container::{self, heif_orientation};
+use super::color::tests::{display_p3, expected, lin_srgb, P3_TO_SRGB};
+use super::color::SourceSpace;
+use super::container::{self, heif_orientation, Colr};
+use super::heif::{pixel_space, Via};
 use super::orient;
 use super::tests::{build_tiff, bx, decode_out, make_jpeg, write, Ifd, V};
 use crate::*;
@@ -361,6 +364,205 @@ fn heif_with_jpeg_primary_decodes_without_codecs() {
     assert_eq!(corners(&rgb, w, h), "..GR");
 }
 
+fn colr_nclx(primaries: u16, transfer: u16) -> Vec<u8> {
+    let mut p = b"nclx".to_vec();
+    for v in [primaries, transfer, 6] {
+        p.extend_from_slice(&v.to_be_bytes());
+    }
+    p.push(0x80);
+    bx(b"colr", &p)
+}
+
+fn colr_icc(icc: &[u8]) -> Vec<u8> {
+    let mut p = b"prof".to_vec();
+    p.extend_from_slice(icc);
+    bx(b"colr", &p)
+}
+
+#[test]
+fn heif_colr_profile_is_found_and_icc_wins() {
+    let icc = display_p3();
+    let file = |ipco: &[Vec<u8>], props: Vec<u8>| {
+        build_heif(
+            1,
+            &[Item {
+                id: 1,
+                typ: b"hvc1",
+                data: vec![0x5A; 32],
+                props,
+            }],
+            ipco,
+        )
+    };
+    let f = file(
+        &[ispe(64, 48), colr_nclx(12, 13), colr_icc(&icc)],
+        vec![1, 2, 3],
+    );
+    assert_eq!(container::parse_heif(&f).colr, Some(Colr::Icc(&icc)));
+    let f = file(&[ispe(64, 48), colr_nclx(12, 13)], vec![1, 2]);
+    let colr = container::parse_heif(&f).colr;
+    assert_eq!(
+        colr,
+        Some(Colr::Nclx {
+            primaries: 12,
+            transfer: 13
+        })
+    );
+    // not associated with the primary item: unknown
+    let f = file(&[ispe(64, 48), colr_nclx(12, 13)], vec![1]);
+    assert_eq!(container::parse_heif(&f).colr, None);
+}
+
+#[test]
+fn heif_pixel_space_depends_on_the_decoder() {
+    let icc = display_p3();
+    let file = Some(Colr::Icc(&icc));
+    let p3 = Some(SourceSpace::Icc(icc.clone()));
+    // libheif and WIC return the file's own space
+    assert_eq!(pixel_space(file, Via::Libheif), p3);
+    let os = if cfg!(target_os = "macos") {
+        None // ImageIO colour-matches to sRGB
+    } else {
+        p3.clone()
+    };
+    assert_eq!(pixel_space(file, Via::Os), os);
+    let nclx = Colr::Nclx {
+        primaries: 12,
+        transfer: 13,
+    };
+    assert_eq!(
+        pixel_space(Some(nclx), Via::Libheif),
+        Some(SourceSpace::Nclx {
+            primaries: 12,
+            transfer: 13
+        })
+    );
+    assert_eq!(pixel_space(None, Via::Libheif), None);
+    // an embedded JPEG: its own profile wins over the file's
+    let jpeg = make_jpeg(16, 16, |_, _| [200, 50, 40]);
+    assert_eq!(pixel_space(file, Via::Jpeg(&jpeg)), p3);
+    let srgb = moxcms::ColorProfile::new_srgb().encode().unwrap();
+    let tagged = super::color::tests::with_icc(&jpeg, &srgb, 60_000, &[0]);
+    assert_eq!(
+        pixel_space(file, Via::Jpeg(&tagged)),
+        Some(SourceSpace::Icc(srgb))
+    );
+}
+
+#[test]
+fn heif_pixels_are_converted_from_the_colr_space() {
+    // A JPEG-coded primary needs no codec, so the whole pipeline runs everywhere.
+    let dir = tempfile::tempdir().unwrap();
+    let px = [230u8, 60, 40];
+    let jpeg = make_jpeg(64, 48, |_, _| px);
+    let center = |ipco: &[Vec<u8>], props: Vec<u8>, name: &str| {
+        let f = build_heif(
+            5,
+            &[Item {
+                id: 5,
+                typ: b"jpeg",
+                data: jpeg.clone(),
+                props,
+            }],
+            ipco,
+        );
+        let p = write(dir.path(), name, &f);
+        let (w, h, rgb) = decode_rgb8(&p, ImageFormat::Heif, 1, 4096).unwrap();
+        let i = (((h / 2) * w + w / 2) * 3) as usize;
+        [rgb[i], rgb[i + 1], rgb[i + 2]]
+    };
+    let close = |a: [u8; 3], b: [u8; 3]| a.iter().zip(&b).all(|(x, y)| x.abs_diff(*y) <= 2);
+    let stored = center(&[ispe(64, 48)], vec![1], "plain.heif");
+    let want = expected(&P3_TO_SRGB, lin_srgb, stored);
+    assert!(!close(stored, want));
+    let icc = center(
+        &[ispe(64, 48), colr_icc(&display_p3())],
+        vec![1, 2],
+        "icc.heif",
+    );
+    assert!(close(icc, want), "ICC: {icc:?} vs {want:?}");
+    let nclx = center(&[ispe(64, 48), colr_nclx(12, 13)], vec![1, 2], "p3.heif");
+    assert!(close(nclx, want), "nclx P3: {nclx:?} vs {want:?}");
+    let bt709 = center(&[ispe(64, 48), colr_nclx(1, 13)], vec![1, 2], "709.heif");
+    assert_eq!(bt709, stored);
+    let pq = center(&[ispe(64, 48), colr_nclx(12, 16)], vec![1, 2], "pq.heif");
+    assert_eq!(pq, stored, "HDR (PQ) is left alone");
+}
+
+/// `clap` box: width, height, horizontal and vertical centre offset as `n/d` pairs.
+fn clap(w: i32, h: i32, dx: (i32, i32), dy: (i32, i32)) -> Vec<u8> {
+    let mut p = Vec::new();
+    for v in [w, 1, h, 1, dx.0, dx.1, dy.0, dy.1] {
+        p.extend_from_slice(&v.to_be_bytes());
+    }
+    bx(b"clap", &p)
+}
+
+#[test]
+fn heif_clean_aperture_crops_coded_padding() {
+    // 64x48 coded as 64x64, the padding (bottom 16 rows) red, as encoders do below 64 px
+    let jpeg = make_jpeg(
+        64,
+        64,
+        |_, y| if y >= 48 { [255, 0, 0] } else { [0, 0, 255] },
+    );
+    let file = build_heif(
+        1,
+        &[Item {
+            id: 1,
+            typ: b"jpeg",
+            data: jpeg,
+            props: vec![1, 2],
+        }],
+        &[ispe(64, 64), clap(64, 48, (0, 2), (-16, 2))],
+    );
+    let info = container::parse_heif(&file);
+    assert_eq!((info.width, info.height), (64, 48));
+    assert_eq!(
+        info.crop,
+        Some(container::Crop {
+            coded: (64, 64),
+            x: 0,
+            y: 0,
+            w: 64,
+            h: 48
+        })
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let p = write(dir.path(), "small.heic", &file);
+    let md = read_metadata(&p, ImageFormat::Heif).unwrap();
+    assert_eq!((md.width, md.height), (Some(64), Some(48)));
+    let (w, h, rgb) = decode_rgb8(&p, ImageFormat::Heif, 1, 4096).unwrap();
+    assert_eq!((w, h), (64, 48));
+    let last_row = &rgb[(47 * 64 * 3) as usize..];
+    assert!(last_row.chunks(3).all(|px| px[2] > 180), "padding was kept");
+    // a centred aperture with an odd remainder, and nonsense that leaves the image alone
+    let f = build_heif(
+        1,
+        &[Item {
+            id: 1,
+            typ: b"hvc1",
+            data: vec![0; 8],
+            props: vec![1, 2],
+        }],
+        &[ispe(101, 80), clap(99, 78, (0, 1), (0, 1))],
+    );
+    let c = container::parse_heif(&f).crop.unwrap();
+    assert_eq!((c.x, c.y, c.w, c.h), (1, 1, 99, 78));
+    let f = build_heif(
+        1,
+        &[Item {
+            id: 1,
+            typ: b"hvc1",
+            data: vec![0; 8],
+            props: vec![1, 2],
+        }],
+        &[ispe(64, 48), clap(200, 48, (0, 1), (0, 0))],
+    );
+    let info = container::parse_heif(&f);
+    assert_eq!((info.width, info.height, info.crop), (64, 48, None));
+}
+
 #[cfg(not(target_os = "android"))]
 #[test]
 fn libheif_private_copy_and_names() {
@@ -438,6 +640,12 @@ for o in range(1, 9):
     save(f'o{o}.heic', 320, 240, o)
 save('thumbs.heic', 1280, 960, 6, thumbnails=[320])
 save('tenbit.heic', 160, 120, 1, mode='RGB;16')
+# a saturated red tagged with a Display P3 ICC profile (argv[2]); pillow-heif returns the
+# stored values, without colour management
+p = os.path.join(d, 'p3.heic')
+pillow_heif.from_pillow(Image.new('RGB', (64, 48), (230, 60, 40))).save(p, quality=95, icc_profile=open(sys.argv[2], 'rb').read())
+hf = pillow_heif.open_heif(p)
+print('P3|' + ','.join(str(c) for c in hf.to_pillow().convert('RGB').getpixel((32, 24))) + '|' + str(len(hf.info.get('icc_profile') or b'')))
 "#;
 
 /// Real decoders on files written by pillow-heif. Runs when `IMAGEPICKER_TEST_PYTHON` names a
@@ -451,10 +659,13 @@ fn real_heic_files_match_libheif_display() {
     };
     let dir = tempfile::tempdir().unwrap();
     let private = tempfile::tempdir().unwrap();
+    let icc = dir.path().join("p3.icc");
+    std::fs::write(&icc, display_p3()).unwrap();
     let out = std::process::Command::new(py)
         .arg("-c")
         .arg(GEN_HEIC)
         .arg(dir.path())
+        .arg(&icc)
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -464,9 +675,14 @@ fn real_heic_files_match_libheif_display() {
         String::from_utf8_lossy(&out.stderr)
     );
     let mut cases = Vec::new();
+    let mut p3_stored = None;
     for line in stdout.lines() {
         let f: Vec<&str> = line.trim().split('|').collect();
-        if f[0] == "SITE" {
+        if f[0] == "P3" {
+            let v: Vec<u8> = f[1].split(',').map(|c| c.parse().unwrap()).collect();
+            p3_stored = Some([v[0], v[1], v[2]]);
+            assert!(f[2] != "0", "pillow-heif kept no ICC profile");
+        } else if f[0] == "SITE" {
             let sp = PathBuf::from(f[1]);
             set_heif_library_dirs(
                 vec![sp.join("pillow_heif.libs"), sp.clone()],
@@ -483,6 +699,11 @@ fn real_heic_files_match_libheif_display() {
         let long = 256;
         let e = generate_thumbnail(p, ImageFormat::Heif, md.orientation, long, 90).unwrap();
         let name = p.file_name().unwrap().to_string_lossy();
+        // `o<n>.heic` was written with EXIF orientation n, which pillow-heif stores as
+        // `irot`/`imir`: the container parser must read the same orientation back
+        if let Some(o) = name.strip_prefix('o').and_then(|s| s.strip_suffix(".heic")) {
+            assert_eq!(md.orientation.to_string(), o, "{name}");
+        }
         assert_eq!(
             e.width.max(e.height),
             long.min((*dw).max(*dh)),
@@ -494,6 +715,33 @@ fn real_heic_files_match_libheif_display() {
         assert_eq!((w, h), (*dw, *dh), "{name}");
         assert_eq!(&corners(&rgb, w, h), want, "{name}");
     }
+    // Display P3: converted to sRGB whichever decoder ran (ImageIO does it itself)
+    let p3 = dir.path().join("p3.heic");
+    let stored = p3_stored.expect("no P3 case");
+    let data = std::fs::read(&p3).unwrap();
+    let colr = container::parse_heif(&data).colr;
+    assert!(matches!(colr, Some(Colr::Icc(_))), "{colr:?}");
+    let want = expected(&P3_TO_SRGB, lin_srgb, stored);
+    // 64x48 is coded as 64x64 plus a `clap` crop
+    let md = read_metadata(&p3, ImageFormat::Heif).unwrap();
+    assert_eq!((md.width, md.height), (Some(64), Some(48)));
+    let (w, h, rgb) = decode_rgb8(&p3, ImageFormat::Heif, 1, 4096).unwrap();
+    assert_eq!((w, h), (64, 48));
+    let i = (((h / 2) * w + w / 2) * 3) as usize;
+    let got = [rgb[i], rgb[i + 1], rgb[i + 2]];
+    eprintln!("P3 HEIC: stored {stored:?} -> sRGB {got:?} (reference {want:?})");
+    assert!(
+        got.iter().zip(&want).all(|(a, b)| a.abs_diff(*b) <= 3),
+        "P3 HEIC: got {got:?}, want {want:?} (stored {stored:?})"
+    );
+    let e = generate_thumbnail(&p3, ImageFormat::Heif, 1, 32, 95).unwrap();
+    let t = decode_out(&e);
+    let i = (((e.height / 2) * e.width + e.width / 2) * 3) as usize;
+    let got = [t[i], t[i + 1], t[i + 2]];
+    assert!(
+        got.iter().zip(&want).all(|(a, b)| a.abs_diff(*b) <= 4),
+        "P3 thumbnail: got {got:?}, want {want:?}"
+    );
     // without an OS codec libheif decodes: its 320 px HEVC thumbnail item serves 256 px
     let thumbs = dir.path().join("thumbs.heic");
     if super::heif::os_decode(&thumbs, 256).is_some_and(|r| r.is_ok()) {

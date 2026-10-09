@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Context};
 use fast_image_resize as fir;
 
+use super::color::{self, SourceSpace};
 use super::container::{self, jpeg_info};
 use super::io::{open_data, read_all};
 use super::orient;
@@ -14,6 +15,35 @@ pub struct Rgb {
     pub w: u32,
     pub h: u32,
     pub data: Vec<u8>,
+}
+
+/// Colour space of decoded pixels.
+pub enum PixelSpace {
+    /// Whatever the file declares (`color::source_space`).
+    Declared,
+    /// Decided by a loader that knows what its decoder returns (HEIF): convert from this
+    /// space, or `None` when the pixels are sRGB already.
+    Known(Option<SourceSpace>),
+}
+
+/// Decoded pixels before resizing, colour management and orientation.
+pub struct Loaded {
+    pub rgb: Rgb,
+    pub source: ThumbSource,
+    /// The decoder already applied the orientation (otherwise the pixels are as stored).
+    pub oriented: bool,
+    pub space: PixelSpace,
+}
+
+impl Loaded {
+    fn declared(rgb: Rgb, source: ThumbSource) -> Self {
+        Loaded {
+            rgb,
+            source,
+            oriented: false,
+            space: PixelSpace::Declared,
+        }
+    }
 }
 
 pub(super) fn fit_dims(w: u32, h: u32, long_edge: u32) -> (u32, u32) {
@@ -143,14 +173,13 @@ fn decode_with_image(path: &Path) -> Result<Rgb> {
     })
 }
 
-/// Load pixels with long edge >= min(`long_edge`, original) where cheap. The flag is true when
-/// the decoder already applied the orientation (otherwise the pixels are as stored).
+/// Load pixels with long edge >= min(`long_edge`, original) where cheap.
 fn load(
     path: &Path,
     format: ImageFormat,
     long_edge: u32,
     allow_embedded_thumb: bool,
-) -> Result<(Rgb, ThumbSource, bool)> {
+) -> Result<Loaded> {
     match format {
         ImageFormat::Jpeg => {
             let data = read_all(path)?;
@@ -165,7 +194,7 @@ fn load(
                                     < 0.02 * (info.width as f64 / info.height as f64);
                             if tw.max(th) >= long_edge && aspect_ok {
                                 if let Ok((rgb, _)) = decode_jpeg(tb, long_edge) {
-                                    return Ok((rgb, ThumbSource::Embedded, false));
+                                    return Ok(Loaded::declared(rgb, ThumbSource::Embedded));
                                 }
                             }
                         }
@@ -173,15 +202,12 @@ fn load(
                 }
             }
             let (rgb, scaled) = decode_jpeg(&data, long_edge)?;
-            Ok((
-                rgb,
-                if scaled {
-                    ThumbSource::DctScaled
-                } else {
-                    ThumbSource::FullDecode
-                },
-                false,
-            ))
+            let source = if scaled {
+                ThumbSource::DctScaled
+            } else {
+                ThumbSource::FullDecode
+            };
+            Ok(Loaded::declared(rgb, source))
         }
         ImageFormat::Raw => {
             let data = open_data(path)?;
@@ -192,11 +218,12 @@ fn load(
                 )
             })?;
             let (rgb, _) = decode_jpeg(prev, long_edge)?;
-            Ok((rgb, ThumbSource::Embedded, false))
+            Ok(Loaded::declared(rgb, ThumbSource::Embedded))
         }
-        ImageFormat::Png | ImageFormat::Webp | ImageFormat::Tiff => {
-            Ok((decode_with_image(path)?, ThumbSource::FullDecode, false))
-        }
+        ImageFormat::Png | ImageFormat::Webp | ImageFormat::Tiff => Ok(Loaded::declared(
+            decode_with_image(path)?,
+            ThumbSource::FullDecode,
+        )),
         ImageFormat::Heif | ImageFormat::Avif => {
             super::heif::load(path, long_edge, allow_embedded_thumb)
         }
@@ -213,13 +240,19 @@ fn upright(
     if long_edge == 0 {
         bail!("long_edge must be > 0");
     }
-    let (rgb, src, oriented) = load(path, format, long_edge, embedded)?;
-    let (nw, nh) = fit_dims(rgb.w, rgb.h, long_edge);
-    let mut rgb = resize_rgb(rgb, nw, nh)?;
-    super::color::to_srgb(path, format, &mut rgb.data);
-    let orientation = if oriented { 1 } else { orientation };
+    let l = load(path, format, long_edge, embedded)?;
+    let (nw, nh) = fit_dims(l.rgb.w, l.rgb.h, long_edge);
+    let mut rgb = resize_rgb(l.rgb, nw, nh)?;
+    match &l.space {
+        PixelSpace::Declared => color::to_srgb(path, format, &mut rgb.data),
+        PixelSpace::Known(Some(space)) => {
+            color::convert(space, &mut rgb.data);
+        }
+        PixelSpace::Known(None) => {}
+    }
+    let orientation = if l.oriented { 1 } else { orientation };
     let (w, h, data) = orient::apply(rgb.w, rgb.h, rgb.data, orientation);
-    Ok((Rgb { w, h, data }, src))
+    Ok((Rgb { w, h, data }, l.source))
 }
 
 pub fn generate_thumbnail(

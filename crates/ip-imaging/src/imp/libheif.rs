@@ -43,8 +43,6 @@ struct Api {
     thumbnail_count: unsafe extern "C" fn(Ptr) -> c_int,
     thumbnail_ids: unsafe extern "C" fn(Ptr, *mut u32, c_int) -> c_int,
     thumbnail: unsafe extern "C" fn(Ptr, u32, *mut Ptr) -> HeifError,
-    options_alloc: unsafe extern "C" fn() -> Ptr,
-    options_free: unsafe extern "C" fn(Ptr),
     decode_image: unsafe extern "C" fn(Ptr, *mut Ptr, c_int, c_int, Ptr) -> HeifError,
     image_width: unsafe extern "C" fn(Ptr, c_int) -> c_int,
     image_height: unsafe extern "C" fn(Ptr, c_int) -> c_int,
@@ -276,8 +274,6 @@ fn load(path: &Path) -> Result<Api, String> {
         thumbnail_count: sym!("heif_image_handle_get_number_of_thumbnails"),
         thumbnail_ids: sym!("heif_image_handle_get_list_of_thumbnail_IDs"),
         thumbnail: sym!("heif_image_handle_get_thumbnail"),
-        options_alloc: sym!("heif_decoding_options_alloc"),
-        options_free: sym!("heif_decoding_options_free"),
         decode_image: sym!("heif_decode_image"),
         image_width: sym!("heif_image_get_width"),
         image_height: sym!("heif_image_get_height"),
@@ -314,14 +310,15 @@ impl Drop for Owned {
     }
 }
 
-/// Decodes the primary image (or, for thumbnails, a large enough thumbnail item) to stored,
-/// untransformed RGB8. `stored` is the primary image's stored size from the container.
-/// Returns whether a thumbnail item was used.
+/// Decodes the primary image (or, for thumbnails, a large enough thumbnail item) to upright
+/// RGB8: libheif applies the item's `clap`, `irot` and `imir` in their declared order. `display`
+/// is the primary image's upright size from the container (`(0, 0)` if unknown). Returns
+/// whether a thumbnail item was used.
 pub fn decode(
     data: &[u8],
     long_edge: u32,
     thumbnails: bool,
-    stored: (u32, u32),
+    display: (u32, u32),
 ) -> Result<(Rgb, bool), String> {
     let api = api()?;
     // SAFETY: every handle comes from libheif and is released exactly once by `Owned`; `data`
@@ -344,7 +341,7 @@ pub fn decode(
         if thumbnails {
             if let Some(t) = thumbnail(api, &primary, long_edge) {
                 if let Ok(rgb) = decode_handle(api, &t) {
-                    if same_aspect((rgb.w, rgb.h), stored) {
+                    if same_aspect((rgb.w, rgb.h), display) {
                         return Ok((rgb, true));
                     }
                 }
@@ -354,12 +351,12 @@ pub fn decode(
     }
 }
 
-/// `true` if `stored` is unknown or the aspect ratios agree within 2%.
-fn same_aspect((w, h): (u32, u32), stored: (u32, u32)) -> bool {
-    if stored.0 == 0 || stored.1 == 0 || w == 0 || h == 0 {
-        return stored.0 == 0 || stored.1 == 0;
+/// `true` if `want` is unknown or the aspect ratios agree within 2%.
+fn same_aspect((w, h): (u32, u32), want: (u32, u32)) -> bool {
+    if want.0 == 0 || want.1 == 0 || w == 0 || h == 0 {
+        return want.0 == 0 || want.1 == 0;
     }
-    let a = stored.0 as f64 / stored.1 as f64;
+    let a = want.0 as f64 / want.1 as f64;
     ((w as f64 / h as f64) - a).abs() < 0.02 * a
 }
 
@@ -397,21 +394,14 @@ unsafe fn thumbnail(api: &Api, primary: &Owned, long_edge: u32) -> Option<Owned>
 /// # Safety
 /// `handle` must be a live image handle of `api`.
 unsafe fn decode_handle(api: &Api, handle: &Owned) -> Result<Rgb, String> {
-    let opts = Owned((api.options_alloc)(), api.options_free);
-    if opts.0.is_null() {
-        return Err("libheif: cannot allocate decoding options".into());
-    }
-    // `struct heif_decoding_options` starts with `uint8_t version; uint8_t
-    // ignore_transformations;` in every version: decode the stored pixels, the caller applies
-    // the orientation from `irot`/`imir` like for every other decoder.
-    *opts.0.cast::<u8>().add(1) = 1;
     let mut img = null_mut();
+    // default options (NULL): transformations applied
     let err = (api.decode_image)(
         handle.0,
         &mut img,
         COLORSPACE_RGB,
         CHROMA_INTERLEAVED_RGB,
-        opts.0,
+        null_mut(),
     );
     let img = Owned(img, api.image_release);
     check(err)?;

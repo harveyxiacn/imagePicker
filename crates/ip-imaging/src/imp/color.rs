@@ -27,6 +27,8 @@ pub enum SourceSpace {
     Icc(Vec<u8>),
     /// DCF option file: EXIF ColorSpace = uncalibrated, interoperability index "R03".
     AdobeRgbDcf,
+    /// Code points of a HEIF `nclx` colour box (ISO/IEC 23091-2).
+    Nclx { primaries: u16, transfer: u16 },
 }
 
 /// The ICC profile of a JPEG: its APP2 `ICC_PROFILE` chunks joined in sequence order. `None`
@@ -102,7 +104,8 @@ fn exif_says_adobe_rgb(tiff: &[u8]) -> bool {
         .is_some_and(|s| s == "R03")
 }
 
-fn jpeg_space(data: &[u8]) -> Option<SourceSpace> {
+/// What a JPEG stream declares: its ICC profile, else the DCF Adobe RGB marker.
+pub fn jpeg_space(data: &[u8]) -> Option<SourceSpace> {
     if let Some(icc) = jpeg_icc(data) {
         return Some(SourceSpace::Icc(icc));
     }
@@ -126,8 +129,8 @@ pub fn source_space(path: &Path, format: ImageFormat) -> Option<SourceSpace> {
                 .ok()?;
             dec.icc_profile().ok().flatten().map(SourceSpace::Icc)
         }
-        // No pixel decoder for these yet; whoever adds one decides whether its output still
-        // needs the `colr` profile applied here.
+        // Depends on the decoder (macOS ImageIO returns sRGB, libheif and WIC the file's own
+        // space): `heif.rs` reports the space of its pixels itself.
         ImageFormat::Heif | ImageFormat::Avif => None,
     }
 }
@@ -151,11 +154,29 @@ fn is_identity(t: &Transform8BitExecutor) -> Option<bool> {
     Some(src.iter().zip(&dst).all(|(a, b)| a.abs_diff(*b) <= 1))
 }
 
+/// The wide-gamut SDR spaces of `nclx` code points: Display P3 (primaries 12) and BT.2020 (9)
+/// with an sRGB / BT.709-style transfer. BT.709 primaries are sRGB; HDR transfers (PQ 16,
+/// HLG 18) would need tone mapping and are left alone, like everything unknown.
+fn nclx_profile(primaries: u16, transfer: u16) -> Option<ColorProfile> {
+    if !matches!(transfer, 1 | 6 | 13 | 14 | 15) {
+        return None;
+    }
+    match primaries {
+        12 => Some(ColorProfile::new_display_p3()),
+        9 => Some(ColorProfile::new_bt2020()),
+        _ => None,
+    }
+}
+
 /// `None` when there is nothing to do: an sRGB-equivalent, non-RGB or unusable profile.
 fn build_transform(space: &SourceSpace) -> Option<Transform> {
     let src = match space {
         SourceSpace::Icc(bytes) => ColorProfile::new_from_slice(bytes).ok()?,
         SourceSpace::AdobeRgbDcf => ColorProfile::new_adobe_rgb(),
+        SourceSpace::Nclx {
+            primaries,
+            transfer,
+        } => nclx_profile(*primaries, *transfer)?,
     };
     if src.color_space != DataColorSpace::Rgb {
         return None;
@@ -178,6 +199,16 @@ fn transform_for(space: &SourceSpace) -> Option<Transform> {
     let key = match space {
         SourceSpace::Icc(bytes) => *blake3::hash(bytes).as_bytes(),
         SourceSpace::AdobeRgbDcf => [0; 32],
+        SourceSpace::Nclx {
+            primaries,
+            transfer,
+        } => {
+            let mut k = [0; 32];
+            k[0] = 1;
+            k[1..3].copy_from_slice(&primaries.to_be_bytes());
+            k[3..5].copy_from_slice(&transfer.to_be_bytes());
+            k
+        }
     };
     let cache = CACHE.get_or_init(Cache::default);
     if let Some(t) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
@@ -219,12 +250,12 @@ pub fn to_srgb(path: &Path, format: ImageFormat, rgb: &mut Vec<u8>) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::super::tests::{build_tiff, make_jpeg, Ifd, V};
     use super::*;
     use crate::{decode_rgb8, generate_thumbnail};
 
-    fn lin_srgb(v: u8) -> f64 {
+    pub fn lin_srgb(v: u8) -> f64 {
         let c = v as f64 / 255.0;
         if c <= 0.04045 {
             c / 12.92
@@ -248,7 +279,7 @@ mod tests {
     }
 
     /// Linear Display P3 -> linear sRGB (both D65; from the primaries, not from moxcms).
-    const P3_TO_SRGB: [[f64; 3]; 3] = [
+    pub const P3_TO_SRGB: [[f64; 3]; 3] = [
         [1.224_940_2, -0.224_940_4, 0.0],
         [-0.042_056_9, 1.042_057_1, 0.0],
         [-0.019_637_6, -0.078_636_1, 1.098_273_5],
@@ -492,6 +523,34 @@ mod tests {
             center(&adobe)
         );
         assert_eq!(center(&srgb), stored);
+    }
+
+    #[test]
+    fn nclx_wide_gamut_sdr_is_converted_hdr_and_bt709_are_not() {
+        let px = [230u8, 60, 40];
+        let nclx = |primaries, transfer| SourceSpace::Nclx {
+            primaries,
+            transfer,
+        };
+        // Display P3 with the sRGB or the BT.709 transfer
+        for transfer in [13, 1] {
+            let mut rgb = px.to_vec();
+            assert!(convert(&nclx(12, transfer), &mut rgb));
+            let want = expected(&P3_TO_SRGB, lin_srgb, px);
+            assert!(
+                close([rgb[0], rgb[1], rgb[2]], want, 2),
+                "{rgb:?} vs {want:?}"
+            );
+        }
+        let mut rgb = px.to_vec();
+        assert!(convert(&nclx(9, 1), &mut rgb), "BT.2020");
+        assert!(rgb[0] > px[0] && rgb[1] < px[1], "{rgb:?}");
+        // sRGB / BT.709 primaries, PQ and HLG, unspecified: untouched
+        for (p, t) in [(1, 13), (1, 1), (12, 16), (9, 18), (2, 2)] {
+            let mut rgb = px.to_vec();
+            assert!(!convert(&nclx(p, t), &mut rgb), "{p}/{t}");
+            assert_eq!(rgb, px.to_vec());
+        }
     }
 
     #[test]

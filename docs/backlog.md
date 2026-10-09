@@ -21,7 +21,7 @@
 | P1 | 倾斜检测、构图分 | M2 |
 | P1 | RAW 预览在真实相机文件上验证（目前仅合成样本） | M1 imaging |
 | P2 | 以脸搜脸「这是新的人」 | M4 web |
-| P1 | HEIC/HEIF 导出与色彩：等 HEIC 解码接入后，若解码器不做色彩管理，需在 `ip-imaging` `imp/color.rs` 的 `source_space` 读取 `colr` 配置文件（iPhone 为 Display P3）；HEIF 的 EXIF 已可复制 | M5 core |
+| P2 | HEIC/HEIF 色彩余项：HDR（`nclx` 传递函数 PQ / HLG、iPhone 增益图）不做色调映射，按 SDR 原样显示；WIC 路径的色彩转换未实测（本机无 HEIF 编解码器） | M5 core |
 | P2 | 导出元数据余项：DNG/CR3/HEIC 文件内部的 XMP、PNG/WebP/TIFF 内嵌 XMP/IPTC 不复制（只用 JPEG 内嵌包或 `.xmp` 侧车）；扩展 XMP（>64 KB）丢弃；导出不写入目录库的评分/关键词；RAW 预览色彩空间只看预览 JPEG 自带 ICC / DCF 标记，RAW EXIF 重建仅在合成样本上验证；原样复制（未编辑、原尺寸）时 `strip_gps` 不生效 | M5 core |
 | P2 | 色彩转换前生成的缩略图/预览缓存不会自动重建（清除缓存后重新生成）；导出只输出 sRGB（无 P3 输出），色域外颜色裁切 | M5 core |
 | P2 | 生成任务没有取消接口、没有持久化任务记录 | M5 |
@@ -50,6 +50,7 @@
 
 - 拍摄时间按查看者时区显示 → 改为拍摄地当地时间（M1）
 - HEIC/HEIF 缩略图：内嵌 JPEG → WIC / ImageIO → 运行时加载 libheif（含 AI 组件自带）分层降级，方向以 `irot`/`imir` 为准（M1，见 02 §5.1）
+- HEIC/HEIF 色彩与导出：libheif / WIC 输出按主图 `colr`（ICC 或 `nclx` P3 / BT.2020）转换为 sRGB，ImageIO 输出本就是 sRGB；有解码器时 HEIC 可预览、修图与导出（M5 core）
 - EXIF 浮点噪声、AI 一键数值噪声（M1、M3）
 - 网格场景标题 key 重复导致重叠（M2）
 - 前端写死 LUT id → `GET /api/luts`（M3）

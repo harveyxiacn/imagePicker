@@ -274,10 +274,13 @@ pub fn raw_preview(data: &[u8]) -> Option<&[u8]> {
 
 #[derive(Default)]
 pub struct HeifInfo<'a> {
-    /// Stored (untransformed) size of the primary image; the largest `ispe` when the primary
-    /// item's properties cannot be resolved.
+    /// Stored (unrotated) size of the primary image, after its `clap` crop; the largest `ispe`
+    /// when the primary item's properties cannot be resolved.
     pub width: u32,
     pub height: u32,
+    /// The primary item's clean aperture when it crops the coded image (encoders pad sizes
+    /// the codec cannot represent, e.g. below 64 px or odd).
+    pub crop: Option<Crop>,
     pub exif_tiff: Option<&'a [u8]>,
     /// EXIF-style orientation (1..=8) of the primary item's `irot`/`imir` properties; `None`
     /// when its property associations were not found.
@@ -286,6 +289,60 @@ pub struct HeifInfo<'a> {
     pub primary_jpeg: Option<&'a [u8]>,
     /// JPEG thumbnails/previews: other JPEG-coded items and the EXIF IFD1 thumbnail.
     pub jpeg_previews: Vec<&'a [u8]>,
+    /// The primary item's colour space (`colr`); an ICC profile wins over `nclx`.
+    pub colr: Option<Colr<'a>>,
+}
+
+/// A `clap` clean aperture inside the coded (`ispe`) image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Crop {
+    pub coded: (u32, u32),
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+}
+
+/// `clap`: width, height and the centre offset as fractions; rounded like libheif.
+fn clean_aperture(p: &[u8], (cw, ch): (u32, u32)) -> Option<Crop> {
+    let v = |i: usize| Some(i32::from_be_bytes(p.get(i * 4..i * 4 + 4)?.try_into().ok()?) as f64);
+    let frac = |i: usize| {
+        let d = v(i + 1)?;
+        (d != 0.0).then_some(v(i)? / d)
+    };
+    let (w, h) = (frac(0)?.round(), frac(2)?.round());
+    let x = (frac(4)? + (cw as f64 - 1.0) / 2.0 - (w - 1.0) / 2.0).floor();
+    let y = (frac(6)? + (ch as f64 - 1.0) / 2.0 - (h - 1.0) / 2.0).floor();
+    if w < 1.0 || h < 1.0 || x < 0.0 || y < 0.0 || x + w > cw as f64 || y + h > ch as f64 {
+        return None;
+    }
+    Some(Crop {
+        coded: (cw, ch),
+        x: x as u32,
+        y: y as u32,
+        w: w as u32,
+        h: h as u32,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Colr<'a> {
+    /// `prof` / `rICC`: an ICC profile.
+    Icc(&'a [u8]),
+    /// `nclx`: ISO/IEC 23091-2 code points (the matrix only matters to the decoder).
+    Nclx { primaries: u16, transfer: u16 },
+}
+
+fn parse_colr(p: &[u8]) -> Option<Colr<'_>> {
+    let be16 = |r: std::ops::Range<usize>| Some(u16::from_be_bytes(p.get(r)?.try_into().ok()?));
+    match p.get(0..4)? {
+        b"prof" | b"rICC" => Some(Colr::Icc(p.get(4..).filter(|icc| !icc.is_empty())?)),
+        b"nclx" => Some(Colr::Nclx {
+            primaries: be16(4..6)?,
+            transfer: be16(6..8)?,
+        }),
+        _ => None,
+    }
 }
 
 /// Big-endian unsigned integer of `n` bytes at `*pos` (`n == 0` reads 0), advancing `pos`.
@@ -521,8 +578,25 @@ pub fn parse_heif(data: &[u8]) -> HeifInfo<'_> {
         {
             info.width = w;
             info.height = h;
+            let clap = props.iter().find(|(t, _)| t == b"clap");
+            info.crop = clap
+                .and_then(|&(_, p)| clean_aperture(p, (w, h)))
+                .filter(|c| (c.w, c.h) != (w, h));
+            if let Some(c) = info.crop {
+                info.width = c.w;
+                info.height = c.h;
+            }
         }
         info.orientation = Some(heif_orientation(&props));
+        for &(_, p) in props.iter().filter(|(t, _)| t == b"colr") {
+            match parse_colr(p) {
+                Some(c @ Colr::Icc(_)) if !matches!(info.colr, Some(Colr::Icc(_))) => {
+                    info.colr = Some(c)
+                }
+                Some(c @ Colr::Nclx { .. }) if info.colr.is_none() => info.colr = Some(c),
+                _ => {}
+            }
+        }
     }
     if info.width == 0 {
         // no associations: the largest `ispe` (the primary image or its grid)
