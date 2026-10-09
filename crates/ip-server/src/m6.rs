@@ -1,5 +1,5 @@
-//! M6 routes (docs/api-contract-m6.md sections A, C, D): assistant, settings, cache, models,
-//! onboarding, face data and XMP sync.
+//! M6 routes (docs/api-contract-m6.md sections A, C, D, F): assistant, settings, cache, models,
+//! onboarding, face data, XMP sync and catalog backups.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -259,4 +259,26 @@ pub async fn set_tags(
 ) -> ApiResult<Json<Value>> {
     let n = st.core.set_tags(b.ids, b.add, b.remove).await?;
     Ok(Json(json!({ "updated": n })))
+}
+
+// ------------------------------------------------------------------ catalog integrity / backups
+
+pub async fn catalog_status(State(st): State<AppState>) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(st.core.catalog_status().await)))
+}
+
+pub async fn catalog_backup(State(st): State<AppState>) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(st.core.catalog_backup().await?)))
+}
+
+#[derive(Deserialize)]
+pub struct RestoreBody {
+    name: String,
+}
+
+pub async fn catalog_restore(
+    State(st): State<AppState>,
+    ApiJson(b): ApiJson<RestoreBody>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(st.core.catalog_restore(&b.name).await?)))
 }

@@ -272,7 +272,9 @@ fn parse_or_empty(text: Option<String>) -> std::result::Result<Xmp, String> {
 }
 
 /// Rewrites the embedded XMP of a JPEG (temp file + rename; pixel data and the other
-/// segments are byte-identical; mtime is restored).
+/// segments are byte-identical; mtime is restored). This changes the original file, so it only
+/// runs in the explicitly confirmed `modify_originals` mode
+/// ([`crate::settings::XMP_MODIFY_ORIGINALS`]).
 fn write_embedded(path: &Path, cat: &CatalogValues) -> std::result::Result<bool, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let existing = jpeg::extract(&bytes);
@@ -511,7 +513,8 @@ impl Core {
         force: bool,
         mode: &str,
     ) -> Result<XmpSyncReport> {
-        let embedded = mode == "sidecar_and_embedded";
+        // the only place where an original file is ever written (docs/02 §8)
+        let embedded = mode == crate::settings::XMP_MODIFY_ORIGINALS;
         let mut report = XmpSyncReport {
             direction: "write".into(),
             photos: ids.len(),

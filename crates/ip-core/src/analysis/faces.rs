@@ -352,6 +352,12 @@ impl Core {
         if let Some(s) = session_id {
             self.session(s).await?;
         }
+        // computing a face feature of an uploaded photo is face recognition too (docs/02 §8)
+        if !self.settings().faces.allowed() {
+            return Err(CoreError::Conflict(
+                "face recognition is off or has not been agreed to (settings: faces)".into(),
+            ));
+        }
         if bytes.len() > MAX_UPLOAD_BYTES {
             return Err(CoreError::bad_request("the image is too large"));
         }

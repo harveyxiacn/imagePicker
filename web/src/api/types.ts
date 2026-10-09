@@ -820,7 +820,8 @@ export interface EditSuggestion {
   reason: string
 }
 
-export type XmpMode = 'off' | 'sidecar' | 'sidecar_and_embedded'
+/** `modify_originals` = sidecar + the XMP inside original JPEGs (the only mode that rewrites originals). */
+export type XmpMode = 'off' | 'sidecar' | 'modify_originals'
 export type ModelSource = 'auto' | 'hf' | 'hf-mirror' | 'modelscope'
 export type GroupStrictness = 'loose' | 'normal' | 'strict'
 export type RenderBackend = 'auto' | 'gpu' | 'cpu'
@@ -829,7 +830,8 @@ export interface Settings {
   language: 'zh-CN' | 'en'
   theme: 'dark' | 'light' | 'system'
   analysis: { default_profile: AnalysisProfile; auto_analyze_on_import: boolean; group_strictness: GroupStrictness }
-  faces: { enabled: boolean }
+  /** `consented`: the purpose explanation was accepted; no face is detected or recognised before that. */
+  faces: { enabled: boolean; consented: boolean }
   privacy: { allow_network: boolean }
   models: { dir: string; source: ModelSource }
   cache: { max_gb: number }
@@ -843,6 +845,34 @@ export interface Settings {
 /** Recursive partial used for `PATCH /api/settings`. */
 export type SettingsPatch = {
   [K in keyof Settings]?: Settings[K] extends unknown[] ? Settings[K] : Settings[K] extends object ? Partial<Settings[K]> : Settings[K]
+} & {
+  /** Confirms switching `xmp_mode` to `modify_originals` (required by the server; never stored). */
+  confirm_modify_originals?: boolean
+}
+
+// ---- data safety: catalog integrity + backups (GET /api/catalog) ----
+
+export type CatalogState = 'checking' | 'ok' | 'damaged' | 'recovery'
+
+export interface CatalogBackup {
+  name: string
+  /** auto = daily / "back up now"; replaced = the catalog a restore replaced; corrupt = an unreadable catalog moved aside */
+  kind: 'auto' | 'replaced' | 'corrupt'
+  /** ms */
+  created_at: number
+  bytes: number
+}
+
+export interface CatalogStatus {
+  state: CatalogState
+  problems: string[]
+  moved_to: string | null
+  checked_at: number | null
+  restored_from: string | null
+  last_backup_at: number | null
+  backup_dir: string
+  /** newest first */
+  backups: CatalogBackup[]
 }
 
 export type CacheKind = 'thumbs' | 'previews' | 'masks' | 'edits' | 'gen'

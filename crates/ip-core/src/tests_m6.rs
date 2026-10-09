@@ -48,6 +48,7 @@ fn open_in(data: tempfile::TempDir, backend: Backend) -> Env {
         force_cpu: true,
     })
     .unwrap();
+    crate::testutil::grant_face_consent(&core);
     Env {
         core,
         worker,
@@ -1420,7 +1421,7 @@ async fn embedded_xmp_rewrite_keeps_the_image_bytes() {
     let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
     let sid = import_dir(&e, e.src.path()).await;
     e.core
-        .patch_settings(json!({"xmp_mode":"sidecar_and_embedded"}))
+        .patch_settings(json!({"xmp_mode":"modify_originals","confirm_modify_originals":true}))
         .await
         .unwrap();
     let id = by_name(&e, sid).await["a.jpg"].id;

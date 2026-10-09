@@ -47,6 +47,7 @@ fn env() -> Env {
         force_cpu: true,
     })
     .unwrap();
+    crate::testutil::grant_face_consent(&core);
     Env {
         core,
         worker,

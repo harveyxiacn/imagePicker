@@ -243,6 +243,7 @@ Click **Analyze** in the top bar, choose a profile and press *Start analysis*:
 | **Standard** (default) | Adds people recognition, aesthetic and image-quality scores, scene classification | About 2 GB depending on tier |
 
 - Analyse only the selection with *Analyse only the N selected*;
+- **Before the first analysis** the app explains what face recognition is used for (closed-eye and expression checks, grouping and filtering by person, best take, portrait retouching) and asks whether to use it. Until you agree no face is detected and no face feature is extracted; *Don't use face recognition* switches it off and the analysis runs without face-based results (closed eyes, people, best take). Change it any time in *Settings → Faces & privacy*;
 - Progress runs: analysing photos → burst grouping → scoring → people clustering;
 - In *Settings → Analysis* set the default profile, **analyse after import**, and burst-grouping strictness (loose / normal / strict).
 
@@ -309,7 +310,7 @@ After analysis, faces are clustered into **people** on your machine (AuraFace id
 
 Click a person to cycle **off → include → exclude**. Match mode: *All together (AND)* or *Any (OR)*. You can also require the selected people to be eyes open / smiling / looking at camera / the subject, limit head count (single, 2–3, many, none), and choose whether photos where they appear only as background bystanders count. The result count updates live; *Save as smart collection* keeps the filter.
 
-> Turn face recognition off in *Settings → Faces & privacy*. Then faces are neither detected nor clustered, and people, best take and beauty profiles are unavailable.
+> Face recognition only starts once you agree (asked before the first analysis, see section 6). Turn it off or withdraw consent in *Settings → Faces & privacy*. Then faces are neither detected nor clustered, and people, best take and beauty profiles are unavailable; delete what was already extracted with *Clear all face data*.
 
 ## 9. Best take
 
@@ -477,9 +478,17 @@ Security notes: enable only on a trusted LAN and use a strong password; failed l
 ## 16. Privacy & data locations
 
 - Photos, face features, ratings and edits are **stored only on your machine** and never uploaded.
+- **Originals are read-only**: importing, analysing, rating, XMP sidecar sync, editing and exporting never change a single byte of an original file (an automated test compares SHA-256 hashes before and after). The only exception is the *Modify originals (write embedded XMP)* mode that you choose and confirm yourself in *Settings → Interop (XMP)*, see section 17.
 - The only network use is downloading models on demand (and the mirror you pick). With *Settings → Faces & privacy → Allow network* off, nothing is downloaded and the app runs fully offline.
-- Face recognition can be turned off entirely; *Wipe all face data* deletes every face, person and beauty profile (photos and ratings stay) after you type the confirmation word.
+- **Face recognition needs your consent**: its purpose is explained before the first analysis, and until you agree no face is detected and no face feature is extracted. Turn it off or withdraw consent in *Settings → Faces & privacy*; *Clear all face data* deletes every face, person and beauty profile (photos and ratings stay) after you type the confirmation word.
 - LAN access is off by default; passwords are stored as Argon2id hashes.
+
+### Catalog backups & restore
+
+- At every start the catalog's integrity is checked in the background (`PRAGMA quick_check`) without slowing the start down.
+- The catalog is backed up once a day to `backups/` in the data directory (`catalog-<date>-<time>.db`, UTC), keeping the latest 7; *Settings → Catalog backups → Back up now* makes one at once. Backups contain the catalog only (ratings, flags, edits, people, analysis results), **not your originals** — back those up yourself.
+- If the catalog is damaged so badly that it cannot be opened, the app moves it to `backups/corrupt-….db`, starts with an empty catalog and shows *The catalog cannot be opened* with the available backups; damage found by the start-up check is reported the same way. Pick a backup and click *Restore*; originals are not affected.
+- Restoring replaces the current catalog with the backup (changes made after it are lost); the replaced catalog is kept as `backups/replaced-….db` and the page reloads. You can also restore any backup from *Settings → Catalog backups*.
 
 ### Data locations
 
@@ -494,13 +503,14 @@ Default data directory (override with `IMAGEPICKER_DATA_DIR` or `--data-dir`):
 | What | Where (inside the data directory) |
 |---|---|
 | Catalog (ratings, flags, edits, people) | `catalog.db` |
+| Catalog backups (one a day, 7 kept) | `backups/` |
 | Thumbnail / preview / AI mask / edit render / generated-result caches | `cache/` (clear in *Settings → Cache*; rebuilt on demand) |
 | Generated patch layers of edits | `edits/` |
 | Imported LUTs | `luts/` |
 | Logs | `logs/` |
 | AI models | default `<platform data dir>/imagePicker/models`, shown in Settings (`IMAGEPICKER_MODELS_DIR` overrides) |
 
-Backup tip: back up `catalog.db` and `edits/`; caches and models can be rebuilt.
+Backup tip: the app backs `catalog.db` up to `backups/` every day (see above); for a full backup copy `backups/` (or `catalog.db` while the app is closed) and `edits/`; caches and models can be rebuilt.
 
 ## 17. Lightroom / darktable interop (XMP)
 
@@ -509,8 +519,10 @@ Choose a mode in *Settings → Interop (XMP)*:
 | Mode | Behaviour |
 |---|---|
 | **Off** (default) | XMP is neither read nor written |
-| **Sidecar** | Reads `<name>.xmp` on import; after a rating change writes the sidecar (debounced, atomic, keeping other content) |
-| **Sidecar + embedded** | Same, and also reads XMP embedded in JPEGs |
+| **Sidecar** | Reads `<name>.xmp` on import (the XMP embedded in a JPEG when there is no sidecar); after a rating change writes the sidecar (debounced, atomic, keeping other content). **Originals are never modified** |
+| **Modify originals (write embedded XMP)** (advanced) | Like *Sidecar*, and also writes ratings, flags, colour labels and keywords into the XMP embedded in original JPEGs. **This rewrites the original files**: pixel data and other metadata stay the same and the modification time is kept, but the file contents and checksums change and backup / sync tools see them as modified. Choosing it asks for a second confirmation; use it only if your other software reads embedded XMP only, and back up your photos first |
+
+> Older versions had a *Sidecar + embedded* mode that was described as "also reads embedded XMP" but rewrote originals. After the upgrade it becomes *Sidecar*; if you really want embedded XMP written, choose *Modify originals* again and confirm.
 
 Conventions: rating → `xmp:Rating`, **reject → −1** (darktable convention, also understood by Lightroom); colour label → `xmp:Label`; keywords → `dc:subject` / `lr:hierarchicalSubject`.
 
@@ -524,11 +536,12 @@ Open with the gear icon on Home or in the top bar.
 |---|---|
 | **Hardware & models** | AI worker state, tier, compute device, assistant engine; model download source, models directory, model table (size / licence / status; download and delete) |
 | **Analysis** | Default profile, analyse after import, burst-grouping strictness |
-| **Faces & privacy** | Face recognition switch, wipe all face data, allow network |
+| **Faces & privacy** | Face recognition switch, face recognition consent (show explanation / withdraw), clear all face data, allow network |
 | **Cache** | Usage per cache kind, clear, cache limit (default 20 GB; least recently used is evicted) |
+| **Catalog backups** | Integrity state, latest backup, *Back up now*, the backups with *Restore* (see section 16) |
 | **Rendering** | Render backend: Auto / GPU / CPU |
 | **LAN / WebUI** | See section 15; also *Allowed folders* (import, export and folder browsing are limited to these roots) |
-| **Interop (XMP)** | See section 17 |
+| **Interop (XMP)** | Off / Sidecar / Modify originals (confirmed twice), see section 17 |
 | **Shortcuts** | Read-only, generated from the built-in keymap |
 | **Language & appearance** | UI language (简体中文 / English), theme (dark / light / follow system) |
 
@@ -553,10 +566,12 @@ Open with the gear icon on Home or in the top bar.
 | A generative task times out | Retry; upscaling and face restore are slow on CPU tiers; reduce load or use a higher tier |
 | Cache too large | Clear kinds one by one or lower the limit in *Settings → Cache*; originals and edits are unaffected |
 | Reset what *My taste* learned | *My taste → Reset my taste* |
+| At start the app says *The catalog cannot be opened* or *The catalog failed its integrity check* | Pick a backup and *Restore* (section 16); the damaged file is kept in `backups/` in the data directory. Without a backup start over with the new empty catalog and import again (originals are not affected; ratings kept in XMP sidecars are read back on import) |
+| No people / closed-eye tags after analysis | Face recognition is off or not agreed to yet: *Settings → Faces & privacy*, show the explanation and agree, then analyse again |
 
 **FAQ**
 
-- **Does it modify or delete my originals?** No. Ratings, flags and edits live in the catalog; *Reject* is only a mark; export writes to a new folder you choose (with XMP enabled only `.xmp` sidecar files are written next to photos).
+- **Does it modify or delete my originals?** No. Ratings, flags and edits live in the catalog; *Reject* is only a mark; export writes to a new folder you choose (with XMP sidecars enabled only `.xmp` sidecar files are written next to photos). The only thing that rewrites originals is the *Modify originals (write embedded XMP)* mode, which you have to choose and confirm (section 17).
 - **Does it need the internet?** Only to download models. Afterwards it can run fully offline.
 - **Can I use it without a GPU?** Yes: fast analysis, basic editing and culling work; standard analysis, upscaling etc. are slower.
 - **Which camera RAW formats?** Common brands (see section 4); RAW is shown from its embedded preview.

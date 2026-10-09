@@ -2,8 +2,10 @@ import type { QueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '@/api/client'
 import type { AnalysisProfile, AnalysisStatus } from '@/api/types'
 import { useAnalysisUi } from '@/stores/analysis'
+import { useFaceConsent } from '@/stores/faceConsent'
 import { useToasts } from '@/stores/toasts'
 import { qk } from './cache'
+import { faceConsentPending } from './faceConsent'
 import { offerRuntimeInstall } from './runtime'
 
 /** Extracts the `models` list of a 409 models_missing response (contract C.2). */
@@ -16,6 +18,8 @@ export function missingModelsOf(err: unknown): string[] | null {
 /**
  * Start (or resume) analysis. A 409 models_missing opens the consent dialog instead of failing;
  * the dialog calls `/api/models/ensure` and then retries through this same function.
+ * Before the first analysis the face-recognition question is asked (docs/02 §8); its dialog
+ * also retries through here once answered.
  */
 export async function startAnalysis(
   qc: QueryClient,
@@ -23,6 +27,10 @@ export async function startAnalysis(
   profile: AnalysisProfile,
   photoIds?: number[],
 ): Promise<boolean> {
+  if (await faceConsentPending(qc)) {
+    useFaceConsent.getState().ask({ sessionId, profile, photoIds })
+    return false
+  }
   try {
     await api.runAnalysis({ session_id: sessionId, profile, ...(photoIds ? { photo_ids: photoIds } : {}) })
     qc.setQueryData<AnalysisStatus>(qk.analysisStatus(sessionId), {

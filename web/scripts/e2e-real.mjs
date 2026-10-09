@@ -198,7 +198,10 @@ try {
   await step('analysis run with the fake worker', async () => {
     await page.getByTestId('analyze-button').click();
     await page.getByRole('radio', { name: /Fast/ }).check();
+    expect((await api('/api/settings')).faces.consented === false, 'face recognition needs an explicit consent');
     await page.getByTestId('analyze-start').click();
+    // the first analysis asks about face recognition first (docs/02 §8); agreeing starts it
+    await page.getByTestId('face-consent-agree').click();
     await until('analysis done', async () => {
       const s = await api(`/api/analysis/status?session_id=${session}`);
       expect(s.state !== 'failed', `analysis failed: ${s.error}`);

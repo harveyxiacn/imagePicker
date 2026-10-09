@@ -4,6 +4,7 @@ pub mod admin;
 pub mod analysis;
 pub mod assistant;
 pub mod auth;
+pub mod backup;
 pub mod catalog;
 pub mod collections;
 pub mod db;
@@ -117,6 +118,8 @@ pub struct Core {
     /// Remote AI (phone -> home PC), M8.
     pub remote: remote::RemoteAi,
     pub(crate) xmp: xmp::XmpState,
+    /// Catalog integrity and backups (`backup`).
+    pub catalog_guard: backup::CatalogGuard,
     pub(crate) evicting: std::sync::atomic::AtomicBool,
     task_seq: AtomicU64,
     pub(crate) runs: std::sync::Mutex<std::collections::HashMap<i64, analysis::RunInfo>>,
@@ -134,7 +137,8 @@ impl Core {
         }
         let dirs = DataDirs::new(paths::resolve_data_dir(cfg.data_dir.as_deref()));
         dirs.create()?;
-        let db = Db::open(&dirs.catalog)?;
+        // an unreadable catalog is moved aside (state "recovery"), see `backup`
+        let (db, catalog_guard) = backup::open_catalog(&dirs)?;
         db.with(|c| catalog::settle_stale_sessions(c))?;
         let tasks: i64 =
             db.with(|c| Ok(c.query_row("SELECT COUNT(*) FROM task", [], |r| r.get(0))?))?;
@@ -223,6 +227,7 @@ impl Core {
             runtime,
             remote,
             xmp: Default::default(),
+            catalog_guard,
             evicting: std::sync::atomic::AtomicBool::new(false),
             task_seq: AtomicU64::new(tasks as u64),
             runs: Default::default(),
@@ -232,6 +237,7 @@ impl Core {
         Core::spawn_worker_status_forwarder(&core);
         core.apply_settings(None, &core.settings());
         Core::spawn_cache_janitor(&core);
+        Core::spawn_catalog_guard(&core);
         Ok(core)
     }
 
@@ -393,6 +399,8 @@ mod tests_m4;
 mod tests_m5;
 #[cfg(test)]
 mod tests_m6;
+#[cfg(test)]
+mod tests_safety;
 
 impl Drop for Core {
     fn drop(&mut self) {
