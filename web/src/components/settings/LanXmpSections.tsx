@@ -3,14 +3,14 @@ import { AlertTriangle, Check, Copy, KeyRound, Loader2, Plus, RefreshCw, Upload,
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
-import { useLan, useSessions } from '@/api/queries'
+import { useLan, usePatchSettings, useSessions } from '@/api/queries'
 import type { XmpMode } from '@/api/types'
 import { PASSWORD_MIN, passwordValid } from '@/lib/auth'
 import { errorText } from '@/lib/errors'
 import { qk } from '@/lib/cache'
 import { parsePort } from '@/lib/settingsForm'
 import { useToasts } from '@/stores/toasts'
-import { Card, CommitInput, Row, Toggle } from './controls'
+import { Card, CommitInput, ConfirmDialog, Row, Toggle } from './controls'
 import { useSetting } from './useSetting'
 
 /** Owner (+ optional guest) password form: POST /api/auth/password {password, guest_password?} (8-256 chars, guest differs). */
@@ -192,18 +192,25 @@ export function LanSection() {
   )
 }
 
-const MODES: XmpMode[] = ['off', 'sidecar', 'sidecar_and_embedded']
+const MODES: XmpMode[] = ['off', 'sidecar', 'modify_originals']
 
-/** 互通: XMP sidecars (Lightroom / darktable). */
+/** 互通: XMP sidecars (Lightroom / darktable). `modify_originals` rewrites original JPEGs and needs a second confirmation. */
 export function XmpSection() {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const { s, set } = useSetting()
+  const patch = usePatchSettings()
   const sessions = useSessions()
   const [sid, setSid] = useState<number | null>(null)
   const [busy, setBusy] = useState<'read' | 'write' | null>(null)
+  const [confirmOriginals, setConfirmOriginals] = useState(false)
   if (!s) return null
   const sessionId = sid ?? sessions.data?.[0]?.id ?? null
+  const choose = (m: XmpMode) => {
+    if (m === s.xmp_mode) return
+    if (m === 'modify_originals') setConfirmOriginals(true)
+    else set('xmp_mode', m)
+  }
 
   const sync = async (direction: 'read' | 'write') => {
     if (sessionId === null) return
@@ -224,15 +231,31 @@ export function XmpSection() {
       <Card title={t('settings.xmp.title')} hint={t('settings.xmp.hint')}>
         <div className="flex flex-col gap-2 px-4 py-3" role="radiogroup" aria-label={t('settings.xmp.title')}>
           {MODES.map((m) => (
-            <label key={m} className={`flex cursor-pointer items-start gap-2.5 rounded-control border px-3 py-2 ${s.xmp_mode === m ? 'border-accent bg-accent/10' : 'border-line'}`}>
-              <input type="radio" name="xmp-mode" className="mt-1" checked={s.xmp_mode === m} onChange={() => set('xmp_mode', m)} data-testid={`xmp-mode-${m}`} />
+            <label key={m} className={`flex cursor-pointer items-start gap-2.5 rounded-control border px-3 py-2 ${s.xmp_mode === m ? (m === 'modify_originals' ? 'border-warning bg-warning/10' : 'border-accent bg-accent/10') : 'border-line'}`}>
+              <input type="radio" name="xmp-mode" className="mt-1" checked={s.xmp_mode === m} onChange={() => choose(m)} data-testid={`xmp-mode-${m}`} />
               <span>
-                <span className="font-medium">{t(`settings.xmp.mode_${m}`)}</span>
+                <span className="flex items-center gap-1.5 font-medium">
+                  {m === 'modify_originals' && <AlertTriangle size={13} className="text-warning" />}
+                  {t(`settings.xmp.mode_${m}`)}
+                </span>
                 <span className="mt-0.5 block text-xs text-muted">{t(`settings.xmp.mode_${m}_desc`)}</span>
               </span>
             </label>
           ))}
         </div>
+        <ConfirmDialog
+          open={confirmOriginals}
+          onOpenChange={setConfirmOriginals}
+          title={t('settings.xmp.originalsTitle')}
+          description={t('settings.xmp.originalsDesc')}
+          confirmLabel={t('settings.xmp.originalsConfirm')}
+          danger
+          testId="xmp-originals-confirm"
+          onConfirm={() => {
+            setConfirmOriginals(false)
+            patch.mutate({ xmp_mode: 'modify_originals', confirm_modify_originals: true })
+          }}
+        />
         <div className="px-4 py-3 text-xs leading-relaxed text-muted" data-testid="xmp-compat">
           <div className="mb-1 font-medium text-fg">{t('settings.xmp.compatTitle')}</div>
           <ul className="list-disc pl-4">

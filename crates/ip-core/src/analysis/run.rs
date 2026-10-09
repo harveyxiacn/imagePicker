@@ -461,7 +461,8 @@ impl Core {
         let out_dir = self.dirs.root.join("cache").join("analysis").join(&task_id);
         let _ = std::fs::create_dir_all(&out_dir);
         let total = refs.len() as i64;
-        // faces disabled in the settings: no detection, no identity embeddings
+        // faces switched off or not agreed to yet: no detection, no identity embeddings
+        let faces_allowed = self.settings().faces.allowed();
         let steps = self.analysis_steps(req.profile).await;
         let mut done: i64 = 0;
         let mut failed: Vec<String> = Vec::new();
@@ -520,7 +521,7 @@ impl Core {
                     other => break other,
                 }
             };
-            let resp = match resp {
+            let mut resp = match resp {
                 Ok(r) => r,
                 Err(WorkerError::Cancelled) => break,
                 Err(e) => {
@@ -531,6 +532,13 @@ impl Core {
                     break;
                 }
             };
+            if !faces_allowed {
+                // whatever the worker did, nothing about faces is stored without consent
+                for it in &mut resp.items {
+                    it.faces.clear();
+                    it.identity_file = None;
+                }
+            }
             for s in &resp.skipped_steps {
                 if !skipped.contains(s) {
                     skipped.push(s.clone());
@@ -832,11 +840,19 @@ impl Core {
         Ok(n)
     }
 
-    /// Explicit worker steps of `profile` when the settings switch faces off (`None` = the
-    /// worker's own profile).
-    async fn analysis_steps(&self, profile: Profile) -> Option<Vec<String>> {
-        if profile == Profile::Lite || self.settings().faces.enabled {
+    /// Explicit worker steps of `profile` when faces are switched off or not agreed to yet
+    /// (`faces.consented`, docs/02 §8); `None` = the worker's own profile.
+    pub(crate) async fn analysis_steps(&self, profile: Profile) -> Option<Vec<String>> {
+        if self.settings().faces.allowed() {
             return None;
+        }
+        if profile == Profile::Lite {
+            return Some(
+                crate::lite::LITE_STEPS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            );
         }
         let fallback: &[&str] = match profile {
             Profile::Lite | Profile::Fast => &["phash", "quality"],

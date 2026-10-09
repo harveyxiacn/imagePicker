@@ -269,7 +269,13 @@ impl AiWorker for LiteWorker {
     ) -> Result<AnalyzeResponse> {
         let started = std::time::Instant::now();
         let (imaging, pool) = (self.imaging.clone(), self.pool.clone());
-        let detector = self.faces.clone();
+        // explicit steps without `faces`: face detection is off or not agreed to
+        let faces_wanted = req
+            .steps
+            .as_ref()
+            .is_none_or(|s| s.iter().any(|x| x == "faces"));
+        let detector = self.faces.clone().filter(|_| faces_wanted);
+        let with_faces = detector.is_some();
         let (items, cancel2) = (req.items.clone(), cancel.clone());
         let (size, total) = (req.analysis_size.max(64), req.items.len());
         let done = Arc::new(AtomicUsize::new(0));
@@ -306,9 +312,9 @@ impl AiWorker for LiteWorker {
         }
         Ok(AnalyzeResponse {
             items: out.into_iter().flatten().collect(),
-            steps: steps_for(self.faces.is_some()),
+            steps: steps_for(with_faces),
             skipped_steps: vec![],
-            models: if self.faces.is_some() {
+            models: if with_faces {
                 json!({"lite": format!("ip-lite {}", env!("CARGO_PKG_VERSION")), "faces": "yunet"})
             } else {
                 json!({"lite": format!("ip-lite {}", env!("CARGO_PKG_VERSION"))})

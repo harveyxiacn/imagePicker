@@ -39,6 +39,7 @@ fn env() -> Env {
         force_cpu: true,
     })
     .unwrap();
+    ip_core::testutil::grant_face_consent(&core);
     let app = build_router(core.clone(), None);
     Env {
         core,

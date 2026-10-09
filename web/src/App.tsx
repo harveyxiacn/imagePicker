@@ -13,6 +13,8 @@ import { handleXmpConflict } from '@/lib/xmp'
 import { Login } from '@/pages/Login'
 import { Settings } from '@/pages/Settings'
 import { BottomNav } from '@/components/mobile/BottomNav'
+import { CatalogRecovery } from '@/components/CatalogRecovery'
+import { FaceConsentDialog } from '@/components/FaceConsentDialog'
 import { Onboarding } from '@/components/Onboarding'
 import { useAssistant } from '@/stores/assistant'
 import { genOnDone, genOnTask } from '@/lib/gen'
@@ -137,6 +139,8 @@ function Shell() {
         {isMobile && showsBottomNav(pathname) && <BottomNav />}
       </div>
       <Onboarding />
+      <FaceConsentDialog />
+      <CatalogRecovery />
       <Toasts />
     </>
   )

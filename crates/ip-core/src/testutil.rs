@@ -140,6 +140,14 @@ impl Imaging for FakeImaging {
     }
 }
 
+/// Records the face-recognition consent the UI asks for before the first analysis
+/// (`faces.consented`, docs/02 §8), for tests that need faces to be detected and recognised.
+pub fn grant_face_consent(core: &crate::Core) {
+    core.settings
+        .patch(&serde_json::json!({"faces": {"consented": true}}))
+        .expect("face consent");
+}
+
 /// Writes a solid-colour JPEG of the given size.
 pub fn write_jpeg(path: &Path, w: u32, h: u32, shade: u8) {
     let img = image::RgbImage::from_pixel(w, h, image::Rgb([shade, 255 - shade, 128]));

@@ -1,4 +1,6 @@
 import type {
+  CatalogBackup,
+  CatalogStatus,
   Device,
   AnalysisProfile,
   AnalysisStatus,
@@ -270,6 +272,10 @@ export const api = {
   setPassword: (password: string, guest_password?: string) =>
     request<{ ok: boolean }>('POST', '/auth/password', guest_password === undefined ? { password } : { password, guest_password }),
   xmpSync: (session_id: number, direction: 'read' | 'write') => request<{ updated?: number }>('POST', '/xmp/sync', { session_id, direction }),
+  // data safety: catalog integrity + backups
+  catalog: () => request<CatalogStatus>('GET', '/catalog'),
+  catalogBackup: () => request<CatalogBackup>('POST', '/catalog/backup'),
+  catalogRestore: (name: string) => request<CatalogStatus>('POST', '/catalog/restore', { name }),
   // remote AI (M8): phone side
   remoteStatus: () => request<RemoteStatus>('GET', '/remote/status'),
   remoteConnect: (body: RemoteConnectBody) => request<RemoteStatus>('POST', '/remote/connect', body),

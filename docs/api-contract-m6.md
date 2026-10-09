@@ -60,9 +60,10 @@
 
 ## C. XMP 侧车互通
 
-- 设置项 `xmp_mode`: `"off" \| "sidecar" \| "sidecar_and_embedded"`（默认 `"off"`）。
-- **读**：导入时读取 `<name>.xmp`（以及 `<name>.<ext>.xmp`）与 JPEG 内嵌 XMP 中的 `xmp:Rating`（−1 = 淘汰）、`xmp:Label`、`dc:subject`/`lr:hierarchicalSubject`（关键词，存入 tag）。
-- **写**：用户评分/旗标/色标/关键词变化后去抖写入（保留侧车中的其他内容，原子写入）；淘汰写 `xmp:Rating="-1"`（darktable 约定，与 Lightroom 兼容）。
+- 设置项 `xmp_mode`: `"off" \| "sidecar" \| "modify_originals"`（默认 `"off"`）。
+- **读**（`sidecar` 与 `modify_originals`）：导入时读取 `<name>.xmp`（以及 `<name>.<ext>.xmp`），没有侧车时读取 JPEG 内嵌 XMP，取 `xmp:Rating`（−1 = 淘汰）、`xmp:Label`、`dc:subject`/`lr:hierarchicalSubject`（关键词，存入 tag）。
+- **写**：用户评分/旗标/色标/关键词变化后去抖写入侧车（保留侧车中的其他内容，原子写入）；淘汰写 `xmp:Rating="-1"`（darktable 约定，与 Lightroom 兼容）。只有 `modify_originals` 还会改写 JPEG 原图内嵌的 XMP 段（其余字节不变，mtime 保留）——这是唯一会改变原图字节的设置，`PATCH /api/settings` 切换到它时必须在同一请求中带 `"confirm_modify_originals": true`（不存储），否则 `422 unprocessable`。
+- 旧值 `"sidecar_and_embedded"`（旧界面称「同上，并读取内嵌 XMP」，实际会改写原图）在加载设置时改为 `"sidecar"`；`PATCH` 不再接受它。
 - 冲突：侧车 mtime 晚于目录库记录 → 以侧车为准并提示；`POST /api/xmp/sync {"session_id", "direction": "read" \| "write"}` 手动同步。
 
 ## D. 设置
@@ -74,12 +75,12 @@
   "language": "zh-CN",
   "theme": "dark" | "light" | "system",
   "analysis": { "default_profile": "standard", "auto_analyze_on_import": false, "group_strictness": "normal" /* loose|normal|strict */ },
-  "faces": { "enabled": true },            // false：不做人脸识别；DELETE /api/faces?confirm=true 清除全部人脸数据
+  "faces": { "enabled": true, "consented": false },  // enabled=false：不做人脸识别；consented：用户已看过用途说明并同意（默认 false，同意前不检测人脸、不计算人脸特征）；DELETE /api/faces?confirm=true 清除全部人脸数据
   "privacy": { "allow_network": true },    // false：禁止一切下载
   "models": { "dir": "...", "source": "auto" | "hf" | "hf-mirror" | "modelscope" },
   "cache": { "max_gb": 20 },
   "render": { "backend": "auto" | "gpu" | "cpu" },
-  "xmp_mode": "off",
+  "xmp_mode": "off",                        // off | sidecar | modify_originals（切换到 modify_originals 需 "confirm_modify_originals": true）
   "lan": { "enabled": false, "port": 7878, "guest_enabled": false },  // 密码通过 POST /api/auth/password 设置
   "roots": ["C:/Users/me/Pictures"],
   "assistant": { "engine": "auto" }
@@ -97,3 +98,20 @@
 { "type": "settings.updated", "settings": {...} }
 { "type": "xmp.conflict", "photo_id": 12, "sidecar": {"rating": 3}, "catalog": {"rating": 4} }
 ```
+
+## F. 目录库完整性与备份（数据安全）
+
+- 启动：`catalog.db` 打不开（SQLite 报告损坏 / 不是数据库）时移到 `<数据目录>/backups/corrupt-<时间>.db`，用空目录库启动，状态 `recovery`；能打开则后台执行 `PRAGMA quick_check`（状态 `checking` → `ok` / `damaged`）。
+- 每天一次自动备份 `VACUUM INTO backups/catalog-<UTC 时间>.db`，保留最近 7 份；状态不是 `ok` 或目录库没有照片时不自动备份。
+- `GET /api/catalog` →
+  ```jsonc
+  { "state": "checking" | "ok" | "damaged" | "recovery",
+    "problems": ["..."],            // quick_check 结果或打不开的原因
+    "moved_to": "…/backups/corrupt-20261009-080503-007.db" | null,
+    "checked_at": 1760000000000 | null, "restored_from": "catalog-….db" | null,
+    "last_backup_at": 1760000000000 | null, "backup_dir": "…/backups",
+    "backups": [{ "name": "catalog-20261009-080503-007.db", "kind": "auto" | "replaced" | "corrupt", "created_at": 1760000000000, "bytes": 18400000 }] }  // 新的在前
+  ```
+- `POST /api/catalog/backup` → 新备份的 `{name, kind, created_at, bytes}`；`recovery` 状态下 `409`（先恢复，避免空目录库挤掉好的备份）。
+- `POST /api/catalog/restore {"name"}` → 恢复后的状态。备份须是可读、`quick_check` 通过、表结构不新于当前版本的目录库，否则 `422`；名称不合法 `400`、不存在 `404`；分析运行中或连接 30 秒内不释放 `409`。当前目录库另存为 `backups/replaced-<时间>.db`（`replaced`、`corrupt` 各保留 3 份）。客户端恢复后重新加载页面。
+- 仅所有者可用（访客 `403`）。

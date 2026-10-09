@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
 
@@ -309,21 +309,27 @@ impl Drop for Guard<'_> {
 /// Connections per catalog (fewer on phones: each one holds its own page cache).
 const POOL_SIZE: usize = if cfg!(target_os = "android") { 3 } else { 6 };
 
+/// The pool's connections to `path`, the first one having migrated the schema.
+fn open_conns(path: &Path) -> Result<Vec<Connection>> {
+    let mut first = Connection::open(path)?;
+    configure(&first)?;
+    migrate(&mut first)?;
+    crate::device::backfill(&first)?;
+    let mut conns = vec![first];
+    for _ in 1..POOL_SIZE {
+        let c = Connection::open(path)?;
+        configure(&c)?;
+        conns.push(c);
+    }
+    Ok(conns)
+}
+
 impl Db {
     pub fn open(path: &Path) -> Result<Db> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let mut first = Connection::open(path)?;
-        configure(&first)?;
-        migrate(&mut first)?;
-        crate::device::backfill(&first)?;
-        let mut conns = vec![first];
-        for _ in 1..POOL_SIZE {
-            let c = Connection::open(path)?;
-            configure(&c)?;
-            conns.push(c);
-        }
+        let conns = open_conns(path)?;
         Ok(Db {
             pool: Arc::new(Pool {
                 conns: Mutex::new(conns),
@@ -389,6 +395,72 @@ impl Db {
         c.1.insert(key, n);
     }
 
+    /// Restores a catalog file (`backup::Core::catalog_restore`): closes every pooled connection
+    /// (waiting up to `wait` for the ones in use; new callers wait meanwhile), moves the catalog
+    /// (and its WAL) to `keep_old_as`, copies `src` into its place and reopens the pool on it,
+    /// migrating it to the current schema. On failure the old file is put back.
+    pub fn replace_file(&self, src: &Path, keep_old_as: &Path, wait: Duration) -> Result<()> {
+        let deadline = Instant::now() + wait;
+        let mut g = self.pool.conns.lock().unwrap();
+        let mut taken: Vec<Connection> = Vec::new();
+        loop {
+            taken.append(&mut g);
+            if taken.len() >= POOL_SIZE {
+                break;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                g.append(&mut taken);
+                drop(g);
+                self.pool.cv.notify_all();
+                return Err(CoreError::Conflict(
+                    "the catalog is busy; try again in a moment".into(),
+                ));
+            }
+            let step = (deadline - now).min(Duration::from_millis(50));
+            g = self.pool.cv.wait_timeout(g, step).unwrap().0;
+        }
+        // closing the last connection checkpoints the WAL into the file
+        drop(taken);
+        let path = self.path.clone();
+        let installed = crate::backup::move_catalog(&path, keep_old_as)
+            .map_err(CoreError::from)
+            .and_then(|()| {
+                let res = install_copy(src, &path).and_then(|()| open_conns(&path));
+                if res.is_err() {
+                    // put the old catalog back
+                    for suffix in ["", "-wal", "-shm"] {
+                        let _ = std::fs::remove_file(with_suffix(&path, suffix));
+                    }
+                    let _ = crate::backup::move_catalog(keep_old_as, &path);
+                }
+                res
+            });
+        let (conns, out) = match installed {
+            Ok(c) => (c, Ok(())),
+            Err(e) => match open_conns(&path) {
+                Ok(c) => (c, Err(e)),
+                Err(e2) => {
+                    // never leave the pool empty (every caller would wait forever)
+                    tracing::error!(error = %e2, "the catalog cannot be reopened after a failed restore");
+                    let mut c = Vec::new();
+                    for _ in 0..POOL_SIZE {
+                        if let Ok(mut m) = Connection::open_in_memory() {
+                            let _ = migrate(&mut m);
+                            c.push(m);
+                        }
+                    }
+                    (c, Err(e))
+                }
+            },
+        };
+        *g = conns;
+        self.pool.generation.fetch_add(1, Ordering::SeqCst);
+        drop(g);
+        self.pool.cv.notify_all();
+        out
+    }
+
     /// Runs `f` on the blocking pool so the tokio runtime is never blocked.
     pub async fn call<T, F>(&self, f: F) -> Result<T>
     where
@@ -400,6 +472,25 @@ impl Db {
             .await
             .map_err(|e| CoreError::Internal(anyhow::anyhow!("db task failed: {e}")))?
     }
+}
+
+/// `path` + `suffix` (`catalog.db` -> `catalog.db-wal`).
+fn with_suffix(p: &Path, suffix: &str) -> PathBuf {
+    let mut s = p.as_os_str().to_owned();
+    s.push(suffix);
+    PathBuf::from(s)
+}
+
+/// Copies `src` (and a `-wal` next to it) to `path` through a temp file.
+fn install_copy(src: &Path, path: &Path) -> Result<()> {
+    let tmp = with_suffix(path, ".restore-tmp");
+    std::fs::copy(src, &tmp)?;
+    std::fs::rename(&tmp, path)?;
+    let wal = with_suffix(src, "-wal");
+    if wal.exists() {
+        std::fs::copy(&wal, with_suffix(path, "-wal"))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -451,6 +542,62 @@ mod tests {
             )
             .unwrap();
         assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn replace_file_swaps_the_catalog_under_the_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.db");
+        let db = Db::open(&path).unwrap();
+        let count = |db: &Db| -> i64 {
+            db.with(|c| Ok(c.query_row("SELECT COUNT(*) FROM preset", [], |r| r.get(0))?))
+                .unwrap()
+        };
+        let add = |db: &Db, name: &str| {
+            db.with(|c| {
+                c.execute(
+                    "INSERT INTO preset(name, stack, created_at) VALUES(?1, '{}', 0)",
+                    [name],
+                )?;
+                Ok(())
+            })
+            .unwrap()
+        };
+        add(&db, "one");
+        let backup = dir.path().join("backup.db");
+        db.with(|c| {
+            c.execute("VACUUM INTO ?1", [backup.to_string_lossy()])?;
+            Ok(())
+        })
+        .unwrap();
+        add(&db, "two");
+        assert_eq!(count(&db), 2);
+        let gen = db.generation();
+        let kept = dir.path().join("old.db");
+        db.replace_file(&backup, &kept, Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(count(&db), 1, "the backup's rows");
+        assert!(db.generation() > gen, "cached counts are invalidated");
+        // every pooled connection sees the restored file
+        let clones: Vec<i64> = (0..POOL_SIZE * 2).map(|_| count(&db)).collect();
+        assert!(clones.iter().all(|n| *n == 1));
+        add(&db, "three");
+        assert_eq!(count(&db), 2);
+        // the replaced catalog is kept, complete
+        let old = Connection::open(&kept).unwrap();
+        let n: i64 = old
+            .query_row("SELECT COUNT(*) FROM preset", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 2);
+        // a broken source leaves the current catalog in place
+        let junk = dir.path().join("junk.db");
+        std::fs::write(&junk, b"not a database at all, not even close").unwrap();
+        let e = db
+            .replace_file(&junk, &dir.path().join("old2.db"), Duration::from_secs(5))
+            .unwrap_err();
+        assert!(crate::backup::is_corruption(&e), "{e:?}");
+        assert_eq!(count(&db), 2);
+        assert!(!dir.path().join("old2.db").exists());
     }
 
     #[test]

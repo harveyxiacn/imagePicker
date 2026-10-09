@@ -34,3 +34,5 @@ getrandom.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# tests_safety.rs: originals are compared by SHA-256 before and after every operation
+sha2 = "0.10"
