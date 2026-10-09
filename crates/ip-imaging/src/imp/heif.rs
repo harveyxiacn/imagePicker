@@ -99,26 +99,30 @@ pub fn load(path: &Path, long_edge: u32, embedded: bool) -> Result<Loaded> {
         return Ok(loaded(rgb, ThumbSource::Embedded, false, Via::Jpeg(j)));
     }
     let mut why = Vec::new();
-    match os_decode(path, long_edge) {
-        Some(Ok(rgb)) => {
-            let rgb = crop(&info, rgb);
-            let rotated = rotated(&info, &rgb);
-            return Ok(loaded(rgb, ThumbSource::FullDecode, rotated, Via::Os));
+    if info.missing_codec_config {
+        why.push("the image has no decoder configuration (damaged file)".to_string());
+    } else {
+        match os_decode(path, long_edge) {
+            Some(Ok(rgb)) => {
+                let rgb = crop(&info, rgb);
+                let rotated = rotated(&info, &rgb);
+                return Ok(loaded(rgb, ThumbSource::FullDecode, rotated, Via::Os));
+            }
+            Some(Err(e)) => why.push(e),
+            None => {}
         }
-        Some(Err(e)) => why.push(e),
-        None => {}
-    }
-    #[cfg(not(target_os = "android"))]
-    match super::libheif::decode(&data, long_edge, embedded, display_size(&info)) {
-        Ok((rgb, thumb)) => {
-            let src = if thumb {
-                ThumbSource::Embedded
-            } else {
-                ThumbSource::FullDecode
-            };
-            return Ok(loaded(rgb, src, true, Via::Libheif));
+        #[cfg(not(target_os = "android"))]
+        match super::libheif::decode(&data, long_edge, embedded, display_size(&info)) {
+            Ok((rgb, thumb)) => {
+                let src = if thumb {
+                    ThumbSource::Embedded
+                } else {
+                    ThumbSource::FullDecode
+                };
+                return Ok(loaded(rgb, src, true, Via::Libheif));
+            }
+            Err(e) => why.push(e),
         }
-        Err(e) => why.push(e),
     }
     if let Some((rgb, j)) = previews
         .iter()

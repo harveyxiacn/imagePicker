@@ -291,6 +291,10 @@ pub struct HeifInfo<'a> {
     pub jpeg_previews: Vec<&'a [u8]>,
     /// The primary item's colour space (`colr`); an ICC profile wins over `nclx`.
     pub colr: Option<Colr<'a>>,
+    /// The primary image is HEVC / AV1 coded but lacks its decoder configuration (`hvcC` /
+    /// `av1C`): a damaged file no decoder can read. Handing it to an OS decoder anyway is
+    /// pointless and risks a crash inside that decoder.
+    pub missing_codec_config: bool,
 }
 
 /// A `clap` clean aperture inside the coded (`ispe`) image.
@@ -565,12 +569,14 @@ pub fn parse_heif(data: &[u8]) -> HeifInfo<'_> {
         Some((w, h))
     };
     // primary item: size and transformative properties
+    let mut primary_props: Option<Vec<[u8; 4]>> = None;
     if let Some(props) = primary.and_then(|id| ipma.iter().find(|(i, _)| *i == id)) {
         let props: Vec<([u8; 4], &[u8])> = props
             .1
             .iter()
             .filter_map(|&k| ipco.get(k.checked_sub(1)?).copied())
             .collect();
+        primary_props = Some(props.iter().map(|(t, _)| *t).collect());
         if let Some((w, h)) = props
             .iter()
             .find(|(t, _)| t == b"ispe")
@@ -638,6 +644,15 @@ pub fn parse_heif(data: &[u8]) -> HeifInfo<'_> {
             }
             _ => {}
         }
+    }
+    let primary_type = primary.and_then(|id| items.iter().find(|(i, _)| *i == id).map(|e| e.1));
+    let config: Option<&[u8; 4]> = match primary_type.as_ref() {
+        Some(b"hvc1" | b"hev1") => Some(b"hvcC"),
+        Some(b"av01") => Some(b"av1C"),
+        _ => None,
+    };
+    if let (Some(c), Some(props)) = (config, &primary_props) {
+        info.missing_codec_config = !props.contains(c);
     }
     info
 }

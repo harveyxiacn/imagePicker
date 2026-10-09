@@ -1,5 +1,6 @@
-//! HEIF/AVIF: container parsing, orientation, the decoder cascade. Synthetic files carry no
-//! decodable HEVC, so every OS/libheif decoder fails on them and the pure-Rust layers are
+//! HEIF/AVIF: container parsing, orientation, the decoder cascade. Synthetic HEVC items carry
+//! no decoder configuration (`hvcC`), so the loader never hands them to an OS decoder or
+//! libheif (macOS ImageIO crashed the test process on such input) and the pure-Rust layers are
 //! tested deterministically; `real_heic_files_match_libheif_display` covers real decoders.
 use std::path::{Path, PathBuf};
 
@@ -337,10 +338,52 @@ fn heif_without_decoder_degrades_to_small_preview_or_errors() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("cannot decode HEIF/AVIF"), "{err}");
-    #[cfg(not(target_os = "android"))]
-    assert!(err.contains("libheif"), "{err}");
+    assert!(err.contains("no decoder configuration"), "{err}");
+    // with a configuration the decoders are tried and say what is missing (Windows: no HEIF
+    // codec for this account / on CI, no libheif)
     #[cfg(windows)]
-    assert!(err.contains("Windows"), "{err}");
+    {
+        let configured = build_heif(
+            1,
+            &[Item {
+                id: 1,
+                typ: b"hvc1",
+                data: vec![0x5A; 64],
+                props: vec![1, 2],
+            }],
+            &[ispe(64, 48), bx(b"hvcC", &[1; 23])],
+        );
+        let p = write(dir.path(), "configured.heic", &configured);
+        let err = generate_thumbnail(&p, ImageFormat::Heif, 1, 256, 80)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("libheif") && err.contains("Windows"), "{err}");
+    }
+}
+
+#[test]
+fn hevc_or_av1_without_decoder_configuration_is_flagged() {
+    // phone-like file: HEVC primary without `hvcC`
+    assert!(container::parse_heif(&phone_like()).missing_codec_config);
+    let item = |typ: &'static [u8; 4], props: Vec<u8>| Item {
+        id: 1,
+        typ,
+        data: vec![0x5A; 64],
+        props,
+    };
+    let with = |typ, config: &[u8; 4]| {
+        build_heif(
+            1,
+            &[item(typ, vec![1, 2])],
+            &[ispe(64, 48), bx(config, &[1; 8])],
+        )
+    };
+    assert!(!container::parse_heif(&with(b"hvc1", b"hvcC")).missing_codec_config);
+    assert!(!container::parse_heif(&with(b"av01", b"av1C")).missing_codec_config);
+    assert!(container::parse_heif(&with(b"av01", b"hvcC")).missing_codec_config);
+    // other primary types (grid, JPEG) are not judged here
+    let grid = build_heif(1, &[item(b"grid", vec![1])], &[ispe(64, 48)]);
+    assert!(!container::parse_heif(&grid).missing_codec_config);
 }
 
 #[test]
