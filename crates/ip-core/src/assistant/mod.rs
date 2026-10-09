@@ -164,6 +164,18 @@ fn detect_locale(msg: &str, hint: Option<&str>, fallback: &str) -> Locale {
     Locale::parse(fallback).unwrap_or(Locale::Zh)
 }
 
+/// Whether a model whose registry `task` list is `task` serves the assistant role `kind`
+/// (`llm` / `vlm`). The worker's registry names the tasks by method (`llm_plan`, `vlm_suggest`,
+/// `vlm_describe`), so a bare `llm` / `vlm` and any `<kind>_...` task count.
+pub(crate) fn serves(task: &[String], kind: &str) -> bool {
+    task.iter().any(|t| {
+        let t = t.to_ascii_lowercase();
+        t == kind
+            || t.strip_prefix(kind)
+                .is_some_and(|rest| rest.starts_with('_'))
+    })
+}
+
 impl Core {
     // ------------------------------------------------------------ status
 
@@ -187,7 +199,7 @@ impl Core {
             listing
                 .models
                 .iter()
-                .find(|m| m.installed && m.task.iter().any(|t| t.eq_ignore_ascii_case(kind)))
+                .find(|m| m.installed && serves(&m.task, kind))
                 .map(|m| m.id.clone())
         };
         let info = LlmInfo {
@@ -606,7 +618,7 @@ impl Core {
         let vlms: Vec<_> = listing
             .models
             .iter()
-            .filter(|m| m.task.iter().any(|t| t.eq_ignore_ascii_case("vlm")))
+            .filter(|m| serves(&m.task, "vlm"))
             .collect();
         if vlms.is_empty() {
             return Err(CoreError::WorkerUnavailable(

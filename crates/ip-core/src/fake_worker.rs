@@ -262,7 +262,8 @@ impl Default for FakeWorker {
 /// `(caption, keywords, problems, adjust, reason)` of the fake VLM.
 type VlmScript = (String, Vec<String>, Vec<String>, serde_json::Value, String);
 
-/// Ids of the fake M6 models (`task: ["llm"]` / `["vlm"]`).
+/// Ids of the fake M6 models (`task: ["llm_plan"]` / `["vlm_suggest", "vlm_describe"]`, as in the
+/// worker's registry).
 pub const LLM_MODEL: &str = "fake-qwen-llm";
 pub const VLM_MODEL: &str = "fake-qwen-vl";
 
@@ -446,14 +447,14 @@ impl AiWorker for FakeWorker {
         let mut extra_models = Vec::new();
         if self.llm_response.lock().unwrap().is_some() {
             let mut llm = m(LLM_MODEL, 1800.0, &[]);
-            llm.task = vec!["llm".into()];
+            llm.task = vec!["llm_plan".into()];
             llm.recommended = false;
             llm.optional = true;
             extra_models.push(llm);
         }
         if self.vlm.lock().unwrap().is_some() {
             let mut vlm = m(VLM_MODEL, 3200.0, &[]);
-            vlm.task = vec!["vlm".into()];
+            vlm.task = vec!["vlm_suggest".into(), "vlm_describe".into()];
             vlm.recommended = false;
             vlm.optional = true;
             extra_models.push(vlm);

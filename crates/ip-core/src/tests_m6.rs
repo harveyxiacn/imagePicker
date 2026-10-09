@@ -606,6 +606,20 @@ async fn people_names_resolve_in_plans() {
 
 // ------------------------------------------------------------------ LLM engine
 
+#[test]
+fn assistant_roles_match_the_registry_task_names() {
+    use crate::assistant::serves;
+    let t = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    // the worker's registry (ai-worker/imagepicker_ai/models/registry.yaml)
+    assert!(serves(&t(&["llm_plan"]), "llm"));
+    assert!(serves(&t(&["vlm_suggest", "vlm_describe"]), "vlm"));
+    assert!(serves(&t(&["LLM"]), "llm"));
+    assert!(!serves(&t(&["vlm_suggest", "vlm_describe"]), "llm"));
+    assert!(!serves(&t(&["llm_plan"]), "vlm"));
+    assert!(!serves(&t(&["llmx", "embed_image", "zero_shot"]), "llm"));
+    assert!(!serves(&[], "vlm"));
+}
+
 #[tokio::test]
 async fn llm_engine_is_validated_and_falls_back() {
     let (e, sid) = scene_session().await;
