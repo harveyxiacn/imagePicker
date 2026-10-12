@@ -963,6 +963,19 @@ impl Core {
         Ok(face)
     }
 
+    /// `POST /api/people`: "this is a new person" from faces picked in search by face.
+    pub async fn create_person(&self, req: CreatePersonRequest) -> Result<Person> {
+        let out = self
+            .db
+            .call(move |c| store::create_person_from_faces(c, &req.face_ids, req.name.as_deref()))
+            .await?;
+        let mut touched = vec![out.person.id];
+        touched.extend(out.left_people);
+        self.after_people_change(touched, Some(out.photo_ids))
+            .await?;
+        Ok(out.person)
+    }
+
     // ------------------------------------------------------------ face crop
 
     /// JPEG of the face with 40% margin, square, `size` px (128 or 256), cached on disk.
