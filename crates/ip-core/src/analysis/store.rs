@@ -82,8 +82,8 @@ pub fn ingest(
         tx.execute(
             "INSERT OR REPLACE INTO analysis(photo_id, profile, steps_done, model_versions, phash, embedding,
                sharpness, exposure, noise, aesthetic, iqa, mean_luminance, clipped_highlights, crushed_shadows,
-               scene_scores, explain, artifacts_dir, analyzed_at)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16,?17)",
+               scene_scores, explain, artifacts_dir, analyzed_at, tilt_deg, tilt_confidence)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16,?17,?18,?19)",
             params![
                 pid,
                 profile.as_str(),
@@ -101,7 +101,9 @@ pub fn ingest(
                 q.crushed_shadows,
                 a.scene_scores.as_ref().map(|v| v.to_string()),
                 artifacts_dir,
-                now
+                now,
+                q.tilt_deg,
+                q.tilt_confidence
             ],
         )?;
         // faces
@@ -467,7 +469,7 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
             let mut st = tx.prepare(&format!(
                 "SELECT p.id, p.burst_id, COALESCE(p.taken_at, p.mtime), p.scene_type, a.sharpness, a.exposure,
                         a.noise, a.iqa, a.aesthetic, a.clipped_highlights, a.crushed_shadows,
-                        a.mean_luminance, a.embedding
+                        a.mean_luminance, a.embedding, a.tilt_deg, a.tilt_confidence
                  FROM photo p JOIN analysis a ON a.photo_id=p.id WHERE p.burst_id IN ({ph})"
             ))?;
             let v = st
@@ -486,6 +488,8 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
                             clipped_highlights: r.get(9)?,
                             crushed_shadows: r.get(10)?,
                             mean_luminance: r.get(11)?,
+                            tilt_deg: r.get(13)?,
+                            tilt_confidence: r.get(14)?,
                             faces: Vec::new(),
                         },
                         emb: r
@@ -1719,6 +1723,92 @@ pub fn set_face_person(
     touched.extend(old);
     let _ = photo_id;
     Ok((face, photo_id, touched))
+}
+
+/// Result of [`create_person_from_faces`].
+#[derive(Debug)]
+pub struct NewPersonOutcome {
+    pub person: Person,
+    /// Photos of the moved faces.
+    pub photo_ids: Vec<i64>,
+    /// People the faces were taken from (they may be gone now).
+    pub left_people: Vec<i64>,
+}
+
+/// "This is a new person": the faces move to a fresh person (named when `name` is not blank),
+/// locked there like any user assignment. Old people get their cover and centre recomputed
+/// and disappear when emptied (unless named).
+pub fn create_person_from_faces(
+    conn: &mut Connection,
+    face_ids: &[i64],
+    name: Option<&str>,
+) -> Result<NewPersonOutcome> {
+    let mut ids = face_ids.to_vec();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.is_empty() {
+        return Err(CoreError::bad_request("face_ids must not be empty"));
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // face -> (photo, current person)
+    let mut found: HashMap<i64, (i64, Option<i64>)> = HashMap::with_capacity(ids.len());
+    for chunk in ids.chunks(500) {
+        let mut st = tx.prepare(&format!(
+            "SELECT id, photo_id, person_id FROM face WHERE id IN ({})",
+            placeholders(chunk.len())
+        ))?;
+        let rows = st.query_map(params_from_iter(chunk.iter()), |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, photo_id, person_id) = row?;
+            found.insert(id, (photo_id, person_id));
+        }
+    }
+    if let Some(missing) = ids.iter().find(|i| !found.contains_key(*i)) {
+        return Err(CoreError::not_found(format!("face {missing} not found")));
+    }
+    // a person appears at most once per photo (the cannot-link rule of the clustering)
+    let mut photo_ids: Vec<i64> = found.values().map(|(p, _)| *p).collect();
+    photo_ids.sort_unstable();
+    if photo_ids.windows(2).any(|w| w[0] == w[1]) {
+        return Err(CoreError::bad_request(
+            "two of the faces are in the same photo; a person appears at most once per photo",
+        ));
+    }
+    let mut left_people: Vec<i64> = found.values().filter_map(|(_, p)| *p).collect();
+    left_people.sort_unstable();
+    left_people.dedup();
+    let name = name.map(str::trim).filter(|n| !n.is_empty());
+    tx.execute(
+        "INSERT INTO person(created_at, name) VALUES(?1, ?2)",
+        params![now_ms(), name],
+    )?;
+    let id = tx.last_insert_rowid();
+    for chunk in ids.chunks(500) {
+        tx.execute(
+            &format!(
+                "UPDATE face SET person_id=?1, person_locked=1 WHERE id IN ({})",
+                ids_sql(chunk)
+            ),
+            [id],
+        )?;
+    }
+    recompute_person(&tx, id)?;
+    for p in &left_people {
+        recompute_person(&tx, *p)?;
+    }
+    let person = get_person(&tx, id)?;
+    tx.commit()?;
+    Ok(NewPersonOutcome {
+        person,
+        photo_ids,
+        left_people,
+    })
 }
 
 /// Writes user ratings from the AI stars of analysed photos; returns the updates.

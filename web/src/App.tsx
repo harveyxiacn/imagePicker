@@ -110,6 +110,8 @@ function Shell() {
           if (t.kind === 'assistant') useAssistant.getState().dispatch({ type: 'progress', taskId: t.task_id, done: t.done, total: t.total })
           else useToasts.getState().updateTask(t)
           genOnTask(queryClient, t)
+          // the task history (settings) shows the final record
+          if (t.state !== 'running') void queryClient.invalidateQueries({ queryKey: qk.tasks })
         },
         onAssistant: (e) => void onAssistantDone(queryClient, e),
         onXmpConflict: (e) => handleXmpConflict(queryClient, e),

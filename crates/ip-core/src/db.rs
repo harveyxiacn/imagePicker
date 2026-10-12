@@ -226,6 +226,19 @@ ALTER TABLE device ADD COLUMN name TEXT;
 ALTER TABLE device ADD COLUMN kind TEXT;
 CREATE INDEX idx_photo_device ON photo(device_id);
 "#,
+    // v10: horizon tilt (docs/03 §3.1): `analysis.tilt_deg` is now filled by the quality step of
+    // every profile; this is its 0..1 confidence (the `tilted` issue needs both).
+    r#"
+ALTER TABLE analysis ADD COLUMN tilt_confidence REAL;
+"#,
+    // v11: task history (docs/api-contract-m5.md section F): progress counts and the end time of
+    // a task; the list is read newest first.
+    r#"
+ALTER TABLE task ADD COLUMN done INTEGER;
+ALTER TABLE task ADD COLUMN total INTEGER;
+ALTER TABLE task ADD COLUMN finished_at INTEGER;
+CREATE INDEX idx_task_created ON task(created_at);
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.
