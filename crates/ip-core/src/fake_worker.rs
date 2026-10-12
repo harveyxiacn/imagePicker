@@ -210,6 +210,17 @@ pub struct FakeWorker {
     pub last_options: Mutex<Option<WorkerOptions>>,
     /// Makes `models.delete` answer like a worker that predates it.
     pub delete_unsupported: std::sync::atomic::AtomicBool,
+    /// Incremental-steps mode: the standard profile also lists the model-backed steps
+    /// `aesthetic`, `iqa` and `scene` (models `nima-aesthetic`, `nima-technical`,
+    /// `siglip2-base-text`), `analyze.batch` honours the request's `steps` and reports a model
+    /// for every step it performed (`models`), leaving out the steps set with `set_skipped`.
+    pub step_models: std::sync::atomic::AtomicBool,
+    /// Makes `analyze.batch` fail like a worker that cannot be reached (after the models check).
+    pub analyze_unavailable: std::sync::atomic::AtomicBool,
+    /// Photo ids of the `analyze.batch` calls that got as far as running, in order.
+    pub analyzed_ids: Mutex<Vec<i64>>,
+    /// Steps of every `analyze.batch` request, in order (`None` = the profile's own steps).
+    pub batch_steps: Mutex<Vec<Option<Vec<String>>>>,
 }
 
 impl Default for FakeWorker {
@@ -263,6 +274,10 @@ impl Default for FakeWorker {
             deleted_models: Mutex::new(Vec::new()),
             last_options: Mutex::new(None),
             delete_unsupported: std::sync::atomic::AtomicBool::new(false),
+            step_models: std::sync::atomic::AtomicBool::new(false),
+            analyze_unavailable: std::sync::atomic::AtomicBool::new(false),
+            analyzed_ids: Mutex::new(Vec::new()),
+            batch_steps: Mutex::new(Vec::new()),
         }
     }
 }
@@ -451,6 +466,7 @@ impl AiWorker for FakeWorker {
             tiers: vec!["T3".into()],
             required_for: req.iter().map(|s| s.to_string()).collect(),
         };
+        let step_models = self.step_models.load(Ordering::SeqCst);
         let mut profiles = std::collections::BTreeMap::new();
         profiles.insert(
             "fast".to_string(),
@@ -462,12 +478,27 @@ impl AiWorker for FakeWorker {
         profiles.insert(
             "standard".to_string(),
             ProfileInfo {
-                steps: vec![
-                    "phash".into(),
-                    "quality".into(),
-                    "faces".into(),
-                    "embed".into(),
-                ],
+                steps: if step_models {
+                    [
+                        "phash",
+                        "quality",
+                        "faces",
+                        "embed",
+                        "aesthetic",
+                        "iqa",
+                        "scene",
+                    ]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+                } else {
+                    vec![
+                        "phash".into(),
+                        "quality".into(),
+                        "faces".into(),
+                        "embed".into(),
+                    ]
+                },
                 models: vec!["yunet".into(), "siglip2-base".into()],
             },
         );
@@ -503,6 +534,18 @@ impl AiWorker for FakeWorker {
             sdxl,
         ];
         models.extend(extra_models);
+        if step_models {
+            // optional soft-step models: not part of the profile's required models
+            for (id, step) in [
+                ("nima-aesthetic", "aesthetic"),
+                ("nima-technical", "iqa"),
+                ("siglip2-base-text", "scene"),
+            ] {
+                let mut x = m(id, 10.0, &[step]);
+                x.optional = true;
+                models.push(x);
+            }
+        }
         Ok(ModelsListing {
             models,
             profiles,
@@ -542,10 +585,19 @@ impl AiWorker for FakeWorker {
         *self.last_profile.lock().unwrap() = req.profile.clone();
         *self.last_steps.lock().unwrap() = req.steps.clone();
         *self.last_allow_download.lock().unwrap() = Some(req.allow_download);
+        self.batch_steps.lock().unwrap().push(req.steps.clone());
         if take_one(&self.crash_batches) {
             self.set_state(WorkerState::Crashed);
             return Err(WorkerError::Disconnected);
         }
+        if self.analyze_unavailable.load(Ordering::SeqCst) {
+            self.set_state(WorkerState::Stopped);
+            return Err(WorkerError::Unavailable("fake worker is down".into()));
+        }
+        self.analyzed_ids
+            .lock()
+            .unwrap()
+            .extend(req.items.iter().map(|i| i.photo_id));
         let delay = self.delay_ms.load(Ordering::SeqCst);
         if delay > 0 {
             tokio::select! {
@@ -557,6 +609,19 @@ impl AiWorker for FakeWorker {
             }
         }
         let standard = req.profile.as_deref() != Some("fast");
+        let strict = self.step_models.load(Ordering::SeqCst);
+        let skipped_now = self.skipped.lock().unwrap().clone();
+        // strict mode: a step is performed when requested (or no steps were named) and not
+        // set to be skipped
+        let does = |step: &str| {
+            !strict
+                || (req
+                    .steps
+                    .as_ref()
+                    .map(|v| v.iter().any(|x| x == step))
+                    .unwrap_or(true)
+                    && !skipped_now.iter().any(|x| x == step))
+        };
         let out = std::path::PathBuf::from(&req.out_dir);
         std::fs::create_dir_all(&out).map_err(|e| WorkerError::Protocol(e.to_string()))?;
         let mut items = Vec::new();
@@ -611,15 +676,23 @@ impl AiWorker for FakeWorker {
                 ..Default::default()
             };
             if standard {
-                let p = out.join(format!("{}.emb.npy", it.photo_id));
-                std::fs::write(&p, write_npy_f16(&[spec.emb.len()], &spec.emb))
-                    .map_err(|e| WorkerError::Protocol(e.to_string()))?;
-                item.embedding_file = Some(p.to_string_lossy().into_owned());
-                item.embedding_model = Some("fake-siglip".into());
-                item.iqa = spec.iqa;
-                item.aesthetic = spec.aesthetic;
-                item.scene_type = spec.scene.clone();
-                if !spec.faces.is_empty() {
+                if does("embed") {
+                    let p = out.join(format!("{}.emb.npy", it.photo_id));
+                    std::fs::write(&p, write_npy_f16(&[spec.emb.len()], &spec.emb))
+                        .map_err(|e| WorkerError::Protocol(e.to_string()))?;
+                    item.embedding_file = Some(p.to_string_lossy().into_owned());
+                    item.embedding_model = Some("fake-siglip".into());
+                }
+                if does("iqa") {
+                    item.iqa = spec.iqa;
+                }
+                if does("aesthetic") {
+                    item.aesthetic = spec.aesthetic;
+                }
+                if does("scene") {
+                    item.scene_type = spec.scene.clone();
+                }
+                if !spec.faces.is_empty() && does("identity") {
                     let dim = spec.faces[0].identity.len();
                     let mut data = Vec::new();
                     for f in &spec.faces {
@@ -639,11 +712,34 @@ impl AiWorker for FakeWorker {
             items.push(item);
         }
         self.set_state(WorkerState::Ready);
+        let (skipped_steps, models) = if strict {
+            let wanted = |s: &str| {
+                req.steps
+                    .as_ref()
+                    .map(|v| v.iter().any(|x| x == s))
+                    .unwrap_or(true)
+            };
+            let mut models = serde_json::Map::new();
+            for (step, model) in [
+                ("embed", "fake-siglip"),
+                ("aesthetic", "fake-nima"),
+                ("iqa", "fake-nima-tech"),
+                ("scene", "fake-scene"),
+            ] {
+                if standard && does(step) {
+                    models.insert(step.into(), json!(model));
+                }
+            }
+            let skipped: Vec<String> = skipped_now.iter().filter(|s| wanted(s)).cloned().collect();
+            (skipped, serde_json::Value::Object(models))
+        } else {
+            (skipped_now, json!({"embed": "fake-siglip"}))
+        };
         Ok(AnalyzeResponse {
             items,
             steps: vec![],
-            skipped_steps: self.skipped.lock().unwrap().clone(),
-            models: json!({"embed": "fake-siglip"}),
+            skipped_steps,
+            models,
             warnings: vec![],
             timings: json!({}),
         })

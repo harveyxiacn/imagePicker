@@ -178,6 +178,7 @@ async fn scene(e: &Env) -> Scene {
             photo_ids: None,
             force: false,
             allow_download: false,
+            fallback_lite: false,
         })
         .await
         .unwrap();

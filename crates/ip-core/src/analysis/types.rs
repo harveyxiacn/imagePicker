@@ -60,6 +60,10 @@ pub struct AnalysisRunRequest {
     /// Re-analyse photos that already have an analysis of this profile (not in the contract).
     #[serde(default)]
     pub force: bool,
+    /// When the AI components or a model are unavailable (no runtime, models missing, worker
+    /// unreachable), carry on with the on-device `lite` profile instead of failing.
+    #[serde(default)]
+    pub fallback_lite: bool,
     /// CLI only: lets the worker download missing models. The HTTP route never sets it.
     #[serde(skip)]
     pub allow_download: bool,
@@ -70,6 +74,9 @@ pub struct AnalysisRunRequest {
 pub enum RunState {
     Idle,
     Running,
+    /// Stopped between two batches on request (or restored as such after a restart); `continue`
+    /// takes it up again with the photos that are left.
+    Paused,
     Done,
     Failed,
 }
@@ -85,6 +92,15 @@ pub struct AnalysisStatus {
     pub error: Option<String>,
     /// Steps the worker skipped (missing models); not part of the M2 contract.
     pub skipped_steps: Vec<String>,
+    /// Machine-readable cause of `error` (`worker_unavailable` | `models_missing`): the UI offers
+    /// the `lite` profile for these.
+    pub error_code: Option<String>,
+    /// The profile that was asked for when the run switched to `lite` (`fallback_lite`).
+    pub fallback_from: Option<Profile>,
+    /// Photos redone for single steps because a model was installed since their analysis.
+    pub incremental: i64,
+    /// The run was picked up again after the app had exited.
+    pub resumed: bool,
 }
 
 impl AnalysisStatus {
@@ -97,8 +113,23 @@ impl AnalysisStatus {
             stage: None,
             error: None,
             skipped_steps: Vec::new(),
+            error_code: None,
+            fallback_from: None,
+            incremental: 0,
+            resumed: false,
         }
     }
+}
+
+/// `GET /api/analysis/plan`: what a run of `profile` would do now.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AnalysisPlan {
+    /// Photos without an analysis of this level (they get every step).
+    pub new_photos: i64,
+    /// Photos that only lack single steps whose models have been installed since.
+    pub incremental_photos: i64,
+    /// The steps those photos get, in profile order.
+    pub incremental_steps: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

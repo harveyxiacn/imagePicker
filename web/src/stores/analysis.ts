@@ -19,10 +19,13 @@ interface AnalysisUiState {
   /** task id of the running /api/models/ensure download, if any */
   ensureTaskId: string | null
   ensureError: string | null
+  /** sessions whose pause was requested and has not taken effect yet (the batch in flight finishes first) */
+  pausing: Record<number, boolean>
   setProfile: (p: AnalysisProfile) => void
   setMenuOpen: (b: boolean) => void
   setConsent: (c: ConsentRequest | null) => void
   setEnsure: (taskId: string | null, error?: string | null) => void
+  setPausing: (sessionId: number, pausing: boolean) => void
 }
 
 export const useAnalysisUi = create<AnalysisUiState>((set) => ({
@@ -31,8 +34,17 @@ export const useAnalysisUi = create<AnalysisUiState>((set) => ({
   consent: null,
   ensureTaskId: null,
   ensureError: null,
+  pausing: {},
   setProfile: (profile) => set({ profile }),
   setMenuOpen: (menuOpen) => set({ menuOpen }),
   setConsent: (consent) => set({ consent, ensureTaskId: null, ensureError: null }),
   setEnsure: (ensureTaskId, ensureError = null) => set({ ensureTaskId, ensureError }),
+  setPausing: (sessionId, pausing) =>
+    set((s) => {
+      if (!!s.pausing[sessionId] === pausing) return s
+      const next = { ...s.pausing }
+      if (pausing) next[sessionId] = true
+      else delete next[sessionId]
+      return { pausing: next }
+    }),
 }))

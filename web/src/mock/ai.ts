@@ -482,6 +482,11 @@ interface Run {
   stage: AnalysisStage | null
   error: string | null
   cancelled: boolean
+  /** `POST /api/analysis/pause` seen: the run stops before its next batch */
+  pauseRequested: boolean
+  /** set while paused: takes the run up again */
+  resume: (() => void) | null
+  fallbackFrom: AnalysisProfile | null
 }
 const runs = new Map<number, Run>()
 let runSeq = 0
@@ -496,9 +501,9 @@ const chunked = <T,>(arr: T[], n: number): T[][] => {
   return out
 }
 
-function startRun(sid: number, profile: AnalysisProfile, photoIds?: number[]): string {
+function startRun(sid: number, profile: AnalysisProfile, photoIds?: number[], fallbackFrom: AnalysisProfile | null = null): string {
   const s = getSession(sid)!
-  const run: Run = { state: 'running', profile, done: 0, total: 0, stage: 'analyzing', error: null, cancelled: false }
+  const run: Run = { state: 'running', profile, done: 0, total: 0, stage: 'analyzing', error: null, cancelled: false, pauseRequested: false, resume: null, fallbackFrom }
   runs.set(sid, run)
   const todo = s.photos.filter((p) => (photoIds ? photoIds.includes(p.id) : !p.analyzed))
   run.total = todo.length
@@ -528,6 +533,20 @@ function startRun(sid: number, profile: AnalysisProfile, photoIds?: number[]): s
 
   const analyze = () => {
     if (run.cancelled) return finish('idle')
+    if (run.pauseRequested && bi < batches.length) {
+      run.pauseRequested = false
+      run.state = 'paused'
+      run.stage = null
+      run.resume = () => {
+        run.resume = null
+        run.state = 'running'
+        run.stage = 'analyzing'
+        emitProgress(sid, run)
+        analyze()
+      }
+      emitProgress(sid, run)
+      return
+    }
     if (bi >= batches.length) return group()
     const ids: number[] = []
     for (const p of batches[bi++]) {
@@ -729,10 +748,14 @@ export const aiHandlers = [
 
   http.post('/api/analysis/run', async ({ request }) => {
     await lat()
-    const body = (await request.json()) as { session_id: number; profile: AnalysisProfile; photo_ids?: number[] }
+    const body = (await request.json()) as { session_id: number; profile: AnalysisProfile; photo_ids?: number[]; fallback_lite?: boolean }
     if (!getSession(body.session_id)) return err(404, 'not_found', 'session not found')
-    if (runs.get(body.session_id)?.state === 'running') return err(409, 'busy', 'analysis already running')
+    const active = runs.get(body.session_id)?.state
+    if (active === 'running' || active === 'paused') return err(409, 'busy', 'analysis already running')
     const missing = missingModels(body.profile)
+    if (missing.length && body.fallback_lite) {
+      return HttpResponse.json({ task_id: startRun(body.session_id, 'lite', body.photo_ids, body.profile) }, { status: 202 })
+    }
     if (missing.length) {
       return HttpResponse.json(
         { error: { code: 'models_missing', message: 'required models are not installed' }, models: missing },
@@ -744,15 +767,36 @@ export const aiHandlers = [
   http.post('/api/analysis/cancel', async ({ request }) => {
     const { session_id } = (await request.json()) as { session_id: number }
     const run = runs.get(session_id)
-    if (run) run.cancelled = true
+    if (run) {
+      run.cancelled = true
+      run.resume?.() // a paused run is wound up
+    }
     return new HttpResponse(null, { status: 204 })
+  }),
+  http.post('/api/analysis/pause', async ({ request }) => {
+    const { session_id } = (await request.json()) as { session_id: number }
+    const run = runs.get(session_id)
+    if (run?.state !== 'running') return err(409, 'conflict', 'no analysis is running')
+    run.pauseRequested = true
+    return new HttpResponse(null, { status: 202 })
+  }),
+  http.post('/api/analysis/continue', async ({ request }) => {
+    const { session_id } = (await request.json()) as { session_id: number }
+    const run = runs.get(session_id)
+    if (run?.state !== 'paused' || !run.resume) return err(409, 'conflict', 'no analysis is paused')
+    run.resume()
+    return HttpResponse.json({ task_id: `analysis-${runSeq}` }, { status: 202 })
+  }),
+  http.get('/api/analysis/plan', async () => {
+    await lat()
+    return HttpResponse.json({ new_photos: 0, incremental_photos: 0, incremental_steps: [] })
   }),
   http.get('/api/analysis/status', async ({ request }) => {
     await lat()
     const sid = Number(new URL(request.url).searchParams.get('session_id'))
     const run = runs.get(sid)
     const body: AnalysisStatus = run
-      ? { state: run.state, profile: run.profile, done: run.done, total: run.total, stage: run.stage, error: run.error }
+      ? { state: run.state, profile: run.profile, done: run.done, total: run.total, stage: run.stage, error: run.error, fallback_from: run.fallbackFrom }
       : { state: 'idle', profile: null, done: 0, total: 0, stage: null, error: null }
     return HttpResponse.json(body)
   }),

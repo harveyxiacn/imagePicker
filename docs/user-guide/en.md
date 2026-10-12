@@ -249,10 +249,14 @@ Click **Analyze** in the top bar, choose a profile and press *Start analysis*:
 |---|---|---|
 | **Fast** | Blur / exposure / face detection | Almost nothing to download |
 | **Standard** (default) | Adds people recognition, aesthetic and image-quality scores, scene classification | About 2 GB depending on tier |
+| **Quick (on device)** | Blur / exposure / noise scores and burst grouping, no people, aesthetic or scene scores | None: needs neither the AI components nor any model |
 
 - Analyse only the selection with *Analyse only the N selected*;
 - **Before the first analysis** the app explains what face recognition is used for (closed-eye and expression checks, grouping and filtering by person, best take, portrait retouching) and asks whether to use it. Until you agree no face is detected and no face feature is extracted; *Don't use face recognition* switches it off and the analysis runs without face-based results (closed eyes, people, best take). Change it any time in *Settings → Faces & privacy*;
-- Progress runs: analysing photos → burst grouping → scoring → people clustering;
+- Progress runs: analysing photos → burst grouping → scoring → people clustering. **Pause** in the status bar stops after the batch in flight (up to 32 photos) and keeps what is done; **Continue** analyses only the photos that are left, **Cancel** groups and scores what was analysed so far. A paused analysis stays paused after you restart the app;
+- **If the app is closed or crashes during an analysis**, the next start continues it automatically with the photos that are left (finished batches are not analysed again; the status bar says it was continued). An analysis that keeps taking the app down is not restarted more than three times: start it again by hand and it only handles the photos without analysis;
+- **Without the AI components** (not installed, or a model download failed) the analysis does not just fail: the model download dialog, the install hint and the status bar offer *Use quick analysis* / *Finish with quick analysis*, which groups bursts and scores sharpness, exposure and noise on this device for the same photos. Install the AI components later and run the Standard analysis again: the quick results are upgraded;
+- **After you install a new model** (say the aesthetic or scene model) the *Analyze* menu tells you how many analysed photos can get the new scores; starting the analysis then computes only those steps for them, nothing else is recalculated;
 - In *Settings → Analysis* set the default profile, **analyse after import**, and burst-grouping strictness (loose / normal / strict).
 
 ### AI stars & score breakdown
@@ -586,6 +590,7 @@ Open with the gear icon on Home or in the top bar.
 | NVIDIA GPU but the tier shows T0 / CPU only | Install with `--extra cuda` (driver >= 580); otherwise it is treated as CPU |
 | Model download fails / is slow | Switch to the HF mirror or ModelScope in *Settings → Hardware & models → Download source*; check that *Allow network* is on |
 | AI stars feel "off" | Thresholds are not calibrated yet; treat them as suggestions, let *My taste* adapt, adjust strictness in Settings |
+| An analysis stopped with "AI analysis unavailable" / the model download failed | Click *Finish with quick analysis* (or choose *Quick (on device)* in the Analyze menu) to get grouping and sharpness / exposure scores now; install the AI components or retry the download later and run Standard again |
 | Burst grouping too loose / tight | *Settings → Analysis → Burst grouping strictness*, or *Split / Merge* by hand in group view |
 | HEIC photos have no thumbnails | No HEIF decoder is available (the log says what is missing): on Windows install *HEIF Image Extensions* + *HEVC Video Extensions* from the Microsoft Store, or the AI components; on Linux install `libheif` with its HEVC plugin (e.g. `libheif-plugin-libde265`). Restart the app and browse again; blurry small thumbnails can be rebuilt by clearing thumbnails in *Settings → Cache* |
 | Cannot drop folders in the browser | Browser mode does not receive OS drops; use *Choose folder* or the desktop app |

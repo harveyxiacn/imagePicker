@@ -4,7 +4,9 @@
 //! into the `task` table when they start and update it when they end; only the newest
 //! [`KEEP_TASKS`] rows are kept. While a task runs it is also registered in memory with its
 //! [`CancelToken`], so `POST /api/tasks/{id}/cancel` can stop it. Rows still `running` when the
-//! catalog is opened belong to a process that exited mid-task and become `interrupted`.
+//! catalog is opened belong to a process that exited mid-task and become `interrupted`. An
+//! analysis run keeps what it needs to be picked up again (see `analysis::run`) in `params`; a
+//! `paused` row survives a restart as it is.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -27,6 +29,8 @@ pub const DEFAULT_LIST: i64 = 50;
 pub const RUNNING: &str = "running";
 /// Listed while a cancelled task is still winding down (never stored).
 pub const CANCELLING: &str = "cancelling";
+/// An analysis run stopped between two batches by `POST /api/analysis/pause`.
+pub const PAUSED: &str = "paused";
 pub const DONE: &str = "done";
 pub const FAILED: &str = "failed";
 pub const CANCELLED: &str = "cancelled";
@@ -39,7 +43,7 @@ pub struct TaskRecord {
     pub id: String,
     /// `besttake` | `inpaint` | `enhance` | `export` | `analysis`
     pub kind: String,
-    /// `running` | `cancelling` | `done` | `failed` | `cancelled` | `interrupted`
+    /// `running` | `paused` | `cancelling` | `done` | `failed` | `cancelled` | `interrupted`
     pub status: String,
     /// What was asked, per kind (e.g. `{"photo_id": 12, "op": "denoise"}`).
     pub params: Value,
@@ -91,10 +95,73 @@ pub(crate) fn finish(
     Ok(())
 }
 
+/// Records that a running task stopped without ending (a paused analysis).
+pub(crate) fn pause(c: &Connection, id: &str, done: i64, total: i64) -> Result<()> {
+    c.execute(
+        "UPDATE task SET status='paused', done=?2, total=?3, updated_at=?4 WHERE id=?1",
+        params![id, done, total, now_ms()],
+    )?;
+    Ok(())
+}
+
+/// Replaces the stored `params` of a task.
+pub(crate) fn set_params(c: &Connection, id: &str, spec: &Value) -> Result<()> {
+    c.execute(
+        "UPDATE task SET params=?2, updated_at=?3 WHERE id=?1",
+        params![id, spec.to_string(), now_ms()],
+    )?;
+    Ok(())
+}
+
+/// Puts a paused or interrupted task back to `running` (a resumed analysis), with its new
+/// `params`.
+pub(crate) fn reopen(c: &Connection, id: &str, spec: &Value) -> Result<()> {
+    c.execute(
+        "UPDATE task SET status='running', params=?2, error=NULL, finished_at=NULL, updated_at=?3
+         WHERE id=?1",
+        params![id, spec.to_string(), now_ms()],
+    )?;
+    Ok(())
+}
+
+/// An analysis row that was still open (`running` or `paused`) when the catalog was opened.
+#[derive(Debug, Clone)]
+pub(crate) struct OpenAnalysis {
+    pub id: String,
+    pub paused: bool,
+    pub params: Value,
+    pub done: i64,
+    pub total: i64,
+}
+
+/// The analysis rows a previous process left `running` or `paused`; read before
+/// [`settle_interrupted`], which turns the running ones into `interrupted`.
+pub(crate) fn open_analyses(c: &Connection) -> Result<Vec<OpenAnalysis>> {
+    let mut st = c.prepare(
+        "SELECT id, status, params, done, total FROM task
+         WHERE kind='analysis' AND status IN ('running', 'paused') ORDER BY created_at, rowid",
+    )?;
+    let rows = st
+        .query_map([], |r| {
+            let params: Option<String> = r.get(2)?;
+            Ok(OpenAnalysis {
+                id: r.get(0)?,
+                paused: r.get::<_, String>(1)? == PAUSED,
+                params: params
+                    .and_then(|p| serde_json::from_str(&p).ok())
+                    .unwrap_or(Value::Null),
+                done: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                total: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 /// Deletes the finished rows beyond the newest [`KEEP_TASKS`].
 pub(crate) fn prune(c: &Connection) -> Result<usize> {
     Ok(c.execute(
-        "DELETE FROM task WHERE status <> 'running' AND rowid NOT IN
+        "DELETE FROM task WHERE status NOT IN ('running', 'paused') AND rowid NOT IN
            (SELECT rowid FROM task ORDER BY created_at DESC, rowid DESC LIMIT ?1)",
         [KEEP_TASKS],
     )?)
@@ -425,6 +492,33 @@ mod tests {
         assert!(r.finished_at.is_some());
         assert_eq!(get(&c, "export-2").unwrap().unwrap().status, DONE);
         assert!(settle_interrupted(&c).unwrap().is_empty());
+    }
+
+    #[test]
+    fn paused_rows_are_kept_and_open_analyses_are_listed() {
+        let c = db();
+        insert(&c, "analysis-1", "analysis", &json!({"session_id": 1}), 9).unwrap();
+        insert(&c, "analysis-2", "analysis", &json!({"session_id": 2}), 4).unwrap();
+        insert(&c, "export-3", "export", &json!({}), 1).unwrap();
+        pause(&c, "analysis-2", 2, 4).unwrap();
+        let open = open_analyses(&c).unwrap();
+        assert_eq!(
+            open.iter()
+                .map(|o| (o.id.as_str(), o.paused, o.done, o.total))
+                .collect::<Vec<_>>(),
+            vec![("analysis-1", false, 0, 9), ("analysis-2", true, 2, 4)]
+        );
+        // a restart interrupts the running rows only; paused ones are neither pruned nor settled
+        assert_eq!(
+            settle_interrupted(&c).unwrap(),
+            vec!["analysis-1", "export-3"]
+        );
+        assert_eq!(get(&c, "analysis-2").unwrap().unwrap().status, PAUSED);
+        reopen(&c, "analysis-1", &json!({"session_id": 1, "resumes": 1})).unwrap();
+        let r = get(&c, "analysis-1").unwrap().unwrap();
+        assert_eq!(r.status, RUNNING);
+        assert!(r.finished_at.is_none());
+        assert_eq!(r.params["resumes"], 1);
     }
 
     #[test]

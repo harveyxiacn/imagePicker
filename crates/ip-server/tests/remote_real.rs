@@ -72,6 +72,7 @@ async fn analyse(core: &std::sync::Arc<Core>, dir: &Path) -> (std::time::Duratio
         photo_ids: None,
         force: false,
         allow_download: false,
+        fallback_lite: false,
     })
     .await
     .unwrap();
@@ -215,6 +216,7 @@ async fn phone_core_analyses_through_the_real_host_worker() {
             photo_ids: None,
             force: true,
             allow_download: false,
+            fallback_lite: false,
         })
         .await
         .unwrap();

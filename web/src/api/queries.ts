@@ -6,7 +6,7 @@ import { qk } from '@/lib/cache'
 import { isLive } from '@/lib/tasks'
 import { mergeSettings } from '@/lib/settingsForm'
 import { useToasts } from '@/stores/toasts'
-import type { Settings, SettingsPatch } from './types'
+import type { AnalysisProfile, Settings, SettingsPatch } from './types'
 import { api, fetchAllPhotos } from './client'
 
 
@@ -93,6 +93,18 @@ export function useAnalysisStatus(sessionId: number) {
     queryFn: () => api.analysisStatus(sessionId),
     staleTime: Infinity,
     enabled: ok,
+  })
+}
+
+/** What a run of `profile` would do now (new photos, steps a newly installed model makes possible). */
+export function useAnalysisPlan(sessionId: number, profile: AnalysisProfile, enabled: boolean) {
+  const ok = useNotGuest()
+  return useQuery({
+    queryKey: [...qk.analysisPlan(sessionId), profile],
+    queryFn: () => api.analysisPlan(sessionId, profile),
+    staleTime: 0,
+    enabled: ok && enabled,
+    retry: false,
   })
 }
 
