@@ -101,14 +101,20 @@ def build() -> dict[str, np.ndarray]:
         "scene_700x500": scene(700, 500, 3),  # quality: bilinear up to 1024
         "scene_1500x1000": scene(1500, 1000, 4),  # quality: area down to 1024
         "scene_512x512": scene(512, 512, 5),  # integer ratio to 32x32
-        "checker_256x192": noisy(checker(256, 192, 13, 70.0), 5.0, 21),  # noise: no exact-zero DCT terms
+        "checker_256x192": noisy(
+            checker(256, 192, 13, 70.0), 5.0, 21
+        ),  # noise: no exact-zero DCT terms
         "dark_640x480": (scene(640, 480, 6) * 0.15).astype(np.uint8),
-        "bright_640x480": np.clip(scene(640, 480, 8).astype(np.int32) + 120, 0, 255).astype(np.uint8),
+        "bright_640x480": np.clip(scene(640, 480, 8).astype(np.int32) + 120, 0, 255).astype(
+            np.uint8
+        ),
         "scene_100x75": scene(100, 75, 9),
         "scene_40x30": scene(40, 30, 10),
         "scene_20x20": scene(20, 20, 11),  # smaller than 32: pHash enlarges (bilinear)
         "portrait_768x1024": scene(768, 1024, 12),
-        "noise_only_480x360": np.random.default_rng(13).integers(0, 256, (360, 480, 3), dtype=np.uint8),
+        "noise_only_480x360": np.random.default_rng(13).integers(
+            0, 256, (360, 480, 3), dtype=np.uint8
+        ),
         # tilt: horizon + posts, level and rotated (quality also resamples the 1500 px one)
         "lines_level_1024x768": lines_scene(1024, 768, 14),
         "lines_cw3_1024x768": rotated(lines_scene(1024, 768, 14), 3.0),

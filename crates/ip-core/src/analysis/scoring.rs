@@ -246,7 +246,11 @@ pub fn subject_flags(faces: &[(FaceFeat, bool /* person named */)]) -> Vec<bool>
             if subject[i] || f.area < MIN_AREA || f.size < SIZE_FLOOR * largest {
                 continue;
             }
-            if fs.iter().zip(&subject).any(|(s, is)| *is && member_of(f, s)) {
+            if fs
+                .iter()
+                .zip(&subject)
+                .any(|(s, is)| *is && member_of(f, s))
+            {
                 subject[i] = true;
                 grew = true;
             }
