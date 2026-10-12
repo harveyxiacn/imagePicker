@@ -158,6 +158,10 @@ The first time an AI feature needs models, the *AI models required* dialog lists
 - Import scans sub-folders recursively: *Scanning…* → *Generating thumbnails…* → *Done*. You can browse and rate while thumbnails appear.
 - *Remove session* only removes the catalog record and caches; **originals are untouched**.
 - The *Import from SD card / phone* button is disabled for now.
+- **Import options** (the link under the drop area): list globs or sub-folders to leave out, one per line (`*.dng`, `backup/**`, `trip/rejects`; matching is case-insensitive, `*` stays inside a folder, `**` crosses folders). The same exclusions apply when the folder is rescanned.
+- **RAW + JPEG pairs**: a RAW file and a JPEG (or HEIC) with the same name in the same folder (`IMG_0001.CR2` + `IMG_0001.JPG`) become **one** grid item with an *RAW+JPEG* badge. The JPEG is shown and analysed, the RAW rides along: rating, flag and colour label apply to both files (and to both XMP sidecars when XMP sync is on: `IMG_0001.xmp` and `IMG_0001.CR2.xmp`). Groups and analysis count the pair once. A RAW without a JPEG next to it stays a normal item. When you export, choose *JPEG*, *RAW* or *Both* for such pairs.
+- **Changes on disk**: the desktop app watches imported folders. Files you add or remove show up within a few seconds; photos whose file has vanished stay in the catalog (with their ratings and edits) with a broken-link mark. If you moved or renamed the whole folder, use *Relocate folder…* in the banner above the grid and pick the new location: files are re-linked by relative path and size. *Rescan* does the same check by hand (useful on network drives).
+- **Move rejected files**: right-click a photo → *Move rejected files…* moves every photo marked as rejected (with its RAW and sidecars) to the **recycle bin** or into a **`_rejected` folder** next to the originals, after you confirm. Nothing is ever deleted permanently by the app; photos in the recycle bin show as missing until you restore them and rescan.
 
 HEIC/HEIF (phone photos) need a decoder, tried in this order: a JPEG preview inside the file → the system decoder (Windows: install *HEIF Image Extensions* and *HEVC Video Extensions* from the Microsoft Store; built into macOS) → libheif (Linux: install `libheif` with its HEVC plugin; with the AI components installed, the libheif they ship is used automatically). Without any of them these photos have no thumbnails, see [Troubleshooting](#19-troubleshooting--faq).
 
@@ -431,6 +435,7 @@ Press `Ctrl+E` (or *Export* in the top bar):
 | Naming template | `{name}` original file name, `{seq}` sequence number, `{date}` capture date, `{event}` import name, `{scene}` scene (e.g. portrait), `{camera}` camera, `{rating}` stars; a live example is shown. Name clashes get `_1`, `_2`…: existing files are never overwritten |
 | Upscale | Off / ×2 / ×4 (on CPU tiers each photo can take tens of seconds) |
 | Export into one folder per person | Used from the People page |
+| RAW+JPEG pairs | Export the JPEG (as shown, with edits; default), the RAW, or both |
 
 While an export runs, its progress shows at the bottom right with a *Cancel* button: files already written stay, the remaining photos are skipped.
 
@@ -452,6 +457,8 @@ Photos with a wide-gamut colour profile (Display P3, Adobe RGB) are converted to
 ## 14. AI assistant
 
 Press `Ctrl+J` or click *AI Assistant*. Give commands in natural language (Chinese or English). The assistant **shows a plan first**: *Preview impact* shows which photos would change, then *Run*. Steps that reject, bulk-rate or export are marked *Needs confirmation* and ask once more; no original is ever deleted; afterwards *Undo the whole run* (or `Ctrl+Z`) restores everything in one step.
+
+Every step that changes photos has a defined scope: when a command filters first, only the filtered photos are changed. If the local model proposes a step with no condition of its own that would act on every photo, although your command names a condition, the plan is rejected and the rules engine is used instead. A step that changes more than 500 photos, or more than half the session (and at least 20 photos), is a large change and needs confirmation; if a step would change more photos than the plan showed when it runs, it fails and you should ask again.
 
 ![AI assistant](../images/assistant.png)
 

@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::catalog::{self, MetaUpdate, NewPhoto};
 use crate::error::{CoreError, Result};
 use crate::events::Event;
-use crate::model::{ImportRequest, ImportState, Session};
+use crate::model::{ImportOptions, ImportRequest, ImportState, Session};
 use crate::thumbs::Tracker;
 use crate::Core;
 
@@ -28,9 +28,22 @@ fn normalize(p: &Path) -> std::io::Result<PathBuf> {
     Ok(abs.components().collect())
 }
 
+pub(crate) fn normalize_path(p: &Path) -> std::io::Result<PathBuf> {
+    normalize(p)
+}
+
 impl Core {
     /// Creates the session immediately and continues scanning in the background.
     pub async fn import(self: &Arc<Self>, req: ImportRequest) -> Result<Session> {
+        self.import_with(req, ImportOptions::default()).await
+    }
+
+    /// [`Core::import`] with the extras of `POST /api/import` (`exclude`).
+    pub async fn import_with(
+        self: &Arc<Self>,
+        req: ImportRequest,
+        opts: ImportOptions,
+    ) -> Result<Session> {
         if req.path.trim().is_empty() {
             return Err(CoreError::bad_request("path must not be empty"));
         }
@@ -49,11 +62,19 @@ impl Core {
             .or_else(|| root.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_else(|| root_str.clone());
         let rs = root_str.clone();
+        let exclude: Vec<String> = opts
+            .exclude
+            .into_iter()
+            .map(|e| e.trim().to_string())
+            .filter(|e| !e.is_empty())
+            .collect();
+        let (recursive, ex) = (req.recursive, exclude.clone());
         let (root_id, session_id) = self
             .db
             .call(move |c| {
                 let root_id = catalog::upsert_root(c, &rs)?;
                 let sid = catalog::create_session(c, root_id, &title)?;
+                crate::files::set_scan_opts(c, sid, recursive, &ex)?;
                 Ok((root_id, sid))
             })
             .await?;
@@ -62,11 +83,19 @@ impl Core {
             session: session.clone(),
         });
         let core = self.clone();
-        let recursive = req.recursive;
         tokio::spawn(async move {
-            if let Err(e) = core.run_import(root, root_id, session_id, recursive).await {
+            core.watch_root(root_id, &root);
+            // one scan at a time per catalog (a watcher rescan may be running)
+            let guard = core.files.rescan_lock.lock().await;
+            if let Err(e) = core
+                .run_import(root, root_id, session_id, recursive, exclude, false)
+                .await
+            {
                 tracing::error!(session = session_id, error = %format!("{e:#}"), "import failed");
             }
+            drop(guard);
+            // files imported earlier that are gone by now
+            let _ = core.refresh_missing(session_id).await;
             // Whatever happened, the session must not stay in a transient state.
             let _ = core
                 .db
@@ -83,20 +112,27 @@ impl Core {
         }
     }
 
-    async fn run_import(
+    /// Scan + insert + metadata + thumbnails. `quiet`: a rescan of a finished import, which
+    /// leaves the session's import state alone.
+    pub(crate) async fn run_import(
         self: &Arc<Self>,
         root: PathBuf,
         root_id: i64,
         session_id: i64,
         recursive: bool,
+        exclude: Vec<String>,
+        quiet: bool,
     ) -> anyhow::Result<()> {
         // 1. scan (imaging scans in parallel itself)
         let imaging = self.imaging.clone();
         let scan_root = root.clone();
         let files =
-            tokio::task::spawn_blocking(move || imaging.scan_dir(&scan_root, recursive, &[]))
+            tokio::task::spawn_blocking(move || imaging.scan_dir(&scan_root, recursive, &exclude))
                 .await??;
         tracing::info!(session = session_id, files = files.len(), "scan finished");
+
+        // RAW files that have a same-named JPEG/HEIF next to them are companions
+        let companions = crate::files::companion_paths(&root, &files);
 
         // 2. batch insert
         let tracker = Tracker::new();
@@ -114,6 +150,7 @@ impl Core {
                         mtime_ms: f.mtime_ms,
                         fast_key: self.imaging.fast_key(&f.path, f.size, f.mtime_ms),
                         format: f.format,
+                        companion: companions.contains(&f.path),
                     })
                 })
                 .collect();
@@ -146,11 +183,22 @@ impl Core {
             self.emit_session(session_id).await;
         }
 
+        // RAW files next to a same-named JPEG become companions: no grid item, no metadata,
+        // no thumbnail, no analysis of their own
+        let (companions, fresh) = self.pair_files(root_id).await?;
+        if !companions.is_empty() {
+            let set: std::collections::HashSet<i64> = companions.iter().copied().collect();
+            meta_jobs.retain(|j| !set.contains(&j.id));
+            thumb_only.retain(|i| !set.contains(i));
+        }
+
         // 3. scanning is over; metadata + thumbnails
-        self.db
-            .call(move |c| catalog::set_import_state(c, session_id, ImportState::Thumbnailing))
-            .await?;
-        self.emit_session(session_id).await;
+        if !quiet {
+            self.db
+                .call(move |c| catalog::set_import_state(c, session_id, ImportState::Thumbnailing))
+                .await?;
+            self.emit_session(session_id).await;
+        }
         if !thumb_only.is_empty() {
             self.thumbs.enqueue(&thumb_only, Some(&tracker), false);
         }
@@ -187,6 +235,11 @@ impl Core {
                 .await?;
             self.xmp_import(ids.clone()).await;
             self.thumbs.enqueue(&ids, Some(&tracker), false);
+        }
+        if !fresh.is_empty() {
+            // a rating the RAW's sidecar carries is the pair's rating, if the JPEG has none
+            self.xmp_import(fresh.clone()).await;
+            self.reconcile_companions(fresh).await;
         }
         if total_meta > 0 {
             // Sort order / dimensions changed; tell clients to refetch.

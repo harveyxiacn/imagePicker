@@ -41,6 +41,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const [scope, setScope] = useState<'selected' | 'all'>('selected')
   const [browse, setBrowse] = useState(false)
   const [upscale, setUpscale] = useState<0 | 2 | 4>(0)
+  const [pairMember, setPairMember] = useState<'jpeg' | 'raw' | 'both'>('jpeg')
   const hardware = useHardware().data
   const wantedPreset = useUi((s) => s.exportPreset)
   // the one preset table lives on the server (the assistant's export tool uses it too)
@@ -72,7 +73,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const ids = byFolder ? Object.values(byFolder).flat() : effectiveScope === 'selected' ? selectedIds : allIds
 
   const mut = useMutation({
-    mutationFn: () => api.exportPhotos(exportBody(form, byFolder ? { folders: byFolder } : { ids }, dest, template, upscale)),
+    mutationFn: () => api.exportPhotos({ ...exportBody(form, byFolder ? { folders: byFolder } : { ids }, dest, template, upscale), ...(pairMember !== 'jpeg' ? { pair_member: pairMember } : {}) }),
     onSuccess: ({ task_id }) => {
       try {
         localStorage.setItem(LS_KEY, dest)
@@ -211,6 +212,17 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
               {t('export.stripMetadata')}
             </label>
             {(stripGps || stripMetadata) && <div className="text-xs text-faint">{t('export.stripHint')}</div>}
+          </div>
+
+          <div className="flex flex-col gap-1" data-testid="export-pair-member">
+            <label htmlFor="exp-pair" className="text-muted">
+              {t('files.exportMember')}
+            </label>
+            <select id="exp-pair" className="field w-fit" value={pairMember} onChange={(e) => setPairMember(e.target.value as 'jpeg' | 'raw' | 'both')}>
+              <option value="jpeg">{t('files.exportJpeg')}</option>
+              <option value="raw">{t('files.exportRaw')}</option>
+              <option value="both">{t('files.exportBoth')}</option>
+            </select>
           </div>
 
           <div className="flex flex-col gap-1" data-testid="export-upscale">

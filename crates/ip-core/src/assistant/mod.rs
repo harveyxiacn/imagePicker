@@ -5,6 +5,7 @@
 pub mod exec;
 pub mod keep_top;
 pub mod rules;
+pub mod target;
 pub mod tools;
 
 use std::collections::HashMap;
@@ -18,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use self::rules::{Call, Locale, PresetName, RulesCtx};
+use self::target::Target;
 use self::tools::{llm_tools, validate_call, MAX_STEPS};
 use crate::analysis::map_worker_err;
 use crate::catalog;
@@ -30,6 +32,17 @@ pub use keep_top::{KeepScope, KeepTop};
 /// Plans are kept in memory this long.
 pub const PLAN_TTL: Duration = Duration::from_secs(30 * 60);
 const STATUS_TTL: Duration = Duration::from_secs(30);
+
+/// A step that changes more photos than this is always a large change.
+pub const LARGE_ABS: usize = 500;
+/// A step that changes more than half of the session's photos is a large change once it changes
+/// at least this many (small sessions are not nagged).
+pub const LARGE_MIN: usize = 20;
+
+/// Large changes need `confirm: true` on execution (`docs/api-contract-m6.md` A.4).
+pub fn is_large(affects: usize, session_photos: usize) -> bool {
+    affects > LARGE_ABS || (affects >= LARGE_MIN && affects.saturating_mul(2) > session_photos)
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -61,6 +74,29 @@ pub struct PlanStep {
     /// Photos the step touches.
     pub affects: usize,
     pub destructive: bool,
+    /// Which photos the step works on, in words (`None` for steps that change no photo).
+    pub criteria: Option<String>,
+    /// See [`is_large`].
+    pub large_impact: bool,
+}
+
+/// Why the plan does not come from the language model although one was requested or tried.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Fallback {
+    /// `llm_failed` (the model call failed or its output was invalid), `llm_no_steps`,
+    /// `llm_invalid` (unknown preset / person ...), `llm_unsafe_target` (a step's photos were not
+    /// justified, see [`target`]).
+    pub code: String,
+    pub message: String,
+}
+
+impl Fallback {
+    fn new(code: &str, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,6 +107,14 @@ pub struct PlanOut {
     pub needs_confirmation: bool,
     pub engine: String,
     pub unsupported: Option<String>,
+    /// A step is a large change ([`is_large`]): execution needs `confirm: true`.
+    pub large_impact: bool,
+    /// What the confirmation shows: every step that needs it, with its count and criteria.
+    pub confirm_text: Option<String>,
+    /// Photos in the session (the base of `large_impact`).
+    pub session_photos: usize,
+    /// Set when a language model was requested or tried but the plan is the rules engine's.
+    pub fallback: Option<Fallback>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +123,8 @@ pub(crate) struct StoredPlan {
     pub steps: Vec<PlanStep>,
     pub ctx: PlanContext,
     pub created: Instant,
+    pub large_impact: bool,
+    pub confirm_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -128,10 +174,27 @@ impl AssistantState {
         self.plans.lock().unwrap().insert(id, plan);
     }
 
-    /// Removes and returns a live plan (a plan runs once).
-    pub(crate) fn take(&self, id: &str) -> Option<StoredPlan> {
+    /// Removes and returns a live plan (a plan runs once). A large plan stays stored (and is not
+    /// run) until it is taken with `confirm`.
+    pub(crate) fn take(&self, id: &str, confirm: bool) -> Result<StoredPlan> {
         self.purge(Instant::now());
-        self.plans.lock().unwrap().remove(id)
+        let mut plans = self.plans.lock().unwrap();
+        let gone = || {
+            CoreError::not_found(format!(
+                "plan {id} not found (plans expire after 30 minutes and run once)"
+            ))
+        };
+        match plans.get(id) {
+            None => return Err(gone()),
+            Some(p) if p.large_impact && !confirm => {
+                return Err(CoreError::ConfirmationRequired(format!(
+                    "this plan is a large change; execute it with confirm=true. {}",
+                    p.confirm_text.clone().unwrap_or_default()
+                )))
+            }
+            Some(_) => {}
+        }
+        plans.remove(id).ok_or_else(gone)
     }
 
     pub fn plan_count(&self) -> usize {
@@ -268,13 +331,16 @@ impl Core {
     ) -> Result<(String, Vec<Call>)> {
         let info = self.llm_info(start_worker).await?;
         if info.llm_model.is_none() {
-            return Err(CoreError::Conflict(
-                "no language model is installed (assistant engine falls back to rules)".into(),
-            ));
+            if !start_worker {
+                // `auto` only uses a model that is already there
+                return Err(CoreError::Conflict("no language model is loaded".into()));
+            }
+            return Err(self.llm_missing().await);
         }
         let ctx = json!({
             "filter": req.context.filter,
             "selection_count": req.context.selection.len(),
+            "selection": req.context.selection.iter().take(200).collect::<Vec<_>>(),
             "current_photo_id": req.context.current_photo_id,
             "people": people.iter().map(|(id, n)| json!({"id": id, "name": n})).collect::<Vec<_>>(),
             "presets": presets.iter().map(|p| json!({"id": p.id, "names": p.names})).collect::<Vec<_>>(),
@@ -306,6 +372,35 @@ impl Core {
         Ok((resp.reply, calls))
     }
 
+    /// Why `engine: "llm"` cannot be served: 409 `models_missing` when the worker knows a language
+    /// model that is not installed, else 503 `worker_unavailable`.
+    async fn llm_missing(&self) -> CoreError {
+        match self.worker.models_list().await {
+            Ok(listing) => {
+                let ids: Vec<String> = listing
+                    .models
+                    .iter()
+                    .filter(|m| serves(&m.task, "llm"))
+                    .map(|m| m.id.clone())
+                    .collect();
+                if ids.is_empty() {
+                    CoreError::WorkerUnavailable(
+                        "this AI worker has no language model (engine \"llm\" is unavailable)"
+                            .into(),
+                    )
+                } else {
+                    CoreError::ModelsMissing(ids)
+                }
+            }
+            Err(e) => map_worker_err(e),
+        }
+    }
+
+    async fn session_photo_count(&self, session_id: i64) -> Result<usize> {
+        let q = tools::photo_query_of(session_id, &json!({}), Some(1));
+        Ok(self.photos(q).await?.total as usize)
+    }
+
     /// `POST /api/assistant/plan`.
     pub async fn assistant_plan(self: &Arc<Self>, req: PlanRequest) -> Result<PlanOut> {
         let sid = req.session_id;
@@ -332,90 +427,100 @@ impl Core {
             return Err(CoreError::bad_request("engine must be auto, rules or llm"));
         }
         let (people, presets) = self.rules_context(sid).await?;
+        let names = Names {
+            people: &people,
+            presets: &presets,
+        };
+        // the rules engine's reading: the plan when no model is used, and the check of a
+        // model plan that acts without a condition of its own
+        let rules = rules::parse(
+            &req.message,
+            &RulesCtx {
+                people: &people,
+                presets: &presets,
+                selection: &req.context.selection,
+                current_photo_id: req.context.current_photo_id,
+                locale,
+            },
+        );
+        let env = PlanEnv {
+            session_id: sid,
+            ctx: &req.context,
+            session_photos: self.session_photo_count(sid).await?,
+            locale,
+            names: &names,
+        };
 
-        let mut engine = "rules";
-        let mut llm_reply: Option<String> = None;
-        let mut calls: Option<Vec<Call>> = None;
-        let mut fallback_note: Option<String> = None;
+        let mut fallback: Option<Fallback> = None;
+        let mut from_llm: Option<(String, Vec<PlanStep>)> = None;
         if engine_req != "rules" {
             // `auto` only uses a model that is already loaded; `llm` starts the worker
             match self
                 .llm_calls(&req, locale, &people, &presets, engine_req == "llm")
                 .await
             {
-                Ok((reply, c)) if !c.is_empty() => {
-                    engine = "llm";
-                    llm_reply = Some(reply);
-                    calls = Some(c);
+                Ok((reply, mut calls)) if !calls.is_empty() => {
+                    let targets = target::bind(&mut calls, &req.context);
+                    let agree = target::rules_unscoped(
+                        &rules.calls,
+                        rules.unsupported.is_some() || !rules.hints.is_empty(),
+                        &req.context,
+                    );
+                    match target::llm_problem(&calls, &targets, agree, locale) {
+                        Some(why) => fallback = Some(Fallback::new("llm_unsafe_target", why)),
+                        None => match self.build_steps(&env, &calls, &targets).await {
+                            Ok(steps) => from_llm = Some((reply, steps)),
+                            Err(why) => fallback = Some(Fallback::new("llm_invalid", why)),
+                        },
+                    }
                 }
                 Ok(_) => {
-                    fallback_note = Some("the model returned no steps".into());
+                    fallback = Some(Fallback::new("llm_no_steps", "the model proposed no steps"));
                 }
                 Err(e) => {
-                    if engine_req == "llm"
-                        && matches!(
-                            e,
-                            CoreError::ModelsMissing(_)
-                                | CoreError::WorkerUnavailable(_)
-                                | CoreError::WorkerTimeout(_)
-                        )
-                    {
+                    let unavailable = matches!(
+                        e,
+                        CoreError::ModelsMissing(_)
+                            | CoreError::WorkerUnavailable(_)
+                            | CoreError::WorkerTimeout(_)
+                    );
+                    if engine_req == "llm" && unavailable {
                         return Err(e);
                     }
-                    tracing::info!(error = %e, "assistant: using the rules engine");
-                    fallback_note = Some(e.to_string());
-                }
-            }
-        }
-        let _ = fallback_note;
-        let names = Names {
-            people: &people,
-            presets: &presets,
-        };
-        let mut llm_calls = calls;
-        let (steps, hints, unsupported) = loop {
-            let (calls, hints, mut unsupported) = match llm_calls.take() {
-                Some(c) => (c, Vec::new(), None),
-                None => {
-                    let parsed = rules::parse(
-                        &req.message,
-                        &RulesCtx {
-                            people: &people,
-                            presets: &presets,
-                            selection: &req.context.selection,
-                            current_photo_id: req.context.current_photo_id,
-                            locale,
-                        },
-                    );
-                    (parsed.calls, parsed.hints, parsed.unsupported)
-                }
-            };
-            let mut steps = Vec::new();
-            if unsupported.is_none() {
-                for c in calls {
-                    match self.build_step(sid, &req.context, &c, locale, &names).await {
-                        Ok(s) => steps.push(s),
-                        Err(msg) => {
-                            unsupported = Some(msg);
-                            steps.clear();
-                            break;
-                        }
+                    // `auto` without a loaded model is the normal case, not worth a note
+                    if !matches!(e, CoreError::Conflict(_)) {
+                        fallback = Some(Fallback::new("llm_failed", e.to_string()));
                     }
                 }
-                if steps.is_empty() && unsupported.is_none() {
-                    unsupported = Some(rules::unsupported_help(locale));
+            }
+            if let Some(f) = &fallback {
+                tracing::info!(code = %f.code, reason = %f.message, "assistant: using the rules engine");
+            }
+        }
+
+        let (engine, steps, llm_reply, hints, unsupported) = match from_llm {
+            Some((reply, steps)) => ("llm", steps, Some(reply), Vec::new(), None),
+            None => {
+                let mut unsupported = rules.unsupported.clone();
+                let mut steps = Vec::new();
+                if unsupported.is_none() {
+                    let mut calls = rules.calls.clone();
+                    let targets = target::bind(&mut calls, &req.context);
+                    match self.build_steps(&env, &calls, &targets).await {
+                        Ok(s) => steps = s,
+                        Err(msg) => unsupported = Some(msg),
+                    }
+                    if steps.is_empty() && unsupported.is_none() {
+                        unsupported = Some(rules::unsupported_help(locale));
+                    }
                 }
+                ("rules", steps, None, rules.hints.clone(), unsupported)
             }
-            if unsupported.is_some() && engine == "llm" {
-                // the model referred to something that does not exist: use the rules instead
-                tracing::info!(reason = ?unsupported, "assistant: model plan rejected; using the rules");
-                engine = "rules";
-                llm_reply = None;
-                continue;
-            }
-            break (steps, hints, unsupported);
         };
-        let needs_confirmation = steps.iter().any(|s| s.destructive);
+        let large_impact = steps.iter().any(|s| s.large_impact);
+        let needs_confirmation = large_impact || steps.iter().any(|s| s.destructive);
+        let confirm_text =
+            needs_confirmation.then(|| confirm_text(&steps, env.session_photos, locale));
         let reply = match (&unsupported, &llm_reply) {
             (Some(u), _) => u.clone(),
             (None, Some(r)) if !r.trim().is_empty() => r.trim().to_string(),
@@ -430,6 +535,8 @@ impl Core {
                     steps: steps.clone(),
                     ctx: req.context.clone(),
                     created: Instant::now(),
+                    large_impact,
+                    confirm_text: confirm_text.clone(),
                 },
             );
         }
@@ -440,6 +547,10 @@ impl Core {
             needs_confirmation,
             engine: engine.into(),
             unsupported,
+            large_impact,
+            confirm_text,
+            session_photos: env.session_photos,
+            fallback,
         })
     }
 
@@ -453,15 +564,29 @@ impl Core {
         format!("plan-{seq}-{}", &h.to_hex()[..8])
     }
 
-    /// Validates a call and computes what the UI shows: summary, affected count, destructive.
+    /// Every call as a step, in order; the first that fails explains why.
+    async fn build_steps(
+        &self,
+        env: &PlanEnv<'_>,
+        calls: &[Call],
+        targets: &[Target],
+    ) -> std::result::Result<Vec<PlanStep>, String> {
+        let mut steps = Vec::with_capacity(calls.len());
+        for (c, t) in calls.iter().zip(targets) {
+            steps.push(self.build_step(env, c, t).await?);
+        }
+        Ok(steps)
+    }
+
+    /// Validates a call and computes what the UI shows: summary, affected count, destructive,
+    /// criteria and whether it is a large change.
     async fn build_step(
         &self,
-        session_id: i64,
-        ctx: &PlanContext,
+        env: &PlanEnv<'_>,
         call: &Call,
-        locale: Locale,
-        names: &Names<'_>,
+        target: &Target,
     ) -> std::result::Result<PlanStep, String> {
+        let (session_id, ctx, locale, names) = (env.session_id, env.ctx, env.locale, env.names);
         let args = validate_call(&call.tool, &call.args)?;
         let tool = call.tool.as_str();
         // references must exist
@@ -498,9 +623,12 @@ impl Core {
             .await
             .map_err(|e| e.to_string())?;
         let destructive = is_destructive(tool, &args, affects);
+        let changes = target::changes_photos(tool);
         Ok(PlanStep {
             tool: tool.to_string(),
             summary: summarize(tool, &args, affects, locale, names),
+            criteria: criteria_of(target, &args, ctx, locale, names),
+            large_impact: changes && is_large(affects, env.session_photos),
             args,
             affects,
             destructive,
@@ -714,6 +842,15 @@ pub(crate) struct Names<'a> {
     pub presets: &'a [PresetName],
 }
 
+/// What building the steps of one plan needs.
+struct PlanEnv<'a> {
+    session_id: i64,
+    ctx: &'a PlanContext,
+    session_photos: usize,
+    locale: Locale,
+    names: &'a Names<'a>,
+}
+
 fn is_destructive(tool: &str, args: &Value, affects: usize) -> bool {
     match tool {
         "set_flag" => args["flag"].as_i64() == Some(-1),
@@ -768,12 +905,22 @@ fn issue_label(k: &str, l: Locale) -> &'static str {
     }
 }
 
-fn filter_summary(args: &Value, l: Locale, names: &Names) -> String {
+/// The conditions of canonical filter arguments, in words.
+fn filter_parts(args: &Value, l: Locale, names: &Names) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     let zh = l == Locale::Zh;
     if let Some(p) = args.get("persons").and_then(Value::as_array) {
         let ids: Vec<i64> = p.iter().filter_map(Value::as_i64).collect();
         parts.push(person_labels(names, &ids));
+    }
+    if let Some(p) = args.get("exclude_persons").and_then(Value::as_array) {
+        let ids: Vec<i64> = p.iter().filter_map(Value::as_i64).collect();
+        let who = person_labels(names, &ids);
+        parts.push(if zh {
+            format!("不含{who}")
+        } else {
+            format!("without {who}")
+        });
     }
     if let Some(r) = args.get("rating_gte").and_then(Value::as_i64) {
         parts.push(if zh {
@@ -846,6 +993,63 @@ fn filter_summary(args: &Value, l: Locale, names: &Names) -> String {
             .to_string(),
         );
     }
+    if let Some(a) = args.get("person_state").and_then(Value::as_array) {
+        for st in a.iter().filter_map(Value::as_str) {
+            parts.push(
+                match (st, zh) {
+                    ("eyes_open", true) => "睁眼",
+                    ("smiling", true) => "微笑",
+                    ("looking", true) => "看镜头",
+                    ("subject", true) => "主体人物",
+                    ("eyes_open", false) => "eyes open",
+                    ("smiling", false) => "smiling",
+                    ("looking", false) => "looking at the camera",
+                    _ => "subject",
+                }
+                .to_string(),
+            );
+        }
+    }
+    let (fmin, fmax) = (
+        args.get("faces_min").and_then(Value::as_i64),
+        args.get("faces_max").and_then(Value::as_i64),
+    );
+    match (fmin, fmax) {
+        (Some(a), Some(b)) if a == b => parts.push(if zh {
+            format!("{a} 张脸")
+        } else {
+            format!("{a} face(s)")
+        }),
+        _ => {
+            if let Some(a) = fmin {
+                parts.push(if zh {
+                    format!("至少 {a} 张脸")
+                } else {
+                    format!("at least {a} face(s)")
+                });
+            }
+            if let Some(b) = fmax {
+                parts.push(if zh {
+                    format!("最多 {b} 张脸")
+                } else {
+                    format!("at most {b} face(s)")
+                });
+            }
+        }
+    }
+    if let Some(b) = args.get("burst_id").and_then(Value::as_i64) {
+        parts.push(if zh {
+            format!("连拍组 #{b}")
+        } else {
+            format!("burst #{b}")
+        });
+    }
+    parts
+}
+
+fn filter_summary(args: &Value, l: Locale, names: &Names) -> String {
+    let zh = l == Locale::Zh;
+    let parts = filter_parts(args, l, names);
     if parts.is_empty() {
         if zh {
             "显示全部照片".to_string()
@@ -857,6 +1061,110 @@ fn filter_summary(args: &Value, l: Locale, names: &Names) -> String {
     } else {
         format!("Filter: {}", parts.join(", "))
     }
+}
+
+/// A selection query's conditions in words ("模糊" / "blurry, first 3 by AI score").
+fn query_criteria(q: &str, l: Locale, names: &Names) -> String {
+    let zh = l == Locale::Zh;
+    let Ok((args, limit)) = tools::query_args(q) else {
+        return q.to_string();
+    };
+    let mut parts = filter_parts(&args, l, names);
+    if let Some(n) = limit {
+        let by = match (args.get("sort").and_then(Value::as_str), zh) {
+            (Some("ai"), true) => "按 AI 评分",
+            (Some("rating"), true) => "按星级",
+            (Some("name"), true) => "按文件名",
+            (Some("-taken_at"), true) => "从最新起",
+            (_, true) => "按拍摄时间",
+            (Some("ai"), false) => " by AI score",
+            (Some("rating"), false) => " by rating",
+            (Some("name"), false) => " by name",
+            (Some("-taken_at"), false) => ", newest first",
+            (_, false) => " by capture time",
+        };
+        parts.push(if zh {
+            format!("{by}前 {n} 张")
+        } else {
+            format!("the first {n}{by}")
+        });
+    }
+    if parts.is_empty() {
+        (if zh { "全部照片" } else { "all photos" }).to_string()
+    } else {
+        parts.join(if zh { "，" } else { ", " })
+    }
+}
+
+/// Which photos a step works on, in words; `None` for steps that change no photo.
+fn criteria_of(
+    t: &Target,
+    args: &Value,
+    ctx: &PlanContext,
+    l: Locale,
+    names: &Names,
+) -> Option<String> {
+    let zh = l == Locale::Zh;
+    Some(match t {
+        Target::NoPhotos => return None,
+        Target::Query(q) => query_criteria(q, l, names),
+        Target::View(q) => {
+            let c = query_criteria(q, l, names);
+            if zh {
+                format!("当前视图（{c}）")
+            } else {
+                format!("the current view ({c})")
+            }
+        }
+        Target::Session => (if zh {
+            "本会话的全部照片"
+        } else {
+            "every photo in this session"
+        })
+        .to_string(),
+        Target::Ids { from_context } => {
+            let ids: Vec<i64> = args["selection"]["ids"]
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_i64).collect())
+                .unwrap_or_default();
+            let n = ids.len();
+            let open = n == 1 && ctx.current_photo_id == Some(ids[0]);
+            match (open, *from_context, zh) {
+                (true, _, true) => "当前打开的照片".to_string(),
+                (true, _, false) => "the open photo".to_string(),
+                (false, true, true) => format!("选中的 {n} 张照片"),
+                (false, true, false) => format!("the {n} selected photo(s)"),
+                (false, false, true) => format!("指定的 {n} 张照片"),
+                (false, false, false) => format!("{n} listed photo(s)"),
+            }
+        }
+    })
+}
+
+/// The confirmation: every destructive or large step with its count (in the summary), its
+/// criteria and, for a large change, its share of the session.
+fn confirm_text(steps: &[PlanStep], session_photos: usize, l: Locale) -> String {
+    let zh = l == Locale::Zh;
+    let mut lines = Vec::new();
+    for s in steps.iter().filter(|s| s.destructive || s.large_impact) {
+        let crit = s.criteria.clone().unwrap_or_else(|| "-".into());
+        let mut line = if zh {
+            format!("{}（照片：{crit}）", s.summary)
+        } else {
+            format!("{} (photos: {crit})", s.summary)
+        };
+        if s.large_impact {
+            let total = session_photos.max(s.affects).max(1);
+            let pct = (s.affects * 100 + total / 2) / total;
+            line.push_str(&if zh {
+                format!("，占本会话 {session_photos} 张中的 {pct}%，属于大范围修改")
+            } else {
+                format!(", {pct}% of the {session_photos} photos in this session: a large change")
+            });
+        }
+        lines.push(line);
+    }
+    lines.join("\n")
 }
 
 fn summarize(tool: &str, args: &Value, affects: usize, l: Locale, names: &Names) -> String {
@@ -1009,5 +1317,47 @@ mod destructive_tests {
         }
         assert!(!super::is_destructive("filter", &a, 100));
         assert!(super::is_destructive("set_flag", &json!({"flag": -1}), 1));
+    }
+
+    #[test]
+    fn large_changes() {
+        use super::is_large;
+        // more than half of the session, from LARGE_MIN photos on
+        assert!(is_large(501, 1000));
+        assert!(!is_large(500, 1000));
+        assert!(!is_large(147, 1000));
+        assert!(is_large(20, 30));
+        assert!(!is_large(19, 19), "small sessions are not nagged");
+        // more than LARGE_ABS photos, whatever the session
+        assert!(is_large(501, 100_000));
+        assert!(!is_large(499, 100_000));
+    }
+
+    #[test]
+    fn the_confirmation_states_count_and_criteria() {
+        use super::rules::Locale;
+        let step = |summary: &str, affects, destructive, large| super::PlanStep {
+            tool: "set_flag".into(),
+            args: json!({}),
+            summary: summary.into(),
+            affects,
+            destructive,
+            criteria: Some("模糊".into()),
+            large_impact: large,
+        };
+        let steps = vec![
+            super::PlanStep {
+                tool: "filter".into(),
+                criteria: None,
+                ..step("筛选：模糊", 147, false, false)
+            },
+            step("淘汰 147 张照片", 147, true, false),
+        ];
+        let t = super::confirm_text(&steps, 1000, Locale::Zh);
+        assert_eq!(t, "淘汰 147 张照片（照片：模糊）");
+        let steps = vec![step("Reject 1000 photo(s)", 1000, true, true)];
+        let t = super::confirm_text(&steps, 1000, Locale::En);
+        assert!(t.starts_with("Reject 1000 photo(s) (photos: 模糊)"), "{t}");
+        assert!(t.contains("100% of the 1000 photos"), "{t}");
     }
 }

@@ -60,6 +60,37 @@ export interface Photo {
   // ---- M3 (docs/api-contract-m3.md B) ----
   /** true when a non-empty edit stack is saved; thumbs/previews are then rendered */
   has_edits: boolean
+  // ---- files (api-contract-m1 "RAW+JPEG 与文件") ----
+  /** the file is gone from disk (deleted / folder moved); see `api.relocateSession` */
+  missing?: boolean
+  /** RAW files paired with this photo by name (same folder, same base name); the photo is the JPEG */
+  companions?: Companion[]
+}
+
+export interface Companion {
+  id: number
+  file_name: string
+  format: ImageFormat
+  file_size: number
+  missing: boolean
+}
+
+export interface RelocateReport {
+  total: number
+  matched: number
+  changed: number
+  absent: number
+  applied: boolean
+}
+
+export type RejectMode = 'trash' | 'folder'
+
+export interface RejectFilesReport {
+  mode: RejectMode
+  photos: number
+  files: number
+  skipped: number
+  errors: string[]
 }
 
 export type Issue = 'closed_eyes' | 'blurry' | 'overexposed' | 'underexposed' | 'noisy' | 'tilted'
@@ -138,6 +169,8 @@ export interface ImportBody {
   path: string
   recursive?: boolean
   title?: string
+  /** globs (`*.dng`, `backup/**`), sub-folder paths or names left out of the import and later rescans */
+  exclude?: string[]
 }
 
 export interface ExportBody {
@@ -151,6 +184,8 @@ export interface ExportBody {
   long_edge?: number | null
   quality?: number
   name_template?: string
+  /** which file of a RAW+JPEG pair is written: the JPEG (default), its RAW, or both */
+  pair_member?: 'jpeg' | 'raw' | 'both'
   /** P0-8: output container (docs/api-contract-m5.md F) */
   format?: ExportFormat
   /** leave out the GPS position, copied originals included */
@@ -857,6 +892,9 @@ export interface PlanStep {
   summary: string
   affects: number
   destructive: boolean
+  /** the photos the step works on, in words */
+  criteria?: string | null
+  large_impact?: boolean
 }
 
 export interface AssistantPlan {
@@ -866,6 +904,11 @@ export interface AssistantPlan {
   needs_confirmation: boolean
   engine: AssistantEngine
   unsupported: string | null
+  /** a large change: execution needs `confirm: true` */
+  large_impact?: boolean
+  confirm_text?: string | null
+  session_photos?: number
+  fallback?: { code: string; message: string } | null
 }
 
 export interface AssistantResult {

@@ -12,6 +12,7 @@ import { HeaderControls } from '@/components/HeaderControls'
 import { UserMenu } from '@/components/UserMenu'
 import { can } from '@/lib/auth'
 import { errorText } from '@/lib/errors'
+import { parseExcludes } from '@/lib/importOptions'
 import { qk } from '@/lib/cache'
 import { getMobilePlatform } from '@/lib/mobilePlatform'
 import { useIsMobile } from '@/lib/useLayout'
@@ -31,9 +32,14 @@ export function Home() {
   const platform = useMemo(() => getPlatform(), [])
   const push = useToasts((s) => s.push)
   const role = useMe().data?.role ?? 'owner'
+  // import options: globs / sub-folders to leave out (one per line)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const [excludeText, setExcludeText] = useState('')
+  const excludes = parseExcludes(excludeText)
 
   const importMut = useMutation({
-    mutationFn: (v: string | { path: string; title?: string }) => api.importFolder(typeof v === 'string' ? { path: v } : v),
+    mutationFn: (v: string | { path: string; title?: string }) =>
+      api.importFolder({ ...(typeof v === 'string' ? { path: v } : v), ...(excludes.length > 0 ? { exclude: excludes } : {}) }),
     onSuccess: ({ session }) => {
       void qc.invalidateQueries({ queryKey: qk.sessions })
       navigate(`/s/${session.id}`)
@@ -116,6 +122,27 @@ export function Home() {
                 </button>
               )}
             </div>
+            <button type="button" className="text-xs text-muted underline" aria-expanded={optionsOpen} onClick={() => setOptionsOpen((o) => !o)} data-testid="import-options-toggle">
+              {t('files.excludeToggle')}
+            </button>
+            {optionsOpen && (
+              <div className="flex w-full max-w-md flex-col gap-1 text-left">
+                <label htmlFor="import-exclude" className="text-muted">
+                  {t('files.excludeLabel')}
+                </label>
+                <textarea
+                  id="import-exclude"
+                  className="field w-full font-mono text-xs"
+                  rows={3}
+                  value={excludeText}
+                  onChange={(e) => setExcludeText(e.target.value)}
+                  placeholder={t('files.excludePlaceholder')}
+                  spellCheck={false}
+                  data-testid="import-exclude"
+                />
+                <div className="text-xs text-faint">{t('files.excludeHint')}</div>
+              </div>
+            )}
             {!platform.canDropFolders && !isMobile && <div className="text-xs text-faint">{t('home.browserHint')}</div>}
           </section>}
 

@@ -26,49 +26,15 @@ impl FakeImaging {
     }
 }
 
-fn walk(dir: &Path, recursive: bool, out: &mut Vec<ScannedFile>) -> std::io::Result<()> {
-    for e in std::fs::read_dir(dir)? {
-        let e = e?;
-        let path = e.path();
-        let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') {
-            continue;
-        }
-        let ft = e.file_type()?;
-        if ft.is_dir() {
-            if recursive {
-                walk(&path, recursive, out)?;
-            }
-        } else if let Some(format) = ImageFormat::from_path(&path) {
-            let md = e.metadata()?;
-            let mtime_ms = md
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
-            out.push(ScannedFile {
-                path,
-                size: md.len(),
-                mtime_ms,
-                format,
-            });
-        }
-    }
-    Ok(())
-}
-
 impl Imaging for FakeImaging {
     fn scan_dir(
         &self,
         root: &Path,
         recursive: bool,
-        _exclude: &[String],
+        exclude: &[String],
     ) -> Result<Vec<ScannedFile>> {
-        let mut v = Vec::new();
-        walk(root, recursive, &mut v)?;
-        v.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(v)
+        // same walk as production (hidden files, `_rejected`, excludes); only decoding is fake
+        ip_imaging::scan_dir(root, recursive, exclude)
     }
 
     fn read_metadata(&self, path: &Path, _format: ImageFormat) -> Result<Metadata> {

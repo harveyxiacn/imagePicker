@@ -13,6 +13,7 @@ pub mod edit;
 pub mod error;
 pub mod events;
 pub mod export;
+pub mod files;
 pub mod generate;
 pub mod imaging;
 pub mod import;
@@ -29,6 +30,7 @@ pub mod settings;
 pub mod tasks;
 pub mod taste;
 pub mod thumbs;
+pub mod watch;
 pub mod xmp;
 
 #[cfg(any(test, feature = "testutil"))]
@@ -50,6 +52,7 @@ pub use edit::{
 };
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};
+pub use files::{RejectFilesReport, RejectFilesRequest, RelocateReport, RelocateRequest, Trasher};
 pub use generate::{
     BaseChoice, BaseFrame, BestTakeAutoBody, BestTakeChoice, BestTakePlan, BestTakeRequest,
     BestTakeResult, EnhanceBody, InpaintBody, Stroke,
@@ -119,6 +122,8 @@ pub struct Core {
     /// Remote AI (phone -> home PC), M8.
     pub remote: remote::RemoteAi,
     pub(crate) xmp: xmp::XmpState,
+    /// RAW+JPEG pairing, rescans, file watching and safe reject (`files`, `watch`).
+    pub(crate) files: files::FilesState,
     /// Catalog integrity and backups (`backup`).
     pub catalog_guard: backup::CatalogGuard,
     pub(crate) evicting: std::sync::atomic::AtomicBool,
@@ -145,6 +150,8 @@ impl Core {
         // an unreadable catalog is moved aside (state "recovery"), see `backup`
         let (db, catalog_guard) = backup::open_catalog(&dirs)?;
         db.with(|c| catalog::settle_stale_sessions(c))?;
+        // catalogs from before RAW+JPEG pairing: pair what is already imported
+        db.with(files::pair_all)?;
         // analysis runs a previous process left open: `resume_analyses` picks them up
         let open_analyses = db.with(|c| tasks::open_analyses(c))?;
         // tasks left running by a previous process: recorded as interrupted, scratch removed
@@ -240,6 +247,7 @@ impl Core {
             runtime,
             remote,
             xmp: Default::default(),
+            files: Default::default(),
             catalog_guard,
             evicting: std::sync::atomic::AtomicBool::new(false),
             task_seq: AtomicU64::new(task_seq),
@@ -357,7 +365,15 @@ impl Core {
         self.taste_after_labels(labels);
         let n = updates.len();
         if n > 0 {
-            let ids: Vec<i64> = updates.iter().map(|u| u.id).collect();
+            let mut ids: Vec<i64> = updates.iter().map(|u| u.id).collect();
+            // the RAW companions got the same values: their sidecars follow too
+            let own = ids.clone();
+            ids.extend(
+                self.db
+                    .call(move |c| files::companion_ids(c, &own))
+                    .await
+                    .unwrap_or_default(),
+            );
             self.events.emit(Event::PhotosUpdated { items: updates });
             self.xmp_touch(&ids);
         }
@@ -417,6 +433,8 @@ impl Core {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_files;
 #[cfg(test)]
 mod tests_full;
 #[cfg(test)]
