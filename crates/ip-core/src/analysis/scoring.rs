@@ -164,11 +164,33 @@ pub fn expression_score(f: &FaceFeat) -> Option<f64> {
     Some(parts.iter().map(|(w, v)| w * v).sum::<f64>() / w)
 }
 
-/// `is_subject` per face of one photo (docs/03 §4.2): weight = sqrt(area) x centredness x
-/// sharpness x (named bonus) x looking; a face is a subject when its weight is at least 45% of the
-/// photo's strongest face and it covers at least 0.15% of the frame.
+/// `is_subject` per face of one photo (docs/03 §4.2), in two passes:
+/// 1. prominence: weight = sqrt(area) x centredness x sharpness x (named bonus) x looking; a face
+///    is a subject when its weight is at least 45% of the photo's strongest face;
+/// 2. group membership: a face standing next to a subject (centres at most 4 face widths apart
+///    across and 1.5 face heights up / down) that is about as large (sqrt(area) at least 0.7x that
+///    subject's and 0.5x the largest subject's) and about as sharp (sharpness factor at least 0.6x)
+///    is a subject too, whatever its centredness; repeated along the row / cluster. People at the
+///    ends of a group photo are members, not bystanders; a small far-away face, a much blurrier one
+///    or one standing apart from the group stays a bystander. Pass 2 only adds subjects.
+///
+/// Every subject covers at least 0.15% of the frame.
 pub fn subject_flags(faces: &[(FaceFeat, bool /* person named */)]) -> Vec<bool> {
-    let weights: Vec<(f64, f64)> = faces
+    const MIN_AREA: f64 = 0.0015;
+    const SIZE_RATIO: f64 = 0.7; // sqrt(area) vs the neighbouring subject
+    const SIZE_FLOOR: f64 = 0.5; // sqrt(area) vs the largest subject: no drift along a chain
+    const SHARP_RATIO: f64 = 0.6; // sharpness factor vs the neighbouring subject
+    const DX_FACES: f64 = 4.0; // centre distance across, in face widths
+    const DY_FACES: f64 = 1.5; // centre distance up / down, in face heights
+    struct Face {
+        area: f64,
+        size: f64,
+        sharp: f64,
+        weight: f64,
+        centre: (f64, f64),
+        dims: (f64, f64),
+    }
+    let fs: Vec<Face> = faces
         .iter()
         .map(|(f, named)| {
             let area = (f.bbox[2] * f.bbox[3]).max(0.0);
@@ -179,14 +201,47 @@ pub fn subject_flags(faces: &[(FaceFeat, bool /* person named */)]) -> Vec<bool>
             let sharp = 0.3 + 0.7 * clamp01(f.sharpness.unwrap_or(0.6));
             let look = 0.7 + 0.3 * clamp01(f.gaze.unwrap_or(0.5));
             let named = if *named { 1.25 } else { 1.0 };
-            (area, area.sqrt() * center * sharp * look * named)
+            Face {
+                area,
+                size: area.sqrt(),
+                sharp,
+                weight: area.sqrt() * center * sharp * look * named,
+                centre: (cx, cy),
+                dims: (f.bbox[2].max(0.0), f.bbox[3].max(0.0)),
+            }
         })
         .collect();
-    let max_w = weights.iter().map(|w| w.1).fold(0.0, f64::max);
-    weights
+    let max_w = fs.iter().map(|f| f.weight).fold(0.0, f64::max);
+    let mut subject: Vec<bool> = fs
         .iter()
-        .map(|(area, w)| *area >= 0.0015 && *w >= 0.45 * max_w)
-        .collect()
+        .map(|f| f.area >= MIN_AREA && f.weight >= 0.45 * max_w)
+        .collect();
+    let largest = fs
+        .iter()
+        .zip(&subject)
+        .filter(|(_, s)| **s)
+        .map(|(f, _)| f.size)
+        .fold(0.0, f64::max);
+    let member_of = |a: &Face, s: &Face| {
+        a.size >= SIZE_RATIO * s.size
+            && a.sharp >= SHARP_RATIO * s.sharp
+            && (a.centre.0 - s.centre.0).abs() <= DX_FACES * a.dims.0.max(s.dims.0)
+            && (a.centre.1 - s.centre.1).abs() <= DY_FACES * a.dims.1.max(s.dims.1)
+    };
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for (i, f) in fs.iter().enumerate() {
+            if subject[i] || f.area < MIN_AREA || f.size < SIZE_FLOOR * largest {
+                continue;
+            }
+            if fs.iter().zip(&subject).any(|(s, is)| *is && member_of(f, s)) {
+                subject[i] = true;
+                grew = true;
+            }
+        }
+    }
+    subject
 }
 
 // ------------------------------------------------------------------ per-photo score
@@ -858,6 +913,69 @@ mod tests {
         assert_eq!(flags, vec![true, true, false]);
         // a lone tiny face is not a subject either
         assert_eq!(subject_flags(&[mk(0.5, 0.5, 0.02, 0.03)]), vec![false]);
+    }
+
+    fn face_at(x: f64, y: f64, w: f64, h: f64, sharpness: f64) -> (FaceFeat, bool) {
+        (
+            FaceFeat {
+                bbox: [x, y, w, h],
+                sharpness: Some(sharpness),
+                gaze: Some(0.8),
+                ..Default::default()
+            },
+            false,
+        )
+    }
+
+    #[test]
+    fn a_row_of_similar_faces_are_all_subjects() {
+        // 5 people side by side: the ends are far from the centre (centredness ~0.3, weight about
+        // a third of the middle face's) but they belong to the group
+        let row: Vec<_> = [0.02, 0.22, 0.44, 0.66, 0.86]
+            .iter()
+            .map(|&x| face_at(x, 0.35, 0.12, 0.2, 0.7))
+            .collect();
+        assert_eq!(subject_flags(&row), vec![true; 5]);
+        // two rows (back row higher and a little smaller) and a slightly blurrier member
+        let rows = [
+            face_at(0.10, 0.45, 0.12, 0.2, 0.7),
+            face_at(0.30, 0.45, 0.12, 0.2, 0.7),
+            face_at(0.50, 0.45, 0.12, 0.2, 0.4),
+            face_at(0.70, 0.45, 0.12, 0.2, 0.7),
+            face_at(0.05, 0.22, 0.10, 0.17, 0.6),
+            face_at(0.82, 0.22, 0.10, 0.17, 0.6),
+        ];
+        assert_eq!(subject_flags(&rows), vec![true; 6]);
+    }
+
+    #[test]
+    fn strangers_stay_bystanders_next_to_a_group() {
+        // a small far-away stranger right next to the subject
+        let flags = subject_flags(&[
+            face_at(0.4, 0.3, 0.2, 0.3, 0.8),
+            face_at(0.63, 0.35, 0.05, 0.07, 0.8),
+        ]);
+        assert_eq!(flags, vec![true, false]);
+        // a large centred subject and tiny people in the background
+        let flags = subject_flags(&[
+            face_at(0.35, 0.2, 0.3, 0.4, 0.8),
+            face_at(0.05, 0.5, 0.03, 0.045, 0.3),
+            face_at(0.75, 0.45, 0.035, 0.05, 0.5),
+            face_at(0.9, 0.6, 0.03, 0.04, 0.2),
+        ]);
+        assert_eq!(flags, vec![true, false, false, false]);
+        // a face as large as the subject but standing apart at the edge of the frame
+        let flags = subject_flags(&[
+            face_at(0.45, 0.35, 0.1, 0.18, 0.8),
+            face_at(0.9, 0.4, 0.08, 0.15, 0.8),
+        ]);
+        assert_eq!(flags, vec![true, false]);
+        // a much blurrier face next to the subject (someone passing by, out of focus)
+        let flags = subject_flags(&[
+            face_at(0.4, 0.3, 0.15, 0.25, 0.9),
+            face_at(0.75, 0.35, 0.14, 0.24, 0.02),
+        ]);
+        assert_eq!(flags, vec![true, false]);
     }
 
     fn member(id: i64, q_sharp: f64, emb: &[f32]) -> (PhotoScore, Vec<f32>) {

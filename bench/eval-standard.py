@@ -264,6 +264,20 @@ def main() -> int:
     out["group_subjects"] = {"photos": gs_photos, "faces": gs_faces, "not_subject": gs_by,
                              "photos_with_demoted": gs_photos_by,
                              "by_pos": {f"{k[0]}:{'subject' if k[1] else 'not'}": v for k, v in by_pos.items()}}
+    # single-person photos: the other faces (background people, generator extras) should mostly stay
+    # bystanders; the largest face is the person
+    extra = extra_subj = 0
+    for pid, (_r, im) in photos.items():
+        t = set(im.get("tags", []))
+        acts = im.get("actors") or [x for x in t if x in ACTORS]
+        fs = faces.get(pid, [])
+        if len(acts) != 1 or "group" in t or len(fs) < 2:
+            continue
+        main = max(fs, key=lambda f: f["area"])
+        extra += len(fs) - 1
+        extra_subj += sum(1 for f in fs if f is not main and f["is_subject"])
+    print(f"  single-person photos: {extra} faces besides the largest one, {extra_subj} of them subjects")
+    out["single_extra_faces"] = {"faces": extra, "subject": extra_subj}
     # closed-eyes misses: a face with eyes_open below the threshold that is not a subject
     expl = []
     for name in fn_names:

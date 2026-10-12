@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import pytest
 
+from imagepicker_ai.besttake import align
 from imagepicker_ai.besttake.compose import Components, compose_arrays
 from imagepicker_ai.enhance.ops import (
     FaceObs,
@@ -130,6 +131,66 @@ def test_besttake_other_face_is_cut_out():
     comp = paste(base, out)
     ox, oy, ow, oh = (int(v) for v in other)
     assert np.abs(comp.astype(int) - base)[oy : oy + oh, ox : ox + ow].max() == 0
+
+
+def _row(n: int, fw: float, cy: float, spacing: float) -> list:
+    x0 = W / 2 - spacing * (n - 1) / 2
+    return [face_box(x0 + i * spacing, cy, fw) for i in range(n)]
+
+
+def test_exclusion_zone_leaves_background_in_a_group_photo():
+    def masks(boxes):
+        mb, ms, zone, keep = align.exclusion_masks((H, W), boxes, 1.0, (H, W), boxes, 1.0)
+        for x, y, w, h in boxes:  # the faces themselves are never matched, whatever the zone
+            assert (mb[max(0, int(y)) : int(y + h), max(0, int(x)) : int(x + w)] == 0).all()
+            assert (ms[max(0, int(y)) : int(y + h), max(0, int(x)) : int(x + w)] == 0).all()
+        assert keep == pytest.approx((mb > 0).mean())
+        return zone, keep
+
+    # a portrait keeps the generous head / hair / neck zone
+    zone, keep = masks([face_box(CX, CY, FW)])
+    assert zone == 0 and keep >= align.MIN_BG_FRAC
+    # 5 people shoulder to shoulder: the generous zones leave < 10 % of the frame to match
+    group = _row(5, 200, 380, 220)
+    assert (align._exclusion_mask((H, W), group, 1.0) > 0).mean() < 0.1
+    zone, keep = masks(group)
+    assert zone > 0 and keep >= align.MIN_BG_FRAC
+    # faces filling the frame (2 rows of 4): the tightest zone, still around every face
+    zone, keep = masks(_row(4, 280, 230, 300) + _row(4, 280, 640, 300))
+    assert zone == len(align.EXCLUSION_ZONES) - 1 and keep < align.MIN_BG_FRAC
+
+
+def test_besttake_group_photo_aligns_and_leaves_the_others_alone():
+    # the middle one of 5 people has closed eyes in the base frame; the source frame is shifted
+    cy, fw = 380, 200
+    bg = synth_image(3, (W, H))
+    truth, base = bg.copy(), bg.copy()
+    for i, box in enumerate(_row(5, fw, cy, 220)):
+        x = box[0] + fw / 2
+        draw_face(truth, x, cy, fw, True, seed=10 + i)
+        draw_face(base, x, cy, fw, i != 2, seed=10 + i)
+    M = cv2.getRotationMatrix2D((W / 2, H / 2), 0.3, 1.0)
+    M[:, 2] += (7.4, -5.3)
+    src = cv2.warpAffine(truth, M, (W, H), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT_101)
+    boxes_b = _row(5, fw, cy, 220)
+    boxes_s = [face_box(*(M @ np.array([b[0] + fw / 2, cy, 1.0])), fw) for b in boxes_b]
+
+    def detect(rgb):
+        return boxes_b if rgb is base else boxes_s
+
+    comps = Components(observe=observer(), detect_faces=detect)
+    out = compose_arrays(base, src, boxes_b[2], boxes_s[2], comps)
+    g = out.debug["global"]
+    assert g.ok and g.zone > 0 and g.residual_px < 2.0
+    assert out.patch is not None, out.reason
+    comp = paste(base, out)
+    eyes = (slice(cy - 40, cy + 20), slice(W // 2 - 70, W // 2 + 70))
+    err_base = np.abs(base.astype(int) - truth)[eyes].mean()
+    assert np.abs(comp.astype(int) - truth)[eyes].mean() < 2.0 < err_base
+    # the neighbours keep their own faces (no ghost of the source frame)
+    for b in (boxes_b[1], boxes_b[3]):
+        ox, oy, ow, oh = (int(v) for v in face_box(b[0] + fw / 2, cy, 0.8 * fw))
+        assert np.abs(comp.astype(int) - base)[oy : oy + oh, ox : ox + ow].max() == 0
 
 
 # ------------------------------------------------------------------------------ tiling / ops
