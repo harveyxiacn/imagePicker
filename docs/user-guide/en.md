@@ -427,6 +427,8 @@ Export includes all your edits, writes JPEG and carries the original's metadata 
 
 Press `Ctrl+J` or click *AI Assistant*. Give commands in natural language (Chinese or English). The assistant **shows a plan first**: *Preview impact* shows which photos would change, then *Run*. Steps that reject, bulk-rate or export are marked *Needs confirmation* and ask once more; no original is ever deleted; afterwards *Undo the whole run* (or `Ctrl+Z`) restores everything in one step.
 
+Every step that changes photos has a defined scope: when a command filters first, only the filtered photos are changed. If the local model proposes a step with no condition of its own that would act on every photo, although your command names a condition, the plan is rejected and the rules engine is used instead. A step that changes more than 500 photos, or more than half the session (and at least 20 photos), is a large change and needs confirmation; if a step would change more photos than the plan showed when it runs, it fails and you should ask again.
+
 ![AI assistant](../images/assistant.png)
 
 Example commands (these work as written; the rules engine understands both languages):

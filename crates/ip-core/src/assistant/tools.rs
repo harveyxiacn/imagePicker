@@ -427,6 +427,42 @@ pub fn filter_query(args: &Value) -> String {
 /// Parses a selection `query` (the `/api/photos` parameters, optionally with `limit`) into a
 /// [`PhotoQuery`] of `session_id`.
 pub fn parse_photo_query(session_id: i64, q: &str) -> VResult<PhotoQuery> {
+    let (n, limit) = query_args(q)?;
+    Ok(photo_query_of(session_id, &n, limit))
+}
+
+/// Whether a filter argument narrows the photos (`sort`, `person_mode`, `include_background`
+/// and `false` / `0` / empty values do not).
+fn restricts(key: &str, v: &Value) -> bool {
+    match key {
+        "sort" | "person_mode" | "include_background" => false,
+        "issues_none" | "burst_best_only" => v.as_bool() == Some(true),
+        "issues_any" | "persons" | "exclude_persons" | "person_state" => {
+            v.as_array().is_some_and(|a| !a.is_empty())
+        }
+        "rating_gte" | "faces_min" => v.as_i64().is_some_and(|n| n > 0),
+        "ai_rating_gte" => v.as_f64().is_some_and(|n| n > 0.0),
+        _ => true,
+    }
+}
+
+/// Whether canonical filter arguments narrow the photos at all.
+pub fn filter_restricts(args: &Value) -> bool {
+    args.as_object()
+        .is_some_and(|m| m.iter().any(|(k, v)| restricts(k, v)))
+}
+
+/// Whether a selection query narrows the photos: a condition or a `limit` (`sort` alone does
+/// not). A query that does not parse counts as narrowing (it is refused where it is used).
+pub fn query_has_conditions(q: &str) -> bool {
+    match query_args(q) {
+        Ok((args, limit)) => limit.is_some() || filter_restricts(&args),
+        Err(_) => true,
+    }
+}
+
+/// Canonical filter arguments and `limit` of a selection query.
+pub fn query_args(q: &str) -> VResult<(Value, Option<i64>)> {
     let q = q.trim().trim_start_matches('?');
     let mut args = Map::new();
     let mut limit = None;
@@ -447,8 +483,7 @@ pub fn parse_photo_query(session_id: i64, q: &str) -> VResult<PhotoQuery> {
             _ => return Err(format!("unknown query parameter {k:?}")),
         }
     }
-    let n = norm_filter(&Value::Object(args))?;
-    Ok(photo_query_of(session_id, &n, limit))
+    Ok((norm_filter(&Value::Object(args))?, limit))
 }
 
 /// [`PhotoQuery`] of canonical filter arguments.
@@ -821,5 +856,36 @@ mod tests {
         assert_eq!(q.persons, [1, 2]);
         assert_eq!(q.person_mode, PersonMode::Any);
         assert!(parse_photo_query(1, "").is_ok());
+    }
+
+    #[test]
+    fn conditions_of_a_query() {
+        for q in [
+            "issues_any=blurry",
+            "rating_gte=4",
+            "flag=picked",
+            "limit=3",
+            "sort=ai&limit=2",
+            "persons=4",
+            "has_edits=0",
+            "faces_max=0",
+            "drop=table",
+        ] {
+            assert!(query_has_conditions(q), "{q}");
+        }
+        for q in [
+            "",
+            "?",
+            "sort=ai",
+            "issues_none=0",
+            "burst_best_only=false",
+            "rating_gte=0",
+            "person_mode=any&include_background=1",
+        ] {
+            assert!(!query_has_conditions(q), "{q}");
+        }
+        let (args, limit) = query_args("?issues_any=blurry,closed_eyes&limit=5").unwrap();
+        assert_eq!(args["issues_any"], json!(["blurry", "closed_eyes"]));
+        assert_eq!(limit, Some(5));
     }
 }

@@ -42,13 +42,18 @@ pub async fn assistant_plan(
 #[derive(Deserialize)]
 pub struct ExecuteBody {
     plan_id: String,
+    /// Required (`true`) for a plan with `large_impact`.
+    #[serde(default)]
+    confirm: bool,
 }
 
 pub async fn assistant_execute(
     State(st): State<AppState>,
     ApiJson(b): ApiJson<ExecuteBody>,
 ) -> ApiResult<Response> {
-    Ok(accepted(st.core.assistant_execute(&b.plan_id).await?))
+    Ok(accepted(
+        st.core.assistant_execute(&b.plan_id, b.confirm).await?,
+    ))
 }
 
 #[derive(Deserialize)]

@@ -22,6 +22,10 @@ pub enum CoreError {
     /// A worker call did not answer in time and the worker was killed (HTTP 504 `worker_timeout`).
     #[error("{0}")]
     WorkerTimeout(String),
+    /// The request needs an explicit confirmation flag (HTTP 409 `confirmation_required`), e.g.
+    /// an assistant plan that changes a large part of the session.
+    #[error("{0}")]
+    ConfirmationRequired(String),
     #[error("{0:#}")]
     Internal(anyhow::Error),
 }
@@ -45,6 +49,7 @@ impl CoreError {
             Self::ModelsMissing(_) => "models_missing",
             Self::WorkerUnavailable(_) => "worker_unavailable",
             Self::WorkerTimeout(_) => "worker_timeout",
+            Self::ConfirmationRequired(_) => "confirmation_required",
             Self::Internal(_) => "internal",
         }
     }

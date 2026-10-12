@@ -279,6 +279,9 @@ async fn inpaint_headless(core: &Arc<Core>, photo_id: i64, body: InpaintBody) ->
 
 fn print_plan_out(p: &ip_core::assistant::PlanOut) {
     println!("engine:        {}", p.engine);
+    if let Some(f) = &p.fallback {
+        println!("fallback:      {} ({})", f.code, f.message);
+    }
     println!("reply:         {}", p.reply);
     if let Some(u) = &p.unsupported {
         println!("unsupported:   {u}");
@@ -291,10 +294,22 @@ fn print_plan_out(p: &ip_core::assistant::PlanOut) {
             s.args,
             if s.destructive { "  [destructive]" } else { "" }
         );
-        println!("               {} ({} photos)", s.summary, s.affects);
+        println!(
+            "               {} ({} photos{}){}",
+            s.summary,
+            s.affects,
+            s.criteria
+                .as_deref()
+                .map(|c| format!(": {c}"))
+                .unwrap_or_default(),
+            if s.large_impact { "  [large]" } else { "" }
+        );
     }
     if p.needs_confirmation {
         println!("confirmation:  needed (pass --execute to run it)");
+        for line in p.confirm_text.as_deref().unwrap_or_default().lines() {
+            println!("               {line}");
+        }
     }
 }
 
@@ -318,7 +333,8 @@ async fn ask_headless(
         return Ok((plan, None));
     }
     let mut rx = core.events.subscribe();
-    core.assistant_execute(&plan.plan_id).await?;
+    // `--execute` is the explicit confirmation, also of a large change
+    core.assistant_execute(&plan.plan_id, true).await?;
     let wait = async {
         loop {
             match rx.recv().await {

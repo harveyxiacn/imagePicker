@@ -72,6 +72,9 @@ impl From<CoreError> for ApiError {
             CoreError::WorkerTimeout(m) => {
                 Self::new(StatusCode::GATEWAY_TIMEOUT, "worker_timeout", m.clone())
             }
+            CoreError::ConfirmationRequired(m) => {
+                Self::new(StatusCode::CONFLICT, "confirmation_required", m.clone())
+            }
             CoreError::Internal(_) => {
                 tracing::error!(error = %e, "internal error");
                 Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string())

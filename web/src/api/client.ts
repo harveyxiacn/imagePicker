@@ -253,7 +253,8 @@ export const api = {
   assistantStatus: () => request<AssistantStatus>('GET', '/assistant/status'),
   assistantPlan: (body: { session_id: number; message: string; context: AssistantContext; engine?: 'auto' | 'rules' | 'llm' }) =>
     request<AssistantPlan>('POST', '/assistant/plan', body),
-  assistantExecute: (plan_id: string) => request<{ task_id: string }>('POST', '/assistant/execute', { plan_id }),
+  assistantExecute: (plan_id: string, confirm = false) =>
+    request<{ task_id: string }>('POST', '/assistant/execute', { plan_id, confirm }),
   assistantDescribe: (photo_id: number) => request<{ caption: string; keywords: string[] }>('POST', '/assistant/describe', { photo_id }),
   settings: () => request<Settings | { settings: Settings }>('GET', '/settings').then(unwrapSettings),
   patchSettings: (patch: SettingsPatch) => request<Settings | { settings: Settings }>('PATCH', '/settings', patch).then(unwrapSettings),

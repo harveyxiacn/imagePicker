@@ -40,6 +40,12 @@
 | P1 | Release 的 Android APK 任务（签名 keystore、`apksigner` 校验、产物路径）未在 CI 实跑；需配置 `ANDROID_KEYSTORE_*` 四个 secrets 后验证 | M8 release |
 | P2 | lite 档位的 `faces` 步骤不输出关键点 / 闭眼 / 表情（需 MediaPipe 或 ONNX 关键点模型） | M8.1 infer |
 
+## 助手
+
+| 优先级 | 项 | 说明 |
+|---|---|---|
+| P1 | 助手 20 条指令基准（docs/09 M6）的 LLM 计划实测 | 目标绑定、`fallback` 与大范围修改确认（api-contract-m6 A.4）已有单元/接口测试，但未用真实本地模型重跑 20 条基准；前端尚未展示 `criteria` / `confirm_text` / `fallback` |
+
 ## 许可审计（商用前）
 
 - NIMA 美学/技术质量模型：权重 Apache-2.0，训练数据 AVA / TID2013 有研究用途条款。
