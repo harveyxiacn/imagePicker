@@ -171,12 +171,14 @@ impl Core {
             lite::LiteWorker::new(cfg.imaging.clone(), lite::default_threads())
                 .with_models_dir(&dirs.root.join("models")),
         );
+        let full_cache = thumbs::FullCache::new(&dirs.full, thumbs::FULL_CACHE_BUDGET);
         let thumbs = Thumbs::new(
             db.clone(),
             cfg.imaging.clone(),
             events.clone(),
             &dirs.thumbs,
             &dirs.previews,
+            full_cache.clone(),
             workers,
         );
         let worker_timeouts = TimeoutHandle::new(WorkerTimeouts::from_env());
@@ -223,6 +225,7 @@ impl Core {
             beauty_dir: dirs.beauty.clone(),
             edited_thumbs_dir: dirs.edited_thumbs.clone(),
             edited_previews_dir: dirs.edited_previews.clone(),
+            full_cache,
             edits_dir: dirs.edits.clone(),
         }));
         let core = Arc::new(Core {
@@ -385,6 +388,13 @@ impl Core {
         self.image_path(id, size).await
     }
 
+    /// Full-resolution image for the loupe at 100% and above (`GET /api/full/{id}`): upright, sRGB,
+    /// the photo's own pixel size (the rendered edit for edited photos), cached on disk. Errors:
+    /// `NotFound` (unknown photo, original missing), `Unsupported` (the original cannot be decoded).
+    pub async fn full_path(&self, id: i64) -> Result<PathBuf> {
+        self.image_path(id, thumbs::FULL_SIZE).await
+    }
+
     /// Cached thumbnail/preview: the rendered image for edited photos, the original otherwise.
     async fn image_path(&self, id: i64, size: u32) -> Result<PathBuf> {
         let r = self.db.call(move |c| catalog::photo_ref(c, id)).await?;
@@ -412,6 +422,8 @@ impl Core {
 mod tests;
 #[cfg(test)]
 mod tests_files;
+#[cfg(test)]
+mod tests_full;
 #[cfg(test)]
 mod tests_lite;
 #[cfg(test)]

@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { AlertTriangle, FolderOpen, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -6,7 +6,7 @@ import { api } from '@/api/client'
 import { useHardware } from '@/api/queries'
 import { missingModelsOf } from '@/lib/analysis'
 import { errorText } from '@/lib/errors'
-import { EXPORT_PRESETS, type ExportPresetId } from '@/lib/exportPresets'
+import { applyPreset as presetForm, ASPECTS, DEFAULT_FORM, exampleName, exportBody, FORMATS, NAME_TOKENS, usesQuality, type EdgeChoice, type ExportForm } from '@/lib/exportOptions'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -22,9 +22,6 @@ interface Props {
   folders?: Record<string, number[]>
 }
 
-type EdgeChoice = 'original' | '2048' | '4096' | 'custom'
-
-
 const LS_KEY = 'imagepicker.exportDest'
 const readDest = () => {
   try {
@@ -37,9 +34,9 @@ const readDest = () => {
 export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders }: Props) {
   const { t } = useTranslation()
   const [dest, setDest] = useState(readDest)
-  const [edge, setEdge] = useState<EdgeChoice>('2048')
-  const [custom, setCustom] = useState(3000)
-  const [quality, setQuality] = useState(90)
+  const [form, setForm] = useState<ExportForm>(DEFAULT_FORM)
+  const set = (patch: Partial<ExportForm>) => setForm((f) => ({ ...f, ...patch }))
+  const { edge, custom, quality, format, aspect, stripGps, stripMetadata } = form
   const [template, setTemplate] = useState('{name}')
   const [scope, setScope] = useState<'selected' | 'all'>('selected')
   const [browse, setBrowse] = useState(false)
@@ -47,26 +44,25 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const [pairMember, setPairMember] = useState<'jpeg' | 'raw' | 'both'>('jpeg')
   const hardware = useHardware().data
   const wantedPreset = useUi((s) => s.exportPreset)
-  const [preset, setPreset] = useState<ExportPresetId | null>(null)
-  const applyPreset = (id: ExportPresetId) => {
-    const p = EXPORT_PRESETS[id]
+  // the one preset table lives on the server (the assistant's export tool uses it too)
+  const presets = useQuery({ queryKey: ['export-presets'], queryFn: api.exportPresets, staleTime: Infinity, enabled: open }).data?.presets
+  const [preset, setPreset] = useState<string | null>(null)
+  const applyPreset = (id: string) => {
+    const p = presets?.find((x) => x.id === id)
+    if (!p) return
     setPreset(id)
-    setQuality(p.quality)
-    if (p.edge === null) setEdge('original')
-    else {
-      setEdge('custom')
-      setCustom(p.edge)
-    }
+    setForm((f) => presetForm(f, p))
   }
-  // the assistant opens the dialog with a preset preselected (state adjusted during render, store cleared in an effect)
+  // the assistant opens the dialog with a preset preselected (state adjusted during render once the
+  // table is loaded, store cleared in an effect)
   const [seenPreset, setSeenPreset] = useState<string | null>(null)
-  if (open && wantedPreset && wantedPreset !== seenPreset) {
+  if (open && presets && wantedPreset && wantedPreset !== seenPreset) {
     setSeenPreset(wantedPreset)
-    if (wantedPreset in EXPORT_PRESETS) applyPreset(wantedPreset as ExportPresetId)
+    applyPreset(wantedPreset)
   } else if (!wantedPreset && seenPreset) setSeenPreset(null)
   useEffect(() => {
-    if (open && wantedPreset) useUi.getState().setExportPreset(null)
-  }, [open, wantedPreset])
+    if (open && presets && wantedPreset) useUi.getState().setExportPreset(null)
+  }, [open, presets, wantedPreset])
   const slowTier = !hardware?.tier || hardware.tier === 'T0' || hardware.tier === 'T1'
   const push = useToasts((s) => s.push)
   const updateTask = useToasts((s) => s.updateTask)
@@ -75,10 +71,9 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const effectiveScope = hasSelection ? scope : 'all'
   const byFolder = folders && Object.keys(folders).length > 0 ? folders : undefined
   const ids = byFolder ? Object.values(byFolder).flat() : effectiveScope === 'selected' ? selectedIds : allIds
-  const longEdge = edge === 'original' ? null : edge === 'custom' ? custom : Number(edge)
 
   const mut = useMutation({
-    mutationFn: () => api.exportPhotos({ ...(byFolder ? { folders: byFolder } : { ids }), dest, long_edge: longEdge, quality, name_template: template || '{name}', ...(upscale ? { upscale } : {}), ...(pairMember !== 'jpeg' ? { pair_member: pairMember } : {}) }),
+    mutationFn: () => api.exportPhotos({ ...exportBody(form, byFolder ? { folders: byFolder } : { ids }, dest, template, upscale), ...(pairMember !== 'jpeg' ? { pair_member: pairMember } : {}) }),
     onSuccess: ({ task_id }) => {
       try {
         localStorage.setItem(LS_KEY, dest)
@@ -97,7 +92,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
     },
   })
 
-  const example = (template || '{name}').replaceAll('{name}', 'IMG_0001') + '.jpg'
+  const example = exampleName(template, format)
 
   return (
     <>
@@ -134,9 +129,9 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
           <div className="flex flex-col gap-1" data-testid="export-presets">
             <span className="text-muted">{t('export.preset')}</span>
             <div className="flex flex-wrap gap-1.5">
-              {(Object.keys(EXPORT_PRESETS) as ExportPresetId[]).map((id) => (
+              {(presets ?? []).map(({ id }) => (
                 <button key={id} className="chip" aria-pressed={preset === id} onClick={() => applyPreset(id)} data-testid={`export-preset-${id}`}>
-                  {t(`export.preset_${id}`)}
+                  {t(`export.preset_${id}`, { defaultValue: id })}
                 </button>
               ))}
             </div>
@@ -171,16 +166,52 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
               {t('export.longEdge')}
             </label>
             <div className="flex items-center gap-2">
-              <select id="exp-edge" className="field" value={edge} onChange={(e) => setEdge(e.target.value as EdgeChoice)}>
+              <select id="exp-edge" className="field" value={edge} onChange={(e) => set({ edge: e.target.value as EdgeChoice })}>
                 <option value="original">{t('export.original')}</option>
                 <option value="2048">2048 px</option>
                 <option value="4096">4096 px</option>
                 <option value="custom">{t('export.custom')}</option>
               </select>
               {edge === 'custom' && (
-                <input type="number" className="field w-28" min={64} max={16384} value={custom} onChange={(e) => setCustom(Math.max(64, Number(e.target.value) || 64))} aria-label={t('export.custom')} />
+                <input type="number" className="field w-28" min={64} max={16384} value={custom} onChange={(e) => set({ custom: Math.max(64, Number(e.target.value) || 64) })} aria-label={t('export.custom')} />
               )}
+              <label htmlFor="exp-aspect" className="ml-2 text-muted">
+                {t('export.aspect')}
+              </label>
+              <select id="exp-aspect" className="field" value={aspect} onChange={(e) => set({ aspect: e.target.value })} data-testid="export-aspect">
+                {[...new Set([...ASPECTS, aspect])].map((a) => (
+                  <option key={a} value={a}>
+                    {a === 'none' ? t('export.aspect_none') : a}
+                  </option>
+                ))}
+              </select>
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label htmlFor="exp-format" className="text-muted">
+              {t('export.format')}
+            </label>
+            <select id="exp-format" className="field w-fit" value={format} onChange={(e) => set({ format: e.target.value as ExportForm['format'] })} data-testid="export-format">
+              {FORMATS.map((f) => (
+                <option key={f} value={f}>
+                  {t(`export.format_${f}`)}
+                </option>
+              ))}
+            </select>
+            <div className="text-xs text-faint">{t(`export.formatHint_${format}`)}</div>
+          </div>
+
+          <div className="flex flex-col gap-1" data-testid="export-strip">
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={stripGps || stripMetadata} disabled={stripMetadata} onChange={(e) => set({ stripGps: e.target.checked })} data-testid="export-strip-gps" />
+              {t('export.stripGps')}
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={stripMetadata} onChange={(e) => set({ stripMetadata: e.target.checked })} data-testid="export-strip-metadata" />
+              {t('export.stripMetadata')}
+            </label>
+            {(stripGps || stripMetadata) && <div className="text-xs text-faint">{t('export.stripHint')}</div>}
           </div>
 
           <div className="flex flex-col gap-1" data-testid="export-pair-member">
@@ -216,9 +247,10 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
 
           <div className="flex flex-col gap-1">
             <label htmlFor="exp-q" className="text-muted">
-              {t('export.quality')}: <span className="tnum text-fg">{quality}</span>
+              {t('export.quality')}: <span className="tnum text-fg">{usesQuality(format) ? quality : '—'}</span>
             </label>
-            <input id="exp-q" type="range" min={50} max={100} value={quality} onChange={(e) => setQuality(Number(e.target.value))} />
+            <input id="exp-q" type="range" min={50} max={100} value={quality} disabled={!usesQuality(format)} onChange={(e) => set({ quality: Number(e.target.value) })} />
+            {!usesQuality(format) && <div className="text-xs text-faint">{t('export.qualityLossless')}</div>}
           </div>
 
           <div className="flex flex-col gap-1">
@@ -227,7 +259,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
             </label>
             <input id="exp-tpl" className="field font-mono text-xs" value={template} onChange={(e) => setTemplate(e.target.value)} spellCheck={false} />
             <div className="text-xs text-faint">
-              {t('export.templateHint')} <span className="tnum text-muted">{example}</span>
+              {t('export.templateHint', { tokens: NAME_TOKENS.join(' ') })} <span className="tnum text-muted">{example}</span>
             </div>
           </div>
         </div>

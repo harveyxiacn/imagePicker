@@ -26,7 +26,7 @@ rayon.workspace = true
 blake3.workspace = true
 rusqlite.workspace = true
 dirs.workspace = true
-image.workspace = true
+image = { workspace = true, features = ["webp", "tiff"] }
 async-trait.workspace = true
 regex.workspace = true
 argon2 = "0.6"

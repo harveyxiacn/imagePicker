@@ -150,7 +150,7 @@ async fn export_to(core: &Arc<Core>, ids: Vec<i64>, dest: &Path, member: PairMem
     let mut rx = core.events.subscribe();
     let req: ExportRequest =
         serde_json::from_value(json!({"ids": ids, "dest": dest.to_string_lossy()})).unwrap();
-    let task = core.export_with(req, None, member).await.unwrap();
+    let task = core.export_with(req, member).await.unwrap();
     tokio::time::timeout(WAIT, async {
         loop {
             if let Ok(Event::TaskProgress {

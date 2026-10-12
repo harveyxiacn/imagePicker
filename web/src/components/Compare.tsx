@@ -2,6 +2,7 @@ import { ArrowLeftRight, Link2, Link2Off } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Photo } from '@/api/types'
+import { COMPARE_COUNTS, compareColumns, type CompareCount } from '@/lib/compare'
 import { useKeyHeld } from '@/lib/hooks'
 import { FIT_VIEW, type ViewState } from '@/lib/zoom'
 import { useUi } from '@/stores/ui'
@@ -15,10 +16,13 @@ interface Props {
   slots: Photo[]
   activeId: number | null
   compareA: number | null
-  count: 2 | 4
+  /** The cells are the current selection (no pinned A). */
+  fromSelection?: boolean
+  selectedCount?: number
+  count: CompareCount
   sync: boolean
   onSyncChange: (b: boolean) => void
-  onCountChange: (n: 2 | 4) => void
+  onCountChange: (n: CompareCount) => void
   onPick: (id: number) => void
   onSwap: () => void
   onRate: (id: number, n: number | null) => void
@@ -27,7 +31,7 @@ interface Props {
 const LABELS = ['A', 'B', 'C', 'D']
 
 /** 2-up / 4-up comparison with optionally synchronized zoom & pan. */
-export function Compare({ photos, slots, activeId, compareA, count, sync, onSyncChange, onCountChange, onPick, onSwap, onRate }: Props) {
+export function Compare({ photos, slots, activeId, compareA, fromSelection = false, selectedCount = 0, count, sync, onSyncChange, onCountChange, onPick, onSwap, onRate }: Props) {
   const { t } = useTranslation()
   const [shared, setShared] = useState<ViewState>(FIT_VIEW)
   const [per, setPer] = useState<Record<number, ViewState>>({})
@@ -39,7 +43,7 @@ export function Compare({ photos, slots, activeId, compareA, count, sync, onSync
     return <div className="flex h-full items-center justify-center text-muted">{t('grid.empty')}</div>
   }
 
-  const cols = slots.length <= 1 ? 1 : 2
+  const cols = compareColumns(slots.length)
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
@@ -51,8 +55,13 @@ export function Compare({ photos, slots, activeId, compareA, count, sync, onSync
           <ArrowLeftRight size={14} />
           {t('compare.swap')}
         </button>
+        {fromSelection && (
+          <span className="tnum text-xs text-muted" data-testid="compare-from-selection">
+            {t('compare.fromSelection', { shown: slots.length, total: selectedCount })}
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1" role="group" aria-label={t('compare.layout')}>
-          {([2, 4] as const).map((n) => (
+          {COMPARE_COUNTS.map((n) => (
             <button key={n} className="btn" aria-pressed={count === n} onClick={() => onCountChange(n)}>
               {n}-up
             </button>

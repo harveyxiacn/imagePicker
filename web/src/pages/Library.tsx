@@ -29,12 +29,13 @@ import { TopBar } from '@/components/TopBar'
 import { acceptAiRatings, editPhotos } from '@/lib/actions'
 import { canAccept } from '@/lib/ai'
 import { useHistory } from '@/lib/history'
+import { compareSlots, compareUsesSelection } from '@/lib/compare'
 import { pruneSelection } from '@/lib/selection'
 import { useIsMobile } from '@/lib/useLayout'
 import { buildGridItems, toggleInSet, visiblePhotos } from '@/lib/stacks'
 import { useToasts } from '@/stores/toasts'
 import { useUi, type View } from '@/stores/ui'
-import { compareSlots, useController } from './useController'
+import { useController } from './useController'
 import { useGroup } from './useGroup'
 import { useShortcuts } from './useShortcuts'
 
@@ -121,7 +122,8 @@ export function Library() {
 
   const activeIndex = activeId === null ? -1 : listPhotos.findIndex((p) => p.id === activeId)
   const active = activeIndex >= 0 ? listPhotos[activeIndex] : undefined
-  const slots = useMemo(() => compareSlots(listPhotos, compareA, activeId, compareCount), [listPhotos, compareA, activeId, compareCount])
+  const fromSelection = useMemo(() => compareUsesSelection(listPhotos, selection.ids), [listPhotos, selection])
+  const slots = useMemo(() => compareSlots(listPhotos, compareA, activeId, compareCount, selection.ids), [listPhotos, compareA, activeId, compareCount, selection])
   const groupSlots = useMemo(() => compareSlots(group.photos, compareA, activeId, 2), [group.photos, compareA, activeId])
   const acceptable = useMemo(() => photos.filter(canAccept).length, [photos])
 
@@ -249,7 +251,9 @@ export function Library() {
               photos={listPhotos}
               slots={slots}
               activeId={activeId}
-              compareA={compareA}
+              compareA={fromSelection ? null : compareA}
+              fromSelection={fromSelection}
+              selectedCount={selection.ids.size}
               count={compareCount}
               sync={syncZoom}
               onSyncChange={useUi.getState().setSyncZoom}

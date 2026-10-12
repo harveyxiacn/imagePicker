@@ -1,5 +1,5 @@
 import { delay, http, HttpResponse } from 'msw'
-import type { ExportBody, ImportBody, PhotoPatchBody, Photo } from '@/api/types'
+import type { ExportBody, ExportPreset, ImportBody, PhotoPatchBody, Photo } from '@/api/types'
 import { emit } from './bus'
 import {
   addSession,
@@ -291,6 +291,16 @@ export const handlers = [
       headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000, immutable' },
     })
   }),
+  http.get('/api/full/:id', async ({ params }) => {
+    await delay(150 + Math.random() * 250)
+    const p = findPhoto(Number(params.id))
+    if (!p) return err(404, 'not_found', 'photo not found')
+    const s = Math.max(p.width ?? 4096, p.height ?? 4096)
+    if (p.has_edits) return renderEdited(p, s)
+    return new HttpResponse(photoSvg(p, s, true), {
+      headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' },
+    })
+  }),
   http.get('/api/original/:id', ({ params }) => {
     const p = findPhoto(Number(params.id))
     if (!p) return err(404, 'not_found', 'photo not found')
@@ -301,6 +311,18 @@ export const handlers = [
     const { ids } = (await request.json()) as { ids: number[] }
     scheduleThumbs(ids)
     return new HttpResponse(null, { status: 204 })
+  }),
+
+  // mirrors EXPORT_PRESETS in crates/ip-core/src/export.rs (the server owns the table)
+  http.get('/api/export/presets', async () => {
+    await lat()
+    const presets: ExportPreset[] = [
+      { id: 'original', long_edge: null, aspect: null, quality: 95, format: 'original', strip_gps: false },
+      { id: 'wechat', long_edge: 2048, aspect: null, quality: 85, format: 'jpeg', strip_gps: true },
+      { id: 'xiaohongshu', long_edge: 1920, aspect: [3, 4], quality: 90, format: 'jpeg', strip_gps: true },
+      { id: 'instagram', long_edge: 1350, aspect: [4, 5], quality: 90, format: 'jpeg', strip_gps: true },
+    ]
+    return HttpResponse.json({ presets })
   }),
 
   http.post('/api/export', async ({ request }) => {

@@ -192,6 +192,10 @@ Click selects one photo, `Ctrl+click` multi-selects, `Ctrl+A` selects all; ratin
 | Hold `Z` | 100% magnifier | Loupe, Compare, Group |
 | `Shift+F` | Show / hide face boxes | Loupe, Compare, Group |
 
+**Zoom.** 100% shows the photo's own pixels: one image pixel per screen pixel, so focus and noise can be judged as they are (on a high-DPI screen with Windows scaling above 100% the photo is therefore smaller at 100% than the page text suggests). Browsing at *Fit* uses the preview only, so flipping through photos stays instant. Zooming in past what the preview holds (photos above about 16 MP) loads the full-resolution image in the background; the preview stays on screen until it arrives, the first time about half a second for a 24 MP JPEG, afterwards from the cache. RAW files show their embedded JPEG, so their 100% is that JPEG's resolution.
+
+**Compare.** `C` opens Compare with 2-up, 3-up or 4-up cells (buttons at the top right). If two or more photos are selected in the grid, those photos are the cells, in grid order; with more selected than cells, `←` `→` step through the selection and the view shows the page holding the cursor. With one or no photo selected, A is the photo you came from and the cells fill with the photos that follow the cursor.
+
 ### Rating & marking
 
 | Key | Action |
@@ -416,21 +420,35 @@ Press `Ctrl+E` (or *Export* in the top bar):
 
 | Option | Description |
 |---|---|
-| **Preset** | Original (full size, quality 95), WeChat (long edge 1920, quality 82), Xiaohongshu (1440, 88), Instagram (1080, 90) |
+| **Preset** | Original (full size, original format, quality 95), WeChat (long edge 2048, quality 85), Xiaohongshu (3:4 crop to 1440×1920, quality 90), Instagram (4:5 crop to 1080×1350, quality 90); the three sharing presets remove the GPS position. The preset table comes from the app's backend; the AI assistant ("export the picks for Instagram") uses the same table |
 | Scope | The N selected / everything in the current filter |
 | Destination folder | Type it or *Browse…* (must be inside an allowed folder) |
-| Long edge | Original size / custom pixels |
-| JPEG quality | Default 90 |
-| Naming template | `{name}` is the original file name; a live example is shown |
+| Long edge | Original size / 2048 / 4096 / custom pixels |
+| Crop | None / 3:4 / 4:5 / 1:1 / 2:3 / 16:9: a centred crop, then scaled down to the long edge (never up) |
+| Format | Original format (unedited photos at original size are copied as they are, RAW stays RAW; everything else is JPEG) / JPEG / PNG / TIFF (8-bit, uncompressed) / WebP (lossless) |
+| Remove GPS location / Remove all metadata | See below |
+| JPEG quality | Default 90; PNG, TIFF and WebP are lossless and ignore it |
+| Naming template | `{name}` original file name, `{seq}` sequence number, `{date}` capture date, `{event}` import name, `{scene}` scene (e.g. portrait), `{camera}` camera, `{rating}` stars; a live example is shown. Name clashes get `_1`, `_2`…: existing files are never overwritten |
 | Upscale | Off / ×2 / ×4 (on CPU tiers each photo can take tens of seconds) |
 | Export into one folder per person | Used from the People page |
 | RAW+JPEG pairs | Export the JPEG (as shown, with edits; default), the RAW, or both |
 
 While an export runs, its progress shows at the bottom right with a *Cancel* button: files already written stay, the remaining photos are skipped.
 
-Export includes all your edits, writes JPEG and carries the original's metadata over: EXIF (for RAW and TIFF files too; maker notes are not copied), XMP (rating, keywords, title, creator…; entries that only describe the original, such as its orientation or Lightroom/darktable develop settings, are left out) and IPTC. Photos with a wide-gamut colour profile (Display P3, Adobe RGB) are converted to sRGB, as are their thumbnails and previews, and every export embeds an sRGB ICC profile. The API option `strip_gps` removes the GPS position from both EXIF and XMP. Exporting at original size without edits copies the file unchanged.
+Export includes all your edits and carries the original's metadata over: EXIF (for RAW and TIFF files too; maker notes are not copied), XMP (rating, keywords, title, creator…; entries that only describe the original, such as its orientation or Lightroom/darktable develop settings, are left out) and IPTC. What each format can carry:
 
-> Known limitations: HEIC/HEIF photos can only be re-encoded on export where a HEIF decoder is available (as for thumbnails, see [Importing photos](#4-importing-photos)), and HDR (PQ/HLG) content is not tone-mapped; XMP stored inside DNG/CR3 files and extended XMP (over 64 KB, e.g. depth maps) is not copied (`.xmp` sidecars are); thumbnails made by an earlier version keep their colours until the cache is cleared (*Settings → Cache*).
+| Format | EXIF | XMP | IPTC | Colour profile |
+|---|---|---|---|---|
+| JPEG | ✓ | ✓ | ✓ | sRGB |
+| TIFF | ✓ (no maker notes) | ✓ | ✓ | sRGB |
+| PNG | ✓ | ✓ | — (title, keywords etc. are in the XMP) | sRGB |
+| WebP | ✓ | ✓ | — (likewise) | sRGB |
+
+Photos with a wide-gamut colour profile (Display P3, Adobe RGB) are converted to sRGB, as are their thumbnails and previews, and every re-encoded export embeds an sRGB ICC profile.
+
+**Remove GPS location** deletes the GPS position from EXIF and XMP; **Remove all metadata** writes no EXIF, XMP or IPTC at all (the colour profile stays). Both also apply to photos that would be copied unchanged: JPEG, PNG and WebP originals are only cleaned, their image data stays byte for byte the same (a photo stored rotated keeps its orientation tag, otherwise it would show sideways); RAW, HEIF and TIFF originals cannot be cleaned in place and are written as a full-size JPEG (or the chosen format) instead. With neither option, exporting at original size without edits copies the file unchanged.
+
+> Known limitations: WebP is lossless only (larger files) and at most 16383 px per side; TIFF is 8-bit uncompressed, and there is no 16-bit or Display P3 output; HEIC/HEIF photos can only be re-encoded on export where a HEIF decoder is available (as for thumbnails, see [Importing photos](#4-importing-photos)), and HDR (PQ/HLG) content is not tone-mapped; XMP stored inside DNG/CR3 files and extended XMP (over 64 KB, e.g. depth maps) is not copied (`.xmp` sidecars are); thumbnails made by an earlier version keep their colours until the cache is cleared (*Settings → Cache*).
 
 ## 14. AI assistant
 
@@ -512,7 +530,7 @@ Default data directory (override with `IMAGEPICKER_DATA_DIR` or `--data-dir`):
 |---|---|
 | Catalog (ratings, flags, edits, people) | `catalog.db` |
 | Catalog backups (one a day, 7 kept) | `backups/` |
-| Thumbnail / preview / AI mask / edit render / generated-result caches | `cache/` (clear in *Settings → Cache*; rebuilt on demand) |
+| Thumbnail / preview / full-resolution (`cache/full`, at most 1 GB) / AI mask / edit render / generated-result caches | `cache/` (clear in *Settings → Cache*; rebuilt on demand) |
 | Generated patch layers of edits | `edits/` |
 | Imported LUTs | `luts/` |
 | Logs | `logs/` |
