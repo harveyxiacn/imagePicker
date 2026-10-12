@@ -1,12 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Cpu, Loader2, Server, Sparkles } from 'lucide-react'
+import { Cpu, Loader2, Pause, Play, Server, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { useAnalysisStatus } from '@/api/queries'
 import { useRemoteStatus } from '@/api/queries'
 import type { AnalysisProfile } from '@/api/types'
-import { analysisFraction, startAnalysis } from '@/lib/analysis'
+import { analysisActions, analysisActive, analysisFraction, continueAnalysis, pauseAnalysis, startAnalysis } from '@/lib/analysis'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useUi } from '@/stores/ui'
 import { RemoteStatusCard } from '../settings/RemoteAiSections'
@@ -29,6 +29,8 @@ export function AnalyzeSheet({ sessionId, photoCount }: { sessionId: number; pho
   const [profile, setProfile] = useState<AnalysisProfile>('lite')
   const [onlySelected, setOnlySelected] = useState(false)
   const running = status.data?.state === 'running'
+  const active = analysisActive(status.data)
+  const actions = analysisActions(status.data)
   const pct = status.data && running ? Math.round(analysisFraction(status.data) * 100) : 0
   const needsPair = profile === 'standard' && !remote.data?.connected
 
@@ -49,12 +51,29 @@ export function AnalyzeSheet({ sessionId, photoCount }: { sessionId: number; pho
         title={t('top.analyze')}
         testId="analyze-sheet"
         footer={
-          <button className="btn btn-primary !h-11 w-full justify-center" onClick={() => void start()} disabled={running || needsPair} data-testid="analyze-start">
+          <button className="btn btn-primary !h-11 w-full justify-center" onClick={() => void start()} disabled={active || needsPair} data-testid="analyze-start">
             <Sparkles size={15} />
             {t('analysis.start')}
           </button>
         }
       >
+        {(actions.canPause || actions.canContinue) && (
+          <div className="flex items-center gap-2 px-4 pt-4" data-testid="analysis-controls">
+            <span className="flex-1 text-sm text-muted">{actions.canContinue ? t('analysis.paused') : t('analysis.stage_analyzing')}</span>
+            {actions.canPause && (
+              <button className="btn !h-10" onClick={() => void pauseAnalysis(sessionId)} data-testid="analysis-pause">
+                <Pause size={14} />
+                {t('analysis.pause')}
+              </button>
+            )}
+            {actions.canContinue && (
+              <button className="btn btn-primary !h-10" onClick={() => void continueAnalysis(qc, sessionId)} data-testid="analysis-continue">
+                <Play size={14} />
+                {t('analysis.continue')}
+              </button>
+            )}
+          </div>
+        )}
         <div className="flex flex-col gap-2 p-4" role="radiogroup" aria-label={t('analysis.profile')} data-testid="profile-chooser">
           {PHONE_PROFILES.map(({ id, icon: Icon, label, desc }) => (
             <button

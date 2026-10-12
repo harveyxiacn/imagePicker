@@ -12,6 +12,8 @@ export const qk = {
   runtime: ['runtime'] as const,
   models: ['models'] as const,
   analysisStatus: (sid: number) => ['analysis', 'status', sid] as const,
+  /** prefix of `GET /api/analysis/plan` queries (one per profile) */
+  analysisPlan: (sid: number) => ['analysis', 'plan', sid] as const,
   analysis: (photoId: number) => ['analysis', 'photo', photoId] as const,
   groups: (sid: number) => ['groups', sid] as const,
   editsAll: ['edits'] as const,
@@ -287,6 +289,11 @@ export function applyEvents(
       done: ev.done,
       total: ev.total,
     }))
+    if (ev.state !== 'running') {
+      // what the event does not carry (error and its code, fallback) and what is left to do come from the server
+      void qc.invalidateQueries({ queryKey: qk.analysisStatus(sid) })
+      void qc.invalidateQueries({ queryKey: qk.analysisPlan(sid) })
+    }
     deps.onAnalysis?.(ev)
   }
 

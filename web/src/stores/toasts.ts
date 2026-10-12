@@ -31,7 +31,7 @@ export const useToasts = create<ToastState>((set, get) => ({
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   updateTask: (t) => {
     set((s) => ({ tasks: { ...s.tasks, [t.task_id]: t } }))
-    if (t.state !== 'running') setTimeout(() => get().dismissTask(t.task_id), t.state === 'failed' ? 8000 : 5000)
+    if (t.state !== 'running' && t.state !== 'paused') setTimeout(() => get().dismissTask(t.task_id), t.state === 'failed' ? 8000 : 5000)
   },
   dismissTask: (id) =>
     set((s) => {

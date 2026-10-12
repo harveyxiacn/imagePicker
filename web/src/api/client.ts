@@ -3,6 +3,7 @@ import type {
   CatalogStatus,
   Device,
   AnalysisProfile,
+  AnalysisPlan,
   AnalysisStatus,
   ApiErrorBody,
   BurstFaces,
@@ -192,9 +193,13 @@ export const api = {
   hardware: () => request<HardwareInfo>('GET', '/system/hardware'),
   models: () => request<{ models: ModelInfo[] }>('GET', '/models'),
   ensureModels: (ids: string[]) => request<{ task_id: string }>('POST', '/models/ensure', { ids }),
-  runAnalysis: (body: { session_id: number; profile: AnalysisProfile; photo_ids?: number[] }) =>
+  runAnalysis: (body: { session_id: number; profile: AnalysisProfile; photo_ids?: number[]; fallback_lite?: boolean }) =>
     request<{ task_id: string }>('POST', '/analysis/run', body),
   cancelAnalysis: (session_id: number) => request<void>('POST', '/analysis/cancel', { session_id }),
+  pauseAnalysis: (session_id: number) => request<void>('POST', '/analysis/pause', { session_id }),
+  continueAnalysis: (session_id: number) => request<{ task_id: string }>('POST', '/analysis/continue', { session_id }),
+  analysisPlan: (session_id: number, profile: AnalysisProfile) =>
+    request<AnalysisPlan>('GET', `/analysis/plan?session_id=${session_id}&profile=${profile}`),
   analysisStatus: (session_id: number) => request<AnalysisStatus>('GET', `/analysis/status?session_id=${session_id}`),
   photoAnalysis: (id: number) => request<PhotoAnalysis>('GET', `/photos/${id}/analysis`),
   groups: (session_id: number) => request<GroupsResponse>('GET', `/groups?session_id=${session_id}`),

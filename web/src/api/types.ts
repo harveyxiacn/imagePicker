@@ -162,7 +162,7 @@ export interface FsList {
 
 // ---- WebSocket events (server -> client) ----
 
-export type TaskState = 'running' | 'done' | 'failed' | 'cancelled'
+export type TaskState = 'running' | 'paused' | 'done' | 'failed' | 'cancelled'
 
 // ---- task history (GET /api/tasks, docs/api-contract-m5.md F) ----
 
@@ -220,12 +220,29 @@ export interface ModelInfo {
 }
 
 export interface AnalysisStatus {
-  state: 'idle' | 'running' | 'done' | 'failed'
+  /** `paused`: stopped between two batches (also restored after a restart); `continue` takes it up again */
+  state: 'idle' | 'running' | 'paused' | 'done' | 'failed'
   profile: AnalysisProfile | null
   done: number
   total: number
   stage: AnalysisStage | null
   error: string | null
+  /** why `error` happened when the AI side was the cause; `lite` can stand in for it */
+  error_code?: 'worker_unavailable' | 'models_missing' | null
+  /** the profile that was asked for when the run switched to `lite` */
+  fallback_from?: AnalysisProfile | null
+  /** photos redone for single steps because a model was installed since their analysis */
+  incremental?: number
+  /** the run was picked up again after the app had exited */
+  resumed?: boolean
+  skipped_steps?: string[]
+}
+
+/** `GET /api/analysis/plan`: what a run of a profile would do now. */
+export interface AnalysisPlan {
+  new_photos: number
+  incremental_photos: number
+  incremental_steps: string[]
 }
 
 export interface Face {
