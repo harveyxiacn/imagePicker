@@ -65,6 +65,9 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **web:** RAW+JPEG badge, import exclusions, missing files, relocate and safe reject ([0de9798](https://github.com/harveyxiacn/imagePicker/commit/0de9798b45c7c08ed96688b4b0a7a38d84454d7e))
 - **imaging:** Glob and folder excludes for scans, skip _rejected folders ([51fbdaa](https://github.com/harveyxiacn/imagePicker/commit/51fbdaa3b960212a33bff787090b8f9fc4f3576a))
 - **core:** RAW+JPEG pairing, import exclusions, file watching, missing files, safe reject ([17798e4](https://github.com/harveyxiacn/imagePicker/commit/17798e444e689f3097d83d7b7ee40e90060fe0b6))
+- **core:** Resumable, pausable analysis with lite fallback and per-step increments ([789ff9a](https://github.com/harveyxiacn/imagePicker/commit/789ff9a0af922a72c44a81474ee7bd6ea94a2a06))
+- **server:** Analysis pause, continue and plan routes; resume open runs at startup ([79cfabe](https://github.com/harveyxiacn/imagePicker/commit/79cfabe35fb1d82369f630d2709e2ad4b3b752ca))
+- **web:** Pause/continue, quick-analysis fallback and incremental-step hint ([74c56fa](https://github.com/harveyxiacn/imagePicker/commit/74c56fa98e4e50b0d1eb6b722e317caec7c572d3))
 
 ### Bug fixes
 
@@ -119,6 +122,8 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **export:** Document formats, presets API, strip options and name tokens ([bb31060](https://github.com/harveyxiacn/imagePicker/commit/bb31060298cc41c3eef8b8ffafc68b4616c0ff83))
 - User guide and backlog for native-pixel zoom and the compare layouts ([636febf](https://github.com/harveyxiacn/imagePicker/commit/636febff73699ea35b9f5d9d2a0b5f6ea073b01b))
 - RAW+JPEG pairs, import exclusions, file watching, relocate and safe reject ([58bc09c](https://github.com/harveyxiacn/imagePicker/commit/58bc09c2283f85e2d43773940566fe4873263a82))
+- Sync changelog, completion review and backlog with merged PRs ([a623c47](https://github.com/harveyxiacn/imagePicker/commit/a623c471b459ed0b5650abec95d0641ce637f082))
+- Analysis resume, pause/continue, lite fallback and incremental steps ([3087b37](https://github.com/harveyxiacn/imagePicker/commit/3087b37fd51d91fcc34cfde518e56df7f76d258d))
 
 ### Tests
 
@@ -135,6 +140,8 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **core:** Give the runtime install tests 60 s on a loaded machine ([675d96c](https://github.com/harveyxiacn/imagePicker/commit/675d96c56a09ad3bad664cb500538b199cd019d1))
 - **core:** Wait for the model-download done event instead of racing it ([4497f11](https://github.com/harveyxiacn/imagePicker/commit/4497f11cc8453ffcef31c815657e98b79d22718b))
 - **core:** Accept cancelled as well as cancelling right after a cancel request ([d3a98eb](https://github.com/harveyxiacn/imagePicker/commit/d3a98ebbaeb4b854757470aa014bcf64d6901dc4))
+- **core:** Keep the lite analysis tests light under load ([9ac8e38](https://github.com/harveyxiacn/imagePicker/commit/9ac8e38d796ce82b227876677cb017efa4530f8c))
+- **core:** Give analysis runs five minutes of wall-clock time in tests_m2 ([7fc7eb1](https://github.com/harveyxiacn/imagePicker/commit/7fc7eb14607ed64447d416a92d6101e35066b079))
 
 ### CI and build
 
