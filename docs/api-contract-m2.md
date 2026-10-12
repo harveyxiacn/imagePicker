@@ -55,9 +55,12 @@ type SceneType = "portrait" | "group" | "landscape" | "food" | "architecture" | 
 | GET | `/api/system/hardware` | — | `{"worker": {"state": WorkerState, "tier": "T0".."T3" \| null, "device": string \| null, "providers": string[], "gpu": {"name","vram_mb"} \| null, "error": string \| null}}` |
 | GET | `/api/models` | — | `{"models": [{"id","task":string[],"size_mb","license","noncommercial":bool,"installed":bool,"required_for":("fast"\|"standard")[]}]}` |
 | POST | `/api/models/ensure` | `{"ids": string[]}` | `202 {"task_id"}`；进度走 `task.progress`（`kind:"model_download"`，done/total 为字节） |
-| POST | `/api/analysis/run` | `{"session_id", "profile": "fast"\|"standard", "photo_ids"?: number[]}` | `202 {"task_id"}`；若所需模型未安装 → `409 {"error":{"code":"models_missing","message",...},"models":[id...]}`（UI 征得同意后调用 `/api/models/ensure` 再重试） |
-| POST | `/api/analysis/cancel` | `{"session_id"}` | `204` |
-| GET | `/api/analysis/status?session_id=` | — | `{"state":"idle"\|"running"\|"done"\|"failed","profile","done","total","stage":"analyzing"\|"grouping"\|"scoring"\|"clustering"\|null,"error":string\|null}` |
+| POST | `/api/analysis/run` | `{"session_id", "profile": "lite"\|"fast"\|"standard", "photo_ids"?: number[], "force"?: bool, "fallback_lite"?: bool}` | `202 {"task_id"}`；若所需模型未安装 → `409 {"error":{"code":"models_missing","message",...},"models":[id...]}`（UI 征得同意后调用 `/api/models/ensure` 再重试）；会话已有运行中或已暂停的分析 → `409 conflict`。`fallback_lite` 见 C.5.3 |
+| POST | `/api/analysis/cancel` | `{"session_id"}` | `204`；已暂停的分析随即收尾（已分析的照片分组、评分）并结束为 `idle` |
+| POST | `/api/analysis/pause` | `{"session_id"}` | `202`；运行中的分析在**当前批次**完成后停下，状态变为 `paused`（见 C.5.1）。没有运行中的分析 → `409 conflict` |
+| POST | `/api/analysis/continue` | `{"session_id"}` | `202 {"task_id"}`（与暂停前相同）；只处理剩余照片。没有已暂停的分析 → `409 conflict` |
+| GET | `/api/analysis/plan?session_id=&profile=` | — | `{"new_photos","incremental_photos","incremental_steps":string[]}`：此刻对该档位发起分析会做什么（见 C.5.4） |
+| GET | `/api/analysis/status?session_id=` | — | `{"state":"idle"\|"running"\|"paused"\|"done"\|"failed","profile","done","total","stage":"analyzing"\|"grouping"\|"scoring"\|"clustering"\|null,"error":string\|null,"error_code":"worker_unavailable"\|"models_missing"\|null,"fallback_from":"lite"\|"fast"\|"standard"\|null,"incremental":number,"resumed":bool,"skipped_steps":string[]}` |
 | GET | `/api/photos/{id}/analysis` | — | 见 C.3 |
 | GET | `/api/groups?session_id=` | — | `{"scenes":[{"id","start_at","end_at","bursts":[{"id","best_photo_id","photo_ids":number[] /*按 rank 排序*/,"size","start_at"}]}]}`（时间序） |
 | POST | `/api/groups/split` | `{"burst_id","at_photo_id"}` | `{"burst_ids":[a,b]}`（`at_photo_id` 及之后的照片进入新组；手动组标记 manual） |
@@ -109,10 +112,38 @@ interface Face {
 | `persons` / `person_mode` / `exclude_persons` / `person_state` / `include_background` / `faces_min` / `faces_max` | 见 [05 §3.2](05-数据与接口设计.md)（`person_state` M2 支持 `eyes_open,smiling,looking,subject`） |
 | `sort` | 新增 `ai`（ai_score 降序，未分析在后） |
 
+### C.5 暂停 / 继续、续跑、lite 兜底、按步骤增量
+
+#### C.5.1 暂停与继续
+
+- `pause` 只在两个批次之间生效（每批最多 32 张）：已发出的批次完成并入库后，分析停止，`state` 变为 `paused`，**不**做分组 / 评分（继续或取消时才做）。`done` / `total` 保持，`stage` 为 null。
+- `continue` 按存储的运行参数重新选出剩余照片（本次运行已分析的不再发送），状态回到 `running`；`task_id` 不变，任务历史里是同一行。
+- 暂停的运行占用该会话：再次 `run` 返回 `409`。`cancel` 对已暂停的分析：先给已分析的照片分组、评分，再结束为 `idle`，任务记为 `cancelled`。删除会话同样结束其暂停的任务。
+- `GET /api/tasks` 中暂停的分析任务为 `status:"paused"`（`cancellable:false`；从 `analysis/cancel` 取消）。`task.progress` 的 `state` 同样可为 `"paused"`。
+
+#### C.5.2 重启后续跑
+
+- 运行参数（`session_id`、档位、`photo_ids`、`force`、`fallback_lite`、开始时间、续跑次数）存在任务行的 `params` 中，无需新表。
+- 服务启动时（构建路由时，`Core::resume_analyses`）：上次退出时仍为 `running` 的分析**自动续跑**——只发送剩余照片，已入库的批次不重算（以本次运行开始时间之后写入的 `analysis.analyzed_at` 判断，所以 `force` 运行也不会重做已完成的照片）；任务行从 `interrupted` 改回 `running`，`status.resumed=true`。上次为 `paused` 的分析恢复为 `paused`（不自动继续）。
+- 同一运行最多自动续跑 3 次，之后保持 `interrupted`，用户可手动重新发起（只会处理未分析的照片）。续跑时若 AI 不可用（组件已卸载、模型缺失）：运行带 `fallback_lite` 则改用 lite，否则记为 `failed` 并带 `error_code`，UI 可据此提供 lite。
+
+#### C.5.3 lite 兜底
+
+- `lite` 档（`ip-lite`，纯 Rust，无需 Python 与模型）在桌面端与 Android 一样可用：`profile:"lite"` 不触发 `models_missing`。
+- `fallback_lite:true` 的 `run`：AI 档位的模型缺失（`models_missing`）、AI 组件未安装或 worker 无法启动 / 超时（`worker_unavailable`）时，改用 `lite` 完成**同一批照片**，而不是返回 409 / 503。`status.profile` 为 `lite`，`status.fallback_from` 为原档位。分析中途 worker 不可用（运行时被卸载、崩溃重启仍失败）时，剩余照片同样改用 `lite`，已入库的结果保留。
+- 不带 `fallback_lite` 的运行以 `failed` 结束时，`status.error_code` 为 `worker_unavailable` 或 `models_missing`；UI 据此提供「改用快速分析」，即对同一会话发起 `profile:"lite"`（只处理尚无分析的照片）。lite 结果之后仍可被 `fast` / `standard` 升级（见 M8 的 `analysis_version` 规则）。
+
+#### C.5.4 按步骤增量
+
+- 每次分析把每步实际使用的模型写入 `analysis.model_versions`（`{step: model id}`）。standard 档的可补算步骤为 `embed`、`aesthetic`、`iqa`、`scene`（各自只写自己的列；`faces` / `identity` 与人脸行绑定，不在此列）。
+- 安装新模型后，已分析（同档位）照片中**缺某步骤且该步骤已有已安装模型**的，下次分析只补算这些步骤：请求带 `steps:[…]`，结果经 `ingest_partial` 只更新这些列并合并 `model_versions`（嵌入、人脸、人物不变），随后照常分组 / 评分。`status.incremental` 为本次这样补算的照片数；`plan` 的 `incremental_*` 预告同样的内容。
+- worker 报告为 `skipped_steps` 的步骤，以「已安装模型集合的指纹」记入该照片 `model_versions._skipped`；同一指纹下不再重试，安装 / 删除模型改变指纹后才会再试。
+
 ## D. WebSocket 新增事件
 
 ```jsonc
 { "type": "analysis.progress", "session_id": 1, "state": "running", "stage": "analyzing", "done": 120, "total": 1204 }
+// state: "running" | "paused" | "done" | "failed" | "idle"（idle = 已取消）。非 running 的状态事件之后，客户端重新拉取 /api/analysis/status 以取得 error / error_code / fallback_from
 { "type": "analysis.updated",  "session_id": 1, "ids": [12, 13] }   // 这些照片的 AI 字段变化，客户端重新拉取
 { "type": "groups.updated",    "session_id": 1 }
 { "type": "people.updated",    "session_id": 1 }

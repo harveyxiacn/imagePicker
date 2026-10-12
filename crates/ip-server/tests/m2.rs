@@ -940,3 +940,316 @@ async fn lite_profile_over_http_without_a_worker() {
         String::from_utf8_lossy(&r.body)
     );
 }
+
+// ====================================================================== pause, resume, fallback
+
+async fn post(e: &Env, uri: &str, body: Value) -> Resp {
+    call(&e.app, Method::POST, uri, Some(body)).await
+}
+
+async fn analysis_status(app: &Router, sid: i64) -> Value {
+    call(
+        app,
+        Method::GET,
+        &format!("/api/analysis/status?session_id={sid}"),
+        None,
+    )
+    .await
+    .json()
+}
+
+/// Polls the status until `f` accepts it.
+async fn status_until(app: &Router, sid: i64, f: impl Fn(&Value) -> bool) -> Value {
+    for _ in 0..4000 {
+        let s = analysis_status(app, sid).await;
+        if f(&s) {
+            return s;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!(
+        "status did not reach the expected state: {}",
+        analysis_status(app, sid).await
+    );
+}
+
+async fn import_many(e: &Env, n: u64) -> i64 {
+    // tiny images: the lite analyzer decodes them for real, slowly in debug builds
+    for i in 0..n {
+        let p = e.src.path().join(format!("p{i:03}.jpg"));
+        write_jpeg(&p, 64, 48, (i % 200) as u8);
+        let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+        f.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(BASE + i * 100))
+            .unwrap();
+    }
+    let r = post(
+        e,
+        "/api/import",
+        json!({"path": e.src.path().to_string_lossy()}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let sid = r.json()["session"]["id"].as_i64().unwrap();
+    e.core
+        .wait_session_ready(sid, Duration::from_secs(30))
+        .await
+        .unwrap();
+    sid
+}
+
+#[tokio::test]
+async fn pause_continue_and_plan_over_http() {
+    let e = env();
+    let sid = import_many(&e, 70).await;
+    e.worker
+        .delay_ms
+        .store(120, std::sync::atomic::Ordering::SeqCst);
+
+    // nothing runs yet
+    assert_eq!(
+        post(&e, "/api/analysis/pause", json!({"session_id": sid}))
+            .await
+            .status,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        post(&e, "/api/analysis/continue", json!({"session_id": sid}))
+            .await
+            .status,
+        StatusCode::CONFLICT
+    );
+    for uri in ["/api/analysis/pause", "/api/analysis/continue"] {
+        assert_eq!(
+            post(&e, uri, json!({"session_id": 999})).await.status,
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    let r = post(
+        &e,
+        "/api/analysis/run",
+        json!({"session_id": sid, "profile": "fast"}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    let task = r.json()["task_id"].as_str().unwrap().to_string();
+    status_until(&e.app, sid, |s| s["done"].as_i64().unwrap_or(0) >= 32).await;
+    let r = post(&e, "/api/analysis/pause", json!({"session_id": sid})).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    let s = status_until(&e.app, sid, |s| s["state"] == "paused").await;
+    let done = s["done"].as_i64().unwrap();
+    assert!((32..70).contains(&done) && done % 32 == 0, "{s}");
+    assert_eq!(
+        (s["total"].clone(), s["error"].clone()),
+        (json!(70), Value::Null)
+    );
+
+    // a paused run is listed as such and blocks a new one
+    let tasks = call(&e.app, Method::GET, "/api/tasks", None).await.json();
+    let rec = tasks["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == task.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (rec["status"].clone(), rec["cancellable"].clone()),
+        (json!("paused"), json!(false))
+    );
+    assert_eq!(
+        post(
+            &e,
+            "/api/analysis/run",
+            json!({"session_id": sid, "profile": "fast"})
+        )
+        .await
+        .status,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        post(&e, "/api/analysis/pause", json!({"session_id": sid}))
+            .await
+            .status,
+        StatusCode::CONFLICT
+    );
+
+    e.worker
+        .delay_ms
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+    let r = post(&e, "/api/analysis/continue", json!({"session_id": sid})).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert_eq!(r.json()["task_id"], task.as_str());
+    let s = status_until(&e.app, sid, |s| s["state"] != "running").await;
+    assert_eq!(
+        (s["state"].clone(), s["done"].clone(), s["total"].clone()),
+        (json!("done"), json!(70), json!(70))
+    );
+    let sent = e.worker.analyzed_ids.lock().unwrap().clone();
+    let uniq: std::collections::HashSet<i64> = sent.iter().copied().collect();
+    assert_eq!(
+        (sent.len(), uniq.len()),
+        (70, 70),
+        "no photo is analysed twice"
+    );
+
+    // the plan: nothing new, no model-backed steps pending
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/analysis/plan?session_id={sid}&profile=standard"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        r.json(),
+        json!({"new_photos": 70, "incremental_photos": 0, "incremental_steps": []})
+    );
+    for (uri, code) in [
+        (
+            "/api/analysis/plan?profile=standard".to_string(),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            format!("/api/analysis/plan?session_id={sid}&profile=deep"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            format!("/api/analysis/plan?session_id={sid}"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "/api/analysis/plan?session_id=999&profile=fast".to_string(),
+            StatusCode::NOT_FOUND,
+        ),
+    ] {
+        assert_eq!(
+            call(&e.app, Method::GET, &uri, None).await.status,
+            code,
+            "{uri}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_paused_run_survives_a_restart_and_continues_over_http() {
+    let e = env();
+    let sid = import_many(&e, 70).await;
+    e.worker
+        .delay_ms
+        .store(100, std::sync::atomic::Ordering::SeqCst);
+    post(
+        &e,
+        "/api/analysis/run",
+        json!({"session_id": sid, "profile": "fast"}),
+    )
+    .await;
+    status_until(&e.app, sid, |s| s["done"].as_i64().unwrap_or(0) >= 32).await;
+    post(&e, "/api/analysis/pause", json!({"session_id": sid})).await;
+    let s = status_until(&e.app, sid, |s| s["state"] == "paused").await;
+    let done = s["done"].as_i64().unwrap();
+    let sent_before = e.worker.analyzed_ids.lock().unwrap().len();
+    e.worker
+        .delay_ms
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+
+    // "restart": a second core on the same catalog; building the router resumes what was open
+    let core2 = Core::open(CoreConfig {
+        data_dir: Some(e._data.path().to_path_buf()),
+        imaging: Arc::new(FakeImaging::new()),
+        thumb_workers: Some(2),
+        worker: Some(e.worker.clone()),
+        renderer: None,
+        force_cpu: false,
+    })
+    .unwrap();
+    let app2 = build_router(core2, None);
+    let s = status_until(&app2, sid, |s| s["state"] == "paused").await;
+    assert_eq!(
+        (s["resumed"].clone(), s["done"].clone()),
+        (json!(true), json!(done))
+    );
+    let r = call(
+        &app2,
+        Method::POST,
+        "/api/analysis/continue",
+        Some(json!({"session_id": sid})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    let s = status_until(&app2, sid, |s| s["state"] != "running").await;
+    assert_eq!(s["state"], "done", "{s}");
+    assert_eq!(
+        e.worker.analyzed_ids.lock().unwrap().len() - sent_before,
+        (70 - done) as usize
+    );
+}
+
+#[tokio::test]
+async fn lite_fallback_over_http() {
+    let e = env();
+    let sid = setup(&e).await;
+    e.worker.set_missing(&["siglip2-base"]);
+    let r = post(
+        &e,
+        "/api/analysis/run",
+        json!({"session_id": sid, "profile": "standard"}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    assert_eq!(r.json()["error"]["code"], "models_missing");
+    let r = post(
+        &e,
+        "/api/analysis/run",
+        json!({"session_id": sid, "profile": "standard", "fallback_lite": true}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    let s = status_until(&e.app, sid, |s| s["state"] != "running").await;
+    assert_eq!(s["state"], "done", "{s}");
+    assert_eq!(
+        (s["profile"].clone(), s["fallback_from"].clone()),
+        (json!("lite"), json!("standard"))
+    );
+    assert_eq!(
+        e.worker
+            .analyze_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    let ps = photos(&e, sid, "").await;
+    assert!(ps.iter().all(|p| p["analyzed"] == true));
+
+    // a worker that dies: the failure carries a code the UI can offer lite for
+    let e = env();
+    let sid = import_many(&e, 20).await;
+    e.worker
+        .analyze_unavailable
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    post(
+        &e,
+        "/api/analysis/run",
+        json!({"session_id": sid, "profile": "fast"}),
+    )
+    .await;
+    let s = status_until(&e.app, sid, |s| s["state"] != "running").await;
+    assert_eq!(s["state"], "failed");
+    assert_eq!(s["error_code"], "worker_unavailable");
+    let r = post(
+        &e,
+        "/api/analysis/run",
+        json!({"session_id": sid, "profile": "lite"}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    let s = status_until(&e.app, sid, |s| s["state"] != "running").await;
+    assert_eq!(
+        (
+            s["state"].clone(),
+            s["total"].clone(),
+            s["error_code"].clone()
+        ),
+        (json!("done"), json!(20), Value::Null)
+    );
+}

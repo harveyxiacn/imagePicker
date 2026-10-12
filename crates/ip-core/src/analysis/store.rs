@@ -197,6 +197,115 @@ pub fn ingest(
     Ok(())
 }
 
+/// Writes the result of single steps (`steps`, a subset of [`super::incremental::INCREMENTAL_STEPS`])
+/// into the existing analysis rows: only the columns of those steps change, `model_versions` is
+/// merged and the stored explanation is dropped so scoring rebuilds it.
+pub fn ingest_partial(
+    conn: &mut Connection,
+    items: &[IngestItem],
+    steps: &[String],
+    model_versions: &Json,
+) -> Result<()> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let now = now_ms();
+    let has = |s: &str| steps.iter().any(|x| x == s);
+    for it in items {
+        let a = &it.item;
+        if a.error.is_some() {
+            continue;
+        }
+        let pid = a.photo_id;
+        let stored: Option<Option<String>> = tx
+            .query_row(
+                "SELECT model_versions FROM analysis WHERE photo_id=?1",
+                [pid],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(stored) = stored else {
+            continue; // removed while the batch was running
+        };
+        let versions = merge_versions(stored.as_deref(), model_versions);
+        tx.execute(
+            "UPDATE analysis SET model_versions=?2, explain=NULL, analyzed_at=?3 WHERE photo_id=?1",
+            params![pid, versions.to_string(), now],
+        )?;
+        if has("embed") {
+            if let Some(e) = &it.embedding {
+                tx.execute(
+                    "UPDATE analysis SET embedding=?2 WHERE photo_id=?1",
+                    params![pid, encode_f16(e)],
+                )?;
+            }
+        }
+        if has("aesthetic") {
+            if let Some(v) = a.aesthetic {
+                tx.execute(
+                    "UPDATE analysis SET aesthetic=?2 WHERE photo_id=?1",
+                    params![pid, v],
+                )?;
+            }
+        }
+        if has("iqa") {
+            if let Some(v) = a.iqa {
+                tx.execute(
+                    "UPDATE analysis SET iqa=?2 WHERE photo_id=?1",
+                    params![pid, v],
+                )?;
+            }
+        }
+        if has("scene") {
+            if let Some(v) = &a.scene_scores {
+                tx.execute(
+                    "UPDATE analysis SET scene_scores=?2 WHERE photo_id=?1",
+                    params![pid, v.to_string()],
+                )?;
+            }
+            if let Some(t) = &a.scene_type {
+                tx.execute(
+                    "UPDATE photo SET scene_type=?2 WHERE id=?1",
+                    params![pid, t],
+                )?;
+            }
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// `new` over `old` (both `{step: model}`); a remembered skip (`_skipped`) is dropped once its
+/// step has a model, and the skips of `new` replace the ones of the same steps.
+fn merge_versions(old: Option<&str>, new: &Json) -> Json {
+    use super::incremental::SKIPPED_KEY;
+    let mut out: serde_json::Map<String, Json> = old
+        .and_then(|s| serde_json::from_str::<Json>(s).ok())
+        .and_then(|v| match v {
+            Json::Object(m) => Some(m),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let mut skipped: serde_json::Map<String, Json> = match out.remove(SKIPPED_KEY) {
+        Some(Json::Object(m)) => m,
+        _ => Default::default(),
+    };
+    if let Json::Object(n) = new {
+        for (k, v) in n {
+            if k == SKIPPED_KEY {
+                if let Json::Object(m) = v {
+                    skipped.extend(m.clone());
+                }
+            } else if !v.is_null() {
+                skipped.remove(k);
+                out.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    if !skipped.is_empty() {
+        out.insert(SKIPPED_KEY.into(), Json::Object(skipped));
+    }
+    Json::Object(out)
+}
+
 // ====================================================================== grouping
 
 struct GRow {

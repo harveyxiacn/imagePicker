@@ -115,6 +115,8 @@ pub fn build_router_auth(
     auth: Arc<AuthState>,
 ) -> Router {
     let dev_cors = auth.dev_cors();
+    // runs a previous process left open (cut off by an exit, or paused) continue from here
+    core.resume_analyses();
     let remote = remote::RemoteHost::new(&core, auth.remote_opts().clone());
     let remote_routes = remote::routes(auth.remote_opts());
     let state = AppState {
@@ -154,6 +156,9 @@ pub fn build_router_auth(
         .route("/models/ensure", post(m2::models_ensure))
         .route("/analysis/run", post(m2::analysis_run))
         .route("/analysis/cancel", post(m2::analysis_cancel))
+        .route("/analysis/pause", post(m2::analysis_pause))
+        .route("/analysis/continue", post(m2::analysis_continue))
+        .route("/analysis/plan", get(m2::analysis_plan))
         .route("/analysis/status", get(m2::analysis_status))
         .route("/photos/{id}/analysis", get(m2::photo_analysis))
         .route("/photos/accept-ai", post(m2::accept_ai))

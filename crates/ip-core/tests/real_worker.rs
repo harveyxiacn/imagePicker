@@ -84,6 +84,7 @@ async fn real_worker_analyses_generated_images() {
         photo_ids: None,
         force: false,
         allow_download: true,
+        fallback_lite: false,
     })
     .await
     .unwrap();

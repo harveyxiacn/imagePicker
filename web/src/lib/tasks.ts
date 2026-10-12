@@ -12,7 +12,7 @@ import { qk } from './cache'
 export const CANCELLED = 'cancelled'
 
 export const TASK_KINDS = ['besttake', 'inpaint', 'enhance', 'export', 'analysis'] as const
-export const TASK_STATUSES: readonly TaskStatus[] = ['running', 'cancelling', 'done', 'failed', 'cancelled', 'interrupted']
+export const TASK_STATUSES: readonly TaskStatus[] = ['running', 'paused', 'cancelling', 'done', 'failed', 'cancelled', 'interrupted']
 
 /** Still going on the server (the history polls while any task is live). */
 export const isLive = (s: TaskStatus): boolean => s === 'running' || s === 'cancelling'

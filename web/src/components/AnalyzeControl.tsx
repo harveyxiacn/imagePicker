@@ -1,16 +1,17 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Cpu, Loader2, Sparkles } from 'lucide-react'
+import { Cpu, Loader2, Pause, Sparkles } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAnalysisStatus, useHardware } from '@/api/queries'
+import { useAnalysisPlan, useAnalysisStatus, useHardware, useRuntime } from '@/api/queries'
 import type { AnalysisProfile, WorkerState } from '@/api/types'
-import { analysisFraction, startAnalysis } from '@/lib/analysis'
+import { analysisActive, analysisFraction, startAnalysis } from '@/lib/analysis'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useUi } from '@/stores/ui'
 import { useIsMobile } from '@/lib/useLayout'
 import { AnalyzeSheet } from './mobile/AnalyzeSheet'
 
-const PROFILES: AnalysisProfile[] = ['fast', 'standard']
+/** `lite` runs without the AI components or any model: the way out when those are missing. */
+const PROFILES: AnalysisProfile[] = ['fast', 'standard', 'lite']
 
 const STATE_DOT: Record<WorkerState, string> = {
   stopped: 'bg-faint',
@@ -63,9 +64,14 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
   const selected = useUi((s) => s.selection.ids)
   const status = useAnalysisStatus(sessionId)
   const hw = useHardware()
+  const runtime = useRuntime(open)
+  const plan = useAnalysisPlan(sessionId, profile, open && profile !== 'lite')
   const wrap = useRef<HTMLDivElement>(null)
   const onlySelected = useRef(false)
   const running = status.data?.state === 'running'
+  const paused = status.data?.state === 'paused'
+  const active = analysisActive(status.data)
+  const noAi = !!runtime.data && runtime.data.state !== 'ready' && runtime.data.state !== 'installing'
   const isMobile = useIsMobile()
 
   useEffect(() => {
@@ -103,8 +109,10 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
         title={t('top.analyzeHint')}
         data-testid="analyze-button"
       >
-        {running ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-        <span className="hidden sm:inline">{running ? t('analysis.runningShort', { pct }) : t('top.analyze')}</span>
+        {running ? <Loader2 size={14} className="animate-spin" /> : paused ? <Pause size={14} /> : <Sparkles size={14} />}
+        <span className="hidden sm:inline">
+          {running ? t('analysis.runningShort', { pct }) : paused ? t('analysis.pausedShort', { pct: Math.round(analysisFraction(status.data!) * 100) }) : t('top.analyze')}
+        </span>
       </button>
       {open && (
         <div
@@ -129,6 +137,22 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
               </label>
             ))}
           </div>
+          {noAi && profile !== 'lite' && (
+            <div className="mt-2 flex items-start gap-2 rounded-control border border-warning/40 bg-warning/10 p-2 text-xs" data-testid="no-ai-note">
+              <span className="flex-1">{t('analysis.noAi')}</span>
+              <button className="btn btn-ghost !h-6 shrink-0 !px-1.5 text-xs" onClick={() => setProfile('lite')} data-testid="use-lite">
+                {t('analysis.useLite')}
+              </button>
+            </div>
+          )}
+          {profile !== 'lite' && plan.data && plan.data.incremental_photos > 0 && (
+            <div className="mt-2 rounded-control border border-ai/40 bg-ai/10 p-2 text-xs" data-testid="incremental-note">
+              {t('analysis.incremental', {
+                n: plan.data.incremental_photos,
+                steps: plan.data.incremental_steps.map((s) => t(`analysis.step_${s}`, { defaultValue: s })).join(', '),
+              })}
+            </div>
+          )}
           {selected.size > 0 && (
             <label className="mt-2 flex cursor-pointer items-center gap-2 text-muted">
               <input type="checkbox" onChange={(e) => (onlySelected.current = e.target.checked)} />
@@ -153,7 +177,7 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
             <button className="btn btn-ghost" onClick={() => setOpen(false)}>
               {t('common.cancel')}
             </button>
-            <button className="btn btn-primary" onClick={() => void start()} disabled={running} data-testid="analyze-start">
+            <button className="btn btn-primary" onClick={() => void start()} disabled={active} data-testid="analyze-start">
               <Sparkles size={14} />
               {t('analysis.start')}
             </button>

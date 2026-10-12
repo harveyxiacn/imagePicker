@@ -63,6 +63,16 @@ export function ModelConsentDialog() {
     }
   }
 
+  // the on-device profile needs no model: the way on when a download is not wanted or fails
+  const canLite = consent !== null && !consent.onReady && consent.profile !== 'lite'
+  const useLite = () => {
+    const c = consent
+    if (!c) return
+    if (ensureTaskId) useToasts.getState().dismissTask(ensureTaskId)
+    setConsent(null)
+    void startAnalysis(qc, c.sessionId, 'lite', c.photoIds)
+  }
+
   const pct = task && task.total > 0 ? Math.round((task.done / task.total) * 100) : 0
 
   return (
@@ -76,6 +86,11 @@ export function ModelConsentDialog() {
       width="max-w-xl"
       footer={
         <>
+          {canLite && (
+            <button className={`btn ${failed ? 'btn-ai' : ''}`} onClick={useLite} data-testid="models-lite" title={t('models.liteHint')}>
+              {t('analysis.useLite')}
+            </button>
+          )}
           <button className="btn" onClick={() => setConsent(null)}>
             {downloading ? t('models.background') : t('common.cancel')}
           </button>
@@ -126,6 +141,11 @@ export function ModelConsentDialog() {
           <div className="mt-3 flex items-start gap-2 rounded-control bg-warning/10 p-2 text-xs text-warning">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
             {t('models.ncWarning')}
+          </div>
+        )}
+        {canLite && failed && (
+          <div className="mt-3 rounded-control bg-ai/10 p-2 text-xs" data-testid="models-lite-hint">
+            {t('models.liteHint')}
           </div>
         )}
         {(ensureTaskId || failed) && (

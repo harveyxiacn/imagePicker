@@ -318,6 +318,7 @@ async fn analysis_and_groups_count_a_pair_once() {
             photo_ids: None,
             force: false,
             allow_download: false,
+            fallback_lite: false,
         })
         .await
         .unwrap();

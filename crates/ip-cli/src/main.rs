@@ -590,6 +590,7 @@ async fn analyze_headless(
         photo_ids: None,
         force,
         allow_download,
+        fallback_lite: false,
     })
     .await
     .context("start analysis")?;

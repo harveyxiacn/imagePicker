@@ -78,9 +78,10 @@ export async function installRuntimeAndWait(onProgress?: (rt: RuntimeInfo) => vo
 
 /**
  * When `err` is "runtime missing", show a toast offering to install the AI components and return true.
+ * `alt` adds a second choice next to the install button (e.g. the on-device `lite` analysis).
  * Callers show their own error otherwise.
  */
-export function offerRuntimeInstall(err: unknown, after?: () => void): boolean {
+export function offerRuntimeInstall(err: unknown, after?: () => void, alt?: { label: string; onClick: () => void }): boolean {
   if (!isRuntimeMissing(err)) return false
   useToasts.getState().push('error', i18n.t('runtime.missingToast'), 10_000, [
     {
@@ -95,6 +96,7 @@ export function offerRuntimeInstall(err: unknown, after?: () => void): boolean {
           .catch((e) => useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000))
       },
     },
+    ...(alt ? [alt] : []),
   ])
   return true
 }

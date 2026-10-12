@@ -146,6 +146,7 @@ async fn run(e: &Env, sid: i64, profile: Profile) -> AnalysisStatus {
             photo_ids: None,
             force: false,
             allow_download: false,
+            fallback_lite: false,
         })
         .await
         .unwrap();

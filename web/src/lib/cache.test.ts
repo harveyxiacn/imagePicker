@@ -199,6 +199,19 @@ describe('applyEvents: analysis (M2)', () => {
     expect(onAnalysis).toHaveBeenCalledTimes(1)
   })
 
+  it('analysis.progress that is not running refreshes the status and the plan (error, fallback, what is left)', () => {
+    const { qc } = setup()
+    qc.setQueryData<AnalysisStatus>(qk.analysisStatus(1), { state: 'running', profile: 'standard', done: 32, total: 70, stage: 'analyzing', error: null })
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    applyEvents(qc, [{ type: 'analysis.progress', session_id: 1, state: 'running', stage: 'analyzing', done: 40, total: 70 }])
+    expect(spy).not.toHaveBeenCalled()
+    applyEvents(qc, [{ type: 'analysis.progress', session_id: 1, state: 'paused', stage: null, done: 64, total: 70 }])
+    const keys = spy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey))
+    expect(keys).toContain(JSON.stringify(qk.analysisStatus(1)))
+    expect(keys).toContain(JSON.stringify(qk.analysisPlan(1)))
+    expect(qc.getQueryData<AnalysisStatus>(qk.analysisStatus(1))).toMatchObject({ state: 'paused', done: 64, profile: 'standard' })
+  })
+
   it('groups.updated / people.updated invalidate their queries; worker.status patches the hardware cache', () => {
     const { qc } = setup()
     qc.setQueryData<HardwareInfo>(qk.hardware, {
