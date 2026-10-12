@@ -76,6 +76,48 @@ pub async fn analysis_cancel(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `POST /api/analysis/pause`: the run stops after its current batch and ends `paused`.
+pub async fn analysis_pause(
+    State(st): State<AppState>,
+    ApiJson(b): ApiJson<SessionBody>,
+) -> ApiResult<StatusCode> {
+    st.core.session(b.session_id).await?;
+    st.core.analysis_pause(b.session_id)?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// `POST /api/analysis/continue`: takes a paused run up again; `202 {"task_id"}`.
+pub async fn analysis_continue(
+    State(st): State<AppState>,
+    ApiJson(b): ApiJson<SessionBody>,
+) -> ApiResult<Response> {
+    let task_id = st.core.analysis_continue(b.session_id).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "task_id": task_id }))).into_response())
+}
+
+#[derive(Deserialize)]
+pub struct PlanParams {
+    session_id: Option<i64>,
+    profile: Option<String>,
+}
+
+/// `GET /api/analysis/plan`: what a run of the profile would do now (new photos, single steps
+/// that newly installed models make possible).
+pub async fn analysis_plan(
+    State(st): State<AppState>,
+    ApiQuery(p): ApiQuery<PlanParams>,
+) -> ApiResult<Json<Value>> {
+    let sid = p
+        .session_id
+        .ok_or_else(|| ApiError::bad_request("session_id is required"))?;
+    let profile = p
+        .profile
+        .as_deref()
+        .and_then(ip_core::Profile::parse)
+        .ok_or_else(|| ApiError::bad_request("profile must be lite, fast or standard"))?;
+    Ok(Json(json!(st.core.analysis_plan(sid, profile).await?)))
+}
+
 #[derive(Deserialize)]
 pub struct SessionParams {
     session_id: Option<i64>,

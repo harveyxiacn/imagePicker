@@ -324,6 +324,7 @@ async fn phone_analyses_through_the_host() {
             photo_ids: None,
             force: false,
             allow_download: false,
+            fallback_lite: false,
         })
         .await
         .unwrap();
