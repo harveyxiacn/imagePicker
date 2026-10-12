@@ -48,14 +48,25 @@ pub async fn health() -> Json<Value> {
     Json(json!({"ok": true, "version": env!("CARGO_PKG_VERSION")}))
 }
 
+/// `POST /api/import` body: [`ImportRequest`] plus `exclude` (a list of globs, sub-folder paths
+/// or names; `exclude[]` is accepted as the key too).
+#[derive(Deserialize)]
+pub struct ImportBody {
+    #[serde(flatten)]
+    req: ImportRequest,
+    #[serde(flatten)]
+    opts: ip_core::ImportOptions,
+}
+
 pub async fn import(
     State(st): State<AppState>,
-    ApiJson(mut req): ApiJson<ImportRequest>,
+    ApiJson(body): ApiJson<ImportBody>,
 ) -> ApiResult<Response> {
+    let ImportBody { mut req, opts } = body;
     if !req.path.trim().is_empty() {
         req.path = whitelisted(&st, &req.path).await?;
     }
-    let session = st.core.import(req).await?;
+    let session = st.core.import_with(req, opts).await?;
     Ok((StatusCode::CREATED, Json(json!({ "session": session }))).into_response())
 }
 
@@ -434,14 +445,24 @@ pub async fn viewport(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `POST /api/export` body: [`ExportRequest`] plus `pair_member` (`jpeg` | `raw` | `both`).
+#[derive(Deserialize)]
+pub struct ExportBody {
+    #[serde(flatten)]
+    req: ExportRequest,
+    #[serde(flatten)]
+    extras: ip_core::ExportExtras,
+}
+
 pub async fn export(
     State(st): State<AppState>,
-    ApiJson(mut req): ApiJson<ExportRequest>,
+    ApiJson(body): ApiJson<ExportBody>,
 ) -> ApiResult<Response> {
+    let ExportBody { mut req, extras } = body;
     if !req.dest.trim().is_empty() {
         req.dest = whitelisted(&st, &req.dest).await?;
     }
-    let task_id = st.core.export(req).await?;
+    let task_id = st.core.export_with(req, extras.pair_member).await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "task_id": task_id }))).into_response())
 }
 

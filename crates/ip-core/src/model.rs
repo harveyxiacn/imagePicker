@@ -47,6 +47,24 @@ pub struct Photo {
     // ---- devices (docs/api-contract-m1.md "设备")
     pub device_id: Option<i64>,
     pub device_kind: Option<crate::device::DeviceKind>,
+    // ---- files (docs/api-contract-m1.md "RAW+JPEG 与文件")
+    /// The file is gone from disk (deleted, moved or its folder was renamed); see
+    /// `POST /api/sessions/{id}/relocate`.
+    #[serde(default)]
+    pub missing: bool,
+    /// RAW (or other) files paired with this photo by name; the photo itself is the JPEG/HEIF.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub companions: Vec<Companion>,
+}
+
+/// A file paired with a photo (same folder, same base name), e.g. the RAW of a RAW+JPEG shot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Companion {
+    pub id: i64,
+    pub file_name: String,
+    pub format: String,
+    pub file_size: i64,
+    pub missing: bool,
 }
 
 /// One camera/phone in a session (`GET /api/sessions/{id}/devices`).
@@ -150,6 +168,15 @@ pub struct ImportRequest {
     pub title: Option<String>,
 }
 
+/// Extras of `POST /api/import` that are not part of [`ImportRequest`].
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ImportOptions {
+    /// Globs (`*.dng`, `backup/**`), sub-folder paths (relative to `path`, or absolute inside it)
+    /// or plain names to leave out of the import and of every later rescan.
+    #[serde(default, alias = "exclude[]")]
+    pub exclude: Vec<String>,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -213,6 +240,25 @@ impl Default for ExportRequest {
             aspect: None,
         }
     }
+}
+
+/// Which file of a RAW+JPEG pair `POST /api/export` writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PairMember {
+    /// The photo shown in the grid (the JPEG/HEIF, rendered with its edits). Default.
+    #[default]
+    Jpeg,
+    /// The companion files (RAW) instead; unpaired photos are exported as they are.
+    Raw,
+    Both,
+}
+
+/// Extras of `POST /api/export` that are not part of [`ExportRequest`].
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ExportExtras {
+    #[serde(default)]
+    pub pair_member: PairMember,
 }
 
 fn default_quality() -> u8 {

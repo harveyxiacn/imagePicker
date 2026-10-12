@@ -155,6 +155,11 @@ export function generatePhotos(
       subject_face_count: null,
       analyzed: false,
       has_edits: false,
+      // every 11th JPEG is a RAW+JPEG pair (the RAW is a companion, not a grid item)
+      companions:
+        fmt.f === 'jpeg' && i % 11 === 0
+          ? [{ id: id + 1_000_000, file_name: name.replace(/\.\w+$/, '.CR2'), format: 'raw', file_size: 26_000_000, missing: false }]
+          : undefined,
     })
   }
   return photos
