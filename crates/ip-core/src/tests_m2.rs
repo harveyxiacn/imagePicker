@@ -83,7 +83,9 @@ fn run_req(sid: i64, profile: Profile) -> AnalysisRunRequest {
 }
 
 async fn wait_done(e: &Env, sid: i64) -> AnalysisStatus {
-    for _ in 0..2400 {
+    // generous: lite runs are CPU-bound and share a small CI runner with the whole suite
+    let t = std::time::Instant::now();
+    while t.elapsed() < Duration::from_secs(300) {
         let s = e.core.analysis_status(sid);
         if s.state != RunState::Running {
             return s;
