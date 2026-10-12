@@ -257,7 +257,7 @@ After analysis every photo gets an AI suggested rating (0–5, half stars possib
 | Face | Eyes open, smile, looking at camera |
 | Composition | (not active yet, see below) |
 
-Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted (tilt detection is not implemented yet).
+Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted. *Tilted* means the horizon or the building verticals are 2–10° off level (the reason shows the angle, e.g. "Horizon is tilted by 3.5°"); it is only judged when the photo has clear straight lines, so many tilted photos without them are not tagged, and it never lowers the rating: fix it with *Crop & straighten* (`R`) in the editor.
 
 - Click *Accept* in the inspector, or press `A`, to write the AI rating into **your** rating; `Ctrl+Shift+A` accepts in bulk.
 - The *AI rating* filter filters by suggested stars.
@@ -300,8 +300,9 @@ After analysis, faces are clustered into **people** on your machine (AuraFace id
 
 - **Best per person**: switch to the *Best per person* view to see N best photos per person (1 / 3 / 5…).
 - **Export by person**: exports the selected people's photos into one folder per person.
-- **Search by face**: drop or paste (`Ctrl+V`) an external photo (JPG/PNG/WebP) to find the same person in your library; the image is processed locally only.
-- **On photos**: with face boxes on (`Shift+F`), click or right-click a face: filter photos with this person / exclude this person / name / "Not this person" (splits into a new person).
+- **Search by face**: drop or paste (`Ctrl+V`) an external photo (JPG/PNG/WebP) to find the same person in your library; the image is processed locally only. The results list likely people (click one to filter) and similar faces.
+- **This is a new person**: when the person is not among the matches, or the AI mixed two people up, tick their faces among the similar faces of the search results (close matches come pre-ticked; one face per photo) and click *This is a new person*, optionally with a name. The faces leave their old person and are locked to the new one, so re-analysing never moves them back.
+- **On photos**: with face boxes on (`Shift+F`), click or right-click a face: filter photos with this person / exclude this person / name / "Not this person" (splits into a new person) / "Find similar faces" (search with this face, then make the look-alikes a new person together).
 
 ### Person filter (`Shift+P`)
 

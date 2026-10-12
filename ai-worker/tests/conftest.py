@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# Before anything loads OpenCV: the package sets OPENCV_FOR_THREADS_NUM (see its __init__).
+import imagepicker_ai  # noqa: F401
+
+# isort: split
 import io
 import os
 import urllib.parse
