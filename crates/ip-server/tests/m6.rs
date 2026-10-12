@@ -293,6 +293,19 @@ async fn assistant_over_http() {
     assert_eq!(plan["engine"], "rules");
     assert_eq!(plan["needs_confirmation"], true);
     assert!(plan["unsupported"].is_null());
+    assert!(plan["fallback"].is_null());
+    assert_eq!(
+        plan["large_impact"], false,
+        "a small session is never nagged"
+    );
+    assert!(plan["session_photos"].as_u64().unwrap() >= 3);
+    let confirm = plan["confirm_text"].as_str().unwrap();
+    assert!(
+        confirm.contains("场景") && confirm.contains("本会话的全部照片"),
+        "{confirm}"
+    );
+    assert_eq!(plan["steps"][0]["criteria"], "本会话的全部照片");
+    assert_eq!(plan["steps"][0]["large_impact"], false);
     let step = &plan["steps"][0];
     assert_eq!(step["tool"], "scene_keep_top");
     assert_eq!(step["destructive"], true);
@@ -350,6 +363,16 @@ async fn assistant_over_http() {
     assert_eq!(r.status, StatusCode::OK);
     assert!(r.json()["unsupported"].as_str().unwrap().contains("Try"));
     assert_eq!(r.json()["steps"], json!([]));
+    // asking for the language model when there is none is an error, not a silent fallback
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/assistant/plan",
+        Some(json!({"session_id": sid, "message": "一键修图", "engine": "llm"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(r.code(), "worker_unavailable");
     // describe without a VLM
     let r = call(
         &e.app,

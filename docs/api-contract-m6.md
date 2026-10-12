@@ -30,13 +30,20 @@
 | 方法 | 路径 | 请求 | 响应 |
 |---|---|---|---|
 | GET | `/api/assistant/status` | — | `{"engine": "rules" \| "llm", "llm_model": string \| null, "vlm_model": string \| null, "llm_available": bool, "vlm_available": bool}` |
-| POST | `/api/assistant/plan` | `{"session_id", "message", "context": {"filter": "<查询串>", "selection": number[], "current_photo_id": number \| null, "locale": "zh-CN" \| "en"}, "engine"?: "auto" \| "rules" \| "llm"}` | `{"plan_id", "reply": string /*给用户看的一句话*/, "steps": [{"tool", "args", "summary": string, "affects": number /*受影响照片数*/, "destructive": bool}], "needs_confirmation": bool, "engine": "rules"\|"llm", "unsupported": string \| null}` |
-| POST | `/api/assistant/execute` | `{"plan_id"}` | `202 {"task_id"}`；逐步执行，进度 `task.progress kind:"assistant"`；结束广播 `assistant.done {plan_id, ok, results:[{tool, ok, affected, error}], undo: {"edits": [{photo_id, before}], "photos": [{id, user_rating, flag, color_label}]}}`，前端据此生成一次撤销 |
+| POST | `/api/assistant/plan` | `{"session_id", "message", "context": {"filter": "<查询串>", "selection": number[], "current_photo_id": number \| null, "locale": "zh-CN" \| "en"}, "engine"?: "auto" \| "rules" \| "llm"}` | `{"plan_id", "reply": string /*给用户看的一句话*/, "steps": [{"tool", "args", "summary": string, "affects": number /*受影响照片数*/, "destructive": bool, "criteria": string \| null /*作用的照片，文字描述*/, "large_impact": bool}], "needs_confirmation": bool, "engine": "rules"\|"llm", "unsupported": string \| null, "large_impact": bool, "confirm_text": string \| null, "session_photos": number, "fallback": {"code", "message"} \| null}` |
+| POST | `/api/assistant/execute` | `{"plan_id", "confirm"?: bool}`（`large_impact` 的计划必须 `confirm:true`，否则 409 `confirmation_required`，计划保留可再次执行） | `202 {"task_id"}`；逐步执行，进度 `task.progress kind:"assistant"`；结束广播 `assistant.done {plan_id, ok, results:[{tool, ok, affected, error}], undo: {"edits": [{photo_id, before}], "photos": [{id, user_rating, flag, color_label}]}}`，前端据此生成一次撤销 |
 | POST | `/api/assistant/describe` | `{"photo_id"}` | `{"caption", "keywords": string[]}`（VLM；不可用 → 409/503） |
 
 - **规则引擎（T0 必备）**：中英文意图模板 + 实体抽取（人物名、星级、数量、场景词、问题词、预设名、"每个场景/每组"、"闭眼/模糊"等），覆盖常用指令；无法理解时 `unsupported` 给出原因与示例。
 - **LLM 引擎（可选）**：worker `llm.plan` 产出同一工具 JSON；Core **校验**工具名/参数后才返回计划，绝不直接执行模型输出。
 - `filter` 步骤只回传给前端应用；破坏性步骤（淘汰、批量改星、导出）`destructive:true`，必须确认。
+
+### A.4 目标照片与大范围修改
+
+- **目标须有依据**：每个改动照片的步骤，其目标只能是：同一计划中前面 `filter` 步骤的结果（`selection:"current_filter"` 与缺省 selection 的 keep-top 绑定到该筛选，改写为显式 `{"query"}`，执行时按同一条件取照片，不再取发请求时的网格视图）、带条件或 `limit` 的显式 query、用户已选中/当前打开的 `ids`，或——仅当请求本身没有任何条件时——当前视图/整个会话。
+- **LLM 计划的校验**：模型步骤若没有自己的条件却会作用于整个视图/会话，而规则引擎对同一请求的解读并非“无条件作用于全部”（或规则也没读懂），则整份模型计划被拒，退回规则引擎，`fallback.code = "llm_unsafe_target"`；ids 既未选中也未打开 → 同样拒绝。其余退回原因：`llm_failed`、`llm_no_steps`、`llm_invalid`（引用了不存在的预设/人物）。`engine:"llm"` 且模型不可用仍返回 409 `models_missing` / 503 `worker_unavailable`。LLM 上下文含最多 200 个选中 id。
+- **大范围修改**：改动照片数 > 500，或 ≥ 20 张且超过会话照片数一半的步骤 `large_impact:true`；计划 `needs_confirmation:true`，`confirm_text` 逐条列出需确认的步骤（数量、作用的照片、占比）。执行必须 `confirm:true`（CLI `--execute` 视为确认）。
+- **执行期上限**：步骤执行时重新解析目标，若照片数超过计划时计数（`affects`），该步骤以 409 失败（“重新提问”），不会改动超出用户所见范围的照片。
 
 ### A.3 Worker 新方法
 

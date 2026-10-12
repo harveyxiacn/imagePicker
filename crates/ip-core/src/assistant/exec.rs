@@ -52,13 +52,14 @@ struct StepOk {
 
 impl Core {
     /// `POST /api/assistant/execute`: runs a stored plan as a task; progress is
-    /// `task.progress kind:"assistant"`, the end is `assistant.done`.
-    pub async fn assistant_execute(self: &Arc<Self>, plan_id: &str) -> Result<String> {
-        let plan = self.assistant.take(plan_id).ok_or_else(|| {
-            CoreError::not_found(format!(
-                "plan {plan_id} not found (plans expire after 30 minutes and run once)"
-            ))
-        })?;
+    /// `task.progress kind:"assistant"`, the end is `assistant.done`. A plan with a large change
+    /// (`large_impact`) needs `confirm`; without it nothing runs and the plan stays available.
+    pub async fn assistant_execute(
+        self: &Arc<Self>,
+        plan_id: &str,
+        confirm: bool,
+    ) -> Result<String> {
+        let plan = self.assistant.take(plan_id, confirm)?;
         let task_id = format!("assistant-{}", self.next_task_seq());
         let total = plan.steps.len() as i64;
         self.assistant_progress(&task_id, 0, total, "running", None);
@@ -215,6 +216,7 @@ impl Core {
             }
             "set_rating" => {
                 let ids = ids(self).await?;
+                within_plan(step, ids.len())?;
                 if ids.is_empty() {
                     return done(0);
                 }
@@ -231,6 +233,7 @@ impl Core {
             }
             "set_flag" => {
                 let ids = ids(self).await?;
+                within_plan(step, ids.len())?;
                 if ids.is_empty() {
                     return done(0);
                 }
@@ -246,6 +249,7 @@ impl Core {
             }
             "accept_ai" => {
                 let ids = ids(self).await?;
+                within_plan(step, ids.len())?;
                 if ids.is_empty() {
                     return done(0);
                 }
@@ -270,6 +274,7 @@ impl Core {
                 if rr {
                     touched.extend(plan.rest.iter().copied());
                 }
+                within_plan(step, touched.len())?;
                 self.snapshot_photos(&touched, undo).await?;
                 match scope {
                     KeepScope::Group => self.group_keep_top(sid, sel.as_deref(), n, rr).await?,
@@ -279,12 +284,14 @@ impl Core {
             }
             "apply_preset" => {
                 let ids = ids(self).await?;
+                within_plan(step, ids.len())?;
                 let preset_id = args["preset_id"].as_str().unwrap_or_default().to_string();
                 let n = self.apply_preset_to(&ids, &preset_id, undo).await?;
                 done(n)
             }
             "auto_adjust" => {
                 let ids = ids(self).await?;
+                within_plan(step, ids.len())?;
                 let mode = match args["mode"].as_str() {
                     Some("portrait") => ip_render::AutoMode::Portrait,
                     Some("landscape") => ip_render::AutoMode::Landscape,
@@ -295,22 +302,26 @@ impl Core {
             }
             "apply_profiles" => {
                 let ids = ids(self).await?;
+                within_plan(step, ids.len())?;
                 self.snapshot_edits(&ids, undo).await?;
                 let n = self.apply_profiles(ids).await?;
                 done(n)
             }
             "besttake_auto" => {
                 let ids = ids(self).await?;
+                within_plan(step, ids.len())?;
                 let n = self.besttake_selected(&ids, undo).await?;
                 done(n)
             }
             "remove_bystanders" => {
                 let ids = ids(self).await?;
+                within_plan(step, ids.len())?;
                 let n = self.remove_bystanders_selected(&ids, undo).await?;
                 done(n)
             }
             "export" => {
                 let ids = ids(self).await?;
+                within_plan(step, ids.len())?;
                 if ids.is_empty() {
                     return done(0);
                 }
@@ -553,6 +564,18 @@ impl Core {
         }
         Ok(n)
     }
+}
+
+/// A step never changes more photos than the plan counted (and the user confirmed): its target
+/// grew since (other edits, an earlier step of the plan) means the plan has to be made again.
+fn within_plan(step: &PlanStep, n: usize) -> Result<()> {
+    if n > step.affects {
+        return Err(CoreError::Conflict(format!(
+            "{}: the step would now change {n} photos but the plan showed {}; ask again",
+            step.tool, step.affects
+        )));
+    }
+    Ok(())
 }
 
 /// Waits until `task_id` reports `done` / `failed` / `cancelled` (progress events of one task).

@@ -840,6 +840,9 @@ export interface PlanStep {
   summary: string
   affects: number
   destructive: boolean
+  /** the photos the step works on, in words */
+  criteria?: string | null
+  large_impact?: boolean
 }
 
 export interface AssistantPlan {
@@ -849,6 +852,11 @@ export interface AssistantPlan {
   needs_confirmation: boolean
   engine: AssistantEngine
   unsupported: string | null
+  /** a large change: execution needs `confirm: true` */
+  large_impact?: boolean
+  confirm_text?: string | null
+  session_photos?: number
+  fallback?: { code: string; message: string } | null
 }
 
 export interface AssistantResult {

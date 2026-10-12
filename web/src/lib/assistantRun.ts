@@ -88,7 +88,8 @@ export async function executePlan(plan: AssistantPlan): Promise<boolean> {
     return true
   }
   try {
-    const { task_id } = await api.assistantExecute(plan.plan_id)
+    // the user has confirmed the plan (see `needsConfirm`) before it gets here
+    const { task_id } = await api.assistantExecute(plan.plan_id, true)
     D()({ type: 'executeStarted', planId: plan.plan_id, taskId: task_id })
     return true
   } catch (e) {

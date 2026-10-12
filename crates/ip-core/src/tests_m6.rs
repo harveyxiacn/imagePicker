@@ -155,7 +155,8 @@ fn plan_req(sid: i64, msg: &str) -> PlanRequest {
 
 async fn run_plan(e: &Env, plan: &PlanOut) -> (bool, Vec<Value>, Value) {
     let mut rx = e.core.events.subscribe();
-    e.core.assistant_execute(&plan.plan_id).await.unwrap();
+    // the user confirmed (also a large change)
+    e.core.assistant_execute(&plan.plan_id, true).await.unwrap();
     let wait = async {
         loop {
             if let Ok(Event::AssistantDone {
@@ -298,11 +299,11 @@ async fn plan_execute_and_undo_ratings_and_flags() {
 
     // a plan runs once
     assert!(matches!(
-        e.core.assistant_execute(&plan.plan_id).await,
+        e.core.assistant_execute(&plan.plan_id, true).await,
         Err(CoreError::NotFound(_))
     ));
     assert!(matches!(
-        e.core.assistant_execute("plan-nope").await,
+        e.core.assistant_execute("plan-nope", true).await,
         Err(CoreError::NotFound(_))
     ));
 }
@@ -511,7 +512,7 @@ async fn plans_expire_after_thirty_minutes() {
         crate::assistant::PLAN_TTL + Duration::from_secs(1),
     );
     assert!(matches!(
-        e.core.assistant_execute(&plan.plan_id).await,
+        e.core.assistant_execute(&plan.plan_id, true).await,
         Err(CoreError::NotFound(_))
     ));
     assert_eq!(e.core.assistant.plan_count(), 0);
@@ -717,6 +718,315 @@ async fn llm_engine_is_validated_and_falls_back() {
         .await
         .unwrap();
     assert_eq!(p.engine, "rules");
+}
+
+// ------------------------------------------------------------------ plan targets
+
+/// The model answers every `llm.plan` with `calls`.
+fn llm_says(e: &Env, calls: Vec<(&str, Value)>) {
+    e.worker.enable_llm(LlmPlanResponse {
+        reply: "ok".into(),
+        calls: calls
+            .into_iter()
+            .map(|(tool, args)| LlmCall {
+                tool: tool.into(),
+                args,
+            })
+            .collect(),
+    });
+    e.core.assistant.invalidate_info();
+}
+
+async fn rate(e: &Env, sid: i64, names: &[&str], stars: i64) {
+    let ph = by_name(e, sid).await;
+    e.core
+        .patch_photos(PatchRequest {
+            ids: names.iter().map(|n| ph[*n].id).collect(),
+            user_rating: Some(Some(stars)),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+}
+
+fn llm_req(sid: i64, msg: &str) -> PlanRequest {
+    PlanRequest {
+        engine: Some("llm".into()),
+        ..plan_req(sid, msg)
+    }
+}
+
+#[tokio::test]
+async fn llm_filter_then_flag_targets_only_the_filtered_photos() {
+    let (e, sid) = scene_session().await;
+    e.core.hardware(true).await.unwrap();
+    rate(&e, sid, &["a1.jpg", "c2.jpg"], 4).await;
+    llm_says(
+        &e,
+        vec![
+            ("filter", json!({"rating_gte": 4})),
+            (
+                "set_flag",
+                json!({"selection": "current_filter", "flag": -1}),
+            ),
+        ],
+    );
+    // the request comes from a grid that shows something else: the plan's filter wins
+    let mut r = llm_req(sid, "reject every 4-star photo");
+    r.context.filter = Some("flag=unflagged".into());
+    let plan = e.core.assistant_plan(r).await.unwrap();
+    assert_eq!(plan.engine, "llm", "{plan:?}");
+    assert!(plan.fallback.is_none());
+    assert_eq!(plan.steps[0].affects, 2);
+    assert_eq!(
+        plan.steps[1].args["selection"],
+        json!({"query": "rating_gte=4"}),
+        "current_filter is bound to the plan's filter"
+    );
+    assert_eq!(plan.steps[1].affects, 2, "only the filtered photos");
+    assert_eq!(plan.steps[1].criteria.as_deref(), Some("4+ stars"));
+    assert_eq!(plan.session_photos, 7);
+    assert!(plan.needs_confirmation && !plan.large_impact);
+    let text = plan.confirm_text.clone().unwrap();
+    assert!(
+        text.contains("Reject 2 photo(s)") && text.contains("4+ stars"),
+        "{text}"
+    );
+    let (ok, results, undo) = run_plan(&e, &plan).await;
+    assert!(ok, "{results:?}");
+    assert_eq!(results[1]["affected"], 2);
+    let f = flags(&e, sid).await;
+    assert_eq!((f["a1.jpg"], f["c2.jpg"]), (-1, -1));
+    assert_eq!(f.values().filter(|v| **v == -1).count(), 2, "{f:?}");
+    assert_eq!(undo["photos"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn llm_action_without_a_filter_is_resolved_from_its_args_or_refused() {
+    let (e, sid) = scene_session().await;
+    e.core.hardware(true).await.unwrap();
+    rate(&e, sid, &["a1.jpg", "c2.jpg"], 4).await;
+
+    // the model left the condition out ("everything"): refused, the rules read the request
+    for sel in [json!("current_filter"), json!({"query": ""})] {
+        llm_says(
+            &e,
+            vec![("set_flag", json!({"selection": sel, "flag": -1}))],
+        );
+        let plan = e
+            .core
+            .assistant_plan(llm_req(sid, "把4星以上的照片都淘汰"))
+            .await
+            .unwrap();
+        assert_eq!(plan.engine, "rules", "{sel}");
+        let fb = plan.fallback.clone().unwrap();
+        assert_eq!(fb.code, "llm_unsafe_target");
+        assert!(fb.message.contains("set_flag"), "{fb:?}");
+        let flag = plan.steps.iter().find(|s| s.tool == "set_flag").unwrap();
+        assert_eq!(flag.affects, 2, "{plan:?}");
+        assert_eq!(flag.criteria.as_deref(), Some("4星以上"));
+    }
+    // the condition in the step's own selection is enough
+    llm_says(
+        &e,
+        vec![(
+            "set_flag",
+            json!({"selection": {"query": "rating_gte=4"}, "flag": -1}),
+        )],
+    );
+    let plan = e
+        .core
+        .assistant_plan(llm_req(sid, "把4星以上的照片都淘汰"))
+        .await
+        .unwrap();
+    assert_eq!(plan.engine, "llm");
+    assert_eq!(plan.steps[0].affects, 2);
+    // a request without any condition may act on everything, as the rules engine does
+    llm_says(
+        &e,
+        vec![(
+            "set_flag",
+            json!({"selection": "current_filter", "flag": -1}),
+        )],
+    );
+    let plan = e
+        .core
+        .assistant_plan(llm_req(sid, "把所有照片都淘汰"))
+        .await
+        .unwrap();
+    assert_eq!(plan.engine, "llm");
+    assert_eq!(plan.steps[0].affects, 7);
+    assert_eq!(plan.steps[0].criteria.as_deref(), Some("本会话的全部照片"));
+    // ... or on the view the user set up
+    let mut r = llm_req(sid, "全部淘汰");
+    r.context.filter = Some("rating_gte=4".into());
+    let plan = e.core.assistant_plan(r).await.unwrap();
+    assert_eq!(plan.engine, "llm");
+    assert_eq!(plan.steps[0].affects, 2);
+    assert_eq!(
+        plan.steps[0].criteria.as_deref(),
+        Some("当前视图（4星以上）")
+    );
+    // photo ids must be the user's selection (or the open photo)
+    let a1 = by_name(&e, sid).await["a1.jpg"].id;
+    llm_says(
+        &e,
+        vec![("set_flag", json!({"selection": {"ids": [a1]}, "flag": -1}))],
+    );
+    let plan = e
+        .core
+        .assistant_plan(llm_req(sid, "reject the selected photos"))
+        .await
+        .unwrap();
+    assert_eq!(plan.engine, "rules");
+    assert_eq!(plan.fallback.unwrap().code, "llm_unsafe_target");
+    assert!(
+        plan.steps.is_empty() && plan.unsupported.is_some(),
+        "nothing is selected"
+    );
+    let mut r = llm_req(sid, "reject the selected photos");
+    r.context.selection = vec![a1];
+    let plan = e.core.assistant_plan(r).await.unwrap();
+    assert_eq!(plan.engine, "llm");
+    assert_eq!(plan.steps[0].affects, 1);
+    assert_eq!(
+        plan.steps[0].criteria.as_deref(),
+        Some("the 1 selected photo(s)")
+    );
+    // nothing was changed by planning
+    assert!(flags(&e, sid).await.values().all(|v| *v == 0));
+}
+
+#[tokio::test]
+async fn large_changes_need_an_explicit_confirmation() {
+    let e = env();
+    for i in 0..24 {
+        photo(e.src.path(), &format!("p{i:02}.jpg"), i * 400);
+    }
+    let sid = import_dir(&e, e.src.path()).await;
+    let plan = e
+        .core
+        .assistant_plan(plan_req(sid, "给所有照片打3星"))
+        .await
+        .unwrap();
+    assert_eq!(plan.session_photos, 24);
+    assert_eq!(plan.steps[0].affects, 24);
+    assert!(plan.large_impact && plan.steps[0].large_impact && plan.needs_confirmation);
+    let text = plan.confirm_text.clone().unwrap();
+    assert!(
+        text.contains("给 24 张照片评 3 星")
+            && text.contains("本会话的全部照片")
+            && text.contains("100%"),
+        "{text}"
+    );
+    // without the flag nothing runs and the plan stays available
+    assert!(matches!(
+        e.core.assistant_execute(&plan.plan_id, false).await,
+        Err(CoreError::ConfirmationRequired(m)) if m.contains("24")
+    ));
+    assert_eq!(e.core.assistant.plan_count(), 1);
+    assert!(by_name(&e, sid)
+        .await
+        .values()
+        .all(|p| p.user_rating.is_none()));
+    let (ok, results, _) = run_plan(&e, &plan).await;
+    assert!(ok, "{results:?}");
+    assert!(by_name(&e, sid)
+        .await
+        .values()
+        .all(|p| p.user_rating == Some(3)));
+
+    // a small part of the session is no large change (still confirmed: it rejects)
+    rate(&e, sid, &["p00.jpg", "p01.jpg"], 5).await;
+    let plan = e
+        .core
+        .assistant_plan(plan_req(sid, "把5星以上的照片淘汰"))
+        .await
+        .unwrap();
+    let step = plan.steps.iter().find(|s| s.tool == "set_flag").unwrap();
+    assert_eq!(step.affects, 2);
+    assert!(!plan.large_impact && plan.needs_confirmation);
+    let text = plan.confirm_text.clone().unwrap();
+    assert!(
+        text.contains("淘汰 2 张照片") && text.contains("5星以上"),
+        "{text}"
+    );
+    // a step never changes more photos than the plan showed
+    rate(&e, sid, &["p02.jpg"], 5).await;
+    let mut rx = e.core.events.subscribe();
+    e.core
+        .assistant_execute(&plan.plan_id, false)
+        .await
+        .unwrap();
+    let done = tokio::time::timeout(WAIT, async {
+        loop {
+            if let Ok(Event::AssistantDone { ok, results, .. }) = rx.recv().await {
+                return (ok, results);
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!done.0);
+    assert!(
+        done.1
+            .iter()
+            .any(|r| r["error"].as_str().is_some_and(|m| m.contains("ask again"))),
+        "{:?}",
+        done.1
+    );
+    assert!(flags(&e, sid).await.values().all(|v| *v == 0));
+}
+
+#[tokio::test]
+async fn requesting_the_llm_without_one_is_not_a_silent_fallback() {
+    let (e, sid) = scene_session().await;
+    e.core.hardware(true).await.unwrap();
+    let r = llm_req(sid, "一键修图");
+    // no language model in this worker at all: 503
+    assert!(matches!(
+        e.core.assistant_plan(r.clone()).await,
+        Err(CoreError::WorkerUnavailable(_))
+    ));
+    // `auto` quietly uses the rules (nothing was tried, no note)
+    let p = e
+        .core
+        .assistant_plan(plan_req(sid, "一键修图"))
+        .await
+        .unwrap();
+    assert_eq!(p.engine, "rules");
+    assert!(p.fallback.is_none());
+    // registered but not downloaded: 409 models_missing naming it
+    llm_says(
+        &e,
+        vec![("auto_adjust", json!({"selection": "current_filter"}))],
+    );
+    e.worker.set_missing(&[crate::testutil::LLM_MODEL]);
+    e.core.assistant.invalidate_info();
+    match e.core.assistant_plan(r.clone()).await {
+        Err(CoreError::ModelsMissing(m)) => assert_eq!(m, [crate::testutil::LLM_MODEL]),
+        other => panic!("{other:?}"),
+    }
+    e.worker.set_missing(&[]);
+    e.core.assistant.invalidate_info();
+    let p = e.core.assistant_plan(r.clone()).await.unwrap();
+    assert_eq!(p.engine, "llm");
+    // a model that answers nonsense or nothing: the rules answer and the plan says why
+    llm_says(
+        &e,
+        vec![(
+            "set_rating",
+            json!({"selection": "current_filter", "rating": 9}),
+        )],
+    );
+    let p = e.core.assistant_plan(r.clone()).await.unwrap();
+    assert_eq!(p.engine, "rules");
+    assert_eq!(p.steps[0].tool, "auto_adjust");
+    assert_eq!(p.fallback.unwrap().code, "llm_failed");
+    llm_says(&e, vec![]);
+    let p = e.core.assistant_plan(r).await.unwrap();
+    assert_eq!(p.engine, "rules");
+    assert_eq!(p.fallback.unwrap().code, "llm_no_steps");
 }
 
 #[tokio::test]
