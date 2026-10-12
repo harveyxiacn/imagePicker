@@ -548,13 +548,21 @@ export interface FaceSearchCandidate {
   person_name: string | null
   similarity: number
 }
+export interface FaceSearchSimilarFace {
+  face_id: number
+  photo_id: number
+  /** the person the face belongs to now (null = unassigned) */
+  person_id: number | null
+  person_name: string | null
+  similarity: number
+}
 export interface FaceSearchResponse {
   /** normalised [x, y, w, h] of every face found in the query image */
   faces_detected: [number, number, number, number][]
   /** index into `faces_detected` the candidates belong to */
   query_face: number
   candidates: FaceSearchCandidate[]
-  similar_faces: { face_id: number; photo_id: number; similarity: number }[]
+  similar_faces: FaceSearchSimilarFace[]
 }
 
 export interface Collection {
