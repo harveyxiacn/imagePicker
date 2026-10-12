@@ -114,7 +114,7 @@ export const zhCN = {
     exposure: '曝光',
   },
   loupe: { fit: '适应' },
-  compare: { sync: '同步缩放', syncHint: '同步缩放与平移', swap: '交换 A/B', layout: '对比布局' },
+  compare: { sync: '同步缩放', syncHint: '同步缩放与平移', swap: '交换 A/B', layout: '对比布局', fromSelection: '对比所选照片（{{shown}} / {{total}}）' },
   status: {
     thumbs: '缩略图 {{x}} / {{y}}',
     selected: '已选 {{n}} 张',

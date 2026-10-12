@@ -3,28 +3,11 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ColorLabel, Flag, Photo } from '@/api/types'
 import { acceptAiRatings, editPhotos, redo, undo } from '@/lib/actions'
+import { compareUsesSelection } from '@/lib/compare'
 import { jumpGroup, moveVertical, toggleStacks } from '@/lib/stacks'
 import { clickSelect, selectAll } from '@/lib/selection'
 import { useToasts } from '@/stores/toasts'
 import { useUi, type View } from '@/stores/ui'
-
-/** Photos shown in compare mode: pinned A, active B, then following candidates. */
-export function compareSlots(photos: Photo[], aId: number | null, activeId: number | null, count: 2 | 4): Photo[] {
-  const byId = (id: number | null) => (id === null ? undefined : photos.find((p) => p.id === id))
-  const a = byId(aId)
-  const b = byId(activeId)
-  const out: Photo[] = []
-  if (a) out.push(a)
-  if (b && b !== a) out.push(b)
-  if (b) {
-    let i = photos.indexOf(b) + 1
-    while (out.length < count && i < photos.length) {
-      if (photos[i] !== a) out.push(photos[i])
-      i++
-    }
-  }
-  return out.slice(0, count)
-}
 
 /** View-specific behaviour injected by the page (group view needs the groups query). */
 export interface ControllerHooks {
@@ -69,17 +52,20 @@ export function useController(photos: Photo[], hooks: ControllerHooks = {}) {
   const move = useCallback(
     (delta: number, opts?: { extend?: boolean }) => {
       const ui = useUi.getState()
-      const list = photosRef.current
-      let i = indexOf(ui.activeId)
+      let list = photosRef.current
+      // Compare shows the selection: the cursor steps through the selected photos only.
+      if (ui.view === 'compare' && compareUsesSelection(list, ui.selection.ids)) list = list.filter((p) => ui.selection.ids.has(p.id))
+      let i = list.findIndex((p) => p.id === ui.activeId)
       if (i < 0) i = delta > 0 ? -1 : list.length
       let next = Math.min(list.length - 1, Math.max(0, i + delta))
-      if ((ui.view === 'compare' || ui.view === 'group') && ui.compareA !== null && list[next]?.id === ui.compareA) {
+      if ((ui.view === 'compare' || ui.view === 'group') && ui.compareA !== null && list[next]?.id === ui.compareA && list === photosRef.current) {
         const skip = next + Math.sign(delta || 1)
         if (skip >= 0 && skip < list.length) next = skip
       }
-      setActiveIndex(next, opts)
+      if (list === photosRef.current) setActiveIndex(next, opts)
+      else if (list.length) ui.setActive(list[next].id)
     },
-    [indexOf, setActiveIndex],
+    [setActiveIndex],
   )
 
   const targetIds = useCallback((): number[] => {
@@ -143,8 +129,9 @@ export function useController(photos: Photo[], hooks: ControllerHooks = {}) {
         ui.setView('group')
         return
       }
-      if (v === 'compare' && ui.view !== 'compare') {
-        // Pin the current photo as A and move the cursor to the next candidate.
+      if (v === 'compare' && ui.view !== 'compare' && !compareUsesSelection(list, ui.selection.ids)) {
+        // Two or more selected photos are compared as they are; otherwise pin the current photo as A
+        // and move the cursor to the next candidate.
         const i = indexOf(ui.activeId)
         if (i >= 0) {
           ui.setCompareA(list[i].id)

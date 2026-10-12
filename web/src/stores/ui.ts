@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ConnectionStatus } from '@/api/events'
+import type { CompareCount } from '@/lib/compare'
 import { DEFAULT_FILTER, type FilterState } from '@/lib/filter'
 import type { GridRow } from '@/lib/stacks'
 import { EMPTY_SELECTION, type SelectionState } from '@/lib/selection'
@@ -15,7 +16,7 @@ interface UiState {
   selection: SelectionState
   /** Compare mode: pinned "A" photo (the candidate "B" is `activeId`). */
   compareA: number | null
-  compareCount: 2 | 4
+  compareCount: CompareCount
   syncZoom: boolean
   filter: FilterState
   /** Filter to apply when the next library mounts (e.g. coming from the People page). */
@@ -70,7 +71,7 @@ interface UiState {
   setActive: (id: number | null) => void
   setSelection: (s: SelectionState) => void
   setCompareA: (id: number | null) => void
-  setCompareCount: (n: 2 | 4) => void
+  setCompareCount: (n: CompareCount) => void
   setSyncZoom: (b: boolean) => void
   setFilter: (f: Partial<FilterState>) => void
   resetFilter: () => void

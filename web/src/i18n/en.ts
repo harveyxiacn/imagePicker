@@ -116,7 +116,7 @@ export const en: Messages = {
     exposure: 'Exposure',
   },
   loupe: { fit: 'Fit' },
-  compare: { sync: 'Sync zoom', syncHint: 'Synchronize zoom and pan', swap: 'Swap A/B', layout: 'Compare layout' },
+  compare: { sync: 'Sync zoom', syncHint: 'Synchronize zoom and pan', swap: 'Swap A/B', layout: 'Compare layout', fromSelection: 'Comparing the selection ({{shown}} of {{total}})' },
   status: {
     thumbs: 'Thumbnails {{x}} / {{y}}',
     selected: '{{n}} selected',
