@@ -914,6 +914,7 @@ async fn export_into_folders() {
                 upscale: None,
                 strip_gps: false,
                 folders: Some(folders),
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -963,6 +964,7 @@ async fn export_into_folders() {
             upscale: None,
             strip_gps: false,
             folders,
+            ..Default::default()
         }
     };
     let f: std::collections::BTreeMap<String, Vec<i64>> =

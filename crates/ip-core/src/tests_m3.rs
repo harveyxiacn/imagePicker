@@ -835,6 +835,7 @@ async fn export_applies_saved_edits() {
                 upscale: None,
                 strip_gps: false,
                 folders: None,
+                ..Default::default()
             })
             .await
             .unwrap();

@@ -5,6 +5,7 @@ import type {
   ApiErrorBody,
   BurstFaces,
   ExportBody,
+  ExportPreset,
   FsList,
   GroupsResponse,
   HardwareInfo,
@@ -177,6 +178,7 @@ export const api = {
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),
+  exportPresets: () => request<{ presets: ExportPreset[] }>('GET', '/export/presets'),
   // ---- M7: AI runtime ----
   runtime: () => request<RuntimeInfo>('GET', '/runtime'),
   installRuntime: (extras?: string[]) => request<{ task_id: string }>('POST', '/runtime/install', extras ? { extras } : {}),

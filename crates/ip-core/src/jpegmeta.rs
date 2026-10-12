@@ -3,6 +3,9 @@
 //! its XMP packet and IPTC record (cleaned up the same way), and an sRGB ICC profile that
 //! matches the pixels (decoding converts sources tagged with another colour space to sRGB).
 //!
+//! The same prepared metadata ([`PreparedMeta`]) goes into PNG, TIFF and WebP exports
+//! (`crate::export::formats`), and [`without_gps`] cleans copied originals.
+//!
 //! No external dependencies: the EXIF TIFF block is edited in place (offsets of everything
 //! else, MakerNotes included, stay valid) and whatever is removed is zeroed so nothing of it
 //! survives in the file. RAW, TIFF and HEIF sources contribute the block `ip-imaging` finds or
@@ -300,10 +303,9 @@ pub fn extract_irb(jpeg: &[u8]) -> Option<Vec<u8>> {
     (!out.is_empty()).then_some(out)
 }
 
-/// The IPTC resources of an image resource block, re-serialised; `None` without IPTC.
-pub fn iptc_resources(irb: &[u8]) -> Option<Vec<u8>> {
+/// The resources of an image resource block: `(signature, id, data)`.
+fn resources(irb: &[u8]) -> Vec<(&[u8], u16, &[u8])> {
     let mut out = Vec::new();
-    let mut has_iptc = false;
     let mut p = 0usize;
     while p + 12 <= irb.len() {
         let sig = &irb[p..p + 4];
@@ -324,20 +326,39 @@ pub fn iptc_resources(irb: &[u8]) -> Option<Vec<u8>> {
         else {
             break;
         };
+        out.push((sig, id, data));
+        p = data_at + size + size % 2;
+    }
+    out
+}
+
+/// The IPTC resources of an image resource block, re-serialised; `None` without IPTC.
+pub fn iptc_resources(irb: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut has_iptc = false;
+    for (sig, id, data) in resources(irb) {
         if sig == b"8BIM" && IRB_KEEP.contains(&id) {
             has_iptc |= id == 0x0404;
             out.extend_from_slice(b"8BIM");
             out.extend_from_slice(&id.to_be_bytes());
             out.extend_from_slice(&[0, 0]);
-            out.extend_from_slice(&(size as u32).to_be_bytes());
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
             out.extend_from_slice(data);
-            if size % 2 == 1 {
+            if data.len() % 2 == 1 {
                 out.push(0);
             }
         }
-        p = data_at + size + size % 2;
     }
     has_iptc.then_some(out)
+}
+
+/// The IPTC-IIM record itself (resource 0x0404) of an image resource block (TIFF exports
+/// store it in tag 33723).
+pub fn iptc_record(irb: &[u8]) -> Option<Vec<u8>> {
+    resources(irb)
+        .into_iter()
+        .find(|(sig, id, _)| *sig == b"8BIM" && *id == 0x0404)
+        .map(|(_, _, data)| data.to_vec())
 }
 
 // ------------------------------------------------------------------ XMP
@@ -357,11 +378,7 @@ const NS_APPLE_GAIN_MAP: &str = "http://ns.apple.com/HDRGainMap/1.0/";
 /// second time), or data that only the original carries (extended XMP, depth maps, motion
 /// photo video, HDR gain maps). With `strip_gps` every `GPS*` property goes too.
 fn dropped_from_export(ns: &str, local: &str, strip_gps: bool) -> bool {
-    if strip_gps
-        && local
-            .get(..3)
-            .is_some_and(|p| p.eq_ignore_ascii_case("gps"))
-    {
+    if strip_gps && is_gps_property(local) {
         return true;
     }
     match ns {
@@ -376,6 +393,14 @@ fn dropped_from_export(ns: &str, local: &str, strip_gps: bool) -> bool {
         | NS_APPLE_GAIN_MAP => true,
         _ => false,
     }
+}
+
+/// Whether an XMP property is (part of) a GPS position: `exif:GPSLatitude`,
+/// `drone-dji:GpsLongitude`... (EXIF and vendor schemas all use the `GPS` prefix).
+pub fn is_gps_property(local: &str) -> bool {
+    local
+        .get(..3)
+        .is_some_and(|p| p.eq_ignore_ascii_case("gps"))
 }
 
 /// The source's XMP packet as it goes into an export (see [`dropped_from_export`]). `None`
@@ -533,6 +558,17 @@ impl Tiff<'_> {
         Some(())
     }
 
+    /// Drops the GPS IFD of IFD0 at `ifd0`: pointer removed, directory and values zeroed.
+    fn strip_gps(&mut self, ifd0: usize) -> Option<()> {
+        if let Some(g) = self.find(ifd0, 0x8825) {
+            if let Some(off) = self.u32(g.at + 8) {
+                self.wipe_ifd(off as usize);
+            }
+            self.remove_tag(ifd0, 0x8825)?;
+        }
+        Some(())
+    }
+
     /// Overwrites an inline SHORT/LONG value.
     fn set_inline(&mut self, ifd: usize, tag: u16, value: u32) {
         let Some(e) = self.find(ifd, tag) else { return };
@@ -565,12 +601,7 @@ pub fn prepare_exif(tiff: &[u8], dims: (u32, u32), strip_gps: bool) -> Option<Ve
     t.entries(ifd0)?; // validates
     t.remove_tag(ifd0, 0x0112)?;
     if strip_gps {
-        if let Some(g) = t.find(ifd0, 0x8825) {
-            if let Some(off) = t.u32(g.at + 8) {
-                t.wipe_ifd(off as usize);
-            }
-            t.remove_tag(ifd0, 0x8825)?;
-        }
+        t.strip_gps(ifd0)?;
     }
     // the embedded thumbnail shows the unedited picture: drop IFD1
     let entries = t.entries(ifd0)?;
@@ -590,6 +621,26 @@ pub fn prepare_exif(tiff: &[u8], dims: (u32, u32), strip_gps: bool) -> Option<Ve
         }
     }
     (data.len() <= MAX_EXIF).then_some(data)
+}
+
+/// An EXIF TIFF block without its GPS position (pointer removed, directory and values zeroed),
+/// everything else, orientation and thumbnail included, untouched: the result has the same
+/// size, so a copied original can be cleaned in place. `None` when the block is malformed.
+pub fn without_gps(tiff: &[u8]) -> Option<Vec<u8>> {
+    let mut data = tiff.to_vec();
+    let le = match data.get(0..2)? {
+        b"II" => true,
+        b"MM" => false,
+        _ => return None,
+    };
+    let mut t = Tiff { d: &mut data, le };
+    if t.u16(2)? != 42 {
+        return None;
+    }
+    let ifd0 = t.u32(4)? as usize;
+    t.entries(ifd0)?; // validates
+    t.strip_gps(ifd0)?;
+    Some(data)
 }
 
 // ------------------------------------------------------------------ synthesised EXIF
@@ -806,15 +857,20 @@ impl SourceMeta {
     }
 }
 
-/// Returns `encoded` (a baseline JPEG of `dims` sRGB pixels rendered from the source) with the
-/// source's EXIF, XMP and IPTC (cleaned up as described in the module docs) and an sRGB ICC
-/// profile embedded. Never fails: metadata is best effort.
-pub fn finalize_export(
-    encoded: Vec<u8>,
-    source: &SourceMeta,
-    dims: (u32, u32),
-    strip_gps: bool,
-) -> Vec<u8> {
+/// The metadata of one re-encoded export, ready for any container: EXIF, XMP and IPTC of the
+/// source cleaned up as described in the module docs. Empty when all metadata is stripped.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PreparedMeta {
+    /// EXIF TIFF block (no `Exif\0\0` prefix).
+    pub exif: Option<Vec<u8>>,
+    /// XMP packet.
+    pub xmp: Option<String>,
+    /// Photoshop image resources holding the IPTC record (see [`iptc_resources`]).
+    pub irb: Option<Vec<u8>>,
+}
+
+/// What of the source goes into an export of `dims` pixels (see [`PreparedMeta`]).
+pub fn prepare_meta(source: &SourceMeta, dims: (u32, u32), strip_gps: bool) -> PreparedMeta {
     let exif = source
         .exif
         .as_deref()
@@ -825,15 +881,34 @@ pub fn finalize_export(
                 .as_ref()
                 .and_then(|m| synth_exif(m, dims, strip_gps))
         });
-    let xmp = source.xmp.as_deref().and_then(|x| export_xmp(x, strip_gps));
-    let irb = source.irb.as_deref().and_then(iptc_resources);
+    PreparedMeta {
+        exif,
+        xmp: source.xmp.as_deref().and_then(|x| export_xmp(x, strip_gps)),
+        irb: source.irb.as_deref().and_then(iptc_resources),
+    }
+}
+
+/// `encoded` (a baseline JPEG) with `meta` and an sRGB ICC profile embedded.
+pub fn with_meta(encoded: &[u8], meta: &PreparedMeta) -> Vec<u8> {
     insert_metadata(
-        &encoded,
-        exif.as_deref(),
-        xmp.as_deref(),
+        encoded,
+        meta.exif.as_deref(),
+        meta.xmp.as_deref(),
         Some(srgb_icc()),
-        irb.as_deref(),
+        meta.irb.as_deref(),
     )
+}
+
+/// Returns `encoded` (a baseline JPEG of `dims` sRGB pixels rendered from the source) with the
+/// source's EXIF, XMP and IPTC (cleaned up as described in the module docs) and an sRGB ICC
+/// profile embedded. Never fails: metadata is best effort.
+pub fn finalize_export(
+    encoded: Vec<u8>,
+    source: &SourceMeta,
+    dims: (u32, u32),
+    strip_gps: bool,
+) -> Vec<u8> {
+    with_meta(&encoded, &prepare_meta(source, dims, strip_gps))
 }
 
 fn read_head(path: &Path) -> Option<Vec<u8>> {
@@ -1381,6 +1456,58 @@ mod tests {
             .map(|s| s.marker)
             .collect();
         assert_eq!(order[..2], [0xE0, 0xE2]);
+    }
+
+    #[test]
+    fn without_gps_keeps_the_size_and_everything_else() {
+        for be in [false, true] {
+            let src = build_test_exif(6, be, true);
+            let out = without_gps(&src).unwrap();
+            assert_eq!(out.len(), src.len(), "in place");
+            let md = parse(&jpeg_with(Some(&out)));
+            assert!(md.gps_lat.is_none() && md.gps_lon.is_none());
+            assert_eq!(md.orientation, 6);
+            assert_eq!(md.camera_make.as_deref(), Some("ACME Corp"));
+            assert!(out.windows(9).any(|w| w == b"THUMBNAIL"), "thumbnail kept");
+            // the coordinates are zeroed, not just unlinked
+            let rat: Vec<u8> = [48u32, 1, 51, 1, 30, 1]
+                .iter()
+                .flat_map(|v| if be { v.to_be_bytes() } else { v.to_le_bytes() })
+                .collect();
+            assert!(!out.windows(rat.len()).any(|w| w == rat.as_slice()));
+            // nothing to remove: unchanged
+            let plain = build_test_exif(1, be, false);
+            assert_eq!(without_gps(&plain).unwrap(), plain);
+        }
+        assert!(without_gps(b"garbage").is_none());
+    }
+
+    #[test]
+    fn the_iptc_record_is_found_among_the_resources() {
+        let iptc = build_test_iptc();
+        assert_eq!(iptc_record(&build_test_irb()), Some(iptc.clone()));
+        let kept = iptc_resources(&build_test_irb()).unwrap();
+        assert_eq!(iptc_record(&kept), Some(iptc));
+        assert!(iptc_record(b"no resources here").is_none());
+    }
+
+    #[test]
+    fn prepared_metadata_is_what_finalize_embeds() {
+        let meta = SourceMeta {
+            exif: Some(build_test_exif(6, false, true)),
+            xmp: Some(TEST_XMP.to_string()),
+            irb: Some(build_test_irb()),
+            metadata: None,
+        };
+        let p = prepare_meta(&meta, (8, 8), true);
+        assert!(p.exif.is_some() && p.xmp.is_some() && p.irb.is_some());
+        assert!(!p.xmp.as_deref().unwrap().contains("GPSLatitude"));
+        assert_eq!(
+            with_meta(&jpeg_with(None), &p),
+            finalize_export(jpeg_with(None), &meta, (8, 8), true)
+        );
+        assert!(is_gps_property("GPSAltitude") && is_gps_property("GpsLatitude"));
+        assert!(!is_gps_property("Rating") && !is_gps_property("GP"));
     }
 
     #[test]

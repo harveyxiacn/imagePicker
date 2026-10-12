@@ -514,6 +514,32 @@ async fn export_over_http_reports_progress() {
 }
 
 #[tokio::test]
+async fn export_presets_are_the_core_table() {
+    let e = env();
+    let r = call(&e.app, Method::GET, "/api/export/presets", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let presets = r.json()["presets"].clone();
+    // the table the assistant's export tool uses, served as is
+    assert_eq!(
+        presets,
+        serde_json::to_value(ip_core::export::EXPORT_PRESETS).unwrap()
+    );
+    let ids: Vec<&str> = presets
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ip_core::export::EXPORT_PRESET_IDS);
+    assert_eq!(
+        presets[2],
+        json!({"id": "xiaohongshu", "long_edge": 1920, "aspect": [3, 4], "quality": 90,
+               "format": "jpeg", "strip_gps": true})
+    );
+    assert_eq!(presets[3]["aspect"], json!([4, 5]));
+}
+
+#[tokio::test]
 async fn fs_browse() {
     let e = env();
     let r = call(&e.app, Method::GET, "/api/fs/roots", None).await;

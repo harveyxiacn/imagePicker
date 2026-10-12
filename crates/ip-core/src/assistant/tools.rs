@@ -29,7 +29,8 @@ pub const TOOL_NAMES: [&str; 14] = [
     "suggest_edits",
 ];
 
-pub const EXPORT_PRESETS: [&str; 4] = ["original", "wechat", "xiaohongshu", "instagram"];
+/// The `preset` enum of the `export` tool: the ids of the one export preset table.
+pub const EXPORT_PRESETS: [&str; 4] = crate::export::EXPORT_PRESET_IDS;
 
 pub fn is_tool(name: &str) -> bool {
     TOOL_NAMES.contains(&name)

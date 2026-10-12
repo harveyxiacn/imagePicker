@@ -151,6 +151,28 @@ export interface ExportBody {
   long_edge?: number | null
   quality?: number
   name_template?: string
+  /** P0-8: output container (docs/api-contract-m5.md F) */
+  format?: ExportFormat
+  /** leave out the GPS position, copied originals included */
+  strip_gps?: boolean
+  /** leave out all EXIF / XMP / IPTC (the colour profile stays) */
+  strip_metadata?: boolean
+  /** centre crop to this aspect ratio `[w, h]`, then `long_edge` */
+  aspect?: [number, number] | null
+}
+
+/** Output container of an export: `original` copies unchanged photos as they are and writes
+ *  everything re-encoded as JPEG; WebP is lossless, TIFF 8-bit uncompressed. */
+export type ExportFormat = 'original' | 'jpeg' | 'png' | 'tiff' | 'webp'
+
+/** `GET /api/export/presets`: the one preset table (the assistant's `export` tool uses it too). */
+export interface ExportPreset {
+  id: string
+  long_edge: number | null
+  aspect: [number, number] | null
+  quality: number
+  format: ExportFormat
+  strip_gps: boolean
 }
 
 export interface FsList {

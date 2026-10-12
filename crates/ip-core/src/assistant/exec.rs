@@ -30,16 +30,19 @@ struct Undo {
     edits: BTreeMap<i64, Value>,
 }
 
-/// Export presets (`docs/api-contract-m6.md` A.1): `(long edge, crop-fit size, JPEG quality)`.
-/// wechat: long edge 2048, q85; xiaohongshu: 3:4 crop-fit 1440x1920, q90; instagram: 4:5
-/// crop-fit 1080x1350, q90; original: no resize.
-pub fn export_preset(name: &str) -> (Option<u32>, Option<(u32, u32)>, u8) {
-    match name {
-        "wechat" => (Some(2048), None, 85),
-        "xiaohongshu" => (None, Some((1440, 1920)), 90),
-        "instagram" => (None, Some((1080, 1350)), 90),
-        _ => (None, None, 95),
-    }
+/// The request of an `export` step: the preset (`docs/api-contract-m6.md` A.1) comes from the
+/// one table the export dialog uses too ([`crate::export::EXPORT_PRESETS`]); unknown names
+/// export originals. Edits are applied, files keep their names.
+pub fn export_request(ids: Vec<i64>, dest: String, preset: &str) -> ExportRequest {
+    let mut req = ExportRequest {
+        ids,
+        dest,
+        ..ExportRequest::default()
+    };
+    crate::export::export_preset(preset)
+        .unwrap_or(&crate::export::EXPORT_PRESETS[0])
+        .apply(&mut req);
+    req
 }
 
 struct StepOk {
@@ -315,26 +318,10 @@ impl Core {
                     .as_str()
                     .map(str::to_string)
                     .ok_or_else(|| CoreError::bad_request(DEST_REQUIRED))?;
-                let (long_edge, fit, quality) =
-                    export_preset(args["preset"].as_str().unwrap_or("original"));
+                let preset = args["preset"].as_str().unwrap_or("original");
                 let n = ids.len();
                 let mut rx = self.events.subscribe();
-                let task = self
-                    .export_fit(
-                        ExportRequest {
-                            ids,
-                            dest,
-                            folders: None,
-                            long_edge,
-                            quality,
-                            name_template: "{name}".into(),
-                            apply_edits: true,
-                            upscale: None,
-                            strip_gps: false,
-                        },
-                        fit,
-                    )
-                    .await?;
+                let task = self.export(export_request(ids, dest, preset)).await?;
                 wait_task(&mut rx, &task).await?;
                 done(n)
             }
@@ -632,10 +619,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn export_presets_are_distinct() {
-        assert_eq!(export_preset("xiaohongshu"), (None, Some((1440, 1920)), 90));
-        assert_eq!(export_preset("instagram"), (None, Some((1080, 1350)), 90));
-        assert_eq!(export_preset("wechat"), (Some(2048), None, 85));
-        assert_eq!(export_preset("original"), (None, None, 95));
+    fn export_steps_use_the_shared_preset_table() {
+        use crate::export::{ExportFormat, EXPORT_PRESETS};
+        // the tool schema offers exactly the table's presets
+        let ids: Vec<&str> = EXPORT_PRESETS.iter().map(|p| p.id).collect();
+        assert_eq!(super::super::tools::EXPORT_PRESETS.to_vec(), ids);
+        for p in EXPORT_PRESETS {
+            let r = export_request(vec![1], "d".into(), p.id);
+            assert_eq!(
+                (r.long_edge, r.aspect, r.quality, r.format, r.strip_gps),
+                (p.long_edge, p.aspect, p.quality, p.format, p.strip_gps),
+                "{}",
+                p.id
+            );
+            assert!(r.apply_edits);
+            assert_eq!(r.name_template, "{name}");
+        }
+        let x = export_request(vec![1], "d".into(), "xiaohongshu");
+        assert_eq!((x.aspect, x.long_edge), (Some([3, 4]), Some(1920)));
+        let i = export_request(vec![1], "d".into(), "instagram");
+        assert_eq!((i.aspect, i.long_edge), (Some([4, 5]), Some(1350)));
+        let o = export_request(vec![1], "d".into(), "no-such-preset");
+        assert_eq!((o.long_edge, o.format), (None, ExportFormat::Original));
     }
 }
