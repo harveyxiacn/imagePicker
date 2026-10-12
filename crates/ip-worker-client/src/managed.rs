@@ -422,6 +422,12 @@ impl ManagedWorker {
         progress: Option<ProgressTx>,
         cancel: Option<&CancelToken>,
     ) -> Result<Value> {
+        // requests without a token of their own follow the enclosing `CancelToken::scope`
+        let scoped = cancel.is_none().then(CancelToken::scoped).flatten();
+        let cancel = cancel.or(scoped.as_ref());
+        if cancel.is_some_and(CancelToken::is_cancelled) {
+            return Err(WorkerError::Cancelled);
+        }
         let client = self.client().await?;
         let _busy = Busy::new(&self.shared);
         let r = client.call(method, params, progress, cancel).await;

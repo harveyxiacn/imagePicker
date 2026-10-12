@@ -76,6 +76,10 @@ enum Command {
         /// Re-analyse photos that already have a result.
         #[arg(long)]
         force: bool,
+        /// Agree to face detection and recognition (stored like the app's consent dialog,
+        /// docs/02 §8). Without this or the app's consent no face is detected or recognised.
+        #[arg(long)]
+        face_consent: bool,
     },
     /// Render a photo (catalog id or image path) through an edit stack to a JPEG (debugging).
     Render {
@@ -797,6 +801,7 @@ async fn main() -> Result<()> {
             models_dir,
             allow_download,
             force,
+            face_consent,
         } => {
             init_tracing("warn");
             let profile = Profile::parse(&profile)
@@ -805,6 +810,19 @@ async fn main() -> Result<()> {
                 std::env::set_var("IMAGEPICKER_MODELS_DIR", d);
             }
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
+            if face_consent {
+                core.patch_settings(
+                    serde_json::json!({"faces": {"enabled": true, "consented": true}}),
+                )
+                .await
+                .context("store the face recognition consent")?;
+            }
+            if !core.settings().faces.allowed() {
+                eprintln!(
+                    "faces: not analysed (face recognition is off or not agreed to; agree in the app \
+                     or pass --face-consent)"
+                );
+            }
             let report = analyze_headless(&core, &target, profile, force, allow_download).await;
             core.worker.shutdown().await;
             let report = report?;
@@ -1231,6 +1249,7 @@ mod tests {
             force_cpu: true,
         })
         .unwrap();
+        ip_core::testutil::grant_face_consent(&core);
         let r = analyze_headless(
             &core,
             &src.path().to_string_lossy(),

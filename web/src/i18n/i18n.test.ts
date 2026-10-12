@@ -76,7 +76,11 @@ describe('i18n', () => {
       ['settings', ['hardware', 'analysis', 'faces', 'cache', 'render', 'lan', 'xmp', 'keys', 'appearance'].map((k) => `nav.${k}`)],
       ['settings', ['auto', 'hf', 'hf-mirror', 'modelscope'].map((k) => `models.source_${k}`)],
       ['settings', ['thumbs', 'previews', 'masks', 'edits', 'gen'].flatMap((k) => [`cache.kind_${k}`, `cache.kind_${k}_hint`])],
-      ['settings', ['off', 'sidecar', 'sidecar_and_embedded'].flatMap((k) => [`xmp.mode_${k}`, `xmp.mode_${k}_desc`])],
+      ['settings', ['off', 'sidecar', 'modify_originals'].flatMap((k) => [`xmp.mode_${k}`, `xmp.mode_${k}_desc`])],
+      ['settings', ['catalog'].map((k) => `nav.${k}`)],
+      ['catalog', ['auto', 'replaced', 'corrupt'].map((k) => `kind_${k}`)],
+      ['catalog', ['checking', 'ok', 'damaged', 'recovery'].map((k) => `state_${k}`)],
+      ['faceConsent', ['purpose', 'local', 'off', 'wipe'].map((k) => `point_${k}`)],
       ['settings', ['loose', 'normal', 'strict'].map((k) => `analysis.strictness_${k}`)],
       ['settings', ['auto', 'rules', 'llm'].map((k) => `assistant.engine_${k}`)],
       ['settings', ['auto', 'gpu', 'cpu'].map((k) => `render.backend_${k}`)],
@@ -91,6 +95,11 @@ describe('i18n', () => {
       ['remote', ['invalid_code', 'pair_expired', 'host_unreachable', 'rate_limited', 'bad_qr'].map((k) => `err_${k}`)],
       ['remote', ['required', 'invalid'].flatMap((k) => [`url_${k}`, `code_${k}`])],
       ['remote', ['connected', 'offline', 'unpaired'].map((k) => `state_${k}`)],
+      ['tasks', ['besttake', 'inpaint', 'enhance', 'export', 'analysis'].map((k) => `kind_${k}`)],
+      ['tasks', ['running', 'cancelling', 'done', 'failed', 'cancelled', 'interrupted'].map((k) => `status_${k}`)],
+      ['tasks', ['denoise', 'face_restore'].map((k) => `op_${k}`)],
+      ['tasks', ['photo', 'photoOp', 'export', 'session'].map((k) => `detail_${k}`)],
+      ['settings', ['tasks'].map((k) => `nav.${k}`)],
     ]
     for (const [ns, keys] of families) for (const k of keys) expect(zh.has(`${ns}.${k}`), `${ns}.${k}`).toBe(true)
   })

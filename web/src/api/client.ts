@@ -1,4 +1,6 @@
 import type {
+  CatalogBackup,
+  CatalogStatus,
   Device,
   AnalysisProfile,
   AnalysisStatus,
@@ -55,6 +57,7 @@ import type {
   RuntimeInfo,
   Settings,
   SettingsPatch,
+  TaskRecord,
 } from './types'
 
 export class ApiError extends Error {
@@ -177,6 +180,9 @@ export const api = {
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),
+  // ---- task history / cancel (M5 F) ----
+  tasks: (limit = 50) => request<{ tasks: TaskRecord[] }>('GET', `/tasks?limit=${limit}`),
+  cancelTask: (id: string) => request<{ task: TaskRecord }>('POST', `/tasks/${encodeURIComponent(id)}/cancel`),
   // ---- M7: AI runtime ----
   runtime: () => request<RuntimeInfo>('GET', '/runtime'),
   installRuntime: (extras?: string[]) => request<{ task_id: string }>('POST', '/runtime/install', extras ? { extras } : {}),
@@ -205,6 +211,9 @@ export const api = {
   mergePeople: (ids: number[], into: number) => request<{ person: Person }>('POST', '/people/merge', { ids, into }),
   setFacePerson: (id: number, person_id: number | null) =>
     request<{ face: Face }>('POST', `/faces/${id}/person`, { person_id }),
+  /** "This is a new person": the faces move to a new person (locked there). */
+  createPerson: (face_ids: number[], name?: string | null) =>
+    request<{ person: Person }>('POST', '/people', name ? { face_ids, name } : { face_ids }),
   // ---- M3 ----
   edits: (id: number) => request<EditsResponse>('GET', `/edits/${id}`),
   putEdits: (id: number, stack: EditStack) => request<EditsPutResponse>('PUT', `/edits/${id}`, { stack }),
@@ -270,6 +279,10 @@ export const api = {
   setPassword: (password: string, guest_password?: string) =>
     request<{ ok: boolean }>('POST', '/auth/password', guest_password === undefined ? { password } : { password, guest_password }),
   xmpSync: (session_id: number, direction: 'read' | 'write') => request<{ updated?: number }>('POST', '/xmp/sync', { session_id, direction }),
+  // data safety: catalog integrity + backups
+  catalog: () => request<CatalogStatus>('GET', '/catalog'),
+  catalogBackup: () => request<CatalogBackup>('POST', '/catalog/backup'),
+  catalogRestore: (name: string) => request<CatalogStatus>('POST', '/catalog/restore', { name }),
   // remote AI (M8): phone side
   remoteStatus: () => request<RemoteStatus>('GET', '/remote/status'),
   remoteConnect: (body: RemoteConnectBody) => request<RemoteStatus>('POST', '/remote/connect', body),

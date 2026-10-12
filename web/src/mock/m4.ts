@@ -4,7 +4,7 @@
  * `collections.updated` events.
  */
 import { delay, http, HttpResponse } from 'msw'
-import type { BeautyProfile, Collection, FaceSearchResponse, Taste, TasteTrait } from '@/api/types'
+import type { BeautyProfile, Collection, Face, FaceSearchResponse, FaceSearchSimilarFace, Taste, TasteTrait } from '@/api/types'
 import { applyProfile } from '@/lib/beauty'
 import { missingModelIds, mockPeopleOfPhoto, peopleListOf, sessionFaces } from './ai'
 import { isBeautyReady, markBeautyReady } from './beautyState'
@@ -74,7 +74,8 @@ export function recordTasteLabels(n: number): void {
 
 // ---------------------------------------------------------------- face search
 
-function searchResult(seed: number, faceIndex: number, nFaces: number, sessionId: number | null): FaceSearchResponse {
+/** `queryFace`: searching with a library face, whose person comes first and which is not among the similar faces. */
+function searchResult(seed: number, faceIndex: number, nFaces: number, sessionId: number | null, queryFace?: Face): FaceSearchResponse {
   const faces: FaceSearchResponse['faces_detected'] = Array.from({ length: nFaces }, (_, i) => [
     nFaces === 1 ? 0.34 : 0.1 + (0.8 / nFaces) * i + 0.02,
     0.2 + (i % 2) * 0.08,
@@ -82,8 +83,14 @@ function searchResult(seed: number, faceIndex: number, nFaces: number, sessionId
     0.34,
   ])
   const people = peopleListOf(sessionId).filter((p) => !p.hidden)
+  const own = queryFace?.person_id
+  if (own != null) {
+    // the query face's own person ranks first
+    const i = people.findIndex((p) => p.id === own)
+    if (i > 0) people.unshift(...people.splice(i, 1))
+  }
   const k = people.length
-  const start = k ? (seed + faceIndex * 3) % k : 0
+  const start = k && own == null ? (seed + faceIndex * 3) % k : 0
   const picked = Array.from({ length: Math.min(4, k) }, (_, i) => people[(start + i) % k])
   const candidates = picked.map((p, i) => ({
     person_id: p.id,
@@ -91,12 +98,14 @@ function searchResult(seed: number, faceIndex: number, nFaces: number, sessionId
     similarity: Math.round((0.93 - i * 0.14 - ((seed >> i) % 5) * 0.01) * 100) / 100,
   }))
   const top = candidates[0]
-  const similar = top
-    ? sessionFaces(sessionId ?? 1)
-        .filter((f) => f.person_id === top.person_id)
-        .slice(0, 8)
-        .map((f, i) => ({ face_id: f.id, photo_id: f.photo_id, similarity: Math.round((top.similarity - i * 0.02) * 100) / 100 }))
-    : []
+  // the top person's faces, then a couple of look-alikes below the preselection threshold
+  const all = sessionFaces(sessionId ?? 1).filter((f) => f.id !== queryFace?.id)
+  const near = (personId: number | undefined, n: number, from: number, step: number): FaceSearchSimilarFace[] =>
+    all
+      .filter((f) => personId !== undefined && f.person_id === personId)
+      .slice(0, n)
+      .map((f, i) => ({ face_id: f.id, photo_id: f.photo_id, person_id: f.person_id, person_name: f.person_name, similarity: Math.round((from - i * step) * 100) / 100 }))
+  const similar = top ? [...near(top.person_id, 7, top.similarity, 0.02), ...near(candidates[1]?.person_id, 2, 0.42, 0.04)] : []
   return { faces_detected: faces, query_face: faceIndex, candidates, similar_faces: similar }
 }
 
@@ -181,7 +190,9 @@ export const m4Handlers = [
     }
     const body = (await request.json()) as { face_id?: number; session_id?: number }
     if (body.face_id === undefined) return err(400, 'bad_request', 'image or face_id required')
-    return HttpResponse.json(searchResult(body.face_id, 0, 1, body.session_id ?? null))
+    const face = sessionFaces(body.session_id ?? 1).find((f) => f.id === body.face_id)
+    if (!face) return err(404, 'not_found', 'face not found')
+    return HttpResponse.json(searchResult(body.face_id, 0, 1, body.session_id ?? null, face))
   }),
 
   http.get('/api/people/:id/beauty-profile', async ({ params }) => {

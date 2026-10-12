@@ -13,6 +13,7 @@ import { clampRadius, MAX_RADIUS, MIN_RADIUS, strokesBody } from '@/lib/strokes'
 import { useEdit } from '@/stores/edit'
 import { useGen } from '@/stores/gen'
 import { useRepair } from '@/stores/repair'
+import { GenTasks } from '../GenTasks'
 import { Section } from './Section'
 import { Slider } from './Slider'
 
@@ -87,6 +88,7 @@ export function RepairPanel({ photo }: { photo: Photo }) {
   return (
     <Section id="repair" icon={<Eraser size={13} />} title={t('repair.title')}>
       <div className="flex flex-col gap-2.5" data-testid="repair-panel">
+        <GenTasks photoId={photo.id} className="flex-wrap text-xs" />
         <button
           type="button"
           className="btn w-full justify-start"

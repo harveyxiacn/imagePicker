@@ -319,6 +319,7 @@ fn load_samples(conn: &Connection, ids: &[i64]) -> Result<Vec<Sample>> {
                         crushed_shadows: r.get(8)?,
                         mean_luminance: r.get(9)?,
                         faces: Vec::new(),
+                        ..Default::default()
                     },
                     emb: r
                         .get::<_, Option<Vec<u8>>>(10)?

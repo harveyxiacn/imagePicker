@@ -19,6 +19,18 @@ live in [`REPORT.md`](REPORT.md); raw numbers in `results/*.json`.
 | `bench/api-features.py` | Drives the AI features of a running `imagepicker serve` end to end (masks, best take, inpaint, denoise, face restore, upscale on export, portrait retouch, assistant plan / execute / undo, describe, face search, XMP round trip) and saves before / after images with numeric checks. |
 | `bench/worker-rpc.py`, `bench/besttake-align.py` | Call the AI worker's JSON-RPC methods directly (`system.info`, `models.ensure`, ...); global-alignment statistics of the library's bursts as Best Take computes them (`--legacy` = the pre-2026-10-09 exclusion zone). |
 
+## Analysis quality (synthetic photo library)
+
+These score the analysis itself rather than speed; inputs are the generated photo library in
+`bench/data/qwen-photo-library` (git-ignored) and catalogs written by
+`imagepicker analyze <dir> --profile lite --data-dir <data dir>`.
+
+| Piece | What it does |
+|---|---|
+| `bench/eval-library.py LIBRARY DATA_DIR` | Issue-tag precision / recall against the manifest tags, burst grouping, metric distributions, star histogram. |
+| `bench/make-tilt-set.py [LIBRARY] [OUT]` | Rotates 247 library photos by 0, +-1, +-2, +-3, +-5, +-8 degrees (border-free centre crop) into `bench/data/tilt-set` with the true angles in its manifest (Pillow). |
+| `bench/eval-tilt.py TILT_SET DATA_DIR [--library LIBRARY DATA_DIR]` | Tilt estimate error, `tilted` flag precision / recall per angle, false positives on the 0-degree copies and the library, and a threshold sweep (docs/03 section 3.1.1). |
+
 ## Reproduce
 
 ```sh

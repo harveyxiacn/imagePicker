@@ -21,7 +21,7 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-ISSUE_BITS = {"closed_eyes": 1, "blurry": 2, "overexposed": 4, "underexposed": 8, "noisy": 64}
+ISSUE_BITS = {"closed_eyes": 1, "blurry": 2, "overexposed": 4, "underexposed": 8, "tilted": 16, "noisy": 64}
 # manifest tag(s) that mean "this photo should carry the issue"
 TRUTH = {
     # burst variants generated with someone's eyes closed (needs the faces step: fast / standard;
@@ -33,6 +33,9 @@ TRUTH = {
     # camera shake / heavy defocus in the defect set, and the motion-blurred burst variants (only
     # blurrier than their own base frame; also scored separately below)
     "blurry": lambda t, ph: "blur" in t and ph in ("defects", "bursts"),
+    # the three harbours prompted with a horizon tilted about 8 degrees; the other photos are
+    # meant to be level, but some are not (see bench/eval-tilt.py for the rotated tilt set)
+    "tilted": lambda t, ph: "tilted" in t,
 }
 METRICS = ["sharpness", "exposure", "noise", "mean_luminance", "clipped_highlights", "crushed_shadows"]
 
