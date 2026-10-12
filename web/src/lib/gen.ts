@@ -19,6 +19,7 @@ import { fetchStack, flushSaves, saveNow } from './editActions'
 import { useHistory } from './history'
 import { missingModelsOf } from './analysis'
 import { mergePatches } from './patches'
+import { CANCELLED, cancelTask } from './tasks'
 
 export const GEN_TIMEOUT_MS = 180_000
 
@@ -148,7 +149,8 @@ export async function finalizeGen(qc: QueryClient, taskId: string, ok: boolean, 
   if (wd) clearTimeout(wd)
   watchdogs.delete(taskId)
   earlyTerminal.delete(taskId)
-  if (!ok) toast('error', `${task.label}: ${reason ?? tr('gen.failed')}`)
+  if (!ok && reason === CANCELLED) toast('info', tr('gen.cancelledToast', { label: task.label }), 3000)
+  else if (!ok) toast('error', `${task.label}: ${reason ?? tr('gen.failed')}`)
   const photoId = resultPhotoId ?? task.photoId
   try {
     const server = await fetchStack(qc, photoId)
@@ -174,11 +176,12 @@ export async function finalizeGen(qc: QueryClient, taskId: string, ok: boolean, 
 export function genOnTask(qc: QueryClient, e: TaskEvent): void {
   if (!isGenKind(e.kind)) return
   const st = useGen.getState()
+  const reason = e.state === 'cancelled' ? CANCELLED : (e.error ?? null)
   if (st.tasks[e.task_id]) {
     st.progress(e.task_id, e.done, e.total)
-    if (e.state !== 'running') void finalizeGen(qc, e.task_id, e.state === 'done', e.error ?? null)
+    if (e.state !== 'running') void finalizeGen(qc, e.task_id, e.state === 'done', reason)
   } else if (e.state !== 'running') {
-    earlyTerminal.set(e.task_id, { ok: e.state === 'done', reason: e.error ?? null, at: Date.now() })
+    earlyTerminal.set(e.task_id, { ok: e.state === 'done', reason, at: Date.now() })
     if (earlyTerminal.size > 50) earlyTerminal.delete(earlyTerminal.keys().next().value as string)
   }
 }
@@ -191,15 +194,20 @@ export function genOnDone(qc: QueryClient, ev: DoneEvent): void {
   let ok: boolean
   let reason: string | null
   let kind: GenKind
+  let cancelled = false
   if (ev.type === 'besttake.done') {
     kind = 'besttake'
-    st.setResults(ev.photo_id, ev.results)
+    // a cancelled task reports `cancelled` for every choice: no per-person outcome to show
+    cancelled = ev.results.length > 0 && ev.results.every((r) => r.reason === CANCELLED)
     const failed = ev.results.filter((r) => !r.ok)
     ok = failed.length === 0
-    reason = failed[0]?.reason ?? null
-    if (!ok) toast('error', tr('besttake.failedFor', { n: failed.length, reason: reason ? tr(`besttake.reason_${reason}`, { defaultValue: reason }) : tr('gen.failed') }))
-    const warned = ev.results.filter((r) => r.ok && r.warnings.length > 0).length
-    if (warned > 0) toast('info', tr('besttake.warnedToast', { n: warned }), 4500)
+    reason = cancelled ? CANCELLED : (failed[0]?.reason ?? null)
+    if (!cancelled) {
+      st.setResults(ev.photo_id, ev.results)
+      if (!ok) toast('error', tr('besttake.failedFor', { n: failed.length, reason: reason ? tr(`besttake.reason_${reason}`, { defaultValue: reason }) : tr('gen.failed') }))
+      const warned = ev.results.filter((r) => r.ok && r.warnings.length > 0).length
+      if (warned > 0) toast('info', tr('besttake.warnedToast', { n: warned }), 4500)
+    }
   } else {
     kind = ev.type === 'inpaint.done' ? 'inpaint' : 'enhance'
     ok = ev.ok
@@ -208,7 +216,21 @@ export function genOnDone(qc: QueryClient, ev: DoneEvent): void {
   const task = Object.values(st.tasks).find(
     (t) => t.kind === kind && (t.photoId === ev.photo_id || (t.kind === 'besttake' && t.snapshots !== undefined && ev.photo_id in t.snapshots)),
   )
-  if (task) void finalizeGen(qc, task.taskId, kind === 'besttake' ? true : ok, kind === 'besttake' ? null : reason, ev.photo_id)
+  if (task) void finalizeGen(qc, task.taskId, kind === 'besttake' ? !cancelled : ok, kind === 'besttake' && !cancelled ? null : reason, ev.photo_id)
   else earlyDone.set(`${kind}:${ev.photo_id}`, { photoId: ev.photo_id, ok, reason, at: Date.now() })
   void qc.invalidateQueries({ queryKey: qk.editsAll })
+}
+
+// ---------------------------------------------------------------- cancel
+
+/**
+ * Stop a running generative task (`POST /api/tasks/{id}/cancel`). The task stays listed as "cancelling" until the
+ * server reports `cancelled` (nothing is written into the stack then); when it already finished, its normal result wins.
+ */
+export async function cancelGen(qc: QueryClient, taskId: string): Promise<void> {
+  const st = useGen.getState()
+  if (!st.tasks[taskId] || st.tasks[taskId].cancelling) return
+  st.setCancelling(taskId, true)
+  // refused (already over, or the request failed): let the user try again while it is still listed
+  if (!(await cancelTask(qc, taskId))) useGen.getState().setCancelling(taskId, false)
 }

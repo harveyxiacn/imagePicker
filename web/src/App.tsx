@@ -13,6 +13,8 @@ import { handleXmpConflict } from '@/lib/xmp'
 import { Login } from '@/pages/Login'
 import { Settings } from '@/pages/Settings'
 import { BottomNav } from '@/components/mobile/BottomNav'
+import { CatalogRecovery } from '@/components/CatalogRecovery'
+import { FaceConsentDialog } from '@/components/FaceConsentDialog'
 import { Onboarding } from '@/components/Onboarding'
 import { useAssistant } from '@/stores/assistant'
 import { genOnDone, genOnTask } from '@/lib/gen'
@@ -110,6 +112,8 @@ function Shell() {
           if (t.kind === 'assistant') useAssistant.getState().dispatch({ type: 'progress', taskId: t.task_id, done: t.done, total: t.total })
           else useToasts.getState().updateTask(t)
           genOnTask(queryClient, t)
+          // the task history (settings) shows the final record
+          if (t.state !== 'running') void queryClient.invalidateQueries({ queryKey: qk.tasks })
         },
         onAssistant: (e) => void onAssistantDone(queryClient, e),
         onXmpConflict: (e) => handleXmpConflict(queryClient, e),
@@ -137,6 +141,8 @@ function Shell() {
         {isMobile && showsBottomNav(pathname) && <BottomNav />}
       </div>
       <Onboarding />
+      <FaceConsentDialog />
+      <CatalogRecovery />
       <Toasts />
     </>
   )

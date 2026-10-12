@@ -591,7 +591,7 @@ fn within_plan(step: &PlanStep, n: usize) -> Result<()> {
     Ok(())
 }
 
-/// Waits until `task_id` reports `done` / `failed` (progress events of one task).
+/// Waits until `task_id` reports `done` / `failed` / `cancelled` (progress events of one task).
 async fn wait_task(rx: &mut tokio::sync::broadcast::Receiver<Event>, task_id: &str) -> Result<()> {
     let wait = async {
         loop {
@@ -601,14 +601,14 @@ async fn wait_task(rx: &mut tokio::sync::broadcast::Receiver<Event>, task_id: &s
                     state,
                     error,
                     ..
-                }) if t == task_id && (state == "done" || state == "failed") => {
-                    return if state == "done" {
-                        Ok(())
-                    } else {
-                        Err(CoreError::Internal(anyhow::anyhow!(
+                }) if t == task_id && state != "running" => {
+                    return match state.as_str() {
+                        "done" => Ok(()),
+                        "cancelled" => Err(CoreError::Conflict(format!("task {t} was cancelled"))),
+                        _ => Err(CoreError::Internal(anyhow::anyhow!(
                             "task {t} failed: {}",
                             error.unwrap_or_default()
-                        )))
+                        ))),
                     }
                 }
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}

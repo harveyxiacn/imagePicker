@@ -108,6 +108,9 @@ export const ZoomPane = memo(function ZoomPane({ photo, view, onViewChange, hold
 
   const onPointerDown = (e: RPointerEvent) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return
+    // Portaled children of the overlay (face menu, its dialogs) bubble here through the React tree; capturing
+    // their pointer would swallow the click on the menu item.
+    if (!e.currentTarget.contains(e.target as Node)) return
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     const p = local(e)
     drag.current = { x: p.x, y: p.y, sx: p.x, sy: p.y, touch: e.pointerType !== 'mouse' }
@@ -139,6 +142,7 @@ export const ZoomPane = memo(function ZoomPane({ photo, view, onViewChange, hold
     }
   }
   const onDouble = (e: React.MouseEvent) => {
+    if (!e.currentTarget.contains(e.target as Node)) return
     const p = local(e)
     onViewChange(toggleFit100(clampView(view, size, img), size, img, p.x, p.y))
   }

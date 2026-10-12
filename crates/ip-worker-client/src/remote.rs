@@ -498,6 +498,9 @@ impl RemoteWorker {
         out_dir: Option<&Path>,
         cancel: Option<&CancelToken>,
     ) -> Result<Value> {
+        // requests without a token of their own follow the enclosing `CancelToken::scope`
+        let scoped = cancel.is_none().then(CancelToken::scoped).flatten();
+        let cancel = cancel.or(scoped.as_ref());
         let fut = self.rpc_inner(method, params, uploads, out_dir);
         let r = match cancel {
             Some(c) => tokio::select! {

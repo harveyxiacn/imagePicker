@@ -162,7 +162,29 @@ export interface FsList {
 
 // ---- WebSocket events (server -> client) ----
 
-export type TaskState = 'running' | 'done' | 'failed'
+export type TaskState = 'running' | 'done' | 'failed' | 'cancelled'
+
+// ---- task history (GET /api/tasks, docs/api-contract-m5.md F) ----
+
+/** `cancelling` = cancel requested, still winding down; `interrupted` = the app exited while it ran. */
+export type TaskStatus = TaskState | 'cancelling' | 'interrupted'
+
+export interface TaskRecord {
+  id: string
+  /** besttake | inpaint | enhance | export | analysis */
+  kind: string
+  status: TaskStatus
+  /** what was asked, per kind (photo_id, op, count, dest, session_id, ...) */
+  params: Record<string, unknown> | null
+  done: number
+  total: number
+  error: string | null
+  created_at: number
+  updated_at: number
+  finished_at: number | null
+  /** POST /api/tasks/{id}/cancel would stop it */
+  cancellable: boolean
+}
 
 export interface PhotoUpdateItem {
   id: number
@@ -548,13 +570,21 @@ export interface FaceSearchCandidate {
   person_name: string | null
   similarity: number
 }
+export interface FaceSearchSimilarFace {
+  face_id: number
+  photo_id: number
+  /** the person the face belongs to now (null = unassigned) */
+  person_id: number | null
+  person_name: string | null
+  similarity: number
+}
 export interface FaceSearchResponse {
   /** normalised [x, y, w, h] of every face found in the query image */
   faces_detected: [number, number, number, number][]
   /** index into `faces_detected` the candidates belong to */
   query_face: number
   candidates: FaceSearchCandidate[]
-  similar_faces: { face_id: number; photo_id: number; similarity: number }[]
+  similar_faces: FaceSearchSimilarFace[]
 }
 
 export interface Collection {
@@ -828,7 +858,8 @@ export interface EditSuggestion {
   reason: string
 }
 
-export type XmpMode = 'off' | 'sidecar' | 'sidecar_and_embedded'
+/** `modify_originals` = sidecar + the XMP inside original JPEGs (the only mode that rewrites originals). */
+export type XmpMode = 'off' | 'sidecar' | 'modify_originals'
 export type ModelSource = 'auto' | 'hf' | 'hf-mirror' | 'modelscope'
 export type GroupStrictness = 'loose' | 'normal' | 'strict'
 export type RenderBackend = 'auto' | 'gpu' | 'cpu'
@@ -837,7 +868,8 @@ export interface Settings {
   language: 'zh-CN' | 'en'
   theme: 'dark' | 'light' | 'system'
   analysis: { default_profile: AnalysisProfile; auto_analyze_on_import: boolean; group_strictness: GroupStrictness }
-  faces: { enabled: boolean }
+  /** `consented`: the purpose explanation was accepted; no face is detected or recognised before that. */
+  faces: { enabled: boolean; consented: boolean }
   privacy: { allow_network: boolean }
   models: { dir: string; source: ModelSource }
   cache: { max_gb: number }
@@ -851,6 +883,34 @@ export interface Settings {
 /** Recursive partial used for `PATCH /api/settings`. */
 export type SettingsPatch = {
   [K in keyof Settings]?: Settings[K] extends unknown[] ? Settings[K] : Settings[K] extends object ? Partial<Settings[K]> : Settings[K]
+} & {
+  /** Confirms switching `xmp_mode` to `modify_originals` (required by the server; never stored). */
+  confirm_modify_originals?: boolean
+}
+
+// ---- data safety: catalog integrity + backups (GET /api/catalog) ----
+
+export type CatalogState = 'checking' | 'ok' | 'damaged' | 'recovery'
+
+export interface CatalogBackup {
+  name: string
+  /** auto = daily / "back up now"; replaced = the catalog a restore replaced; corrupt = an unreadable catalog moved aside */
+  kind: 'auto' | 'replaced' | 'corrupt'
+  /** ms */
+  created_at: number
+  bytes: number
+}
+
+export interface CatalogStatus {
+  state: CatalogState
+  problems: string[]
+  moved_to: string | null
+  checked_at: number | null
+  restored_from: string | null
+  last_backup_at: number | null
+  backup_dir: string
+  /** newest first */
+  backups: CatalogBackup[]
 }
 
 export type CacheKind = 'thumbs' | 'previews' | 'masks' | 'edits' | 'gen'
