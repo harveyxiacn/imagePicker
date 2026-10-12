@@ -52,6 +52,9 @@ struct Loaded {
     format: ImageFormat,
     cat: CatalogValues,
     recorded_mtime: Option<i64>,
+    /// A RAW paired with a JPEG: it keeps its own `<file>.<ext>.xmp` sidecar (the `<stem>.xmp`
+    /// name belongs to the JPEG).
+    companion: bool,
 }
 
 fn mtime_ms(p: &Path) -> Option<i64> {
@@ -70,7 +73,7 @@ fn load(conn: &Connection, ids: &[i64]) -> Result<Vec<Loaded>> {
         let ph = vec!["?"; chunk.len()].join(",");
         let mut st = conn.prepare(&format!(
             "SELECT p.id, r.path, p.rel_path, COALESCE(p.format,''), p.user_rating, COALESCE(p.flag,0),
-                    p.color_label, s.sidecar_mtime
+                    p.color_label, s.sidecar_mtime, p.pair_id IS NOT NULL
              FROM photo p JOIN root_folder r ON r.id=p.root_id
              LEFT JOIN xmp_state s ON s.photo_id=p.id
              WHERE p.id IN ({ph}) ORDER BY p.id"
@@ -86,10 +89,11 @@ fn load(conn: &Connection, ids: &[i64]) -> Result<Vec<Loaded>> {
                     r.get::<_, i64>(5)?,
                     r.get::<_, Option<String>>(6)?,
                     r.get::<_, Option<i64>>(7)?,
+                    r.get::<_, i64>(8)? != 0,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        for (id, root, rel, fmt, rating, flag, label, mtime) in rows {
+        for (id, root, rel, fmt, rating, flag, label, mtime, companion) in rows {
             let tags = tags_of(conn, id)?;
             out.push(Loaded {
                 id,
@@ -102,6 +106,7 @@ fn load(conn: &Connection, ids: &[i64]) -> Result<Vec<Loaded>> {
                     tags,
                 },
                 recorded_mtime: mtime,
+                companion,
             });
         }
     }
@@ -333,10 +338,15 @@ fn write_embedded(path: &Path, cat: &CatalogValues) -> std::result::Result<bool,
 }
 
 fn write_one(l: &Loaded, embedded: bool, force: bool) -> Outcome {
-    let existing = find_sidecar(&l.path);
+    let cands = sidecar_candidates(&l.path);
+    let existing = if l.companion {
+        Some(cands[1].clone()).filter(|p| p.is_file())
+    } else {
+        find_sidecar(&l.path)
+    };
     let target = existing
         .clone()
-        .unwrap_or_else(|| sidecar_candidates(&l.path)[0].clone());
+        .unwrap_or_else(|| cands[usize::from(l.companion)].clone());
     let mut text = None;
     if let Some(sc) = &existing {
         let m = mtime_ms(sc).unwrap_or(0);

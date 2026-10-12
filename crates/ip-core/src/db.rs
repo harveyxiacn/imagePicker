@@ -239,6 +239,14 @@ ALTER TABLE task ADD COLUMN total INTEGER;
 ALTER TABLE task ADD COLUMN finished_at INTEGER;
 CREATE INDEX idx_task_created ON task(created_at);
 "#,
+    // v12: files (docs/api-contract-m1.md "RAW+JPEG 与文件"): `photo.pair_id` (present since v1,
+    // unused until now) points a RAW companion at the JPEG/HEIF shown in the grid; the import
+    // options of a session are kept so rescans (file watching) apply the same exclusions.
+    r#"
+CREATE INDEX idx_photo_pair ON photo(pair_id);
+ALTER TABLE session ADD COLUMN recursive INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE session ADD COLUMN exclude TEXT;
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.

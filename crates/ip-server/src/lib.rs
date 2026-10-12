@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod error;
+pub mod files;
 pub mod fs;
 pub mod m2;
 pub mod m3;
@@ -131,6 +132,9 @@ pub fn build_router_auth(
             get(routes::get_session).delete(routes::delete_session),
         )
         .route("/sessions/{id}/devices", get(routes::session_devices))
+        .route("/sessions/{id}/rescan", post(files::rescan))
+        .route("/sessions/{id}/relocate", post(files::relocate))
+        .route("/photos/reject-files", post(files::reject_files))
         .route(
             "/photos",
             get(routes::list_photos).patch(routes::patch_photos),
@@ -339,6 +343,8 @@ pub fn serve_listener_with(
 /// background. The returned `addr` is the actual bound address.
 pub async fn spawn(config: ServerConfig) -> anyhow::Result<RunningServer> {
     let core = Core::open(CoreConfig::new(config.data_dir.clone())).context("open catalog")?;
+    // files added to / removed from imported folders show up without a re-import
+    core.start_watching();
     spawn_with_core(core, &config).await
 }
 

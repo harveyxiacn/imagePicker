@@ -210,6 +210,11 @@ pub fn delete_session(conn: &mut Connection, id: i64) -> Result<Vec<String>> {
     tx.execute("DELETE FROM session WHERE id=?1", [id])?; // cascades session_photo
     for chunk in orphans.chunks(500) {
         let ph = vec!["?"; chunk.len()].join(",");
+        // RAW companions belong to no session; they go with their JPEG
+        tx.execute(
+            &format!("DELETE FROM photo WHERE pair_id IN ({ph})"),
+            params_from_iter(chunk.iter().map(|(i, _)| *i)),
+        )?;
         tx.execute(
             &format!("DELETE FROM photo WHERE id IN ({ph})"),
             params_from_iter(chunk.iter().map(|(i, _)| *i)),
@@ -236,6 +241,9 @@ pub struct NewPhoto {
     pub mtime_ms: i64,
     pub fast_key: String,
     pub format: ImageFormat,
+    /// A RAW next to a same-named JPEG: stored, but not a member of the session (see
+    /// `files::pair_root`).
+    pub companion: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -287,11 +295,13 @@ pub fn insert_batch(
                     })
                 },
             )?;
-            link.execute(params![session_id, ins_row.id])?;
+            if !p.companion {
+                link.execute(params![session_id, ins_row.id])?;
+            }
             out.push(ins_row);
         }
     }
-    if let Some(first) = out.first() {
+    if let Some((_, first)) = batch.iter().zip(&out).find(|(p, _)| !p.companion) {
         set_cover_if_missing(&tx, session_id, first.id)?;
     }
     tx.commit()?;
@@ -497,11 +507,11 @@ const PHOTO_COLS: &str = "p.id, r.path, p.rel_path, p.file_name, COALESCE(p.form
     p.ai_score, COALESCE(p.issues,0), p.rank_in_burst, (SELECT b.size FROM burst b WHERE b.id=p.burst_id), p.scene_type,
     p.face_count, p.subject_face_count, COALESCE(p.analysis_version,0),
     COALESCE(p.has_edits,0), p.edit_hash,
-    p.device_id, (SELECT d.kind FROM device d WHERE d.id=p.device_id)";
+    p.device_id, (SELECT d.kind FROM device d WHERE d.id=p.device_id), COALESCE(p.missing,0)";
 
 /// Number of columns in `PHOTO_COLS`; queries append the session id at this index and the
 /// sort key (for cursors) right after it. Update when adding columns.
-const PHOTO_COL_COUNT: usize = 35;
+const PHOTO_COL_COUNT: usize = 36;
 
 /// Column `PHOTO_COL_COUNT` (after PHOTO_COLS) is the session id.
 fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
@@ -545,7 +555,45 @@ fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
         device_kind: r.get::<_, Option<String>>(34)?.map(|k| {
             crate::device::DeviceKind::parse(&k).unwrap_or(crate::device::DeviceKind::Unknown)
         }),
+        missing: r.get::<_, i64>(35)? != 0,
+        companions: Vec::new(),
     })
+}
+
+/// Fills `companions` of the photos (RAW files paired with them).
+fn fill_companions(conn: &Connection, photos: &mut [Photo]) -> Result<()> {
+    let mut at: HashMap<i64, usize> = HashMap::new();
+    for (i, p) in photos.iter().enumerate() {
+        at.insert(p.id, i);
+    }
+    let ids: Vec<i64> = at.keys().copied().collect();
+    for chunk in ids.chunks(500) {
+        let ph = vec!["?"; chunk.len()].join(",");
+        let mut st = conn.prepare(&format!(
+            "SELECT pair_id, id, file_name, COALESCE(format,''), COALESCE(file_size,0), COALESCE(missing,0)
+             FROM photo WHERE pair_id IN ({ph}) ORDER BY id"
+        ))?;
+        let rows = st
+            .query_map(params_from_iter(chunk.iter()), |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    Companion {
+                        id: r.get(1)?,
+                        file_name: r.get(2)?,
+                        format: r.get(3)?,
+                        file_size: r.get(4)?,
+                        missing: r.get::<_, i64>(5)? != 0,
+                    },
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (primary, c) in rows {
+            if let Some(i) = at.get(&primary) {
+                photos[*i].companions.push(c);
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn get_photo(conn: &Connection, id: i64) -> Result<Photo> {
@@ -553,12 +601,14 @@ pub fn get_photo(conn: &Connection, id: i64) -> Result<Photo> {
         "SELECT {PHOTO_COLS}, (SELECT MIN(session_id) FROM session_photo WHERE photo_id=p.id)
          FROM photo p JOIN root_folder r ON r.id=p.root_id WHERE p.id=?1"
     );
-    conn.query_row(&sql, [id], photo_row).map_err(|e| match e {
+    let mut photo = conn.query_row(&sql, [id], photo_row).map_err(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => {
             CoreError::not_found(format!("photo {id} not found"))
         }
         e => e.into(),
-    })
+    })?;
+    fill_companions(conn, std::slice::from_mut(&mut photo))?;
+    Ok(photo)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -746,8 +796,10 @@ pub fn query_photos_cached(
             next_cursor = Some(hex_encode(&serde_json::to_vec(&cur)?));
         }
     }
+    let mut photos: Vec<Photo> = rows.into_iter().map(|(p, _)| p).collect();
+    fill_companions(conn, &mut photos)?;
     Ok(PhotosPage {
-        photos: rows.into_iter().map(|(p, _)| p).collect(),
+        photos,
         total,
         next_cursor,
     })
@@ -944,6 +996,14 @@ pub fn patch_photos(conn: &mut Connection, req: &PatchRequest) -> Result<Vec<Pho
         args.extend(chunk.iter().map(|i| Value::Integer(*i)));
         tx.execute(
             &format!("UPDATE photo SET {} WHERE id IN ({ph})", sets.join(",")),
+            params_from_iter(args.iter()),
+        )?;
+        // RAW companions follow their JPEG (rating, flag and colour label are one decision)
+        tx.execute(
+            &format!(
+                "UPDATE photo SET {} WHERE pair_id IN ({ph})",
+                sets.join(",")
+            ),
             params_from_iter(args.iter()),
         )?;
         let mut st = tx.prepare(&format!(

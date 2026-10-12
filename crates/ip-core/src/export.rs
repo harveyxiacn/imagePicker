@@ -449,6 +449,17 @@ impl Core {
         req: ExportRequest,
         fit: Option<(u32, u32)>,
     ) -> Result<String> {
+        self.export_with(req, fit, crate::model::PairMember::default())
+            .await
+    }
+
+    /// [`Core::export_fit`] choosing which file of a RAW+JPEG pair is written.
+    pub async fn export_with(
+        self: &Arc<Self>,
+        req: ExportRequest,
+        fit: Option<(u32, u32)>,
+        member: crate::model::PairMember,
+    ) -> Result<String> {
         let folders = req.folders.clone().filter(|f| !f.is_empty());
         match (&folders, req.ids.is_empty()) {
             (Some(_), false) => {
@@ -484,7 +495,13 @@ impl Core {
         match folders {
             None => {
                 let ids = req.ids.clone();
-                let refs = self.db.call(move |c| catalog::photo_refs(c, &ids)).await?;
+                let refs = self
+                    .db
+                    .call(move |c| {
+                        let ids = crate::files::export_members(c, &ids, member)?;
+                        catalog::photo_refs(c, &ids)
+                    })
+                    .await?;
                 groups.push((dest.clone(), refs));
             }
             Some(folders) => {
@@ -496,7 +513,13 @@ impl Core {
                         )));
                     }
                     let dir = dest.join(&clean);
-                    let refs = self.db.call(move |c| catalog::photo_refs(c, &ids)).await?;
+                    let refs = self
+                        .db
+                        .call(move |c| {
+                            let ids = crate::files::export_members(c, &ids, member)?;
+                            catalog::photo_refs(c, &ids)
+                        })
+                        .await?;
                     if refs.is_empty() {
                         continue;
                     }
