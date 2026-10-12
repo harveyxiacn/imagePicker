@@ -138,6 +138,7 @@ pub fn build_router_auth(
         .route("/photos/{id}", get(routes::get_photo))
         .route("/thumb/{id}", get(routes::thumb))
         .route("/preview/{id}", get(routes::preview))
+        .route("/full/{id}", get(routes::full))
         .route("/original/{id}", get(routes::original))
         .route("/viewport", post(routes::viewport))
         .route("/export", post(routes::export))

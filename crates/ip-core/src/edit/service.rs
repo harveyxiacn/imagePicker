@@ -24,7 +24,7 @@ use crate::catalog::PhotoRef;
 use crate::db::Db;
 use crate::error::{CoreError, Result};
 use crate::imaging::Imaging;
-use crate::thumbs::{PREVIEW_SIZES, THUMB_SIZES};
+use crate::thumbs::{FullCache, FULL_QUALITY, FULL_SIZE, PREVIEW_SIZES, THUMB_SIZES};
 
 /// Concurrent renders (each may use the GPU or all CPU cores; decoding is the other cost).
 pub const RENDER_CONCURRENCY: usize = 2;
@@ -363,6 +363,7 @@ pub struct RenderService {
     proxies: Mutex<ProxyCache>,
     thumbs: ThumbCache,
     previews: ThumbCache,
+    full: FullCache,
     inflight: Mutex<HashMap<(i64, String, u32), Cell>>,
     tmp_seq: AtomicU64,
     /// Number of renderer invocations (tests, diagnostics).
@@ -381,6 +382,8 @@ pub struct ServiceParts {
     pub beauty_dir: PathBuf,
     pub edited_thumbs_dir: PathBuf,
     pub edited_previews_dir: PathBuf,
+    /// Full-resolution images (shared with the originals' cache).
+    pub full_cache: FullCache,
     pub edits_dir: PathBuf,
 }
 
@@ -404,6 +407,7 @@ impl RenderService {
             proxies: Mutex::new(ProxyCache::default()),
             thumbs: ThumbCache::new(p.edited_thumbs_dir),
             previews: ThumbCache::new(p.edited_previews_dir),
+            full: p.full_cache,
             inflight: Mutex::new(HashMap::new()),
             tmp_seq: AtomicU64::new(0),
             renders: AtomicUsize::new(0),
@@ -433,9 +437,14 @@ impl RenderService {
         }
     }
 
-    /// Cache file of an edited image (`key` from [`super::edited_key`]).
+    /// Cache file of an edited image (`key` from [`super::edited_key`]); `size` may be
+    /// [`FULL_SIZE`].
     pub fn edited_path(&self, key: &str, size: u32) -> PathBuf {
-        self.cache_for(size).path_for(key, size)
+        if size == FULL_SIZE {
+            self.full.path_for(key)
+        } else {
+            self.cache_for(size).path_for(key, size)
+        }
     }
 
     /// Removes the cached edited images of one `(fast_key, hash)` (best effort).
@@ -443,6 +452,7 @@ impl RenderService {
         for s in THUMB_SIZES.iter().chain(PREVIEW_SIZES.iter()) {
             let _ = std::fs::remove_file(self.edited_path(key, *s));
         }
+        let _ = std::fs::remove_file(self.edited_path(key, FULL_SIZE));
     }
 
     // -------------------------------------------------------------- decoding
@@ -593,7 +603,8 @@ impl RenderService {
 
     // -------------------------------------------------------------- edited thumbnails
 
-    /// The cached rendered thumbnail/preview of an edited photo, rendering it on a miss.
+    /// The cached rendered thumbnail/preview of an edited photo, rendering it on a miss; `size`
+    /// [`FULL_SIZE`] renders at the photo's own resolution.
     /// `Ok(None)` = the photo has no (visible) edits or rendering failed: serve the original.
     pub async fn edited_image(self: &Arc<Self>, r: PhotoRef, size: u32) -> Result<Option<PathBuf>> {
         let id = r.id;
@@ -606,6 +617,10 @@ impl RenderService {
         let key = super::edited_key(&r.fast_key, &cur.hash);
         let path = self.edited_path(&key, size);
         if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+            if size == FULL_SIZE {
+                let p = path.clone();
+                drop(tokio::task::spawn_blocking(move || FullCache::touch(&p)));
+            }
             return Ok(Some(path));
         }
         let ck = (id, cur.hash.clone(), size);
@@ -623,15 +638,19 @@ impl RenderService {
                 async move {
                     let stack: EditStack = serde_json::from_value(cur.stack.clone())
                         .map_err(|e| format!("stored edit stack is invalid: {e}"))?;
+                    let long_edge = (size != FULL_SIZE).then_some(size);
                     let out = svc
-                        .render_async(r, stack, Some(size), MaskMode::CachedOnly)
+                        .render_async(r, stack, long_edge, MaskMode::CachedOnly)
                         .await
                         .map_err(|e| e.to_string())?;
-                    let quality = if size <= 512 {
+                    let quality = if size == FULL_SIZE {
+                        FULL_QUALITY
+                    } else if size <= 512 {
                         THUMB_QUALITY
                     } else {
                         PREVIEW_QUALITY
                     };
+                    let full = (size == FULL_SIZE).then(|| svc.full.clone());
                     let seq = svc.tmp_seq.fetch_add(1, Ordering::Relaxed);
                     let done_path = path.clone();
                     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
@@ -646,6 +665,9 @@ impl RenderService {
                             if !path.exists() {
                                 return Err(e.into());
                             }
+                        }
+                        if let Some(full) = full {
+                            full.trim(&path);
                         }
                         Ok(())
                     })

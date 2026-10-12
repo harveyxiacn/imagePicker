@@ -1,14 +1,16 @@
 //! Thumbnail scheduler: priority queue + worker pool for eager 256px grid thumbnails, and
-//! deduplicated on-demand generation for every size.
+//! deduplicated on-demand generation for every size, including the full-resolution image the
+//! loupe shows at 100% and above.
 
 use std::collections::{BinaryHeap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::SystemTime;
 
 use anyhow::Context;
 use ip_imaging::ThumbCache;
-use tokio::sync::{Notify, OnceCell};
+use tokio::sync::{Notify, OnceCell, Semaphore};
 
 use crate::catalog::{self, PhotoRef};
 use crate::db::Db;
@@ -22,6 +24,98 @@ pub const THUMB_SIZES: [u32; 2] = [256, 512];
 pub const PREVIEW_SIZES: [u32; 3] = [1024, 2048, 4096];
 const THUMB_QUALITY: u8 = 80;
 const PREVIEW_QUALITY: u8 = 88;
+/// Size key of the full-resolution image (`GET /api/full/{id}`): the photo's own pixel size.
+pub const FULL_SIZE: u32 = 0;
+/// Long edge asked of the decoder for it: the largest a JPEG can hold, so nothing is scaled down.
+pub const FULL_EDGE: u32 = u16::MAX as u32;
+/// JPEG quality of full-resolution images: they are looked at pixel by pixel.
+pub const FULL_QUALITY: u8 = 92;
+/// Bytes of full-resolution images kept on disk (about 80 photos of 24 MP); the least recently
+/// used go first. The global `cache.max_gb` limit applies on top.
+pub const FULL_CACHE_BUDGET: u64 = 1 << 30;
+/// Full-resolution decodes at once: each holds the whole decoded image in memory.
+const FULL_CONCURRENCY: usize = 2;
+
+/// On-disk cache of full-resolution images, `<root>/<k[0..2]>/<k[2..4]>/<key>_full.jpg`, kept
+/// within a byte budget by last use.
+#[derive(Debug, Clone)]
+pub struct FullCache {
+    root: PathBuf,
+    budget: u64,
+}
+
+impl FullCache {
+    pub fn new(root: impl Into<PathBuf>, budget: u64) -> Self {
+        Self {
+            root: root.into(),
+            budget,
+        }
+    }
+
+    pub fn path_for(&self, key: &str) -> PathBuf {
+        self.root
+            .join(&key[0..2])
+            .join(&key[2..4])
+            .join(format!("{key}_full.jpg"))
+    }
+
+    /// Marks a cached image as used now (file systems often do not update access times).
+    pub fn touch(path: &Path) {
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).open(path) {
+            let _ = f.set_modified(SystemTime::now());
+        }
+    }
+
+    /// Deletes the least recently used images until the cache fits its budget, never `keep`.
+    /// Returns the bytes freed.
+    pub fn trim(&self, keep: &Path) -> u64 {
+        let mut files: Vec<(SystemTime, u64, PathBuf)> = Vec::new();
+        for l1 in read_dirs(&self.root) {
+            for l2 in read_dirs(&l1) {
+                let Ok(rd) = std::fs::read_dir(&l2) else {
+                    continue;
+                };
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if !p.to_string_lossy().ends_with("_full.jpg") {
+                        continue;
+                    }
+                    if let Ok(md) = e.metadata() {
+                        let used = md.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                        files.push((used, md.len(), p));
+                    }
+                }
+            }
+        }
+        let mut total: u64 = files.iter().map(|f| f.1).sum();
+        if total <= self.budget {
+            return 0;
+        }
+        files.sort_by_key(|f| f.0);
+        let mut freed = 0;
+        for (_, size, p) in files {
+            if total <= self.budget {
+                break;
+            }
+            if p != keep && std::fs::remove_file(&p).is_ok() {
+                total -= size;
+                freed += size;
+            }
+        }
+        freed
+    }
+}
+
+fn read_dirs(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .map(|e| e.path())
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 /// Counts outstanding jobs of one import so it can await completion.
 pub struct Tracker {
@@ -92,7 +186,24 @@ struct Queue {
     seq: u64,
 }
 
-type Cell = Arc<OnceCell<std::result::Result<PathBuf, String>>>;
+/// Why an image could not be generated.
+#[derive(Debug, Clone)]
+enum GenError {
+    /// The original is there but cannot be decoded here (HTTP 415).
+    Decode(String),
+    Other(String),
+}
+
+impl From<GenError> for CoreError {
+    fn from(e: GenError) -> Self {
+        match e {
+            GenError::Decode(m) => CoreError::Unsupported(m),
+            GenError::Other(m) => CoreError::Internal(anyhow::anyhow!(m)),
+        }
+    }
+}
+
+type Cell = Arc<OnceCell<std::result::Result<PathBuf, GenError>>>;
 
 struct Inner {
     db: Db,
@@ -100,6 +211,8 @@ struct Inner {
     events: EventBus,
     thumbs: ThumbCache,
     previews: ThumbCache,
+    full: FullCache,
+    full_gate: Semaphore,
     queue: Mutex<Queue>,
     cv: Condvar,
     shutdown: AtomicBool,
@@ -119,7 +232,9 @@ impl Drop for Thumbs {
 }
 
 fn quality_for(size: u32) -> u8 {
-    if size <= 512 {
+    if size == FULL_SIZE {
+        FULL_QUALITY
+    } else if size <= 512 {
         THUMB_QUALITY
     } else {
         PREVIEW_QUALITY
@@ -133,6 +248,7 @@ impl Thumbs {
         events: EventBus,
         thumbs_dir: &Path,
         previews_dir: &Path,
+        full: FullCache,
         workers: usize,
     ) -> Self {
         let inner = Arc::new(Inner {
@@ -141,6 +257,8 @@ impl Thumbs {
             events,
             thumbs: ThumbCache::new(thumbs_dir),
             previews: ThumbCache::new(previews_dir),
+            full,
+            full_gate: Semaphore::new(FULL_CONCURRENCY),
             queue: Mutex::new(Queue::default()),
             cv: Condvar::new(),
             shutdown: AtomicBool::new(false),
@@ -221,7 +339,7 @@ impl Thumbs {
     }
 
     pub fn cache_path(&self, fast_key: &str, size: u32) -> PathBuf {
-        self.inner.cache_for(size).path_for(fast_key, size)
+        self.inner.path_for(fast_key, size)
     }
 
     /// Returns the cached file, generating it first if needed. Concurrent calls for the same
@@ -236,12 +354,23 @@ impl Thumbs {
     }
 
     /// Like [`Thumbs::ensure`] for the *original* image of an already loaded row.
+    /// `size` is a thumbnail or preview size, or [`FULL_SIZE`].
     pub async fn ensure_ref(&self, r: PhotoRef, size: u32) -> Result<PathBuf> {
         let inner = self.inner.clone();
         let id = r.id;
-        let path = inner.cache_for(size).path_for(&r.fast_key, size);
+        let path = inner.path_for(&r.fast_key, size);
         if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+            if size == FULL_SIZE {
+                let p = path.clone();
+                drop(tokio::task::spawn_blocking(move || FullCache::touch(&p)));
+            }
             return Ok(path);
+        }
+        if !tokio::fs::try_exists(&r.path).await.unwrap_or(false) {
+            return Err(CoreError::not_found(format!(
+                "original file is missing: {}",
+                r.path.display()
+            )));
         }
         let key = (id, size);
         let cell: Cell = inner
@@ -255,10 +384,18 @@ impl Thumbs {
             .get_or_init(|| {
                 let inner = inner.clone();
                 async move {
-                    tokio::task::spawn_blocking(move || inner.generate_and_record(&r, size))
+                    // full-resolution decodes are big: only a few at once
+                    let _permit = if size == FULL_SIZE {
+                        Some(inner.full_gate.acquire().await.map_err(|_| {
+                            GenError::Other("thumbnail service is shutting down".into())
+                        })?)
+                    } else {
+                        None
+                    };
+                    let task = inner.clone();
+                    tokio::task::spawn_blocking(move || task.generate_and_record(&r, size))
                         .await
-                        .map_err(|e| format!("thumbnail task failed: {e}"))?
-                        .map_err(|e| format!("{e:#}"))
+                        .map_err(|e| GenError::Other(format!("thumbnail task failed: {e}")))?
                 }
             })
             .await
@@ -269,7 +406,7 @@ impl Thumbs {
                 m.remove(&key);
             }
         }
-        res.map_err(|m| CoreError::Internal(anyhow::anyhow!(m)))
+        res.map_err(CoreError::from)
     }
 
     /// Deletes cached images of the given photos (best effort).
@@ -284,6 +421,7 @@ impl Thumbs {
             for s in PREVIEW_SIZES {
                 let _ = std::fs::remove_file(self.inner.previews.path_for(k, s));
             }
+            let _ = std::fs::remove_file(self.inner.full.path_for(k));
         }
     }
 }
@@ -294,6 +432,14 @@ impl Inner {
             &self.thumbs
         } else {
             &self.previews
+        }
+    }
+
+    fn path_for(&self, key: &str, size: u32) -> PathBuf {
+        if size == FULL_SIZE {
+            self.full.path_for(key)
+        } else {
+            self.cache_for(size).path_for(key, size)
         }
     }
 
@@ -335,32 +481,54 @@ impl Inner {
         if path.exists() {
             self.record(&r, GRID_SIZE)?;
         } else {
-            self.generate_and_record(&r, GRID_SIZE)?;
+            self.generate_and_record(&r, GRID_SIZE)
+                .map_err(|e| match e {
+                    GenError::Decode(m) | GenError::Other(m) => anyhow::anyhow!(m),
+                })?;
         }
         Ok(())
     }
 
-    fn generate_and_record(&self, r: &PhotoRef, size: u32) -> anyhow::Result<PathBuf> {
-        let path = self.cache_for(size).path_for(&r.fast_key, size);
+    fn generate_and_record(
+        &self,
+        r: &PhotoRef,
+        size: u32,
+    ) -> std::result::Result<PathBuf, GenError> {
+        let path = self.path_for(&r.fast_key, size);
+        let edge = if size == FULL_SIZE { FULL_EDGE } else { size };
         let img = self
             .imaging
-            .generate_thumbnail(&r.path, r.format, r.orientation, size, quality_for(size))
-            .with_context(|| format!("generate {size}px for {}", r.path.display()))?;
+            .generate_thumbnail(&r.path, r.format, r.orientation, edge, quality_for(size))
+            .with_context(|| match size {
+                FULL_SIZE => format!("decode {} at full resolution", r.path.display()),
+                _ => format!("generate {size}px for {}", r.path.display()),
+            })
+            .map_err(|e| GenError::Decode(format!("{e:#}")))?;
+        let other = |e: std::io::Error| GenError::Other(format!("cache write failed: {e}"));
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent).map_err(other)?;
         }
         let tmp = path.with_extension(format!(
             "tmp{}",
             self.tmp_seq.fetch_add(1, Ordering::Relaxed)
         ));
-        std::fs::write(&tmp, &img.bytes)?;
+        std::fs::write(&tmp, &img.bytes).map_err(other)?;
         if let Err(e) = std::fs::rename(&tmp, &path) {
             let _ = std::fs::remove_file(&tmp);
             if !path.exists() {
-                return Err(e.into());
+                return Err(other(e));
             }
         }
-        self.record(r, size)?;
+        if size == FULL_SIZE {
+            // not a thumbnail: no `thumb_state`; keep the cache within its budget instead
+            let freed = self.full.trim(&path);
+            if freed > 0 {
+                tracing::debug!(freed, "full-resolution cache trimmed");
+            }
+        } else {
+            self.record(r, size)
+                .map_err(|e| GenError::Other(format!("{e:#}")))?;
+        }
         Ok(path)
     }
 
@@ -414,5 +582,39 @@ mod tests {
         });
         let order: Vec<i64> = std::iter::from_fn(|| h.pop().map(|i| i.id)).collect();
         assert_eq!(order, vec![2, 1, 3, 1, 2, 3]);
+    }
+
+    #[test]
+    fn full_cache_trims_least_recently_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = FullCache::new(dir.path(), 250);
+        let t0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let keys = ["aa11", "aa22", "bb33", "cc44"];
+        let paths: Vec<PathBuf> = keys
+            .iter()
+            .enumerate()
+            .map(|(i, k)| {
+                let p = cache.path_for(k);
+                assert!(p.ends_with(format!("{}/{}/{k}_full.jpg", &k[0..2], &k[2..4])));
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                std::fs::write(&p, [0u8; 100]).unwrap();
+                let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+                f.set_modified(t0 + std::time::Duration::from_secs(i as u64 * 60))
+                    .unwrap();
+                p
+            })
+            .collect();
+        // a stray temporary file is not an image of the cache
+        std::fs::write(paths[0].with_extension("tmp7"), [0u8; 100]).unwrap();
+        // the oldest one was just looked at again
+        FullCache::touch(&paths[0]);
+        assert_eq!(cache.trim(&paths[3]), 200);
+        let left: Vec<bool> = paths.iter().map(|p| p.exists()).collect();
+        assert_eq!(left, vec![true, false, false, true]);
+        assert_eq!(cache.trim(&paths[3]), 0, "within the budget");
+        // `keep` survives even when it alone is over the budget
+        let tiny = FullCache::new(dir.path(), 10);
+        assert_eq!(tiny.trim(&paths[3]), 100);
+        assert!(paths[3].exists() && !paths[0].exists());
     }
 }
