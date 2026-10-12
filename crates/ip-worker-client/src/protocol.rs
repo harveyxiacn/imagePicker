@@ -64,6 +64,11 @@ pub struct QualityInfo {
     pub clipped_highlights: Option<f64>,
     pub crushed_shadows: Option<f64>,
     pub noise_sigma: Option<f64>,
+    /// Deviation of the dominant straight lines from level, degrees, > 0 = clockwise
+    /// (`steps/tilt.py`, `ip_lite::tilt`); absent from older workers.
+    pub tilt_deg: Option<f64>,
+    /// 0..1 confidence of `tilt_deg`.
+    pub tilt_confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

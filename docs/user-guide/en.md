@@ -258,7 +258,7 @@ After analysis every photo gets an AI suggested rating (0–5, half stars possib
 | Face | Eyes open, smile, looking at camera |
 | Composition | (not active yet, see below) |
 
-Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted (tilt detection is not implemented yet).
+Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted. *Tilted* means the horizon or the building verticals are 2–10° off level (the reason shows the angle, e.g. "Horizon is tilted by 3.5°"); it is only judged when the photo has clear straight lines, so many tilted photos without them are not tagged, and it never lowers the rating: fix it with *Crop & straighten* (`R`) in the editor.
 
 - Click *Accept* in the inspector, or press `A`, to write the AI rating into **your** rating; `Ctrl+Shift+A` accepts in bulk.
 - The *AI rating* filter filters by suggested stars.
@@ -301,8 +301,9 @@ After analysis, faces are clustered into **people** on your machine (AuraFace id
 
 - **Best per person**: switch to the *Best per person* view to see N best photos per person (1 / 3 / 5…).
 - **Export by person**: exports the selected people's photos into one folder per person.
-- **Search by face**: drop or paste (`Ctrl+V`) an external photo (JPG/PNG/WebP) to find the same person in your library; the image is processed locally only.
-- **On photos**: with face boxes on (`Shift+F`), click or right-click a face: filter photos with this person / exclude this person / name / "Not this person" (splits into a new person).
+- **Search by face**: drop or paste (`Ctrl+V`) an external photo (JPG/PNG/WebP) to find the same person in your library; the image is processed locally only. The results list likely people (click one to filter) and similar faces.
+- **This is a new person**: when the person is not among the matches, or the AI mixed two people up, tick their faces among the similar faces of the search results (close matches come pre-ticked; one face per photo) and click *This is a new person*, optionally with a name. The faces leave their old person and are locked to the new one, so re-analysing never moves them back.
+- **On photos**: with face boxes on (`Shift+F`), click or right-click a face: filter photos with this person / exclude this person / name / "Not this person" (splits into a new person) / "Find similar faces" (search with this face, then make the look-alikes a new person together).
 
 ### Person filter (`Shift+P`)
 
@@ -399,9 +400,9 @@ The **Repair** panel on the edit page:
 | **Denoise** | Set *Denoise strength* and run |
 | **Generated layers** | Each result is a layer you can hide / show / delete; stored in the edit stack |
 
-Generative tasks show progress and offer retry on failure. Upscaling is chosen at [export](#13-export--presets).
+Generative tasks show progress and a *Cancel* button (in the Repair panel, the library status bar and the best-take editor's footer); a cancelled task leaves the photo untouched and stops the AI work in progress. Failures offer a retry. Every generative task is listed under *Settings → Task history*. Upscaling is chosen at [export](#13-export--presets).
 
-> Known limitations: large removals (holes over 512 px) come out blurry or with ghosting; faces on statues or posters can be taken for bystanders, which is why you confirm before erasing; generative tasks cannot be cancelled yet.
+> Known limitations: large removals (holes over 512 px) come out blurry or with ghosting; faces on statues or posters can be taken for bystanders, which is why you confirm before erasing.
 
 ## 13. Export & presets
 
@@ -419,6 +420,8 @@ Press `Ctrl+E` (or *Export* in the top bar):
 | Naming template | `{name}` is the original file name; a live example is shown |
 | Upscale | Off / ×2 / ×4 (on CPU tiers each photo can take tens of seconds) |
 | Export into one folder per person | Used from the People page |
+
+While an export runs, its progress shows at the bottom right with a *Cancel* button: files already written stay, the remaining photos are skipped.
 
 Export includes all your edits, writes JPEG and carries the original's metadata over: EXIF (for RAW and TIFF files too; maker notes are not copied), XMP (rating, keywords, title, creator…; entries that only describe the original, such as its orientation or Lightroom/darktable develop settings, are left out) and IPTC. Photos with a wide-gamut colour profile (Display P3, Adobe RGB) are converted to sRGB, as are their thumbnails and previews, and every export embeds an sRGB ICC profile. The API option `strip_gps` removes the GPS position from both EXIF and XMP. Exporting at original size without edits copies the file unchanged.
 
@@ -539,6 +542,7 @@ Open with the gear icon on Home or in the top bar.
 | **Faces & privacy** | Face recognition switch, face recognition consent (show explanation / withdraw), clear all face data, allow network |
 | **Cache** | Usage per cache kind, clear, cache limit (default 20 GB; least recently used is evicted) |
 | **Catalog backups** | Integrity state, latest backup, *Back up now*, the backups with *Restore* (see section 16) |
+| **Task history** | Recent best take, removal, enhancement, export and analysis tasks with their outcome (the last 200 are kept); running ones can be cancelled; tasks still running when the app exited are marked *Interrupted*. *Tasks* in the library status bar opens it too |
 | **Rendering** | Render backend: Auto / GPU / CPU |
 | **LAN / WebUI** | See section 15; also *Allowed folders* (import, export and folder browsing are limited to these roots) |
 | **Interop (XMP)** | Off / Sidecar / Modify originals (confirmed twice), see section 17 |

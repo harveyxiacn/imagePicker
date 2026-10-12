@@ -157,7 +157,7 @@ pub fn build_router_auth(
         .route("/bursts/{id}/faces", get(m2::burst_faces))
         .route("/faces/{id}/crop", get(m2::face_crop))
         .route("/faces/{id}/person", post(m2::set_face_person))
-        .route("/people", get(m2::people))
+        .route("/people", get(m2::people).post(m2::create_person))
         .route("/people/merge", post(m2::merge_people))
         .route("/people/{id}", patch(m2::patch_person))
         .route(
@@ -199,6 +199,8 @@ pub fn build_router_auth(
         .route("/photos/{id}/inpaint", post(m5::inpaint))
         .route("/photos/{id}/enhance", post(m5::enhance))
         .route("/assets/{photo_id}/{asset}", get(m5::asset))
+        .route("/tasks", get(m5::tasks))
+        .route("/tasks/{id}/cancel", post(m5::cancel_task))
         .route("/taste", get(m4::taste))
         .route("/taste/reset", post(m4::taste_reset))
         .route("/assistant/status", get(m6::assistant_status))

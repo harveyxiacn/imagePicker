@@ -21,6 +21,7 @@ import { editHandlers, renderEdited } from './edits'
 import { m4Handlers, recordTasteLabels } from './m4'
 import { m5Handlers } from './m5'
 import { photoSvg } from './svg'
+import { endTask, isCancelled, taskHandlers, taskProgress, trackTask } from './tasks'
 
 const err = (status: number, code: string, message: string) =>
   HttpResponse.json({ error: { code, message } }, { status })
@@ -125,11 +126,20 @@ function finishThumbs(sessionId: number) {
 }
 
 let exportSeq = 0
-function simulateExport(total: number) {
+function simulateExport(total: number, params: Record<string, unknown>) {
   const task_id = `export-${++exportSeq}`
+  trackTask(task_id, 'export', params, total)
   let done = 0
   const tick = () => {
+    if (isCancelled(task_id)) {
+      // files written so far stay, the rest is skipped
+      endTask(task_id, 'cancelled')
+      emit({ type: 'task.progress', task_id, kind: 'export', done, total, state: 'cancelled' })
+      return
+    }
     done = Math.min(total, done + Math.max(1, Math.ceil(total / 12)))
+    taskProgress(task_id, done, total)
+    if (done >= total) endTask(task_id, 'done')
     emit({ type: 'task.progress', task_id, kind: 'export', done, total, state: done >= total ? 'done' : 'running' })
     if (done < total) setTimeout(tick, 250)
   }
@@ -147,6 +157,7 @@ export const handlers = [
   ...m6Handlers,
   ...m8Handlers,
   ...m5Handlers,
+  ...taskHandlers,
 
   http.get('/api/health', () => HttpResponse.json({ ok: true, version: '0.1.0-mock' })),
 
@@ -268,7 +279,7 @@ export const handlers = [
     }
     ;(globalThis as { __lastExport?: unknown }).__lastExport = body
     const total = body.folders ? Object.values(body.folders).reduce((n, ids) => n + ids.length, 0) : (body.ids?.length ?? 0)
-    return HttpResponse.json({ task_id: simulateExport(total) }, { status: 202 })
+    return HttpResponse.json({ task_id: simulateExport(total, { dest: body.dest, long_edge: body.long_edge ?? null, upscale: body.upscale ?? null, count: total }) }, { status: 202 })
   }),
 
   http.get('/api/fs/roots', () => HttpResponse.json({ roots: ['C:\\', 'D:\\', 'C:\\Users\\demo'] })),

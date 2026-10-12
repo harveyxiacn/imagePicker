@@ -2,7 +2,9 @@
 //!
 //! Speaks just enough of the protocol: ready line, bearer-token auth, `system.info`,
 //! `system.ping`, `system.shutdown`, `models.list`, `analyze.batch` (progress + empty items),
-//! `hang` (waits for `cancel`), `crash` (exits) and `pid`.
+//! `hang` (waits for `cancel`), `crash` (exits) and `pid`. The generation methods
+//! (`besttake.compose`, `inpaint.run`, `enhance.run`) hang like `hang`; `cancelled` lists the ids
+//! of the requests a `cancel` stopped (cancellation tests).
 //! With `IP_FAKE_ANALYSIS=1` (real-server end-to-end tests) `analyze.batch` returns synthetic but
 //! deterministic `fast` results instead of empty items: the pHash is derived from the file size
 //! (frames cut from the same synthetic base image look alike, so bursts form), sharpness and
@@ -84,6 +86,7 @@ async fn main() {
                 }
             });
             let hanging: Arc<Mutex<HashMap<u64, ()>>> = Arc::default();
+            let mut cancelled: Vec<u64> = Vec::new();
             while let Some(Ok(msg)) = stream.next().await {
                 let Message::Text(t) = msg else { continue };
                 let v: Value = serde_json::from_str(t.as_str()).unwrap();
@@ -110,7 +113,7 @@ async fn main() {
                         std::process::exit(0);
                     }
                     "crash" => std::process::exit(1),
-                    "hang" => {
+                    "hang" | "besttake.compose" | "inpaint.run" | "enhance.run" => {
                         if let Some(id) = id {
                             hanging.lock().unwrap().insert(id, ());
                         }
@@ -118,9 +121,11 @@ async fn main() {
                     "cancel" => {
                         let req = v["params"]["req"].as_u64().unwrap_or(0);
                         if hanging.lock().unwrap().remove(&req).is_some() {
+                            cancelled.push(req);
                             let _ = tx.send(json!({"jsonrpc":"2.0","id":req,"error":{"code":-32800,"message":"request cancelled","data":{"kind":"cancelled"}}}).to_string());
                         }
                     }
+                    "cancelled" => reply(json!(cancelled)),
                     "analyze.batch" if std::env::var_os("IP_FAKE_ANALYSIS").is_some() => {
                         let items = synthetic_items(&v["params"]["items"]);
                         let n = items.len();

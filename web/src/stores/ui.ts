@@ -38,6 +38,8 @@ interface UiState {
   /** M4: save-as-smart-collection dialog, face search dialog */
   saveCollectionOpen: boolean
   faceSearchOpen: boolean
+  /** Library face the face search dialog searches with (face menu); null = upload a photo. */
+  faceSearchFace: { id: number; photo_id: number } | null
   /** Library left sidebar (smart collections) */
   sidebarOpen: boolean
   /** Mobile cull: one photo at a time, or quick cull (AI top-3 cards per group). */
@@ -79,6 +81,8 @@ interface UiState {
   setExportPreset: (p: string | null) => void
   setSaveCollectionOpen: (b: boolean) => void
   setFaceSearchOpen: (b: boolean) => void
+  /** Opens the face search dialog on a face already in the library. */
+  openFaceSearch: (face: { id: number; photo_id: number }) => void
   setSidebarOpen: (b: boolean) => void
   setCullMode: (m: 'single' | 'quick') => void
   setConnection: (c: ConnectionStatus) => void
@@ -118,6 +122,7 @@ export const useUi = create<UiState>()(
       exportPreset: null,
       saveCollectionOpen: false,
       faceSearchOpen: false,
+      faceSearchFace: null,
       sidebarOpen: !narrow,
       cullMode: 'single',
       connection: 'connecting',
@@ -150,7 +155,8 @@ export const useUi = create<UiState>()(
       setExportOpen: (exportOpen) => set({ exportOpen }),
       setExportPreset: (exportPreset) => set({ exportPreset }),
       setSaveCollectionOpen: (saveCollectionOpen) => set({ saveCollectionOpen }),
-      setFaceSearchOpen: (faceSearchOpen) => set({ faceSearchOpen }),
+      setFaceSearchOpen: (faceSearchOpen) => set({ faceSearchOpen, faceSearchFace: null }),
+      openFaceSearch: (face) => set({ faceSearchOpen: true, faceSearchFace: { id: face.id, photo_id: face.photo_id } }),
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       setCullMode: (cullMode) => set({ cullMode }),
       setConnection: (connection) => set({ connection }),
@@ -178,6 +184,7 @@ export const useUi = create<UiState>()(
           exportOpen: false,
           saveCollectionOpen: false,
           faceSearchOpen: false,
+          faceSearchFace: null,
         })),
     }),
     {

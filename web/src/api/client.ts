@@ -57,6 +57,7 @@ import type {
   RuntimeInfo,
   Settings,
   SettingsPatch,
+  TaskRecord,
 } from './types'
 
 export class ApiError extends Error {
@@ -179,6 +180,9 @@ export const api = {
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),
+  // ---- task history / cancel (M5 F) ----
+  tasks: (limit = 50) => request<{ tasks: TaskRecord[] }>('GET', `/tasks?limit=${limit}`),
+  cancelTask: (id: string) => request<{ task: TaskRecord }>('POST', `/tasks/${encodeURIComponent(id)}/cancel`),
   // ---- M7: AI runtime ----
   runtime: () => request<RuntimeInfo>('GET', '/runtime'),
   installRuntime: (extras?: string[]) => request<{ task_id: string }>('POST', '/runtime/install', extras ? { extras } : {}),
@@ -207,6 +211,9 @@ export const api = {
   mergePeople: (ids: number[], into: number) => request<{ person: Person }>('POST', '/people/merge', { ids, into }),
   setFacePerson: (id: number, person_id: number | null) =>
     request<{ face: Face }>('POST', `/faces/${id}/person`, { person_id }),
+  /** "This is a new person": the faces move to a new person (locked there). */
+  createPerson: (face_ids: number[], name?: string | null) =>
+    request<{ person: Person }>('POST', '/people', name ? { face_ids, name } : { face_ids }),
   // ---- M3 ----
   edits: (id: number) => request<EditsResponse>('GET', `/edits/${id}`),
   putEdits: (id: number, stack: EditStack) => request<EditsPutResponse>('PUT', `/edits/${id}`, { stack }),
