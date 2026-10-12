@@ -694,6 +694,102 @@ async fn worker_timeouts_are_504() {
 }
 
 #[tokio::test]
+async fn tasks_are_listed_and_cancelled_over_http() {
+    let e = env();
+    let s = scene(&e).await;
+    e.worker.gen_delay_ms.store(60_000, Ordering::SeqCst);
+    let mut rx = e.core.events.subscribe();
+    let r = call(
+        &e.app,
+        Method::POST,
+        &format!("/api/photos/{}/enhance", s.ids["a1.jpg"]),
+        Some(json!({"op": "denoise", "strength": 0.5})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    let task = r.json()["task_id"].as_str().unwrap().to_string();
+    for _ in 0..2000 {
+        if e.worker.enhance_calls.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let r = call(&e.app, Method::GET, "/api/tasks?limit=5", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let first = r.json()["tasks"][0].clone();
+    assert_eq!(first["id"], task.as_str());
+    assert_eq!(
+        (&first["kind"], &first["status"], &first["cancellable"]),
+        (&json!("enhance"), &json!("running"), &json!(true))
+    );
+    assert_eq!(first["params"]["photo_id"], s.ids["a1.jpg"]);
+    // the analysis of the scene is in the history too
+    let r = call(&e.app, Method::GET, "/api/tasks", None).await;
+    assert!(r.json()["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["kind"] == "analysis" && t["status"] == "done"));
+
+    let r = call(
+        &e.app,
+        Method::POST,
+        &format!("/api/tasks/{task}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert_eq!(r.json()["task"]["status"], "cancelling");
+    let done = wait_event(&mut rx, |ev| matches!(ev, Event::EnhanceDone { .. })).await;
+    let v = serde_json::to_value(&done).unwrap();
+    assert_eq!(
+        (&v["ok"], &v["reason"]),
+        (&json!(false), &json!("cancelled"))
+    );
+    let last = wait_event(
+        &mut rx,
+        |ev| matches!(ev, Event::TaskProgress { state, .. } if state != "running"),
+    )
+    .await;
+    assert_eq!(serde_json::to_value(&last).unwrap()["state"], "cancelled");
+    let r = call(&e.app, Method::GET, "/api/tasks?limit=1", None).await;
+    assert_eq!(r.json()["tasks"][0]["status"], "cancelled");
+    assert!(r.json()["tasks"][0]["finished_at"].is_i64());
+    assert!(e.core.get_edit(s.ids["a1.jpg"]).await.unwrap().stack["ops"]
+        .as_array()
+        .is_none_or(|ops| ops.iter().all(|o| o["type"] != "patch")));
+
+    // already over: 409; unknown: 404; bad limits: 400
+    let r = call(
+        &e.app,
+        Method::POST,
+        &format!("/api/tasks/{task}/cancel"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::CONFLICT, "conflict")
+    );
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/tasks/enhance-424242/cancel",
+        None,
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::NOT_FOUND, "not_found")
+    );
+    for q in ["limit=0", "limit=201", "limit=x"] {
+        let r = call(&e.app, Method::GET, &format!("/api/tasks?{q}"), None).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{q}");
+    }
+}
+
+#[tokio::test]
 async fn people_singletons_and_float_cleanup_over_http() {
     let e = env();
     let s = scene(&e).await;

@@ -6,6 +6,10 @@
 //! asset (`edit::patch`) and records it as a `patch` op in the photo's edit stack, then sends
 //! `edits.updated` followed by the matching `*.done` event. Patches are never copied to other
 //! photos by sync / presets.
+//!
+//! The tasks are recorded and cancellable (`crate::tasks`): their worker calls run inside the
+//! task's [`CancelToken`] scope, and nothing is imported or written into a stack once the task was
+//! cancelled (it ends with `*.done` `reason: "cancelled"` and `task.progress` `cancelled`).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -26,6 +30,7 @@ use crate::edit::sync::rank;
 use crate::edit::{ops_of, store};
 use crate::error::{CoreError, Result};
 use crate::events::Event;
+use crate::tasks::{TaskHandle, CANCELLED, DONE, FAILED};
 use crate::Core;
 
 /// A candidate face is not composable when its head pose differs from the base face's by more
@@ -750,6 +755,38 @@ fn reason_of(e: &CoreError) -> String {
     e.to_string()
 }
 
+fn failed(base_face_id: i64, reason: String) -> BestTakeResult {
+    BestTakeResult {
+        base_face_id,
+        ok: false,
+        warnings: Vec::new(),
+        reason: Some(reason),
+    }
+}
+
+/// How a single-result generation task (inpaint, enhance) ended. `Ok(true)` = the result was
+/// committed, `Ok(false)` = it stopped before committing because it was cancelled; an error of a
+/// cancelled task counts as a cancellation (the worker call was cut short).
+fn ending(out: Result<bool>, task: &TaskHandle) -> (&'static str, Option<String>) {
+    match out {
+        Ok(true) => (DONE, None),
+        Ok(false) => (CANCELLED, Some(CANCELLED.to_string())),
+        Err(_) if task.cancelled() => (CANCELLED, Some(CANCELLED.to_string())),
+        Err(e) => (FAILED, Some(reason_of(&e))),
+    }
+}
+
+/// A composed best-take patch waiting to be committed.
+struct Composed {
+    /// Index into the task's results.
+    idx: usize,
+    patch: String,
+    rect: [f32; 4],
+    face_id: i64,
+    person_id: Option<i64>,
+    source_photo_id: i64,
+}
+
 /// Worker failures after which trying the next item of the same task is pointless.
 fn is_fatal(e: &CoreError) -> bool {
     matches!(
@@ -789,25 +826,6 @@ impl Core {
 
     fn gen_dir(&self, task_id: &str) -> PathBuf {
         self.dirs.gen.join(task_id)
-    }
-
-    fn task_progress(
-        &self,
-        task_id: &str,
-        kind: &str,
-        done: i64,
-        total: i64,
-        state: &str,
-        error: Option<String>,
-    ) {
-        self.events.emit(Event::TaskProgress {
-            task_id: task_id.to_string(),
-            kind: kind.to_string(),
-            done,
-            total,
-            state: state.to_string(),
-            error,
-        });
     }
 
     /// Current edit ops of a photo (empty when unedited).
@@ -922,16 +940,21 @@ impl Core {
             })
             .await?;
         self.preflight_models("besttake", &[]).await?;
-        let task_id = format!("besttake-{}", self.next_task_seq());
         let items: Vec<(BestTakeChoice, Face, Face, PhotoRef)> = req
             .choices
             .into_iter()
             .zip(faces)
             .map(|(c, (bf, sf, src))| (c, bf, sf, src))
             .collect();
-        self.task_progress(&task_id, "besttake", 0, items.len() as i64, "running", None);
-        let (core, tid) = (self.clone(), task_id.clone());
-        tokio::spawn(async move { core.run_besttake(tid, base, items).await });
+        let spec = json!({"photo_id": base_id, "choices": items.len()});
+        let task = self
+            .task_begin("besttake", spec, items.len() as i64)
+            .await?;
+        let (core, task_id) = (self.clone(), task.id.clone());
+        tokio::spawn(async move {
+            let cancel = task.cancel.clone();
+            cancel.scope(core.run_besttake(task, base, items)).await
+        });
         Ok(task_id)
     }
 
@@ -945,15 +968,17 @@ impl Core {
         let choices = auto_choices(&plan);
         if choices.is_empty() {
             // nothing to improve: a task that finishes at once, so clients follow one flow
-            let task_id = format!("besttake-{}", self.next_task_seq());
-            let (core, tid, base) = (self.clone(), task_id.clone(), plan.base_photo_id);
-            self.task_progress(&task_id, "besttake", 0, 0, "running", None);
+            let base = plan.base_photo_id;
+            let task = self
+                .task_begin("besttake", json!({"photo_id": base, "choices": 0}), 0)
+                .await?;
+            let (core, task_id) = (self.clone(), task.id.clone());
             tokio::spawn(async move {
-                core.events.emit(Event::BestTakeDone {
+                let result = Event::BestTakeDone {
                     photo_id: base,
                     results: Vec::new(),
-                });
-                core.task_progress(&tid, "besttake", 0, 0, "done", None);
+                };
+                core.task_end(&task, (0, 0), DONE, None, Some(result)).await;
             });
             return Ok(task_id);
         }
@@ -966,30 +991,27 @@ impl Core {
 
     async fn run_besttake(
         self: Arc<Self>,
-        task_id: String,
+        task: TaskHandle,
         base: PhotoRef,
         items: Vec<(BestTakeChoice, Face, Face, PhotoRef)>,
     ) {
         let total = items.len() as i64;
-        let dir = self.gen_dir(&task_id);
+        let dir = self.gen_dir(&task.id);
         let mut results: Vec<BestTakeResult> = Vec::new();
-        let mut new_ops: Vec<(usize, Value)> = Vec::new();
+        let mut composed: Vec<Composed> = Vec::new();
         let mut fatal: Option<String> = None;
         for (i, (choice, bf, sf, src)) in items.iter().enumerate() {
-            let fail = |reason: String| BestTakeResult {
-                base_face_id: choice.base_face_id,
-                ok: false,
-                warnings: Vec::new(),
-                reason: Some(reason),
-            };
+            if task.cancelled() {
+                break;
+            }
             if let Some(why) = &fatal {
-                results.push(fail(why.clone()));
+                results.push(failed(choice.base_face_id, why.clone()));
                 continue;
             }
             // composability is judged against the base actually posted
             if pose_delta(bf, sf) > POSE_LIMIT_DEG {
-                results.push(fail("large_pose_change".to_string()));
-                self.task_progress(&task_id, "besttake", i as i64 + 1, total, "running", None);
+                results.push(failed(choice.base_face_id, "large_pose_change".to_string()));
+                self.task_step(&task, i as i64 + 1, total);
                 continue;
             }
             let req = BestTakeComposeRequest {
@@ -1011,53 +1033,73 @@ impl Core {
                     if is_fatal(&e) {
                         fatal = Some(why.clone());
                     }
-                    results.push(fail(why));
+                    results.push(failed(choice.base_face_id, why));
                 }
-                Ok(resp) => {
-                    let (Some(patch), Some(rect)) = (resp.patch.clone(), resp.rect) else {
-                        results.push(fail(
-                            resp.reason.unwrap_or_else(|| "reason_unknown".to_string()),
-                        ));
-                        self.task_progress(
-                            &task_id,
-                            "besttake",
-                            i as i64 + 1,
-                            total,
-                            "running",
-                            None,
-                        );
-                        continue;
-                    };
-                    let (svc, base_id, face_id) = (self.render.clone(), base.id, bf.id);
-                    let stored = tokio::task::spawn_blocking(move || {
-                        svc.patches
-                            .import(base_id, "bt", &face_id.to_string(), Path::new(&patch))
-                    })
-                    .await
-                    .map_err(|e| CoreError::Internal(anyhow::anyhow!("patch import failed: {e}")))
-                    .and_then(|r| r);
-                    match stored {
-                        Err(e) => results.push(fail(reason_of(&e))),
-                        Ok((asset, _)) => {
-                            let mut op = patch_op("best_take", &asset, rect, PATCH_FEATHER, 1.0);
-                            if let Some(p) = bf.person_id {
-                                op.insert("person_id".into(), json!(p));
-                            }
-                            op.insert("source_photo_id".into(), json!(src.id));
-                            // additive (not in the typed op): which base face this replaces
-                            op.insert("base_face_id".into(), json!(bf.id));
-                            new_ops.push((results.len(), Value::Object(op)));
-                            results.push(BestTakeResult {
-                                base_face_id: choice.base_face_id,
-                                ok: true,
-                                warnings: resp.quality.map(|q| q.warnings).unwrap_or_default(),
-                                reason: None,
-                            });
-                        }
+                Ok(resp) => match (resp.patch, resp.rect) {
+                    (Some(patch), Some(rect)) => {
+                        // imported only once every choice is through and the task still stands
+                        composed.push(Composed {
+                            idx: results.len(),
+                            patch,
+                            rect,
+                            face_id: bf.id,
+                            person_id: bf.person_id,
+                            source_photo_id: src.id,
+                        });
+                        results.push(BestTakeResult {
+                            base_face_id: choice.base_face_id,
+                            ok: true,
+                            warnings: resp.quality.map(|q| q.warnings).unwrap_or_default(),
+                            reason: None,
+                        });
                     }
+                    _ => results.push(failed(
+                        choice.base_face_id,
+                        resp.reason.unwrap_or_else(|| "reason_unknown".to_string()),
+                    )),
+                },
+            }
+            self.task_step(&task, i as i64 + 1, total);
+        }
+        if task.cancelled() {
+            // nothing was imported or written: every choice reports the cancellation
+            let done = results.len() as i64;
+            let results = items
+                .iter()
+                .map(|(c, ..)| failed(c.base_face_id, CANCELLED.to_string()))
+                .collect();
+            let _ = std::fs::remove_dir_all(dir);
+            let result = Event::BestTakeDone {
+                photo_id: base.id,
+                results,
+            };
+            self.task_end(&task, (done, total), CANCELLED, None, Some(result))
+                .await;
+            return;
+        }
+        let mut new_ops: Vec<(usize, Value)> = Vec::new();
+        for c in composed {
+            let (svc, base_id, face_id, patch) = (self.render.clone(), base.id, c.face_id, c.patch);
+            let stored = tokio::task::spawn_blocking(move || {
+                svc.patches
+                    .import(base_id, "bt", &face_id.to_string(), Path::new(&patch))
+            })
+            .await
+            .map_err(|e| CoreError::Internal(anyhow::anyhow!("patch import failed: {e}")))
+            .and_then(|r| r);
+            match stored {
+                Err(e) => results[c.idx] = failed(results[c.idx].base_face_id, reason_of(&e)),
+                Ok((asset, _)) => {
+                    let mut op = patch_op("best_take", &asset, c.rect, PATCH_FEATHER, 1.0);
+                    if let Some(p) = c.person_id {
+                        op.insert("person_id".into(), json!(p));
+                    }
+                    op.insert("source_photo_id".into(), json!(c.source_photo_id));
+                    // additive (not in the typed op): which base face this replaces
+                    op.insert("base_face_id".into(), json!(c.face_id));
+                    new_ops.push((c.idx, Value::Object(op)));
                 }
             }
-            self.task_progress(&task_id, "besttake", i as i64 + 1, total, "running", None);
         }
         if !new_ops.is_empty() {
             let ops: Vec<Value> = new_ops.iter().map(|(_, o)| o.clone()).collect();
@@ -1072,13 +1114,14 @@ impl Core {
         let ok = results.iter().filter(|r| r.ok).count();
         let error =
             (ok == 0 && !results.is_empty()).then(|| results[0].reason.clone().unwrap_or_default());
-        self.events.emit(Event::BestTakeDone {
+        let _ = std::fs::remove_dir_all(dir);
+        let state = if error.is_some() { FAILED } else { DONE };
+        let result = Event::BestTakeDone {
             photo_id: base.id,
             results,
-        });
-        let state = if error.is_some() { "failed" } else { "done" };
-        self.task_progress(&task_id, "besttake", ok as i64, total, state, error);
-        let _ = std::fs::remove_dir_all(dir);
+        };
+        self.task_end(&task, (ok as i64, total), state, error, Some(result))
+            .await;
     }
 
     // -------------------------------------------------------------- inpaint
@@ -1183,32 +1226,32 @@ impl Core {
             }));
         }
         self.preflight_models("inpaint", &[model.as_str()]).await?;
-        let task_id = format!("inpaint-{}", self.next_task_seq());
-        self.task_progress(
-            &task_id,
-            "inpaint",
-            0,
-            faces.len() as i64 + 1,
-            "running",
-            None,
-        );
-        let (core, tid) = (self.clone(), task_id.clone());
+        let spec = json!({
+            "photo_id": photo_id,
+            "faces": faces.len(),
+            "strokes": strokes.len(),
+            "model": model,
+        });
+        let task = self
+            .task_begin("inpaint", spec, faces.len() as i64 + 1)
+            .await?;
+        let (core, task_id) = (self.clone(), task.id.clone());
         tokio::spawn(async move {
-            let out = core
-                .run_inpaint(&tid, r.clone(), faces, strokes, model)
+            let out = task
+                .cancel
+                .scope(core.run_inpaint(&task, r.clone(), faces, strokes, model))
                 .await;
-            let (ok, reason) = match out {
-                Ok(()) => (true, None),
-                Err(e) => (false, Some(reason_of(&e))),
-            };
-            core.events.emit(Event::InpaintDone {
+            let (state, reason) = ending(out, &task);
+            let _ = std::fs::remove_dir_all(core.gen_dir(&task.id));
+            let result = Event::InpaintDone {
                 photo_id: r.id,
-                ok,
+                ok: state == DONE,
                 reason: reason.clone(),
-            });
-            let state = if ok { "done" } else { "failed" };
-            core.task_progress(&tid, "inpaint", 1, 1, state, reason);
-            let _ = std::fs::remove_dir_all(core.gen_dir(&tid));
+            };
+            let done = i64::from(state != CANCELLED);
+            let error = reason.filter(|_| state == FAILED);
+            core.task_end(&task, (done, 1), state, error, Some(result))
+                .await;
         });
         Ok(task_id)
     }
@@ -1277,23 +1320,27 @@ impl Core {
         Ok(canvas)
     }
 
+    /// `Ok(false)`: cancelled before anything was committed.
     async fn run_inpaint(
         self: &Arc<Self>,
-        task_id: &str,
+        task: &TaskHandle,
         r: PhotoRef,
         faces: Vec<Face>,
         strokes: Vec<Stroke>,
         model: String,
-    ) -> Result<()> {
-        let dir = self.gen_dir(task_id);
+    ) -> Result<bool> {
+        let dir = self.gen_dir(&task.id);
         std::fs::create_dir_all(&dir)?;
         let total = faces.len() as i64 + 1;
-        let (core, tid) = (self.clone(), task_id.to_string());
+        let (core, t) = (self.clone(), task.clone());
         let canvas = self
             .build_removal_mask(&r, &faces, &strokes, &dir, &move |done| {
-                core.task_progress(&tid, "inpaint", done, total, "running", None)
+                core.task_step(&t, done, total)
             })
             .await?;
+        if task.cancelled() {
+            return Ok(false);
+        }
         if canvas.count() == 0 {
             return Err(CoreError::Unprocessable("the removal mask is empty".into()));
         }
@@ -1310,6 +1357,9 @@ impl Core {
             })
             .await
             .map_err(map_worker_err)?;
+        if task.cancelled() {
+            return Ok(false);
+        }
         let (Some(patch), Some(rect)) = (resp.patch, resp.rect) else {
             return Err(CoreError::Internal(anyhow::anyhow!(
                 "inpaint.run returned no patch"
@@ -1322,7 +1372,8 @@ impl Core {
         .await
         .map_err(|e| CoreError::Internal(anyhow::anyhow!("patch import failed: {e}")))??;
         let op = patch_op("inpaint", &asset, rect, PATCH_FEATHER, 1.0);
-        self.apply_patches(r.id, vec![Value::Object(op)]).await
+        self.apply_patches(r.id, vec![Value::Object(op)]).await?;
+        Ok(true)
     }
 
     // -------------------------------------------------------------- enhance
@@ -1363,37 +1414,40 @@ impl Core {
             return Err(CoreError::Unprocessable("the photo has no faces".into()));
         }
         self.preflight_models("enhance", &[op.as_str()]).await?;
-        let task_id = format!("enhance-{}", self.next_task_seq());
-        self.task_progress(&task_id, "enhance", 0, 1, "running", None);
-        let (core, tid) = (self.clone(), task_id.clone());
+        let spec = json!({"photo_id": photo_id, "op": op, "strength": strength});
+        let task = self.task_begin("enhance", spec, 1).await?;
+        let (core, task_id) = (self.clone(), task.id.clone());
         tokio::spawn(async move {
-            let out = core.run_enhance(&tid, &r, &op, strength, &faces).await;
-            let (ok, reason) = match out {
-                Ok(()) => (true, None),
-                Err(e) => (false, Some(reason_of(&e))),
-            };
-            core.events.emit(Event::EnhanceDone {
+            let out = task
+                .cancel
+                .scope(core.run_enhance(&task, &r, &op, strength, &faces))
+                .await;
+            let (state, reason) = ending(out, &task);
+            let _ = std::fs::remove_dir_all(core.gen_dir(&task.id));
+            let result = Event::EnhanceDone {
                 photo_id: r.id,
                 op: op.clone(),
-                ok,
+                ok: state == DONE,
                 reason: reason.clone(),
-            });
-            let state = if ok { "done" } else { "failed" };
-            core.task_progress(&tid, "enhance", ok as i64, 1, state, reason);
-            let _ = std::fs::remove_dir_all(core.gen_dir(&tid));
+            };
+            let error = reason.filter(|_| state == FAILED);
+            let done = i64::from(state == DONE);
+            core.task_end(&task, (done, 1), state, error, Some(result))
+                .await;
         });
         Ok(task_id)
     }
 
+    /// `Ok(false)`: cancelled before anything was committed.
     async fn run_enhance(
         self: &Arc<Self>,
-        task_id: &str,
+        task: &TaskHandle,
         r: &PhotoRef,
         op: &str,
         strength: f64,
         faces: &[Face],
-    ) -> Result<()> {
-        let dir = self.gen_dir(task_id);
+    ) -> Result<bool> {
+        let dir = self.gen_dir(&task.id);
         let resp = self
             .worker
             .enhance_run(&EnhanceRequest {
@@ -1407,6 +1461,9 @@ impl Core {
             })
             .await
             .map_err(map_worker_err)?;
+        if task.cancelled() {
+            return Ok(false);
+        }
         let mut pieces: Vec<(String, [f32; 4])> = Vec::new();
         match op {
             "denoise" => {
@@ -1443,6 +1500,7 @@ impl Core {
             .iter()
             .map(|(a, rect)| Value::Object(patch_op(op, a, *rect, PATCH_FEATHER, 1.0)))
             .collect();
-        self.apply_patches(r.id, ops).await
+        self.apply_patches(r.id, ops).await?;
+        Ok(true)
     }
 }

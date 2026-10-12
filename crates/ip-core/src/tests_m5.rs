@@ -2376,6 +2376,7 @@ async fn wide_gamut_sources_are_converted_to_srgb_on_export() {
         strip_gps: false,
         upscale: None,
         fit: None,
+        cancel: None,
     };
     let out = e.src.path().join("resized");
     std::fs::create_dir_all(&out).unwrap();
@@ -2583,6 +2584,162 @@ async fn a_stuck_best_take_fails_the_task_without_hammering_the_worker() {
         .iter()
         .any(|e| matches!(e, Event::TaskProgress { state, .. } if state == "failed")));
     assert!(patches_of(&s.e, a1).await.is_empty());
+}
+
+/// Polls until `pred` holds (or panics after [`WAIT`]).
+async fn until(mut pred: impl FnMut() -> bool) {
+    let t = std::time::Instant::now();
+    while !pred() {
+        assert!(t.elapsed() < WAIT, "condition never held");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Cancels `task` once the worker is busy with it; returns the events up to its last progress.
+async fn cancel_mid_call(
+    e: &Env,
+    rx: &mut tokio::sync::broadcast::Receiver<Event>,
+    task: &str,
+    calls: &std::sync::atomic::AtomicUsize,
+) -> Vec<Event> {
+    until(|| calls.load(Ordering::SeqCst) == 1).await;
+    let listed = e.core.tasks_list(None).await.unwrap();
+    let rec = listed.iter().find(|r| r.id == task).expect("listed");
+    assert_eq!((rec.status.as_str(), rec.cancellable), ("running", true));
+    let rec = e.core.task_cancel(task).await.unwrap();
+    assert_eq!(rec.status, "cancelling");
+    let t = std::time::Instant::now();
+    let seen = wait_for(rx, |ev| {
+        matches!(ev, Event::TaskProgress { task_id, state, .. } if task_id == task && state != "running")
+    })
+    .await;
+    assert!(
+        t.elapsed() < Duration::from_secs(10),
+        "cut short, not waited out"
+    );
+    match seen.last().unwrap() {
+        Event::TaskProgress { state, error, .. } => {
+            assert_eq!((state.as_str(), error), ("cancelled", &None));
+        }
+        _ => unreachable!(),
+    }
+    seen
+}
+
+#[tokio::test]
+async fn generation_tasks_cancelled_mid_call_commit_nothing() {
+    let s = scene().await;
+    let (a1, a2, p1) = (s.ph["a1.jpg"].id, s.ph["a2.jpg"].id, s.ph["p1.jpg"].id);
+    let (fa1, fa2) = (faces_of(&s.e, a1).await, faces_of(&s.e, a2).await);
+    s.e.worker.gen_delay_ms.store(60_000, Ordering::SeqCst);
+
+    // best take: the composition in flight is abandoned, every choice reports `cancelled`
+    let mut rx = s.e.core.events.subscribe();
+    let task =
+        s.e.core
+            .besttake_start(BestTakeRequest {
+                base_photo_id: a1,
+                choices: vec![
+                    choice(fa1[0].id, a2, fa2[0].id),
+                    choice(fa1[1].id, a2, fa2[1].id),
+                ],
+            })
+            .await
+            .unwrap();
+    let seen = cancel_mid_call(&s.e, &mut rx, &task, &s.e.worker.compose_calls).await;
+    let results = seen
+        .iter()
+        .find_map(|ev| match ev {
+            Event::BestTakeDone { results, .. } => Some(results.clone()),
+            _ => None,
+        })
+        .expect("besttake.done precedes the last progress");
+    assert_eq!(results.len(), 2);
+    assert!(results
+        .iter()
+        .all(|r| !r.ok && r.reason.as_deref() == Some("cancelled")));
+    assert_eq!(s.e.worker.compose_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(s.e.worker.cancelled_calls.load(Ordering::SeqCst), 1);
+    assert!(patches_of(&s.e, a1).await.is_empty());
+    assert!(!seen.iter().any(|e| matches!(e, Event::EditsUpdated { .. })));
+
+    // inpaint and enhance: `*.done` with reason `cancelled`, no patch, no asset file
+    let mut rx = s.e.core.events.subscribe();
+    let task =
+        s.e.core
+            .inpaint_start(
+                p1,
+                InpaintBody {
+                    strokes: Some(vec![Stroke {
+                        points: vec![[0.5, 0.5]],
+                        radius: 0.02,
+                    }]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+    let seen = cancel_mid_call(&s.e, &mut rx, &task, &s.e.worker.inpaint_calls).await;
+    assert!(seen.iter().any(|e| matches!(e,
+        Event::InpaintDone { photo_id, ok: false, reason } if *photo_id == p1 && reason.as_deref() == Some("cancelled"))));
+    let mut rx = s.e.core.events.subscribe();
+    let task =
+        s.e.core
+            .enhance_start(
+                p1,
+                EnhanceBody {
+                    op: "denoise".into(),
+                    strength: Some(0.5),
+                },
+            )
+            .await
+            .unwrap();
+    let seen = cancel_mid_call(&s.e, &mut rx, &task, &s.e.worker.enhance_calls).await;
+    assert!(seen.iter().any(|e| matches!(e,
+        Event::EnhanceDone { ok: false, reason, .. } if reason.as_deref() == Some("cancelled"))));
+    assert_eq!(s.e.worker.cancelled_calls.load(Ordering::SeqCst), 3);
+    assert!(patches_of(&s.e, p1).await.is_empty());
+    let assets = s.e.core.render.patches.dir(p1);
+    assert_eq!(
+        std::fs::read_dir(&assets).map(|d| d.count()).unwrap_or(0),
+        0,
+        "no asset was imported"
+    );
+    assert!(!s.e.core.dirs.gen.join(&task).exists(), "scratch removed");
+
+    // the history: newest first, all cancelled; a second cancel is a conflict
+    let listed = s.e.core.tasks_list(Some(3)).await.unwrap();
+    let kinds: Vec<(&str, &str)> = listed
+        .iter()
+        .map(|r| (r.kind.as_str(), r.status.as_str()))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("enhance", "cancelled"),
+            ("inpaint", "cancelled"),
+            ("besttake", "cancelled")
+        ]
+    );
+    assert!(listed
+        .iter()
+        .all(|r| !r.cancellable && r.finished_at.is_some()));
+    assert_eq!(listed[0].params["op"], "denoise");
+    assert!(matches!(
+        s.e.core.task_cancel(&task).await,
+        Err(CoreError::Conflict(_))
+    ));
+
+    // without a cancel the same tasks still go through
+    s.e.worker.gen_delay_ms.store(0, Ordering::SeqCst);
+    let (ok, reason) = enhance(&s.e, p1, "denoise").await;
+    assert!(ok, "{reason:?}");
+    assert_eq!(patches_of(&s.e, p1).await.len(), 1);
+    let listed = s.e.core.tasks_list(Some(1)).await.unwrap();
+    assert_eq!(
+        (listed[0].status.as_str(), listed[0].done, listed[0].total),
+        ("done", 1, 1)
+    );
 }
 
 // ------------------------------------------------------------------ partial portrait geometry
