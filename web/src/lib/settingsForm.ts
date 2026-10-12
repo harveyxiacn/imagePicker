@@ -12,6 +12,7 @@ export type SettingPath =
   | 'analysis.auto_analyze_on_import'
   | 'analysis.group_strictness'
   | 'faces.enabled'
+  | 'faces.consented'
   | 'privacy.allow_network'
   | 'models.source'
   | 'cache.max_gb'
@@ -95,7 +96,7 @@ export const DEFAULT_SETTINGS: Settings = {
   language: 'zh-CN',
   theme: 'dark',
   analysis: { default_profile: 'standard', auto_analyze_on_import: false, group_strictness: 'normal' },
-  faces: { enabled: true },
+  faces: { enabled: true, consented: false },
   privacy: { allow_network: true },
   models: { dir: '', source: 'auto' },
   cache: { max_gb: 20 },

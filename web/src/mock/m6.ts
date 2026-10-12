@@ -17,6 +17,8 @@ import type {
   AssistantResult,
   AssistantStatus,
   AssistantUndo,
+  CatalogBackup,
+  CatalogStatus,
   EditStack,
   Photo,
   PlanStep,
@@ -95,8 +97,8 @@ export function seedM6Mock(): void {
   }
 }
 
-// real backend: guests get 403 for people, faces, taste, settings, assistant, system, fs, xmp, cache, onboarding, masks, models, besttake, analysis
-const GUEST_BLOCKED_GET = [/^\/api\/people/, /^\/api\/faces/, /^\/api\/taste/, /^\/api\/settings/, /^\/api\/assistant/, /^\/api\/system/, /^\/api\/fs/, /^\/api\/xmp/, /^\/api\/cache/, /^\/api\/onboarding/, /^\/api\/masks/, /^\/api\/models/, /^\/api\/bursts\/\d+\/besttake/, /^\/api\/analysis/, /^\/api\/photos\/\d+\/(analysis|people|bystanders)/]
+// real backend: guests get 403 for catalog, people, faces, taste, settings, assistant, system, fs, xmp, cache, onboarding, masks, models, besttake, analysis
+const GUEST_BLOCKED_GET = [/^\/api\/catalog/, /^\/api\/people/, /^\/api\/faces/, /^\/api\/taste/, /^\/api\/settings/, /^\/api\/assistant/, /^\/api\/system/, /^\/api\/fs/, /^\/api\/xmp/, /^\/api\/cache/, /^\/api\/onboarding/, /^\/api\/masks/, /^\/api\/models/, /^\/api\/bursts\/\d+\/besttake/, /^\/api\/analysis/, /^\/api\/photos\/\d+\/(analysis|people|bystanders)/]
 const GUEST_ALLOWED_WRITE = [/^\/api\/viewport/]
 
 /** First handler: 401 for anonymous callers, 403 for guests writing / reading private data. Falls through otherwise. */
@@ -120,6 +122,23 @@ export const m6Gate = http.all('/api/*', ({ request }) => {
 let settings: Settings = mergeSettings(DEFAULT_SETTINGS, {
   models: { dir: 'C:\\Users\\demo\\AppData\\Local\\imagePicker\\models', source: 'auto' },
   roots: ['C:\\Users\\demo\\Pictures', 'D:\\Archive'],
+  // the demo library is already analysed with people, i.e. face recognition was agreed to
+  faces: { enabled: true, consented: true },
+})
+
+// catalog backups (GET /api/catalog): two daily backups, healthy catalog
+const DAY = 24 * 3600 * 1000
+const mockBackupName = (t: number) => `catalog-${new Date(t).toISOString().replace(/[-:]/g, '').replace('T', '-').replace(/\.(\d{3})Z$/, '-$1')}.db`
+let catalogBackups: CatalogBackup[] = [Date.now() - 2 * 3600 * 1000, Date.now() - DAY - 2 * 3600 * 1000].map((t): CatalogBackup => ({ name: mockBackupName(t), kind: 'auto', created_at: t, bytes: 18_400_000 }))
+const catalogStatus = (): CatalogStatus => ({
+  state: 'ok',
+  problems: [],
+  moved_to: null,
+  checked_at: Date.now(),
+  restored_from: null,
+  last_backup_at: catalogBackups.find((b) => b.kind === 'auto')?.created_at ?? null,
+  backup_dir: 'C:\\Users\\demo\\AppData\\Roaming\\imagePicker\\backups',
+  backups: catalogBackups,
 })
 
 const cacheBytes = { thumbs: 1_840_000_000, previews: 3_210_000_000, masks: 248_000_000, edits: 12_400_000, gen: 655_000_000 }
@@ -606,7 +625,9 @@ export const m6Handlers = [
   }),
   http.patch('/api/settings', async ({ request }) => {
     await lat()
-    const patch = (await request.json()) as SettingsPatch
+    const { confirm_modify_originals: confirmed, ...patch } = (await request.json()) as SettingsPatch
+    if (patch.xmp_mode === 'modify_originals' && settings.xmp_mode !== 'modify_originals' && !confirmed)
+      return err(422, 'unprocessable', 'xmp_mode "modify_originals" rewrites original JPEG files; send "confirm_modify_originals": true')
     if (patch.lan?.enabled && !auth.ownerPw) return err(400, 'password_required', 'set an owner password before enabling LAN access')
     if (patch.lan?.port !== undefined && (patch.lan.port < 1024 || patch.lan.port > 65535)) return err(400, 'bad_request', 'invalid port')
     if (patch.cache?.max_gb !== undefined && patch.cache.max_gb < 1) return err(400, 'bad_request', 'cache limit too small')
@@ -709,6 +730,24 @@ export const m6Handlers = [
     auth.ownerPw = password
     if (guest_password !== undefined) auth.guestPw = guest_password === '' ? null : guest_password
     return json({ ok: true })
+  }),
+
+  http.get('/api/catalog', async () => {
+    await lat()
+    return json(catalogStatus())
+  }),
+  http.post('/api/catalog/backup', async () => {
+    await delay(400)
+    const t = Date.now()
+    const b: CatalogBackup = { name: mockBackupName(t), kind: 'auto', created_at: t, bytes: 18_500_000 }
+    catalogBackups = [b, ...catalogBackups].slice(0, 7)
+    return json(b)
+  }),
+  http.post('/api/catalog/restore', async ({ request }) => {
+    await delay(600)
+    const { name } = (await request.json()) as { name: string }
+    if (!catalogBackups.some((b) => b.name === name)) return err(404, 'not_found', `backup ${name} does not exist`)
+    return json({ ...catalogStatus(), restored_from: name })
   }),
 
   http.post('/api/xmp/sync', async ({ request }) => {

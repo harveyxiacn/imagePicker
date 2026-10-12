@@ -1,4 +1,4 @@
-import { Cpu, Database, FileJson, Globe, Keyboard, Palette, ScanFace, ScanSearch, Wifi, ChevronLeft, Layers, MonitorSmartphone, Smartphone } from 'lucide-react'
+import { ArchiveRestore, Cpu, Database, FileJson, Globe, History, Keyboard, Palette, ScanFace, ScanSearch, Wifi, ChevronLeft, Layers, MonitorSmartphone, Smartphone } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { useMe, useSettings } from '@/api/queries'
@@ -6,7 +6,9 @@ import { AppearanceSection, ShortcutsSection } from '@/components/settings/MiscS
 import { HardwareSection } from '@/components/settings/HardwareSection'
 import { LanSection, XmpSection } from '@/components/settings/LanXmpSections'
 import { AnalysisSection, CacheSection, FacesSection, RenderSection } from '@/components/settings/PrivacyCacheSections'
+import { CatalogSection } from '@/components/settings/CatalogSection'
 import { RemoteAiSection, RemoteDevicesSection } from '@/components/settings/RemoteAiSections'
+import { TasksSection } from '@/components/settings/TasksSection'
 import { can } from '@/lib/auth'
 
 const SETTINGS_SECTIONS = [
@@ -14,6 +16,8 @@ const SETTINGS_SECTIONS = [
   { id: 'analysis', icon: ScanSearch, view: AnalysisSection },
   { id: 'faces', icon: ScanFace, view: FacesSection },
   { id: 'cache', icon: Database, view: CacheSection },
+  { id: 'catalog', icon: ArchiveRestore, view: CatalogSection },
+  { id: 'tasks', icon: History, view: TasksSection },
   { id: 'render', icon: Layers, view: RenderSection },
   { id: 'lan', icon: Wifi, view: LanSection },
   { id: 'remote', icon: Smartphone, view: RemoteAiSection },

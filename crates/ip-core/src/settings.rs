@@ -39,13 +39,35 @@ impl Default for AnalysisSettings {
 #[serde(default, deny_unknown_fields)]
 pub struct FacesSettings {
     pub enabled: bool,
+    /// The user read the purpose explanation and agreed to face detection / recognition
+    /// (docs/02 §8: face features are sensitive personal data). Until then no face is
+    /// detected and no identity embedding is computed, whatever `enabled` says.
+    pub consented: bool,
 }
 
 impl Default for FacesSettings {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            consented: false,
+        }
     }
 }
+
+impl FacesSettings {
+    /// Faces may be detected and recognised: switched on and agreed to.
+    pub fn allowed(&self) -> bool {
+        self.enabled && self.consented
+    }
+}
+
+/// `xmp_mode` that also writes the XMP packet embedded in original JPEGs. The only mode in
+/// which the app changes an original's bytes; switching to it needs
+/// [`CONFIRM_MODIFY_ORIGINALS`] in the same patch.
+pub const XMP_MODIFY_ORIGINALS: &str = "modify_originals";
+/// Settings patch key that confirms switching `xmp_mode` to [`XMP_MODIFY_ORIGINALS`] (the UI
+/// sends it after its second confirmation). Never stored.
+pub const CONFIRM_MODIFY_ORIGINALS: &str = "confirm_modify_originals";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -143,7 +165,8 @@ pub struct Settings {
     pub models: ModelsSettings,
     pub cache: CacheSettings,
     pub render: RenderSettings,
-    /// `off` | `sidecar` | `sidecar_and_embedded`
+    /// `off` | `sidecar` | `modify_originals` (sidecar + the JPEG's embedded XMP; rewrites
+    /// originals, see [`XMP_MODIFY_ORIGINALS`])
     pub xmp_mode: String,
     pub assistant: AssistantSettings,
     pub remote_ai: RemoteAiSettings,
@@ -205,7 +228,7 @@ impl Settings {
         one_of(
             "xmp_mode",
             &self.xmp_mode,
-            &["off", "sidecar", "sidecar_and_embedded"],
+            &["off", "sidecar", XMP_MODIFY_ORIGINALS],
         )?;
         one_of(
             "assistant.engine",
@@ -285,6 +308,19 @@ impl GroupParams {
     }
 }
 
+/// Rewrites values of older builds in a stored settings object. Returns whether anything changed.
+///
+/// `xmp_mode = "sidecar_and_embedded"` was described as "also read the embedded XMP" but
+/// rewrote original JPEGs; nobody agreed to that, so it becomes `sidecar` (the explicit
+/// `modify_originals` mode needs a confirmation).
+fn upgrade_legacy(v: &mut Value) -> bool {
+    if v.get("xmp_mode").and_then(Value::as_str) == Some("sidecar_and_embedded") {
+        v["xmp_mode"] = Value::from("sidecar");
+        return true;
+    }
+    false
+}
+
 /// RFC 7396 merge patch of settings objects: `null` resets a key to its default.
 fn merge(cur: &mut Value, patch: &Value) {
     match (cur, patch) {
@@ -318,8 +354,13 @@ impl SettingsStore {
             .unwrap_or_else(|| root.join("models"))
             .to_string_lossy()
             .into_owned();
+        let mut upgraded = false;
         let mut s = match std::fs::read_to_string(&path) {
-            Ok(text) => match serde_json::from_str::<Settings>(&text)
+            Ok(text) => match serde_json::from_str::<Value>(&text)
+                .and_then(|mut v| {
+                    upgraded = upgrade_legacy(&mut v);
+                    serde_json::from_value::<Settings>(v)
+                })
                 .map_err(|e| e.to_string())
                 .and_then(|s| s.validate().map(|_| s).map_err(|e| e.to_string()))
             {
@@ -327,6 +368,7 @@ impl SettingsStore {
                 Err(e) => {
                     tracing::warn!(error = %e, "settings file is invalid; using defaults");
                     let _ = std::fs::rename(&path, root.join("settings.json.bad"));
+                    upgraded = false;
                     Settings::default()
                 }
             },
@@ -335,11 +377,21 @@ impl SettingsStore {
         if s.models.dir.trim().is_empty() {
             s.models.dir = default_models_dir.clone();
         }
-        Self {
+        let store = Self {
             path,
             default_models_dir,
             cur: RwLock::new(Arc::new(s)),
+        };
+        if upgraded {
+            tracing::warn!(
+                "xmp_mode \"sidecar_and_embedded\" (rewrote original JPEGs) is now \"sidecar\"; \
+                 \"modify_originals\" has to be chosen and confirmed again"
+            );
+            if let Err(e) = store.save(&store.get()) {
+                tracing::warn!(error = %e, "cannot store the upgraded settings");
+            }
         }
+        store
     }
 
     pub fn get(&self) -> Arc<Settings> {
@@ -359,19 +411,42 @@ impl SettingsStore {
 
     /// Validates `patch` against the current settings and stores the result.
     /// Returns `(old, new)`.
+    ///
+    /// Switching `xmp_mode` to `modify_originals` (the only mode that rewrites original files)
+    /// needs `"confirm_modify_originals": true` in the same patch.
     pub fn patch(&self, patch: &Value) -> Result<(Arc<Settings>, Arc<Settings>)> {
-        let Value::Object(_) = patch else {
+        let Value::Object(fields) = patch else {
             return Err(CoreError::bad_request("the body must be a JSON object"));
         };
+        let mut fields = fields.clone();
+        let confirmed = match fields.remove(CONFIRM_MODIFY_ORIGINALS) {
+            None => false,
+            Some(Value::Bool(b)) => b,
+            Some(_) => {
+                return Err(CoreError::bad_request(format!(
+                    "{CONFIRM_MODIFY_ORIGINALS} must be true or false"
+                )))
+            }
+        };
+        let patch = Value::Object(fields);
         let old = self.get();
         let mut v = serde_json::to_value(&*old)?;
-        merge(&mut v, patch);
+        merge(&mut v, &patch);
         let mut new: Settings = serde_json::from_value(v)
             .map_err(|e| CoreError::bad_request(format!("invalid settings: {e}")))?;
         if new.models.dir.trim().is_empty() {
             new.models.dir = self.default_models_dir.clone();
         }
         new.validate()?;
+        if new.xmp_mode == XMP_MODIFY_ORIGINALS
+            && old.xmp_mode != XMP_MODIFY_ORIGINALS
+            && !confirmed
+        {
+            return Err(CoreError::Unprocessable(format!(
+                "xmp_mode \"{XMP_MODIFY_ORIGINALS}\" rewrites the XMP inside original JPEG files; \
+                 send \"{CONFIRM_MODIFY_ORIGINALS}\": true with the change to confirm it"
+            )));
+        }
         self.save(&new)?;
         let new = Arc::new(new);
         *self.cur.write().unwrap() = new.clone();
@@ -471,6 +546,11 @@ mod tests {
         let v = serde_json::to_value(&*s.get()).unwrap();
         assert_eq!(v["language"], "zh-CN");
         assert_eq!(v["faces"]["enabled"], true);
+        assert_eq!(
+            v["faces"]["consented"], false,
+            "faces need an explicit consent"
+        );
+        assert!(!s.get().faces.allowed());
         assert_eq!(v["privacy"]["allow_network"], true);
         assert_eq!(v["cache"]["max_gb"], 20.0);
         assert_eq!(v["xmp_mode"], "off");
@@ -527,6 +607,51 @@ mod tests {
         let s = SettingsStore::load(d.path());
         assert_eq!(s.get().language, "zh-CN");
         assert!(d.path().join("settings.json.bad").exists());
+    }
+
+    #[test]
+    fn modify_originals_needs_a_confirmation() {
+        let (_d, s) = store();
+        let e = s
+            .patch(&json!({"xmp_mode": XMP_MODIFY_ORIGINALS}))
+            .unwrap_err();
+        assert!(matches!(e, CoreError::Unprocessable(_)), "{e:?}");
+        assert_eq!(s.get().xmp_mode, "off");
+        assert!(matches!(
+            s.patch(&json!({"xmp_mode": XMP_MODIFY_ORIGINALS, CONFIRM_MODIFY_ORIGINALS: "yes"}))
+                .unwrap_err(),
+            CoreError::BadRequest(_)
+        ));
+        let (_, new) = s
+            .patch(&json!({"xmp_mode": XMP_MODIFY_ORIGINALS, CONFIRM_MODIFY_ORIGINALS: true}))
+            .unwrap();
+        assert_eq!(new.xmp_mode, XMP_MODIFY_ORIGINALS);
+        // already on: other changes need no new confirmation; the flag is never stored
+        s.patch(&json!({"theme": "light"})).unwrap();
+        let text = std::fs::read_to_string(&s.path).unwrap();
+        assert!(!text.contains(CONFIRM_MODIFY_ORIGINALS), "{text}");
+        // the old mode name is gone
+        assert!(s
+            .patch(&json!({"xmp_mode": "sidecar_and_embedded"}))
+            .is_err());
+        s.patch(&json!({"xmp_mode": "sidecar"})).unwrap();
+        assert!(s.patch(&json!({"xmp_mode": XMP_MODIFY_ORIGINALS})).is_err());
+    }
+
+    #[test]
+    fn legacy_embedded_mode_becomes_sidecar() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join(SETTINGS_FILE),
+            r#"{"theme":"dark","xmp_mode":"sidecar_and_embedded"}"#,
+        )
+        .unwrap();
+        let s = SettingsStore::load(d.path());
+        assert_eq!(s.get().xmp_mode, "sidecar");
+        assert_eq!(s.get().theme, "dark", "the rest of the file is kept");
+        assert!(!d.path().join("settings.json.bad").exists());
+        let stored = std::fs::read_to_string(d.path().join(SETTINGS_FILE)).unwrap();
+        assert!(!stored.contains("sidecar_and_embedded"), "{stored}");
     }
 
     #[test]
