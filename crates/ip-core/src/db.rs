@@ -226,6 +226,11 @@ ALTER TABLE device ADD COLUMN name TEXT;
 ALTER TABLE device ADD COLUMN kind TEXT;
 CREATE INDEX idx_photo_device ON photo(device_id);
 "#,
+    // v10: horizon tilt (docs/03 §3.1): `analysis.tilt_deg` is now filled by the quality step of
+    // every profile; this is its 0..1 confidence (the `tilted` issue needs both).
+    r#"
+ALTER TABLE analysis ADD COLUMN tilt_confidence REAL;
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.
