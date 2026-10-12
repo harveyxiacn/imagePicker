@@ -38,6 +38,33 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **web:** M6 UI - AI assistant drawer, settings, LAN login and roles, onboarding, XMP conflicts ([b2e36f1](https://github.com/harveyxiacn/imagePicker/commit/b2e36f1815f11ece2635d21edf3785d79864b97f))
 - **m6:** AI assistant, settings, cache, XMP interop and ask CLI ([acccd52](https://github.com/harveyxiacn/imagePicker/commit/acccd52bd4c3f02b29b6c82cec2d56e105512d6b))
 - **ai:** Local LLM/VLM assistant (llm.plan, vlm.suggest, vlm.describe) on onnxruntime-genai, models.delete ([a814916](https://github.com/harveyxiacn/imagePicker/commit/a814916509f9da24ec989e129bedb93dafeea70f))
+- **runtime:** Installable AI runtime (uv-managed Python + worker), launch resolution, /api/runtime, web UI, fetch-uv script ([ce543f7](https://github.com/harveyxiacn/imagePicker/commit/ce543f72fc991ad8a08b4138e736b739f5c52fb0))
+- **runtime:** Byte-based install progress, prune uv cache, server tests, CI fetches uv ([d21ccbc](https://github.com/harveyxiacn/imagePicker/commit/d21ccbcaf2f90c3deb7575afd322d8ac1ec38e90))
+- **android:** Tauri 2 Android shell, imagepicker-media plugin (Rust + Kotlin), platform adapter, CI job ([4e57264](https://github.com/harveyxiacn/imagePicker/commit/4e57264a94e46add47188a530787895f391ff1e6))
+- **web:** Mobile UX - bottom nav, swipe cull, quick cull, album import, edit drawer, remote AI pairing ([20eff93](https://github.com/harveyxiacn/imagePicker/commit/20eff9348e04f7512dc1f7553be5d73556b43911))
+- **android:** Expose mobile platform methods (albumCoverUrl via asset protocol, flat media aliases) ([4dfe1c5](https://github.com/harveyxiacn/imagePicker/commit/4dfe1c5a5d0c670e970063939802ad153c90fe32))
+- **remote:** Remote AI host endpoints, device pairing and RemoteWorker ([9c9664e](https://github.com/harveyxiacn/imagePicker/commit/9c9664ec4c224ff2562ea921720f565992e66324))
+- **remote:** Align status/connect shapes and error codes with the mobile UI ([9c78c51](https://github.com/harveyxiacn/imagePicker/commit/9c78c51507ca1806ecab5193d0b7977d5a0d5651))
+- **core:** Android-ready core and on-device lite analysis ([f772265](https://github.com/harveyxiacn/imagePicker/commit/f7722654e2ae4763e677533587c21b88621833d1))
+- **infer:** Ip-infer crate with YuNet face detection; optional faces step for the lite profile ([296daf3](https://github.com/harveyxiacn/imagePicker/commit/296daf31fbee2af576760a45944944a682611863))
+- **web:** Device filter (camera/phone), device kind in inspector, mock devices ([68fe5f4](https://github.com/harveyxiacn/imagePicker/commit/68fe5f42bdaa023e8a5c02441f90c9e8ebf06a13))
+- **core,server:** Normalised camera names, device kinds, session devices endpoint and device filter ([9d46c52](https://github.com/harveyxiacn/imagePicker/commit/9d46c526168d4e99929bcc40670418d16ffcef89))
+- **scoring:** Calibrate issue tags on the synthetic photo library ([c9fef3b](https://github.com/harveyxiacn/imagePicker/commit/c9fef3b1c39c759a879e0cae39d02bfc04010628))
+- **grouping:** Look-back linking and gap filling for burst segmentation ([63a8ffe](https://github.com/harveyxiacn/imagePicker/commit/63a8ffe3e457846af24f55d4c3813d3e10566fb1))
+- **export:** Convert wide-gamut sources to sRGB, keep XMP/IPTC and original EXIF ([fff3fe1](https://github.com/harveyxiacn/imagePicker/commit/fff3fe1160ee5e32a13b32a693ff56965f16918b))
+- **imaging:** HEIC/HEIF thumbnails via embedded JPEG, OS codecs and runtime-loaded libheif ([85c53a4](https://github.com/harveyxiacn/imagePicker/commit/85c53a4602ab453e2b32769bd93d921fa7a4e2ac))
+- **imaging:** Colour-manage HEIF pixels to sRGB; honour the clean aperture ([494e964](https://github.com/harveyxiacn/imagePicker/commit/494e96475cb3e568d9429a8cb0ceb4ce9a3561d8))
+- **besttake:** Choose the base frame that needs the least compositing ([09b6734](https://github.com/harveyxiacn/imagePicker/commit/09b67347dfc188ee1649197d0eadb8da9cd2c2c9))
+- **tasks:** Cancel generation tasks and keep a task history ([5c7f6c9](https://github.com/harveyxiacn/imagePicker/commit/5c7f6c91c76a6b3ab2b6b75566ae9ae0c6c35ae1))
+- **analysis:** Horizon tilt detection for every profile ([52a4d76](https://github.com/harveyxiacn/imagePicker/commit/52a4d76d472a6700021a5c1548f8c8af5fea0fbe))
+- **people:** "this is a new person" from search by face ([2d48908](https://github.com/harveyxiacn/imagePicker/commit/2d48908803889b2cc49ad537d5e2a57f209fa8ac))
+- **export:** JPEG/PNG/TIFF/WebP outputs, shared presets, GPS/EXIF stripping, name tokens ([4c63e42](https://github.com/harveyxiacn/imagePicker/commit/4c63e42cd059194b9876cd2a6bdfe64fdbc65eea))
+- **viewer:** Show the original's native pixels at 100% in the loupe ([eec7235](https://github.com/harveyxiacn/imagePicker/commit/eec7235b1f2573f7e683af26a5386d169e8cd4b6))
+- **compare:** 2/3/4-up layouts and cells taken from the selection ([b3f3211](https://github.com/harveyxiacn/imagePicker/commit/b3f321130736fe85073ac558a4ca319ebd71512e))
+- **assistant:** Justify plan targets, confirm large changes, report LLM fallbacks ([cba2ab4](https://github.com/harveyxiacn/imagePicker/commit/cba2ab489ac0a54212467966a34cb2c1a2ba68b8))
+- **web:** RAW+JPEG badge, import exclusions, missing files, relocate and safe reject ([0de9798](https://github.com/harveyxiacn/imagePicker/commit/0de9798b45c7c08ed96688b4b0a7a38d84454d7e))
+- **imaging:** Glob and folder excludes for scans, skip _rejected folders ([51fbdaa](https://github.com/harveyxiacn/imagePicker/commit/51fbdaa3b960212a33bff787090b8f9fc4f3576a))
+- **core:** RAW+JPEG pairing, import exclusions, file watching, missing files, safe reject ([17798e4](https://github.com/harveyxiacn/imagePicker/commit/17798e444e689f3097d83d7b7ee40e90060fe0b6))
 
 ### Bug fixes
 
@@ -47,6 +74,25 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - Auto-adjust suggestions serialise cleanly (round to slider steps, no f64 widening) ([1387974](https://github.com/harveyxiacn/imagePicker/commit/138797475980357e1d679fa4871fb54360435b07))
 - **core:** Model preflight uses the worker's exact per-operation lists ([1e71097](https://github.com/harveyxiacn/imagePicker/commit/1e71097e1679175b52ba22fca3a23ba8f636a03a))
 - **core:** Assistant asks for confirmation before batch edits on many photos ([ec0b7f7](https://github.com/harveyxiacn/imagePicker/commit/ec0b7f7f04ebe4de1c345d8ac6329c046844c58f))
+- **desktop:** Asset protocol enabled with an empty scope on desktop ([2069c86](https://github.com/harveyxiacn/imagePicker/commit/2069c86e938d30a79adbaf4b9b40f04082d7a4dd))
+- **android:** Pad the WebView by system bars and cutout; ci: setup-android without the retired tools package ([6f44772](https://github.com/harveyxiacn/imagePicker/commit/6f44772dea4c23cbec0a64647f49dc622f824a26))
+- **core:** Wait for the GPU warm-up thread before Core shutdown ([d51693e](https://github.com/harveyxiacn/imagePicker/commit/d51693eed2b5cf361240c426fd3119f311fb4e78))
+- **worker-client:** Kill and probe worker processes natively on Windows ([8871158](https://github.com/harveyxiacn/imagePicker/commit/8871158d49ebab2e4e28840454c673c7c8410cef))
+- **imaging:** Use as_chunks in the macOS ImageIO pixel copy ([14f1475](https://github.com/harveyxiacn/imagePicker/commit/14f1475b81ccabe3d4e2eadb21732d1a25711153))
+- **imaging:** Never hand HEVC/AV1 items without a decoder configuration to a decoder ([4175eb7](https://github.com/harveyxiacn/imagePicker/commit/4175eb775d5ee7cc0d9f1b6afe963d7e6ae49746))
+- **imaging:** Treat HEIF files without a primary image as undecodable ([8f8fabe](https://github.com/harveyxiacn/imagePicker/commit/8f8fabeb049a8f02acbbff2a4104d514156e46a3))
+- **data-safety:** Read-only originals, catalog backup/restore, face-recognition consent ([9bf3374](https://github.com/harveyxiacn/imagePicker/commit/9bf337468d3ef982012516e6600260675a3c75c8))
+- **worker:** Start OpenCV single-threaded to stop thread-pool crashes on Windows ([33198aa](https://github.com/harveyxiacn/imagePicker/commit/33198aa0b1be65eca63b463ca89ba0e27a45cea9))
+- **tasks:** Report cancelling for a cancelled task that is still writing its final state ([76fe25f](https://github.com/harveyxiacn/imagePicker/commit/76fe25f111c75386c8e7c4fdba6ab3c857acf8c2))
+- **inpaint:** Fall back to the body box when a bystander's person mask is empty ([c96f716](https://github.com/harveyxiacn/imagePicker/commit/c96f7160e64ae88eae527efb66c22c95ac261c74))
+- **assistant:** Recognise the worker's llm_plan / vlm_* model tasks ([ab2f2c4](https://github.com/harveyxiacn/imagePicker/commit/ab2f2c4be7192c4122b3a6c8cf5a30454256cc16))
+- **scoring,besttake:** Keep group-photo members as subjects and align group photos ([1c6ed47](https://github.com/harveyxiacn/imagePicker/commit/1c6ed47ae2b4e6885f13213897947eb3e51f2912))
+
+### Performance
+
+- **core,server:** Two-step photo pages, cached totals, lazy GPU init, batched label writes, JSON fast path; bench harness ([fdfd2ac](https://github.com/harveyxiacn/imagePicker/commit/fdfd2ac456a7ff9742a68652f901c3f4bdcdd835))
+- **web:** Instant loupe layers for preloaded photos, deeper decoded preload, i18n-free grid cells; real-server perf scripts ([53b9b2a](https://github.com/harveyxiacn/imagePicker/commit/53b9b2a90bdf91c0b96c6ea9e2bf5b4c77188f4a))
+- M7 benchmark report, harness docs and results; clippy fixes in bench ([541a5f1](https://github.com/harveyxiacn/imagePicker/commit/541a5f1b73ffaf29260eaf290cdcc3577333f6d6))
 
 ### Refactor
 
@@ -62,6 +108,17 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - Update backlog after M5 backend ([36527eb](https://github.com/harveyxiacn/imagePicker/commit/36527ebe853259e210c1b08e2681569822b83cad))
 - Backlog items from the M5 real-photo run ([0f5f057](https://github.com/harveyxiacn/imagePicker/commit/0f5f057e96faf57cf9a6ed2d095b752c3c942301))
 - M6 contract (assistant, LAN auth, XMP, settings) ([033f4ab](https://github.com/harveyxiacn/imagePicker/commit/033f4abf92fcd81b73c37fc789ada540f79aa66f))
+- Git-cliff config, generated CHANGELOG and release guide ([2b2a981](https://github.com/harveyxiacn/imagePicker/commit/2b2a981f1a0a89a0cf1aa03ceb5418f5e3c49e70))
+- Bilingual README, user guide (zh-CN/en), screenshots, contributing layout ([7538fb2](https://github.com/harveyxiacn/imagePicker/commit/7538fb2873d5ec09e948d972a41ec72e0691d16e))
+- AI components are installed from inside the app ([d20b951](https://github.com/harveyxiacn/imagePicker/commit/d20b951f0edc85b798572c92321b993e05f360db))
+- Backlog after M7 ([08aff1c](https://github.com/harveyxiacn/imagePicker/commit/08aff1cd80ac3dee165eb31906ba07e302a5f9f8))
+- M8 Android contract (media plugin, lite analysis, remote AI, mobile UI) ([f78af77](https://github.com/harveyxiacn/imagePicker/commit/f78af772f5310e27d15539aac0f26fd8e9fd2632))
+- First-open steps for unsigned installers (SmartScreen, Gatekeeper) ([b238671](https://github.com/harveyxiacn/imagePicker/commit/b23867198fef58dfebeb66e35210e7c0fd98908e))
+- **bench:** Lite-profile calibration pass on the synthetic set; EXIF JPEG converter for the set ([a88daec](https://github.com/harveyxiacn/imagePicker/commit/a88daec3d64dda57597fad49b830fba73c7dba82))
+- Completion review and finishing plan (09) ([eedbd28](https://github.com/harveyxiacn/imagePicker/commit/eedbd28bcfb377ee33ea148eba93685dac6dfbce))
+- **export:** Document formats, presets API, strip options and name tokens ([bb31060](https://github.com/harveyxiacn/imagePicker/commit/bb31060298cc41c3eef8b8ffafc68b4616c0ff83))
+- User guide and backlog for native-pixel zoom and the compare layouts ([636febf](https://github.com/harveyxiacn/imagePicker/commit/636febff73699ea35b9f5d9d2a0b5f6ea073b01b))
+- RAW+JPEG pairs, import exclusions, file watching, relocate and safe reject ([58bc09c](https://github.com/harveyxiacn/imagePicker/commit/58bc09c2283f85e2d43773940566fe4873263a82))
 
 ### Tests
 
@@ -69,11 +126,26 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **core:** Use a genuinely unknown op type now that warp/beauty are known ops ([9d875d6](https://github.com/harveyxiacn/imagePicker/commit/9d875d66e78393e3d81486a7395129cb9c368cfc))
 - **core:** Fix sync test expectation for the unknown-op example ([5acf55c](https://github.com/harveyxiacn/imagePicker/commit/5acf55cdb13885f076259f76c455c50a20e3b1e4))
 - De-flake preview render-count test; accept beauty_models in models.list ([c9509e9](https://github.com/harveyxiacn/imagePicker/commit/c9509e9afe649bc9b8072a76b559d8618ff5d918))
+- **bench:** Fake worker synthetic analysis (IP_FAKE_ANALYSIS), burst-aware bench gen, bench seed --files-dir ([ae35069](https://github.com/harveyxiacn/imagePicker/commit/ae35069839ed56dfdc65f2ee18b789ca782c1b2a))
+- **e2e:** Real-server end-to-end test with the fake worker; analysis progress no longer shown as an export toast ([1a4cb59](https://github.com/harveyxiacn/imagePicker/commit/1a4cb59676e6b6e383ddce6840d5c9b0583ccc8c))
+- **core:** Hold the fake uv sync open so the runtime install conflict check is deterministic ([ea81c1a](https://github.com/harveyxiacn/imagePicker/commit/ea81c1ad20c96afb77b74cb3a32a43b9c0e082cd))
+- **ai:** Exclusive-eviction test uses an explicit memory budget ([48d6291](https://github.com/harveyxiacn/imagePicker/commit/48d62913436297f5d197c554c7076545ccedaec3))
+- **server:** Wait for edits.updated before snapshotting render count ([6c11447](https://github.com/harveyxiacn/imagePicker/commit/6c11447305ec36eb564f2498d83c4511dea9b3fc))
+- **server:** Give the login rate-limit window test room for slow runners ([c0ec2f4](https://github.com/harveyxiacn/imagePicker/commit/c0ec2f4009e6f863615b5afd6e6e798489d99bd3))
+- **core:** Give the runtime install tests 60 s on a loaded machine ([675d96c](https://github.com/harveyxiacn/imagePicker/commit/675d96c56a09ad3bad664cb500538b199cd019d1))
+- **core:** Wait for the model-download done event instead of racing it ([4497f11](https://github.com/harveyxiacn/imagePicker/commit/4497f11cc8453ffcef31c815657e98b79d22718b))
+- **core:** Accept cancelled as well as cancelling right after a cancel request ([d3a98eb](https://github.com/harveyxiacn/imagePicker/commit/d3a98ebbaeb4b854757470aa014bcf64d6901dc4))
 
 ### CI and build
 
 - GitHub Actions for rust/web/ai-worker, issue templates, contributing guide ([eebcbe0](https://github.com/harveyxiacn/imagePicker/commit/eebcbe0f7ce3d09ffe324a19fb17219e904eea1c))
 - Drop invalid job-level hashFiles conditions ([1ffb8f2](https://github.com/harveyxiacn/imagePicker/commit/1ffb8f25ffb9a3d654bf063a0a2df782caa06938))
+- Release and nightly workflows, version-consistency check, bump-version script ([1be68f8](https://github.com/harveyxiacn/imagePicker/commit/1be68f8518a8303b0366b45e180d60b19892e3e4))
+- AUR packages (imagepicker, imagepicker-bin) and Flatpak draft ([cf919b7](https://github.com/harveyxiacn/imagePicker/commit/cf919b79372ad7f74c1808ad2e0ff1d3591c7950))
+- Rename duplicate android job (core check vs debug APK) ([0d0708d](https://github.com/harveyxiacn/imagePicker/commit/0d0708d0504ff72eb89e34c9ac1be7b58f786b51))
+- **release:** Build and publish the Android APK ([9d72ee6](https://github.com/harveyxiacn/imagePicker/commit/9d72ee61d28f919596740dd632cff6f117902989))
+- **release:** Setup-android without the retired tools package ([aed2418](https://github.com/harveyxiacn/imagePicker/commit/aed24185d3c8b45d3ca114c7239784ddcc544360))
+- Exclude the tauri media plugin from the host rust job; fix import/settings test races ([3e0087c](https://github.com/harveyxiacn/imagePicker/commit/3e0087c83749d8cbb9092709ca723e59449c39ce))
 
 ### Miscellaneous
 
@@ -83,4 +155,16 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - M4 contract (beauty/warp ops, person geometry, beauty.prepare, M2 remainder APIs) ([08986a2](https://github.com/harveyxiacn/imagePicker/commit/08986a2b2fdbf4032ff501edd0fdbf1f9f607c57))
 - Update Cargo.lock for ip-server -> ip-render dependency ([780003f](https://github.com/harveyxiacn/imagePicker/commit/780003faa5a6f02b113e6344e1ab0746581d963b))
 - M5 contract (patch op, best take, inpaint, enhance) and backlog doc ([8234e26](https://github.com/harveyxiacn/imagePicker/commit/8234e2682f269a6493c6ef67b504cd64f4a67aee))
+- Cargo.lock for desktop/android tauri features ([a25baad](https://github.com/harveyxiacn/imagePicker/commit/a25baad16557b4a9364f778612e3bf3e6a3baa5c))
+- ComfyUI synthetic evaluation set generator; backlog after the M8 CI/APK/ip-infer round ([ed90a3e](https://github.com/harveyxiacn/imagePicker/commit/ed90a3e67803ce67a5e25eb4dd3a53b3f1885889))
+- **bench:** V2 synthetic set generator (actor references, img2img bursts, places/things/defects) ([33c975c](https://github.com/harveyxiacn/imagePicker/commit/33c975cbca6ca90c4efd1bd7cfc856bfa2b4f7cc))
+- **bench:** EXIF converter understands v2 scene/burst keys ([3cd2d7e](https://github.com/harveyxiacn/imagePicker/commit/3cd2d7e4a3d6b09f1b227c4c5db799fd57f8659e))
+- **bench:** V2 generator uses face-crop identity references, scene-first prompts, denoise 0.7 bursts ([000c6e6](https://github.com/harveyxiacn/imagePicker/commit/000c6e6288c4f88e7ab4fb7afe9ebf30ccc65a0d))
+- **bench:** EXIF converter rotates scenes over a camera and two phones; document-like images get no EXIF ([325e4ff](https://github.com/harveyxiacn/imagePicker/commit/325e4ff0219182b0588cde64aa3cedc2db33ecea))
+- **scripts:** Add the ComfyUI synthetic photo library generator, audit and test ([c55f36d](https://github.com/harveyxiacn/imagePicker/commit/c55f36d066981e70674599b38b7437b9ef18fe12))
+- Cargo fmt the subject_flags pass; ruff format gen_lite_fixtures.py; docs/09 notes the committed generator ([fd28e5d](https://github.com/harveyxiacn/imagePicker/commit/fd28e5d06ffa8d18aec82e9d2ec3fb9fab3ef1aa))
+
+### Bench
+
+- Standard-profile evaluation on the synthetic photo library ([51e21a5](https://github.com/harveyxiacn/imagePicker/commit/51e21a50e29545f1383d5b6f0d1897821a2f0d9a))
 
