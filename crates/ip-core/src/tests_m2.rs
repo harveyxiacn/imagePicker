@@ -948,11 +948,21 @@ async fn models_missing_blocks_standard_but_not_fast() {
             break;
         }
     }
-    let evs = drain(&mut rx);
-    assert!(evs.iter().any(
-        |ev| matches!(ev, Event::TaskProgress { kind, state, done, total, .. }
+    // The final progress event can follow the installed state: wait for the event itself (a
+    // slow Windows CI runner drained the events before it arrived).
+    let finished = |ev: &Event| {
+        matches!(ev, Event::TaskProgress { kind, state, done, total, .. }
         if kind == "model_download" && state == "done" && done == total && *total > 0)
-    ));
+    };
+    let mut evs = drain(&mut rx);
+    for _ in 0..500 {
+        if evs.iter().any(finished) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        evs.extend(drain(&mut rx));
+    }
+    assert!(evs.iter().any(finished));
     assert!(matches!(
         e.core.models_ensure(vec!["nope".into()]).await,
         Err(CoreError::BadRequest(_))

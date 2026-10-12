@@ -15,6 +15,18 @@ live in [`REPORT.md`](REPORT.md); raw numbers in `results/*.json`.
 | `web/scripts/perf-trace.mjs` | Chrome trace of a fast scroll, summarised by event (where main-thread time goes). |
 | `web/scripts/e2e-real.mjs` | Real-server end-to-end test, see [`CI-E2E.md`](CI-E2E.md). |
 
+## Analysis quality (synthetic photo library)
+
+These score the analysis itself rather than speed; inputs are the generated photo library in
+`bench/data/qwen-photo-library` (git-ignored) and catalogs written by
+`imagepicker analyze <dir> --profile lite --data-dir <data dir>`.
+
+| Piece | What it does |
+|---|---|
+| `bench/eval-library.py LIBRARY DATA_DIR` | Issue-tag precision / recall against the manifest tags, burst grouping, metric distributions, star histogram. |
+| `bench/make-tilt-set.py [LIBRARY] [OUT]` | Rotates 247 library photos by 0, +-1, +-2, +-3, +-5, +-8 degrees (border-free centre crop) into `bench/data/tilt-set` with the true angles in its manifest (Pillow). |
+| `bench/eval-tilt.py TILT_SET DATA_DIR [--library LIBRARY DATA_DIR]` | Tilt estimate error, `tilted` flag precision / recall per angle, false positives on the 0-degree copies and the library, and a threshold sweep (docs/03 section 3.1.1). |
+
 ## Reproduce
 
 ```sh

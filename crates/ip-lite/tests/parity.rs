@@ -1,5 +1,6 @@
 //! Cross-check against the Python worker: `ai-worker/scripts/gen_lite_fixtures.py` runs the real
-//! `phash.py` / `quality.py` on synthetic images and stores the results next to the PNGs.
+//! `phash.py` / `quality.py` (with `tilt.py`) on synthetic images and stores the results next to
+//! the PNGs.
 
 use std::path::PathBuf;
 
@@ -86,4 +87,49 @@ fn quality_matches_worker_formulas() {
     }
     eprintln!("max relative deviation: {max_dev:.2e}");
     assert!(bad.is_empty(), "quality differs:\n{}", bad.join("\n"));
+}
+
+/// The tilt estimate (part of the quality step): the angle where the worker found straight
+/// structure (it is arbitrary otherwise), the confidence everywhere.
+#[test]
+fn tilt_matches_worker() {
+    let mut bad = Vec::new();
+    let (mut max_deg, mut max_conf) = (0f64, 0f64);
+    for (name, e) in expected() {
+        let (w, h, rgb) = load(&name);
+        let q = analyze_quality(&rgb, w, h);
+        let want_deg = e["quality"]["tilt_deg"].as_f64().unwrap();
+        let want_conf = e["quality"]["tilt_confidence"].as_f64().unwrap();
+        max_conf = max_conf.max((q.tilt_confidence - want_conf).abs());
+        bad.extend(close(
+            &name,
+            "tilt_confidence",
+            q.tilt_confidence,
+            want_conf,
+            0.01,
+            0.0,
+        ));
+        if want_conf >= 0.05 {
+            max_deg = max_deg.max((q.tilt_deg - want_deg).abs());
+            bad.extend(close(&name, "tilt_deg", q.tilt_deg, want_deg, 0.05, 0.0));
+        }
+        // the rotated fixtures: the known angle, confidently
+        let truth = match name.as_str() {
+            "lines_level_1024x768" => Some(0.0),
+            "lines_cw3_1024x768" => Some(3.0),
+            "lines_ccw6_1500x1000" => Some(-6.0),
+            "lines_cw1_768x1024" => Some(1.25),
+            _ => None,
+        };
+        if let Some(t) = truth {
+            if (q.tilt_deg - t).abs() > 0.3 || q.tilt_confidence < 0.3 {
+                bad.push(format!(
+                    "{name}: tilt {} conf {} (true {t})",
+                    q.tilt_deg, q.tilt_confidence
+                ));
+            }
+        }
+    }
+    eprintln!("max deviation: tilt {max_deg:.3} deg, confidence {max_conf:.4}");
+    assert!(bad.is_empty(), "tilt differs:\n{}", bad.join("\n"));
 }

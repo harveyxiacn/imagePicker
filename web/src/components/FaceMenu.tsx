@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Ban, Check, Pencil, UserX } from 'lucide-react'
+import { Ban, Check, Pencil, ScanSearch, UserX } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -18,7 +18,10 @@ interface MenuState {
   y: number
 }
 
-/** Right-click menu for a face: filter by / exclude / name this person (doc 04 3.6.1 "click a face to filter"). */
+/**
+ * Right-click menu for a face: filter by / exclude / name this person (doc 04 3.6.1 "click a face to filter"), "not
+ * this person", and search by this face (where "this is a new person" can gather its look-alikes).
+ */
 export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; preventDefault: () => void }, face: Face) => void; node: ReactNode } {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -94,7 +97,7 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
             role="menu"
             aria-label={t('face.menu')}
             className="anim-pop fixed z-[70] min-w-52 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]"
-            style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 170) }}
+            style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 205) }}
             data-testid="face-menu"
           >
             <div className="px-2 py-1 text-xs text-muted">{menu.face.person_name ?? (known ? `${t('person.unnamed')} ${menu.face.person_id}` : t('face.unassigned'))}</div>
@@ -117,6 +120,15 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
             </MenuItem>
             <MenuItem icon={<UserX size={14} />} disabled={!known} onClick={() => void notThisPerson(menu.face)}>
               {t('face.notThisPerson')}
+            </MenuItem>
+            <MenuItem
+              icon={<ScanSearch size={14} />}
+              onClick={() => {
+                useUi.getState().openFaceSearch(menu.face)
+                setMenu(null)
+              }}
+            >
+              {t('face.searchSimilar')}
             </MenuItem>
           </div>,
           document.body,
