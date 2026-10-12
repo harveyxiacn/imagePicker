@@ -72,6 +72,7 @@ async fn analyze(core: &Arc<Core>, sid: i64, force: bool) {
         photo_ids: None,
         force,
         allow_download: false,
+        fallback_lite: false,
     })
     .await
     .unwrap();

@@ -87,6 +87,7 @@ async fn analyze(e: &Env, sid: i64) {
             photo_ids: None,
             force: false,
             allow_download: false,
+            fallback_lite: false,
         })
         .await
         .unwrap();

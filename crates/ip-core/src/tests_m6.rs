@@ -87,6 +87,7 @@ async fn analyze(e: &Env, sid: i64) {
             photo_ids: None,
             force: false,
             allow_download: false,
+            fallback_lite: false,
         })
         .await
         .unwrap();
@@ -815,6 +816,7 @@ async fn settings_persist_and_apply_live() {
             photo_ids: None,
             force: false,
             allow_download: true,
+            fallback_lite: false,
         })
         .await
         .unwrap_err();
@@ -894,6 +896,7 @@ async fn faces_disabled_skips_identity_steps() {
             photo_ids: None,
             force: true,
             allow_download: false,
+            fallback_lite: false,
         })
         .await
         .unwrap();

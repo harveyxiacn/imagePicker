@@ -82,6 +82,7 @@ async fn analyze(e: &Env, sid: i64) {
             photo_ids: None,
             force: false,
             allow_download: false,
+            fallback_lite: false,
         })
         .await
         .unwrap();
@@ -929,6 +930,7 @@ async fn new_person_from_search_results_is_locked_and_survives_reclustering() {
             photo_ids: None,
             force: true,
             allow_download: false,
+            fallback_lite: false,
         })
         .await
         .unwrap();

@@ -126,6 +126,8 @@ pub struct Core {
     /// Running recorded tasks (cancel tokens, live progress).
     pub(crate) tasks: tasks::TaskRegistry,
     pub(crate) runs: std::sync::Mutex<std::collections::HashMap<i64, analysis::RunInfo>>,
+    /// Analysis runs of a previous process, waiting for [`Core::resume_analyses`].
+    pub(crate) open_analyses: std::sync::Mutex<Vec<tasks::OpenAnalysis>>,
     pub(crate) analysis_gate: tokio::sync::Semaphore,
     pub(crate) taste_lock: tokio::sync::Mutex<()>,
 }
@@ -143,6 +145,8 @@ impl Core {
         // an unreadable catalog is moved aside (state "recovery"), see `backup`
         let (db, catalog_guard) = backup::open_catalog(&dirs)?;
         db.with(|c| catalog::settle_stale_sessions(c))?;
+        // analysis runs a previous process left open: `resume_analyses` picks them up
+        let open_analyses = db.with(|c| tasks::open_analyses(c))?;
         // tasks left running by a previous process: recorded as interrupted, scratch removed
         for id in db.with(|c| tasks::settle_interrupted(c))? {
             let _ = std::fs::remove_dir_all(dirs.gen.join(&id));
@@ -238,6 +242,7 @@ impl Core {
             task_seq: AtomicU64::new(task_seq),
             tasks: Default::default(),
             runs: Default::default(),
+            open_analyses: std::sync::Mutex::new(open_analyses),
             analysis_gate: tokio::sync::Semaphore::new(1),
             taste_lock: tokio::sync::Mutex::new(()),
         });
@@ -285,7 +290,15 @@ impl Core {
                 Ok((keys, orphans))
             })
             .await?;
-        self.runs.lock().unwrap().remove(&id);
+        let removed = self.runs.lock().unwrap().remove(&id);
+        if let Some(r) = removed.filter(|r| r.status.state == RunState::Paused) {
+            // a paused run has no task left to end its history row
+            let (tid, d, t) = (r.task_id, r.status.done, r.status.total);
+            let _ = self
+                .db
+                .call(move |c| tasks::finish(c, &tid, tasks::CANCELLED, d, t, None))
+                .await;
+        }
         self.thumbs.purge(&keys);
         // rendered (edited) thumbnails/previews and generated patch assets of the deleted photos
         for (photo_id, fast_key, hashes) in &orphans {

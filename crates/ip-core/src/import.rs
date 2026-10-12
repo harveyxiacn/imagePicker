@@ -208,6 +208,7 @@ impl Core {
                     photo_ids: None,
                     force: false,
                     allow_download: false,
+                    fallback_lite: false,
                 };
                 if let Err(e) = self.analysis_run(req).await {
                     tracing::info!(session = session_id, error = %e, "auto analysis not started");

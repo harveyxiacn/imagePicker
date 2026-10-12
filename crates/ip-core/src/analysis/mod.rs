@@ -4,6 +4,7 @@
 pub mod cluster;
 pub mod faces;
 pub mod grouping;
+pub mod incremental;
 pub mod scoring;
 pub mod store;
 pub mod types;

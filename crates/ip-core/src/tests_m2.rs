@@ -78,6 +78,7 @@ fn run_req(sid: i64, profile: Profile) -> AnalysisRunRequest {
         photo_ids: None,
         force: false,
         allow_download: false,
+        fallback_lite: false,
     }
 }
 
@@ -1214,4 +1215,641 @@ async fn migration_v4_upgrades_a_v3_catalog() {
         )
         .unwrap();
     assert_eq!((fc, n), (None, 0));
+}
+
+// ====================================================================== resume, pause, fallback
+
+fn many_photos(e: &Env, n: u64) {
+    for i in 0..n {
+        photo(e.src.path(), &format!("p{i:03}.jpg"), i * 100);
+    }
+}
+
+async fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
+    for _ in 0..1000 {
+        if f() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("timed out waiting for {what}");
+}
+
+async fn wait_state(core: &Arc<Core>, sid: i64, state: RunState) -> AnalysisStatus {
+    wait_until(&format!("state {state:?}"), || {
+        core.analysis_status(sid).state == state
+    })
+    .await;
+    core.analysis_status(sid)
+}
+
+/// Photos whose analysis has been stored.
+async fn stored(core: &Arc<Core>) -> i64 {
+    core.db
+        .call(|c| {
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM photo WHERE COALESCE(analysis_version,0) > 0",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+/// Ids of the photos whose analysis has been stored.
+async fn analysed_ids(core: &Arc<Core>) -> std::collections::HashSet<i64> {
+    core.db
+        .call(|c| {
+            let mut st =
+                c.prepare("SELECT id FROM photo WHERE COALESCE(analysis_version,0) > 0")?;
+            let v = st
+                .query_map([], |r| r.get(0))?
+                .collect::<rusqlite::Result<std::collections::HashSet<i64>>>()?;
+            Ok(v)
+        })
+        .await
+        .unwrap()
+}
+
+fn open_at(data: &Path, worker: &Arc<FakeWorker>) -> Arc<Core> {
+    Core::open(CoreConfig {
+        data_dir: Some(data.to_path_buf()),
+        imaging: Arc::new(FakeImaging::new()),
+        thumb_workers: Some(2),
+        worker: Some(worker.clone()),
+        renderer: None,
+        force_cpu: false,
+    })
+    .unwrap()
+}
+
+/// Runs `fut` as a process of its own: a runtime on a thread that is dropped when the future is
+/// done, which drops whatever still runs (a batch in flight, the run task) and closes the
+/// catalog, like an exit in the middle of a run.
+fn run_process<T: Send + 'static>(fut: impl std::future::Future<Output = T> + Send + 'static) -> T {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let out = rt.block_on(fut);
+        drop(rt);
+        out
+    })
+    .join()
+    .unwrap()
+}
+
+/// First process of the restart tests: imports 70 photos, starts a fast run and returns once at
+/// least one batch is stored (`pause`: and the run is paused).
+fn first_process(data: &Path, src: &Path, worker: &Arc<FakeWorker>, pause: bool) -> i64 {
+    for i in 0..70u64 {
+        let p = src.join(format!("p{i:03}.jpg"));
+        write_jpeg(&p, 320, 240, (i % 200) as u8);
+        let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+        f.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(BASE + i * 100))
+            .unwrap();
+    }
+    let (data, src, worker) = (data.to_path_buf(), src.to_path_buf(), worker.clone());
+    run_process(async move {
+        let core = open_at(&data, &worker);
+        crate::testutil::grant_face_consent(&core);
+        let s = core
+            .import(ImportRequest {
+                path: src.to_string_lossy().into_owned(),
+                recursive: true,
+                title: None,
+            })
+            .await
+            .unwrap();
+        core.wait_session_ready(s.id, Duration::from_secs(30))
+            .await
+            .unwrap();
+        core.analysis_run(run_req(s.id, Profile::Fast))
+            .await
+            .unwrap();
+        wait_until("one stored batch", || {
+            core.db
+                .with(|c| {
+                    Ok(c.query_row(
+                        "SELECT COUNT(*) FROM photo WHERE COALESCE(analysis_version,0) > 0",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )?)
+                })
+                .unwrap()
+                >= 32
+        })
+        .await;
+        if pause {
+            core.analysis_pause(s.id).unwrap();
+            wait_state(&core, s.id, RunState::Paused).await;
+        }
+        s.id
+    })
+}
+
+#[tokio::test]
+async fn an_interrupted_analysis_resumes_with_the_photos_that_are_left() {
+    let (data, src) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let worker = Arc::new(FakeWorker::new());
+    worker.delay_ms.store(150, Ordering::SeqCst);
+    let sid = first_process(data.path(), src.path(), &worker, false);
+    worker.delay_ms.store(0, Ordering::SeqCst);
+
+    // the process is gone: at least batch 1 is stored, the batch in flight is lost
+    let sent_before = worker.analyzed_ids.lock().unwrap().len();
+    let core = open_at(data.path(), &worker);
+    let done_ids = analysed_ids(&core).await;
+    assert!(
+        (32..70).contains(&done_ids.len()) && done_ids.len() % 32 == 0,
+        "{}",
+        done_ids.len()
+    );
+    // opening alone starts nothing; the server does when it builds its router
+    assert_eq!(core.analysis_status(sid).state, RunState::Idle);
+    let rec = core.tasks_list(None).await.unwrap();
+    assert_eq!(rec[0].status, "interrupted");
+    let task_id = rec[0].id.clone();
+
+    core.resume_analyses();
+    let st = wait_state(&core, sid, RunState::Done).await;
+    assert!(st.resumed && st.error.is_none(), "{st:?}");
+    assert_eq!((st.done, st.total), (70, 70));
+    // only the photos that were left went to the worker, each once
+    let sent: Vec<i64> = worker.analyzed_ids.lock().unwrap()[sent_before..].to_vec();
+    let sent_set: std::collections::HashSet<i64> = sent.iter().copied().collect();
+    assert_eq!(sent.len(), 70 - done_ids.len());
+    assert_eq!(sent_set.len(), sent.len());
+    assert!(sent_set.is_disjoint(&done_ids));
+    assert_eq!(stored(&core).await, 70);
+    // the history row of the interrupted run carries on instead of a second one
+    let rec = core.tasks_list(None).await.unwrap();
+    assert_eq!(rec.len(), 1);
+    assert_eq!(
+        (rec[0].id.as_str(), rec[0].status.as_str(), rec[0].done),
+        (task_id.as_str(), "done", 70)
+    );
+    assert_eq!(rec[0].params["resumes"], 1);
+    assert!(!core.groups(sid).await.unwrap().scenes.is_empty());
+    // nothing left: a later start does not run it again
+    let calls = worker.analyze_calls.load(Ordering::SeqCst);
+    drop(core);
+    let core = open_at(data.path(), &worker);
+    core.resume_analyses();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(core.analysis_status(sid).state, RunState::Idle);
+    assert_eq!(worker.analyze_calls.load(Ordering::SeqCst), calls);
+}
+
+#[tokio::test]
+async fn a_run_that_keeps_killing_the_process_is_not_resumed_forever() {
+    let (data, src) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let worker = Arc::new(FakeWorker::new());
+    worker.delay_ms.store(150, Ordering::SeqCst);
+    let sid = first_process(data.path(), src.path(), &worker, false);
+    worker.delay_ms.store(5_000, Ordering::SeqCst);
+    // every start picks the run up and is cut off again before it stores anything
+    for round in 1..=3 {
+        let (d, w) = (data.path().to_path_buf(), worker.clone());
+        run_process(async move {
+            let core = open_at(&d, &w);
+            core.resume_analyses();
+            wait_until("resumed", || {
+                core.analysis_status(sid).state == RunState::Running
+            })
+            .await;
+            round
+        });
+    }
+    worker.delay_ms.store(0, Ordering::SeqCst);
+    let calls = worker.analyze_calls.load(Ordering::SeqCst);
+    let core = open_at(data.path(), &worker);
+    core.resume_analyses();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(core.analysis_status(sid).state, RunState::Idle);
+    assert_eq!(worker.analyze_calls.load(Ordering::SeqCst), calls);
+    // the user can still start it by hand: only the missing photos
+    core.analysis_run(run_req(sid, Profile::Fast))
+        .await
+        .unwrap();
+    let st = wait_state(&core, sid, RunState::Done).await;
+    assert!(st.total < 70, "{st:?}");
+    assert_eq!(stored(&core).await, 70);
+}
+
+#[tokio::test]
+async fn pause_and_continue_keep_the_finished_batches() {
+    let e = env();
+    many_photos(&e, 100);
+    let sid = import(&e).await;
+    e.worker.delay_ms.store(150, Ordering::SeqCst);
+    let mut rx = e.core.events.subscribe();
+    assert!(matches!(
+        e.core.analysis_pause(sid),
+        Err(CoreError::Conflict(_))
+    ));
+    assert!(matches!(
+        e.core.analysis_continue(sid).await,
+        Err(CoreError::Conflict(_))
+    ));
+    let task = e
+        .core
+        .analysis_run(run_req(sid, Profile::Fast))
+        .await
+        .unwrap();
+    wait_until("first batch", || e.core.analysis_status(sid).done >= 32).await;
+    e.core.analysis_pause(sid).unwrap();
+    let st = wait_state(&e.core, sid, RunState::Paused).await;
+    assert!(
+        st.done >= 32 && st.done < 100 && st.done % 32 == 0,
+        "{st:?}"
+    );
+    assert_eq!((st.total, st.stage.clone()), (100, None));
+    assert_eq!(stored(&e.core).await, st.done);
+    let rec = e
+        .core
+        .tasks_list(None)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == task)
+        .unwrap();
+    assert_eq!(
+        (rec.status.as_str(), rec.done, rec.cancellable),
+        ("paused", st.done, false)
+    );
+    // a paused run blocks a new one and cannot be paused again
+    assert!(matches!(
+        e.core.analysis_run(run_req(sid, Profile::Fast)).await,
+        Err(CoreError::Conflict(_))
+    ));
+    assert!(matches!(
+        e.core.analysis_pause(sid),
+        Err(CoreError::Conflict(_))
+    ));
+    let evs = drain(&mut rx);
+    assert!(evs.iter().any(|ev| matches!(
+        ev,
+        Event::AnalysisProgress {
+            state: RunState::Paused,
+            ..
+        }
+    )));
+    assert!(evs.iter().any(|ev| matches!(ev,
+        Event::TaskProgress { task_id, state, .. } if task_id == &task && state == "paused")));
+    // while paused nothing is sent
+    let calls = e.worker.analyze_calls.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(e.worker.analyze_calls.load(Ordering::SeqCst), calls);
+    assert_eq!(e.core.analysis_status(sid).state, RunState::Paused);
+
+    e.worker.delay_ms.store(0, Ordering::SeqCst);
+    assert_eq!(e.core.analysis_continue(sid).await.unwrap(), task);
+    assert!(matches!(
+        e.core.analysis_continue(sid).await,
+        Err(CoreError::Conflict(_))
+    ));
+    let st = wait_done(&e, sid).await;
+    assert_eq!((st.state, st.done, st.total), (RunState::Done, 100, 100));
+    // every photo was sent once
+    let sent = e.worker.analyzed_ids.lock().unwrap().clone();
+    let uniq: std::collections::HashSet<i64> = sent.iter().copied().collect();
+    assert_eq!((sent.len(), uniq.len()), (100, 100));
+    let rec = e.core.tasks_list(None).await.unwrap();
+    assert_eq!(
+        (rec[0].id.as_str(), rec[0].status.as_str()),
+        (task.as_str(), "done")
+    );
+    assert!(!e.core.groups(sid).await.unwrap().scenes.is_empty());
+}
+
+#[tokio::test]
+async fn cancelling_a_paused_analysis_groups_what_was_done() {
+    let e = env();
+    many_photos(&e, 70);
+    let sid = import(&e).await;
+    e.worker.delay_ms.store(100, Ordering::SeqCst);
+    let task = e
+        .core
+        .analysis_run(run_req(sid, Profile::Fast))
+        .await
+        .unwrap();
+    wait_until("first batch", || e.core.analysis_status(sid).done >= 32).await;
+    e.core.analysis_pause(sid).unwrap();
+    wait_state(&e.core, sid, RunState::Paused).await;
+    assert!(
+        e.core.groups(sid).await.unwrap().scenes.is_empty(),
+        "pausing does not group yet"
+    );
+    e.core.analysis_cancel(sid);
+    wait_state(&e.core, sid, RunState::Idle).await;
+    assert!(!e.core.groups(sid).await.unwrap().scenes.is_empty());
+    let rec = e.core.tasks_list(None).await.unwrap();
+    assert_eq!(
+        (rec[0].id.as_str(), rec[0].status.as_str()),
+        (task.as_str(), "cancelled")
+    );
+    assert!(matches!(
+        e.core.analysis_continue(sid).await,
+        Err(CoreError::Conflict(_))
+    ));
+    // the rest can be analysed by a new run
+    e.worker.delay_ms.store(0, Ordering::SeqCst);
+    let st = run(&e, sid, Profile::Fast).await;
+    assert_eq!(st.state, RunState::Done);
+    assert_eq!(stored(&e.core).await, 70);
+}
+
+#[tokio::test]
+async fn a_paused_analysis_stays_paused_across_a_restart() {
+    let (data, src) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let worker = Arc::new(FakeWorker::new());
+    worker.delay_ms.store(100, Ordering::SeqCst);
+    let sid = first_process(data.path(), src.path(), &worker, true);
+    worker.delay_ms.store(0, Ordering::SeqCst);
+    let (calls, sent_before) = (
+        worker.analyze_calls.load(Ordering::SeqCst),
+        worker.analyzed_ids.lock().unwrap().len(),
+    );
+
+    let core = open_at(data.path(), &worker);
+    core.resume_analyses();
+    let st = wait_state(&core, sid, RunState::Paused).await;
+    assert!(st.resumed && st.done >= 32, "{st:?}");
+    let paused_at = st.done;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(worker.analyze_calls.load(Ordering::SeqCst), calls);
+    assert_eq!(core.analysis_status(sid).state, RunState::Paused);
+
+    core.analysis_continue(sid).await.unwrap();
+    let st = wait_state(&core, sid, RunState::Done).await;
+    assert_eq!((st.done, st.total), (70, 70));
+    assert_eq!(
+        worker.analyzed_ids.lock().unwrap().len() - sent_before,
+        (70 - paused_at) as usize
+    );
+    assert_eq!(stored(&core).await, 70);
+}
+
+#[tokio::test]
+async fn deleting_a_session_ends_its_paused_run() {
+    let e = env();
+    many_photos(&e, 70);
+    let sid = import(&e).await;
+    e.worker.delay_ms.store(100, Ordering::SeqCst);
+    let task = e
+        .core
+        .analysis_run(run_req(sid, Profile::Fast))
+        .await
+        .unwrap();
+    wait_until("first batch", || e.core.analysis_status(sid).done >= 32).await;
+    e.core.analysis_pause(sid).unwrap();
+    wait_state(&e.core, sid, RunState::Paused).await;
+    e.core.delete_session(sid).await.unwrap();
+    let rec = e.core.tasks_list(None).await.unwrap();
+    assert_eq!(
+        (rec[0].id.as_str(), rec[0].status.as_str()),
+        (task.as_str(), "cancelled")
+    );
+    assert_eq!(e.core.analysis_status(sid).state, RunState::Idle);
+}
+
+fn fallback_req(sid: i64, profile: Profile) -> AnalysisRunRequest {
+    AnalysisRunRequest {
+        fallback_lite: true,
+        ..run_req(sid, profile)
+    }
+}
+
+async fn profiles_of(e: &Env) -> HashMap<String, i64> {
+    e.core
+        .db
+        .call(|c| {
+            let mut st = c.prepare("SELECT profile, COUNT(*) FROM analysis GROUP BY profile")?;
+            let v = st
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<HashMap<String, i64>>>()?;
+            Ok(v)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn lite_stands_in_when_models_or_worker_are_missing() {
+    // a model is missing
+    let e = env();
+    build_scene(&e);
+    let sid = import(&e).await;
+    e.worker.set_missing(&["siglip2-base"]);
+    assert!(matches!(
+        e.core.analysis_run(run_req(sid, Profile::Standard)).await,
+        Err(CoreError::ModelsMissing(_))
+    ));
+    e.core
+        .analysis_run(fallback_req(sid, Profile::Standard))
+        .await
+        .unwrap();
+    let st = wait_done(&e, sid).await;
+    assert_eq!(st.state, RunState::Done, "{st:?}");
+    assert_eq!(
+        (st.profile, st.fallback_from),
+        (Some(Profile::Lite), Some(Profile::Standard))
+    );
+    assert_eq!(e.worker.analyze_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        profiles_of(&e).await,
+        HashMap::from([("lite".to_string(), 6)])
+    );
+    let ph = all(&e, sid).await;
+    assert!(ph.values().all(|p| p.analyzed && p.ai_rating.is_some()));
+    assert!(!e.core.groups(sid).await.unwrap().scenes.is_empty());
+
+    // the worker cannot be reached at all
+    let e = env();
+    build_scene(&e);
+    let sid = import(&e).await;
+    e.worker.models_unavailable.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        e.core.analysis_run(run_req(sid, Profile::Standard)).await,
+        Err(CoreError::WorkerUnavailable(_))
+    ));
+    e.core
+        .analysis_run(fallback_req(sid, Profile::Fast))
+        .await
+        .unwrap();
+    let st = wait_done(&e, sid).await;
+    assert_eq!(st.state, RunState::Done, "{st:?}");
+    assert_eq!(st.fallback_from, Some(Profile::Fast));
+    assert_eq!(
+        profiles_of(&e).await,
+        HashMap::from([("lite".to_string(), 6)])
+    );
+}
+
+#[tokio::test]
+async fn lite_takes_over_when_the_ai_dies_mid_run() {
+    let e = env();
+    many_photos(&e, 100);
+    let sid = import(&e).await;
+    e.worker.delay_ms.store(100, Ordering::SeqCst);
+    e.core
+        .analysis_run(fallback_req(sid, Profile::Fast))
+        .await
+        .unwrap();
+    wait_until("first batch", || e.core.analysis_status(sid).done >= 32).await;
+    e.worker.analyze_unavailable.store(true, Ordering::SeqCst);
+    let st = wait_done(&e, sid).await;
+    assert_eq!(st.state, RunState::Done, "{st:?}");
+    assert_eq!(
+        (st.profile, st.fallback_from),
+        (Some(Profile::Lite), Some(Profile::Fast))
+    );
+    let by = profiles_of(&e).await;
+    let (ai, lite) = (by["fast"], by["lite"]);
+    assert!(ai >= 32 && lite > 0 && ai + lite == 100, "{by:?}");
+    assert_eq!(ai % 32, 0);
+    assert_eq!(stored(&e.core).await, 100);
+}
+
+#[tokio::test]
+async fn without_the_fallback_a_dead_worker_fails_and_lite_can_finish_the_job() {
+    let e = env();
+    many_photos(&e, 40);
+    let sid = import(&e).await;
+    e.worker.analyze_unavailable.store(true, Ordering::SeqCst);
+    let st = run(&e, sid, Profile::Fast).await;
+    assert_eq!(st.state, RunState::Failed);
+    assert_eq!(st.error_code.as_deref(), Some("worker_unavailable"));
+    assert!(st.error.is_some());
+    // what the UI offers next: the same photos with the lite profile
+    let st = run(&e, sid, Profile::Lite).await;
+    assert_eq!((st.state, st.total), (RunState::Done, 40));
+    assert_eq!(st.error_code, None);
+    assert_eq!(
+        profiles_of(&e).await,
+        HashMap::from([("lite".to_string(), 40)])
+    );
+}
+
+#[tokio::test]
+async fn installing_a_model_recomputes_only_the_step_it_enables() {
+    let e = env();
+    e.worker.step_models.store(true, Ordering::SeqCst);
+    e.worker
+        .set_missing(&["nima-aesthetic", "siglip2-base-text"]);
+    e.worker.set_skipped(&["aesthetic", "scene"]);
+    build_scene(&e);
+    let sid = import(&e).await;
+    let st = run(&e, sid, Profile::Standard).await;
+    assert_eq!(st.state, RunState::Done);
+    assert_eq!(
+        st.skipped_steps,
+        vec!["aesthetic".to_string(), "scene".to_string()]
+    );
+    let c1 = all(&e, sid).await["c1.jpg"].id;
+    let d = e.core.photo_analysis(c1).await.unwrap();
+    assert!(d.scores.as_ref().unwrap().aesthetic.is_none() && d.scene_type.is_none());
+    assert!(d.scores.unwrap().iqa.is_some());
+
+    // no model for the skipped steps yet: nothing to do, the worker is not asked again
+    let plan = e.core.analysis_plan(sid, Profile::Standard).await.unwrap();
+    assert_eq!((plan.new_photos, plan.incremental_photos), (0, 0));
+    let calls = e.worker.analyze_calls.load(Ordering::SeqCst);
+    let st = run(&e, sid, Profile::Standard).await;
+    assert_eq!((st.state, st.total, st.incremental), (RunState::Done, 0, 0));
+    assert_eq!(e.worker.analyze_calls.load(Ordering::SeqCst), calls);
+
+    // the aesthetic model arrives (the fake worker still skips the step): one more try, with
+    // that single step, and the skip is remembered
+    install(&e, "nima-aesthetic").await;
+    let plan = e.core.analysis_plan(sid, Profile::Standard).await.unwrap();
+    assert_eq!(
+        (
+            plan.new_photos,
+            plan.incremental_photos,
+            plan.incremental_steps
+        ),
+        (0, 6, vec!["aesthetic".to_string()])
+    );
+    let before = e.worker.batch_steps.lock().unwrap().len();
+    let st = run(&e, sid, Profile::Standard).await;
+    assert_eq!((st.state, st.total, st.incremental), (RunState::Done, 6, 6));
+    assert_eq!(
+        e.worker.batch_steps.lock().unwrap()[before..].to_vec(),
+        vec![Some(vec!["aesthetic".to_string()])]
+    );
+    let calls = e.worker.analyze_calls.load(Ordering::SeqCst);
+    assert_eq!(run(&e, sid, Profile::Standard).await.total, 0);
+    assert_eq!(e.worker.analyze_calls.load(Ordering::SeqCst), calls);
+
+    // the worker can do both now and the text model arrives: both steps, nothing else
+    e.worker.set_skipped(&[]);
+    install(&e, "siglip2-base-text").await;
+    let plan = e.core.analysis_plan(sid, Profile::Standard).await.unwrap();
+    assert_eq!(
+        plan.incremental_steps,
+        vec!["aesthetic".to_string(), "scene".to_string()]
+    );
+    let emb_before = embedding_of(&e, c1).await;
+    let before = e.worker.batch_steps.lock().unwrap().len();
+    let st = run(&e, sid, Profile::Standard).await;
+    assert_eq!((st.state, st.incremental), (RunState::Done, 6));
+    assert_eq!(
+        e.worker.batch_steps.lock().unwrap()[before..].to_vec(),
+        vec![Some(vec!["aesthetic".to_string(), "scene".to_string()])]
+    );
+    let d = e.core.photo_analysis(c1).await.unwrap();
+    assert!(d.scores.unwrap().aesthetic.is_some());
+    assert_eq!(d.scene_type.as_deref(), Some("landscape"));
+    assert!(d.ai_score.is_some());
+    assert_eq!(
+        embedding_of(&e, c1).await,
+        emb_before,
+        "other steps are left alone"
+    );
+    // faces and people survive a step-only update
+    assert_eq!(e.core.people(Some(sid)).await.unwrap().len(), 2);
+    // everything is up to date now
+    let plan = e.core.analysis_plan(sid, Profile::Standard).await.unwrap();
+    assert_eq!((plan.new_photos, plan.incremental_photos), (0, 0));
+    assert!(plan.incremental_steps.is_empty());
+    let calls = e.worker.analyze_calls.load(Ordering::SeqCst);
+    assert_eq!(run(&e, sid, Profile::Standard).await.total, 0);
+    assert_eq!(e.worker.analyze_calls.load(Ordering::SeqCst), calls);
+}
+
+async fn install(e: &Env, model: &str) {
+    e.core.models_ensure(vec![model.into()]).await.unwrap();
+    for _ in 0..200 {
+        let installed = e
+            .core
+            .models()
+            .await
+            .unwrap()
+            .iter()
+            .any(|m| m.id == model && m.installed);
+        if installed {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("{model} was not installed");
+}
+
+async fn embedding_of(e: &Env, photo_id: i64) -> Option<Vec<u8>> {
+    e.core
+        .db
+        .call(move |c| {
+            Ok(c.query_row(
+                "SELECT embedding FROM analysis WHERE photo_id=?1",
+                [photo_id],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap()
 }
