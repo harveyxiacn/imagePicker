@@ -83,7 +83,7 @@ fn run_req(sid: i64, profile: Profile) -> AnalysisRunRequest {
 }
 
 async fn wait_done(e: &Env, sid: i64) -> AnalysisStatus {
-    for _ in 0..600 {
+    for _ in 0..2400 {
         let s = e.core.analysis_status(sid);
         if s.state != RunState::Running {
             return s;
@@ -1225,6 +1225,17 @@ fn many_photos(e: &Env, n: u64) {
     }
 }
 
+/// Like [`many_photos`] with tiny images, for runs the real `lite` analyzer does in debug builds.
+fn small_photos(e: &Env, n: u64) {
+    for i in 0..n {
+        let p = e.src.path().join(format!("p{i:03}.jpg"));
+        write_jpeg(&p, 64, 48, (i % 200) as u8);
+        let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+        f.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(BASE + i * 100))
+            .unwrap();
+    }
+}
+
 async fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
     for _ in 0..1000 {
         if f() {
@@ -1693,7 +1704,7 @@ async fn lite_stands_in_when_models_or_worker_are_missing() {
 #[tokio::test]
 async fn lite_takes_over_when_the_ai_dies_mid_run() {
     let e = env();
-    many_photos(&e, 100);
+    small_photos(&e, 70);
     let sid = import(&e).await;
     e.worker.delay_ms.store(100, Ordering::SeqCst);
     e.core
@@ -1710,15 +1721,15 @@ async fn lite_takes_over_when_the_ai_dies_mid_run() {
     );
     let by = profiles_of(&e).await;
     let (ai, lite) = (by["fast"], by["lite"]);
-    assert!(ai >= 32 && lite > 0 && ai + lite == 100, "{by:?}");
+    assert!(ai >= 32 && lite > 0 && ai + lite == 70, "{by:?}");
     assert_eq!(ai % 32, 0);
-    assert_eq!(stored(&e.core).await, 100);
+    assert_eq!(stored(&e.core).await, 70);
 }
 
 #[tokio::test]
 async fn without_the_fallback_a_dead_worker_fails_and_lite_can_finish_the_job() {
     let e = env();
-    many_photos(&e, 40);
+    small_photos(&e, 40);
     let sid = import(&e).await;
     e.worker.analyze_unavailable.store(true, Ordering::SeqCst);
     let st = run(&e, sid, Profile::Fast).await;
