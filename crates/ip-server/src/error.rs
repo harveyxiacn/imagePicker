@@ -53,6 +53,11 @@ impl From<CoreError> for ApiError {
             CoreError::Unprocessable(m) => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "unprocessable", m.clone())
             }
+            CoreError::Unsupported(m) => Self::new(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_media",
+                m.clone(),
+            ),
             CoreError::Conflict(m) => Self::new(StatusCode::CONFLICT, "conflict", m.clone()),
             CoreError::ModelsMissing(models) => {
                 let mut e = Self::new(StatusCode::CONFLICT, "models_missing", e.to_string());

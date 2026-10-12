@@ -381,6 +381,13 @@ pub async fn preview(
     jpeg_file(path, "public, max-age=3600").await
 }
 
+/// Full-resolution image for the loupe at 100% and above: upright sRGB JPEG at the photo's own
+/// pixel size (the rendered edit for edited photos). Generated on first use, then cached.
+pub async fn full(State(st): State<AppState>, ApiPath(id): ApiPath<i64>) -> ApiResult<Response> {
+    let path = st.core.full_path(id).await?;
+    jpeg_file(path, "public, max-age=3600").await
+}
+
 fn content_type(format: ImageFormat) -> &'static str {
     match format {
         ImageFormat::Jpeg => "image/jpeg",

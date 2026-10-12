@@ -91,7 +91,8 @@ impl Core {
         let d = &self.dirs;
         match kind {
             "thumbs" => vec![d.thumbs.clone()],
-            "previews" => vec![d.previews.clone()],
+            // previews and the full-resolution loupe images
+            "previews" => vec![d.previews.clone(), d.full.clone()],
             "masks" => vec![d.masks.clone(), d.beauty.clone()],
             // rendered thumbnails/previews of edited photos (never the saved patch assets)
             "edits" => vec![d.edited_thumbs.clone(), d.edited_previews.clone()],

@@ -326,3 +326,5 @@ export const faceCropUrl = (faceId: number, s: 128 | 256 = 128) => `${BASE}/face
 /** RGBA PNG of a patch asset (contract M5 C). */
 export const assetUrl = (photoId: number, asset: string) => `${BASE}/assets/${photoId}/${encodeURIComponent(asset)}`
 export const originalUrl = (id: number) => `${BASE}/original/${id}`
+/** Full-resolution image (upright sRGB JPEG at the photo's own size; the rendered edit when edited). */
+export const fullUrl = (id: number, v?: string) => `${BASE}/full/${id}${v ? `?v=${encodeURIComponent(v)}` : ''}`

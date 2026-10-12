@@ -256,6 +256,16 @@ export const handlers = [
       headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000, immutable' },
     })
   }),
+  http.get('/api/full/:id', async ({ params }) => {
+    await delay(150 + Math.random() * 250)
+    const p = findPhoto(Number(params.id))
+    if (!p) return err(404, 'not_found', 'photo not found')
+    const s = Math.max(p.width ?? 4096, p.height ?? 4096)
+    if (p.has_edits) return renderEdited(p, s)
+    return new HttpResponse(photoSvg(p, s, true), {
+      headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' },
+    })
+  }),
   http.get('/api/original/:id', ({ params }) => {
     const p = findPhoto(Number(params.id))
     if (!p) return err(404, 'not_found', 'photo not found')
