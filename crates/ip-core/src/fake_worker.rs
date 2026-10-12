@@ -166,8 +166,14 @@ pub struct FakeWorker {
     /// Makes `mask.generate` honour `person_bbox` for `person` masks: 255 inside the box, 0
     /// elsewhere (on a 100x100 raster). Off = the legacy "left half" mask.
     pub person_mask_from_bbox: std::sync::atomic::AtomicBool,
-    /// Milliseconds every non-analysis call sleeps before answering (timeout tests).
+    /// Milliseconds every non-analysis call sleeps before answering (timeout tests). The sleep
+    /// ends early with `Cancelled` when the enclosing `CancelToken::scope` fires.
     pub call_delay_ms: AtomicUsize,
+    /// Milliseconds `besttake.compose`, `inpaint.run` and `enhance.run` take on top of
+    /// `call_delay_ms` (cancellation tests); cut short like `call_delay_ms`.
+    pub gen_delay_ms: AtomicUsize,
+    /// Calls cut short by a cancelled `CancelToken::scope` (like the real worker's `cancel`).
+    pub cancelled_calls: AtomicUsize,
     /// Number of times the core killed this worker (after a call timeout).
     pub kills: AtomicUsize,
     /// `besttake.compose` calls received and the last request.
@@ -231,6 +237,8 @@ impl Default for FakeWorker {
             last_embed_request: Mutex::new(None),
             person_mask_from_bbox: std::sync::atomic::AtomicBool::new(false),
             call_delay_ms: AtomicUsize::new(0),
+            gen_delay_ms: AtomicUsize::new(0),
+            cancelled_calls: AtomicUsize::new(0),
             kills: AtomicUsize::new(0),
             compose_calls: AtomicUsize::new(0),
             last_compose_request: Mutex::new(None),
@@ -338,10 +346,30 @@ impl FakeWorker {
             .unwrap()
             .insert(source_photo_id, reason.to_string());
     }
-    async fn nap(&self) {
-        let ms = self.call_delay_ms.load(Ordering::SeqCst);
-        if ms > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(ms as u64)).await;
+    async fn nap(&self) -> Result<()> {
+        self.sleep_ms(self.call_delay_ms.load(Ordering::SeqCst))
+            .await
+    }
+    async fn gen_nap(&self) -> Result<()> {
+        self.nap().await?;
+        self.sleep_ms(self.gen_delay_ms.load(Ordering::SeqCst))
+            .await
+    }
+    async fn sleep_ms(&self, ms: usize) -> Result<()> {
+        if ms == 0 {
+            return Ok(());
+        }
+        let sleep = tokio::time::sleep(std::time::Duration::from_millis(ms as u64));
+        let Some(cancel) = CancelToken::scoped() else {
+            sleep.await;
+            return Ok(());
+        };
+        tokio::select! {
+            _ = sleep => Ok(()),
+            _ = cancel.cancelled() => {
+                self.cancelled_calls.fetch_add(1, Ordering::SeqCst);
+                Err(WorkerError::Cancelled)
+            }
         }
     }
     /// A `-32010` error when any of `ids` is flagged missing and downloads are not allowed.
@@ -400,7 +428,7 @@ impl AiWorker for FakeWorker {
         Ok(info)
     }
     async fn models_list(&self) -> Result<ModelsListing> {
-        self.nap().await;
+        self.nap().await?;
         if self.models_unavailable.load(Ordering::SeqCst) {
             return Err(WorkerError::Unavailable("fake worker is down".into()));
         }
@@ -618,7 +646,7 @@ impl AiWorker for FakeWorker {
     async fn mask_generate(&self, req: &MaskRequest) -> Result<MaskResponse> {
         self.mask_calls.fetch_add(1, Ordering::SeqCst);
         *self.last_mask_request.lock().unwrap() = Some(req.clone());
-        self.nap().await;
+        self.nap().await?;
         if self.mask_unavailable.load(Ordering::SeqCst) {
             return Err(WorkerError::Unavailable("fake worker is down".into()));
         }
@@ -753,7 +781,7 @@ impl AiWorker for FakeWorker {
     ) -> Result<BestTakeComposeResponse> {
         self.compose_calls.fetch_add(1, Ordering::SeqCst);
         *self.last_compose_request.lock().unwrap() = Some(req.clone());
-        self.nap().await;
+        self.gen_nap().await?;
         self.gen_models(&[BESTTAKE_MODEL], req.allow_download)?;
         if let Some(reason) = self
             .compose_refusals
@@ -801,7 +829,7 @@ impl AiWorker for FakeWorker {
     async fn inpaint_run(&self, req: &InpaintRequest) -> Result<InpaintResponse> {
         self.inpaint_calls.fetch_add(1, Ordering::SeqCst);
         *self.last_inpaint_request.lock().unwrap() = Some(req.clone());
-        self.nap().await;
+        self.gen_nap().await?;
         self.gen_models(&[INPAINT_MODEL], req.allow_download)?;
         let mask = image::open(&req.mask)
             .map_err(|e| WorkerError::Protocol(format!("bad mask: {e}")))?
@@ -844,7 +872,7 @@ impl AiWorker for FakeWorker {
     async fn enhance_run(&self, req: &EnhanceRequest) -> Result<EnhanceResponse> {
         self.enhance_calls.fetch_add(1, Ordering::SeqCst);
         self.enhance_requests.lock().unwrap().push(req.clone());
-        self.nap().await;
+        self.gen_nap().await?;
         self.gen_models(&[ENHANCE_MODEL], req.allow_download)?;
         let out = std::path::PathBuf::from(&req.out_dir);
         std::fs::create_dir_all(&out).map_err(|e| WorkerError::Protocol(e.to_string()))?;
@@ -909,7 +937,7 @@ impl AiWorker for FakeWorker {
     async fn llm_plan(&self, req: &LlmPlanRequest) -> Result<LlmPlanResponse> {
         self.llm_calls.fetch_add(1, Ordering::SeqCst);
         *self.last_llm_request.lock().unwrap() = Some(req.clone());
-        self.nap().await;
+        self.nap().await?;
         self.set_state(WorkerState::Ready);
         match self.llm_response.lock().unwrap().clone() {
             Some(r) => Ok(r),
@@ -920,7 +948,7 @@ impl AiWorker for FakeWorker {
     }
     async fn vlm_describe(&self, _req: &VlmDescribeRequest) -> Result<VlmDescribeResponse> {
         self.vlm_calls.fetch_add(1, Ordering::SeqCst);
-        self.nap().await;
+        self.nap().await?;
         match self.vlm.lock().unwrap().clone() {
             Some((caption, keywords, ..)) => Ok(VlmDescribeResponse { caption, keywords }),
             None => Err(WorkerError::Unavailable("no VLM".into())),
@@ -928,7 +956,7 @@ impl AiWorker for FakeWorker {
     }
     async fn vlm_suggest(&self, _req: &VlmSuggestRequest) -> Result<VlmSuggestResponse> {
         self.vlm_calls.fetch_add(1, Ordering::SeqCst);
-        self.nap().await;
+        self.nap().await?;
         match self.vlm.lock().unwrap().clone() {
             Some((_, _, problems, adjust, reason)) => Ok(VlmSuggestResponse {
                 problems,

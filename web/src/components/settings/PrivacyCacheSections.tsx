@@ -8,6 +8,7 @@ import { CACHE_KINDS, type CacheKind, type GroupStrictness, type RenderBackend }
 import { qk } from '@/lib/cache'
 import { formatBytes } from '@/lib/format'
 import { cacheFraction, isTypedConfirm, parseCacheGb } from '@/lib/settingsForm'
+import { useFaceConsent } from '@/stores/faceConsent'
 import { useToasts } from '@/stores/toasts'
 import { Card, CommitInput, ConfirmDialog, Row, Select, Toggle } from './controls'
 import { useSetting } from './useSetting'
@@ -79,8 +80,26 @@ export function FacesSection() {
   return (
     <div className="flex flex-col gap-4" data-testid="settings-faces">
       <Card title={t('settings.faces.title')}>
+        {/* switching on without consent first shows the purpose explanation (docs/02 §8) */}
         <Row label={t('settings.faces.enabled')} hint={t('settings.faces.enabledHint')}>
-          <Toggle label={t('settings.faces.enabled')} testId="setting-faces-enabled" checked={s.faces.enabled} onChange={(v) => set('faces.enabled', v)} />
+          <Toggle
+            label={t('settings.faces.enabled')}
+            testId="setting-faces-enabled"
+            checked={s.faces.enabled}
+            onChange={(v) => (v && !s.faces.consented ? useFaceConsent.getState().ask(null) : set('faces.enabled', v))}
+          />
+        </Row>
+        <Row label={t('settings.faces.consent')} hint={t(s.faces.consented ? 'settings.faces.consentGivenHint' : 'settings.faces.consentMissingHint')} testId="faces-consent">
+          <span className={`text-xs ${s.faces.consented ? 'text-success' : 'text-muted'}`}>{t(s.faces.consented ? 'settings.faces.consentGiven' : 'settings.faces.consentMissing')}</span>
+          {s.faces.consented ? (
+            <button className="btn" onClick={() => set('faces.consented', false)} data-testid="faces-consent-withdraw">
+              {t('settings.faces.consentWithdraw')}
+            </button>
+          ) : (
+            <button className="btn" onClick={() => useFaceConsent.getState().ask(null)} data-testid="faces-consent-ask">
+              {t('settings.faces.consentAsk')}
+            </button>
+          )}
         </Row>
         <Row label={t('settings.faces.wipe')} hint={t('settings.faces.wipeHint')}>
           <button className="btn border-danger text-danger" onClick={() => setAsk(true)} data-testid="faces-wipe">

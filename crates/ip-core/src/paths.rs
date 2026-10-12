@@ -52,6 +52,8 @@ pub struct DataDirs {
     pub edits: PathBuf,
     /// Scratch space handed to the worker for generative requests.
     pub gen: PathBuf,
+    /// Catalog backups (`backup`: daily `VACUUM INTO` copies, replaced and unreadable catalogs).
+    pub backups: PathBuf,
 }
 
 impl DataDirs {
@@ -69,6 +71,7 @@ impl DataDirs {
             edited_previews: root.join("cache").join("edited-previews"),
             edits: root.join("edits"),
             gen: root.join("cache").join("gen"),
+            backups: root.join("backups"),
             root,
         }
     }
@@ -84,6 +87,7 @@ impl DataDirs {
         std::fs::create_dir_all(&self.edited_previews)?;
         std::fs::create_dir_all(&self.edits)?;
         std::fs::create_dir_all(&self.gen)?;
+        std::fs::create_dir_all(&self.backups)?;
         std::fs::create_dir_all(&self.logs)
     }
 }
