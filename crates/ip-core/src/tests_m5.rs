@@ -2662,7 +2662,12 @@ async fn cancel_mid_call(
     let rec = listed.iter().find(|r| r.id == task).expect("listed");
     assert_eq!((rec.status.as_str(), rec.cancellable), ("running", true));
     let rec = e.core.task_cancel(task).await.unwrap();
-    assert_eq!(rec.status, "cancelling");
+    // `cancelled` when the task already wound down before the record was read
+    assert!(
+        matches!(rec.status.as_str(), "cancelling" | "cancelled"),
+        "{}",
+        rec.status
+    );
     let t = std::time::Instant::now();
     let seen = wait_for(rx, |ev| {
         matches!(ev, Event::TaskProgress { task_id, state, .. } if task_id == task && state != "running")

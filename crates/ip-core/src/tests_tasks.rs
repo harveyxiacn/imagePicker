@@ -112,9 +112,12 @@ async fn an_upscaling_export_can_be_cancelled() {
         .unwrap();
     until(|| worker.enhance_calls.load(Ordering::SeqCst) >= 1).await;
     let rec = core.task_cancel(&task).await.unwrap();
-    assert_eq!(
-        (rec.kind.as_str(), rec.status.as_str()),
-        ("export", "cancelling")
+    // `cancelled` when the export already wound down before the record was read
+    assert_eq!(rec.kind, "export");
+    assert!(
+        matches!(rec.status.as_str(), "cancelling" | "cancelled"),
+        "{}",
+        rec.status
     );
     let (state, done, total, error) = last_progress(&mut rx, &task).await;
     assert_eq!((state.as_str(), total, error), ("cancelled", 3, None));
