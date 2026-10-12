@@ -22,7 +22,8 @@
 | P1 | RAW 预览在真实相机文件上验证（目前仅合成样本） | M1 imaging |
 | P2 | 以脸搜脸「这是新的人」 | M4 web |
 | P2 | HEIC/HEIF 色彩余项：HDR（`nclx` 传递函数 PQ / HLG、iPhone 增益图）不做色调映射，按 SDR 原样显示；WIC 路径的色彩转换未实测（本机无 HEIF 编解码器） | M5 core |
-| P2 | 导出元数据余项：DNG/CR3/HEIC 文件内部的 XMP、PNG/WebP/TIFF 内嵌 XMP/IPTC 不复制（只用 JPEG 内嵌包或 `.xmp` 侧车）；扩展 XMP（>64 KB）丢弃；导出不写入目录库的评分/关键词；RAW 预览色彩空间只看预览 JPEG 自带 ICC / DCF 标记，RAW EXIF 重建仅在合成样本上验证；原样复制（未编辑、原尺寸）时 `strip_gps` 不生效 | M5 core |
+| P2 | 导出元数据余项：DNG/CR3/HEIC 文件内部的 XMP、PNG/WebP/TIFF 内嵌 XMP/IPTC 不复制（只用 JPEG 内嵌包或 `.xmp` 侧车）；扩展 XMP（>64 KB）丢弃；导出不写入目录库的评分/关键词；RAW 预览色彩空间只看预览 JPEG 自带 ICC / DCF 标记，RAW EXIF 重建仅在合成样本上验证 | M5 core |
+| P2 | 导出格式余项：WebP 只有无损（纯 Rust 编码器无有损模式，文件较大）；TIFF 为 8 位无压缩，无 16 位输出；PNG/WebP 不写 IPTC 块（只在 XMP 中）；TIFF 导出不带 MakerNote；无「打印 300dpi」预设与用户自定义导出预设 | P0-8 |
 | P2 | 色彩转换前生成的缩略图/预览缓存不会自动重建（清除缓存后重新生成）；导出只输出 sRGB（无 P3 输出），色域外颜色裁切 | M5 core |
 | P2 | 生成任务没有取消接口、没有持久化任务记录 | M5 |
 | P2 | 最佳表情选底片的系数（`MIN_GAIN` 0.04、残留 ×6、缺席 ×3、切换余量 0.25）只在合成矩阵上验证，需真实连拍复核；不估计相机移动；手动换底片时网页仍用自动底片的计划（可合成性按自动底片的姿态判断、原自动底片不在候选中），可改用 `?base_photo_id=` 重新取计划 | M5 |
@@ -58,4 +59,5 @@
 - M7：冷启动 500→32ms、翻页 p95 188→15ms、批量改星 20k 1213→122ms；三平台安装包 CI 试运行成功，Windows 安装包实机验证（启动、鉴权、卸载）
 - 导出色彩：带非 sRGB ICC（Display P3、Adobe RGB…）或 DCF Adobe RGB 标记的来源在解码时转换为 sRGB（moxcms，纯 Rust），缩略图、预览、渲染与导出一致；导出保留 XMP（去掉朝向、尺寸、冲印参数、人脸区域、动态照片/景深/增益图引用，`strip_gps` 时去掉所有 `GPS*`）与 IPTC（APP13 只留 IPTC 记录）；RAW/TIFF/CR3 导出复制原始 EXIF（重建 IFD0/Exif/GPS，不含 MakerNote），RAF/HEIF 原样复制（M5 core）
 - 一键全员最佳不再总以组内最佳为底片：逐帧估算需替换的脸（按脸尺寸加权）、替换后仍低于本人最佳的表情、缺席人物，排除模糊/曝光问题帧，组内最佳只在别的帧明显更省事时让位；计划返回 `base_choice` 说明原因（编辑器底片按钮悬停可见），可用 `base_photo_id` 手动指定底片；表情分提升不足 0.04 的脸不再替换（M5 core）
+- P0-8 导出（已完成）：可选 JPEG / PNG / TIFF / WebP，各格式携带的 EXIF/XMP/IPTC/ICC 见 `api-contract-m5.md` F 节；对话框有「去除 GPS 位置」「去除全部元数据」，对原样复制的原图同样生效（JPEG/PNG/WebP 按段/块清理，图像数据不变；RAW/HEIF/TIFF 改为全尺寸重新编码）；导出预设只有服务端一张表（`GET /api/export/presets`，对话框与 AI 助手共用，含 3:4、4:5 裁切）；命名模板支持 `{event}` `{scene}` `{camera}` `{rating}`；导出失败时只删除本次创建的文件（规划文件名后才出现的同名文件不再被删除，也从不覆盖）
 - 导出保留 EXIF + 嵌入 sRGB ICC；Worker 调用超时（504）+ 自动重启；删除会话清理编辑缓存；部分几何在模型安装后刷新；单张人物可被选中；API 浮点噪声统一清理（M5）
