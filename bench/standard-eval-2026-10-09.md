@@ -183,8 +183,8 @@ GPU 平均利用率 13.5–15%（峰值 100%），显存只多 3.4 GB：瓶颈�
 **未修复（需要设计或调参）**
 
 3. **LLM 计划会淘汰整个会话**（危险，可撤销）。复现（修复 2 之后）：`POST /api/assistant/plan {"session_id":1,"message":"reject every blurry photo","engine":"llm","context":{"filter":""}}` → `filter {issues_any:[blurry]}`（147 张）+ `set_flag {selection:"current_filter", flag:-1}`，后者 `affects: 1000`，执行后 1000 张全部淘汰；「把闭眼的照片都淘汰」→ 只有 `set_flag current_filter`，同样 1000 张。规则引擎会写成 `{"query":"issues_any=blurry"}`。怀疑：`crates/ip-core/src/assistant/mod.rs::build_step` / `exec.rs` 把 `current_filter` 解析成请求上下文里的筛选，而不是同一计划里前面的 `filter` 步骤；`ai-worker/imagepicker_ai/llm/prompts.py` 的 few-shot 也应示范显式 query。建议：计划里有 `filter` 步骤时，后续 `current_filter` 用该筛选；破坏性步骤覆盖整个会话且用户没说「全部」时拒绝 LLM 计划、回退规则。确认框会显示「淘汰 1000 张」，撤销也正常。
-4. **合影最佳表情几乎都是 `camera_moved`**。复现：`POST /api/bursts/{id}/besttake/auto {"base_photo_id":<闭眼帧>}`，26 组只成 6 个；`python bench/besttake-align.py <库> <data> [--margin 1.2 1.3]` 给出原因（上节）。文件：`ai-worker/imagepicker_ai/besttake/align.py::_exclusion_mask`（半宽 1.3 脸宽、半高 1.5 脸高、向下 1.4 倍）。建议：剩余背景不足（例如 < 30%）时退回只排除脸框，或只排除要替换的那张脸。
-5. **合影边上的成员被判为路人**：17% 的合影脸、画面左右 20% 内近一半。文件：`crates/ip-core/src/analysis/scoring.rs::subject_flags`。影响闭眼漏报（4/5）、「消除路人」会抹掉家人（`bg01-family-dinner-00` 的 a1）、最佳表情。建议见「人脸与人物」。
+4. **合影最佳表情几乎都是 `camera_moved`**（已修复，见下「修复：合影」）。复现：`POST /api/bursts/{id}/besttake/auto {"base_photo_id":<闭眼帧>}`，26 组只成 6 个；`python bench/besttake-align.py <库> <data> [--margin 1.2 1.3]` 给出原因（上节）。文件：`ai-worker/imagepicker_ai/besttake/align.py`。
+5. **合影边上的成员被判为路人**（已修复，见下「修复：合影」）：17% 的合影脸、画面左右 20% 内近一半。文件：`crates/ip-core/src/analysis/scoring.rs::subject_flags`。影响闭眼漏报（4/5）、「消除路人」会抹掉家人（`bg01-family-dinner-00` 的 a1）、最佳表情。
 6. **standard 档模糊误报**（P 0.23，113 个 FP，gaze-away 21 个）：组内相对阈值配上 worker 清晰度，把转头帧当成动态模糊。文件：`scoring.rs` `BLURRY_IN_BURST_RATIO` 及其清晰度来源。
 7. **风景星级偏低**（120 张干净风景平均 1.86★）：landscape 评分由 NIMA 美学分主导。需按场景重标定。
 8. **最佳帧偏向大笑**：60 组连拍里 30 组把 laugh 帧选为最佳，`best` 帧只中 7/23。表情分的笑容项（权重 0.20）需要上限或「自然度」项；同时需要目检确认 `best` 标签。
@@ -206,3 +206,10 @@ GPU 平均利用率 13.5–15%（峰值 100%），显存只多 3.4 GB：瓶颈�
 - worker 吞吐：`target\eval\standard\bench-analyze-{people,groups}.txt/json`；对齐诊断：`target\eval\standard\besttake-align{,-tight}.txt/json`。
 - API 端到端：`target\eval\api\api-*.jsonl`、`target\eval\api-bt\api-run3/4.jsonl`，图片在 `target\eval\api\out\`、`target\eval\api-bt\out\`（蒙版、前后对比、补丁、导出、XMP 侧车）。
 - 模型：`target\models`（standard 1.01 GB + 修图 1.01 GB + 助手 6.04 GB）；worker venv：`ai-worker\.venv`（加 `llm-cuda` 后 2.30 GB）。
+
+## 修复：合影（分支 `fix/group-photos-2`，带测试；尚未在整库上重测）
+
+- **Bug 5，`subject_flags`**（`scoring.rs`）：第一遍仍按权重（相对最强脸 45%）；第二遍把「站在主体旁边」的脸并入主体：与某个主体的中心距离不超过 4 倍脸宽 / 1.5 倍脸高，√面积不小于该主体的 0.7 倍、不小于最大主体的 0.5 倍（防止沿链条漂移），清晰度因子不小于 0.6 倍，不看居中度，可沿一排 / 一团传递。第二遍只增不减。远处的小脸、明显更模糊的脸、离群的脸仍是路人。测试：`a_row_of_similar_faces_are_all_subjects`、`strangers_stay_bystanders_next_to_a_group`。
+- **Bug 4，`besttake/align.py`**：排除区由单一大框改为 `EXCLUSION_ZONES` 三档（头 + 发 + 颈 + 肩 / 头发和颈 / 脸框 + 20–30%），`exclusion_masks` 取第一档使两帧都至少留下 `MIN_BG_FRAC`（40%）背景者，否则取最紧的一档；其余检查（内点数、残差、位移 / 缩放 / 旋转、背景 NCC）不放松。`GlobalAlign` 多了 `zone` / `bg_frac`。测试：`test_exclusion_zone_leaves_background_in_a_group_photo`、`test_besttake_group_photo_aligns_and_leaves_the_others_alone`（5 人合影，中间一人闭眼，换眼后邻居的脸不变）。
+- 诊断脚本：`bench/besttake-align.py` 输出每档的使用次数；`--legacy` 只用最宽的一档（修复前行为），`--margin W H` 仍是脸框实验。`bench/eval-standard.py` 增加「单人照里除最大脸外的脸有多少是主体」一项，用来看 Bug 5 的修复有没有把背景路人拉进主体。
+- 待做：在 `target\eval\standard` 上重跑 `eval-standard.py`（路人 / 闭眼漏报）和 `besttake-align.py`（合影 142 帧对齐数，修复前 52，脸框实验 128），把数字补进上面两节。

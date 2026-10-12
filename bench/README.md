@@ -15,8 +15,9 @@ live in [`REPORT.md`](REPORT.md); raw numbers in `results/*.json`.
 | `web/scripts/perf-trace.mjs` | Chrome trace of a fast scroll, summarised by event (where main-thread time goes). |
 | `web/scripts/e2e-real.mjs` | Real-server end-to-end test, see [`CI-E2E.md`](CI-E2E.md). |
 | `bench/eval-library.py`, `bench/eval-standard.py` | Score an analysed catalog of the synthetic photo library (`bench/data/qwen-photo-library`, labels in its `manifest.json`): issue tags incl. closed eyes, bursts and best frame; `eval-standard.py` adds people clustering vs the actor ids, expression signals, subject / bystander split, scenes, stars and GPU use. Results: [`standard-eval-2026-10-09.md`](standard-eval-2026-10-09.md). |
+| `scripts/comfy-photo-library.py`, `scripts/comfy-photo-library-audit.py`, `scripts/test_comfy_photo_library.py` | Generator of the synthetic photo library with a local ComfyUI (Qwen-Image; plan, resumable run, EXIF, audit with pHash burst distances and a contact sheet; the test runs without ComfyUI). Plan, categories and quality limits: [`photo-library-2026-10-08.md`](photo-library-2026-10-08.md). The images stay in the git-ignored `bench/data/`. |
 | `bench/api-features.py` | Drives the AI features of a running `imagepicker serve` end to end (masks, best take, inpaint, denoise, face restore, upscale on export, portrait retouch, assistant plan / execute / undo, describe, face search, XMP round trip) and saves before / after images with numeric checks. |
-| `bench/worker-rpc.py`, `bench/besttake-align.py` | Call the AI worker's JSON-RPC methods directly (`system.info`, `models.ensure`, ...); global-alignment statistics of the library's bursts as Best Take computes them. |
+| `bench/worker-rpc.py`, `bench/besttake-align.py` | Call the AI worker's JSON-RPC methods directly (`system.info`, `models.ensure`, ...); global-alignment statistics of the library's bursts as Best Take computes them (`--legacy` = the pre-2026-10-09 exclusion zone). |
 
 ## Analysis quality (synthetic photo library)
 

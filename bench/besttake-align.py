@@ -2,10 +2,12 @@
 
 Usage (worker venv):
     ai-worker/.venv/Scripts/python bench/besttake-align.py LIBRARY_DIR DATA_DIR [--json OUT]
+        [--legacy | --margin W H]
 
 For every manifest burst, aligns each frame onto the burst's `base` frame with the worker's own
 `besttake.align.align_global` (faces from the catalog masked out, as `besttake.compose` does) and
-prints inliers / residual / shift / scale / rotation / background NCC against the thresholds.
+prints inliers / residual / shift / scale / rotation / background NCC against the thresholds, and
+which exclusion zone (`align.EXCLUSION_ZONES`) was used.
 """
 
 from __future__ import annotations
@@ -47,23 +49,15 @@ def main() -> int:
     ap.add_argument("data_dir", type=Path)
     ap.add_argument("--json", type=Path)
     ap.add_argument("--margin", type=float, nargs=2, metavar=("W", "H"),
-                    help="experiment: exclude only the face box grown by these factors instead of the"
-                         " worker's head/hair/neck box (1.3 x 1.5 half sizes, shifted down)")
+                    help="experiment: exclude only the face box grown by these factors")
+    ap.add_argument("--legacy", action="store_true",
+                    help="only the generous head / hair / neck zone (before the 2026-10-09 fix)")
     a = ap.parse_args()
     if a.margin:
-        import cv2
-
         mw, mh = a.margin
-
-        def tight(shape, boxes, s):
-            m = np.full(shape, 255, np.uint8)
-            for x, y, w, h in boxes:
-                cx, cy = (x + w / 2) * s, (y + h / 2) * s
-                cv2.rectangle(m, (int(cx - w * s * mw / 2), int(cy - h * s * mh / 2)),
-                              (int(cx + w * s * mw / 2), int(cy + h * s * mh / 2)), 0, -1)
-            return m
-
-        align._exclusion_mask = tight
+        align.EXCLUSION_ZONES = ((mw / 2, mh / 2, mh / 2),)
+    elif a.legacy:
+        align.EXCLUSION_ZONES = align.EXCLUSION_ZONES[:1]
     manifest = json.loads((a.library / "manifest.json").read_text(encoding="utf-8"))
     db = sqlite3.connect(f"file:{a.data_dir / 'catalog.db'}?mode=ro", uri=True)
     faces = defaultdict(list)
@@ -82,7 +76,8 @@ def main() -> int:
         bimg = np.asarray(Image.open(a.library / base["jpeg"]).convert("RGB"))
         bh, bw = bimg.shape[:2]
         bf = [(x * bw, y * bh, w * bw, h * bh) for x, y, w, h in faces[Path(base["jpeg"]).name]]
-        excl.append(("group" in base["tags"], float((align._exclusion_mask((bh, bw), bf, 1.0) == 0).mean())))
+        _, _, _, keep = align.exclusion_masks((bh, bw), bf, 1.0, (bh, bw), bf, 1.0)
+        excl.append(("group" in base["tags"], 1.0 - keep))
         for im in ims:
             if im is base:
                 continue
@@ -96,13 +91,15 @@ def main() -> int:
                          "ok": ga.ok, "why": failing(ga) if not ga.ok else [], "inliers": ga.inliers,
                          "matches": ga.matches, "residual_px": round(ga.residual_px, 2),
                          "shift": round(ga.shift_frac, 4), "scale": round(ga.scale, 4),
-                         "rot": round(ga.rot_deg, 2), "ncc": round(ga.ncc, 3)})
+                         "rot": round(ga.rot_deg, 2), "ncc": round(ga.ncc, 3), "zone": ga.zone,
+                         "bg_frac": round(ga.bg_frac, 3)})
     for kind in (False, True):
         sel = [r for r in rows if r["group"] == kind]
         okn = sum(r["ok"] for r in sel)
         why = Counter(w for r in sel for w in r["why"])
+        zones = dict(sorted(Counter(r["zone"] for r in sel).items()))
         print(f"{'group' if kind else 'single'} bursts: {okn}/{len(sel)} frames align with their base;"
-              f" failing criteria: {dict(why)}")
+              f" failing criteria: {dict(why)}; exclusion zone used: {zones}")
         for k in ("inliers", "residual_px", "ncc", "shift"):
             xs = sorted(r[k] for r in sel)
             if xs:

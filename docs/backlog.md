@@ -31,6 +31,7 @@
 | P2 | 最佳表情选底片的系数（`MIN_GAIN` 0.04、残留 ×6、缺席 ×3、切换余量 0.25）只在合成矩阵上验证，需真实连拍复核；不估计相机移动；手动换底片时网页仍用自动底片的计划（可合成性按自动底片的姿态判断、原自动底片不在候选中），可改用 `?base_photo_id=` 重新取计划 | M5 |
 | P1 | 大面积消除（超过 512px 的洞）结果偏糊、有残影；默认 LaMa，需 SDXL 增强包实测（真实照片：去除雕像） | M5 worker |
 | P1 | 雕像/海报上的人脸会被当作「路人」；界面需确认后才消除，但检测应区分真人（活体/语义） | M5 |
+| P2 | 合影修复（`subject_flags` 第二遍、`besttake/align.py` 分档排除区）只在合成测试上验证；需在 1000 张合成库上重跑 `bench/eval-standard.py` / `bench/besttake-align.py` 并补数字，再用真实合影连拍复核阈值（`EXCLUSION_ZONES`、`MIN_BG_FRAC`、`subject_flags` 的比例常量） | M5 |
 | P2 | SDXL 增强包未用真实权重测试；OpenCV 构建无 AKAZE，仅 ORB 对齐 | M5 worker |
 | P2 | 取消生成任务时 worker 立即以 `-32800` 结束请求，但 `inpaint.run` / `enhance.run` / `besttake.compose` 在线程池里的计算不会中断，跑完才释放（紧接着的生成请求会排在它后面）；需在推理循环里检查取消标志 | M5 worker |
 | P1 | 网格 60fps 需在真实 GPU 浏览器上复测（无头软件光栅下仅 4× 降频 CPU 快速滚动时掉帧） | M7 perf |

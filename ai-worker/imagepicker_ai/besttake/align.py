@@ -1,9 +1,10 @@
 """Frame alignment for Best Take (doc 03 section 5, steps 4-5).
 
 Global:  ORB (AKAZE fallback) features + RANSAC homography source -> base on an analysis-size copy
-         (faces excluded: they move), refined with ECC (homography) on a 1/2-scale copy. Rejected
-         (`camera_moved`) when too few inliers, a large residual, an implausible transform (shift /
-         scale / rotation) or a low correlation of the aligned backgrounds.
+         (people excluded: they move; see `exclusion_masks`), refined with ECC (homography) on a
+         1/2-scale copy. Rejected (`camera_moved`) when too few inliers, a large residual, an
+         implausible transform (shift / scale / rotation) or a low correlation of the aligned
+         backgrounds.
 Local:   similarity transform from stable face landmarks (jaw line, nose, forehead) mapping the
          source face onto the base face, blended into the global homography outside the face
          (`face_weight`), plus a dense DIS optical-flow refinement inside the face region that is
@@ -30,6 +31,20 @@ MAX_SCALE_DEV = 0.15
 MAX_ROT_DEG = 8.0
 MIN_BG_NCC = 0.55
 
+# Zones kept out of the feature matching around every face, in face-box units: (half width,
+# extent above the box centre, extent below it). Faces, hair, necks and shoulders move between
+# frames, so the first zone is generous. In a group photo the generous zones cover almost the whole
+# frame (median 93% on the synthetic library: nothing left to match, `camera_moved`), so
+# `exclusion_masks` takes the first zone that leaves at least MIN_BG_FRAC of both frames, down to
+# the face box plus a margin. Whatever survives must still pass every check of `align_global`, and
+# the compositing has its own (landmark error, seam, occlusion).
+EXCLUSION_ZONES: tuple[tuple[float, float, float], ...] = (
+    (1.3, 1.2, 2.1),  # head, hair, neck and shoulders
+    (0.85, 0.95, 1.3),  # head, hair and neck
+    (0.6, 0.65, 0.65),  # face box + 20 / 30 %
+)
+MIN_BG_FRAC = 0.4
+
 # landmark subset that moves rigidly with the head (no eyes / brows / mouth)
 # the chin arc is left out: it moves with the jaw (open mouth, laughing)
 _CHIN_ARC = {397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136}
@@ -51,6 +66,8 @@ class GlobalAlign:
     rot_deg: float = 0.0
     ncc: float = 0.0
     reason: str | None = None
+    zone: int = 0  # index into EXCLUSION_ZONES used for the matching
+    bg_frac: float = 1.0  # share of the frames left for matching
 
 
 def _gray_small(rgb: np.ndarray, side: int) -> tuple[np.ndarray, float]:
@@ -62,20 +79,44 @@ def _gray_small(rgb: np.ndarray, side: int) -> tuple[np.ndarray, float]:
 
 
 def _exclusion_mask(
-    shape: tuple[int, int], boxes: list[tuple[float, float, float, float]], s: float
+    shape: tuple[int, int],
+    boxes: list[tuple[float, float, float, float]],
+    s: float,
+    zone: tuple[float, float, float] = EXCLUSION_ZONES[0],
 ):
+    """255 = usable for matching, 0 = the `zone` around one of the face `boxes` (px, scaled by s)."""
     m = np.full(shape, 255, np.uint8)
+    kw, up, down = zone
     for x, y, w, h in boxes:
         cx, cy = (x + w / 2) * s, (y + h / 2) * s
-        hw, hh = w * s * 1.3, h * s * 1.5  # generous: head, hair, neck move with the face
         cv2.rectangle(
             m,
-            (int(cx - hw), int(cy - hh * 0.8)),
-            (int(cx + hw), int(cy + hh * 1.4)),
+            (int(cx - w * s * kw), int(cy - h * s * up)),
+            (int(cx + w * s * kw), int(cy + h * s * down)),
             0,
             -1,
         )
     return m
+
+
+def exclusion_masks(
+    shape_b: tuple[int, int],
+    boxes_b: list[tuple[float, float, float, float]],
+    s_b: float,
+    shape_s: tuple[int, int],
+    boxes_s: list[tuple[float, float, float, float]],
+    s_s: float,
+) -> tuple[np.ndarray, np.ndarray, int, float]:
+    """(base mask, source mask, zone index, usable fraction): the most generous of
+    `EXCLUSION_ZONES` that keeps at least `MIN_BG_FRAC` of both frames for matching, else the
+    tightest one."""
+    for i, zone in enumerate(EXCLUSION_ZONES):
+        mb = _exclusion_mask(shape_b, boxes_b, s_b, zone)
+        ms = _exclusion_mask(shape_s, boxes_s, s_s, zone)
+        keep = min(float((mb > 0).mean()), float((ms > 0).mean()))
+        if keep >= MIN_BG_FRAC or i == len(EXCLUSION_ZONES) - 1:
+            return mb, ms, i, keep
+    raise AssertionError("EXCLUSION_ZONES is empty")
 
 
 def _akaze():
@@ -140,8 +181,7 @@ def align_global(
     sh, sw = src.shape[:2]
     gb, sb = _gray_small(base, ANALYSIS_SIDE)
     gs, ss = _gray_small(src, ANALYSIS_SIDE)
-    mb = _exclusion_mask(gb.shape, base_faces, sb)
-    ms = _exclusion_mask(gs.shape, src_faces, ss)
+    mb, ms, zone, bg_frac = exclusion_masks(gb.shape, base_faces, sb, gs.shape, src_faces, ss)
 
     best = None
     for kind in ("orb", "akaze"):
@@ -161,7 +201,7 @@ def align_global(
             break
 
     def fail(reason: str, **kw) -> GlobalAlign:
-        return GlobalAlign(False, np.eye(3), reason=reason, **kw)
+        return GlobalAlign(False, np.eye(3), reason=reason, zone=zone, bg_frac=bg_frac, **kw)
 
     if best is None:
         return fail("camera_moved")
@@ -229,6 +269,8 @@ def align_global(
         scale=scale,
         rot_deg=rot,
         ncc=ncc,
+        zone=zone,
+        bg_frac=bg_frac,
     )
     if (
         shift > MAX_SHIFT_FRAC
