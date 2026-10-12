@@ -1,5 +1,5 @@
 /**
- * Task history and cancellation (docs/api-contract-m5.md F): `GET /api/tasks` lists recorded tasks (generation,
+ * Task history and cancellation (docs/api-contract-m5.md G): `GET /api/tasks` lists recorded tasks (generation,
  * export, analysis), `POST /api/tasks/{id}/cancel` stops a running one.
  */
 import type { QueryClient } from '@tanstack/react-query'

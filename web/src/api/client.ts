@@ -7,6 +7,7 @@ import type {
   ApiErrorBody,
   BurstFaces,
   ExportBody,
+  ExportPreset,
   FsList,
   GroupsResponse,
   HardwareInfo,
@@ -180,7 +181,8 @@ export const api = {
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),
-  // ---- task history / cancel (M5 F) ----
+  exportPresets: () => request<{ presets: ExportPreset[] }>('GET', '/export/presets'),
+  // ---- task history / cancel (M5 G) ----
   tasks: (limit = 50) => request<{ tasks: TaskRecord[] }>('GET', `/tasks?limit=${limit}`),
   cancelTask: (id: string) => request<{ task: TaskRecord }>('POST', `/tasks/${encodeURIComponent(id)}/cancel`),
   // ---- M7: AI runtime ----

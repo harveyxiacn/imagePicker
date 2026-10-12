@@ -438,6 +438,11 @@ pub async fn export(
     Ok((StatusCode::ACCEPTED, Json(json!({ "task_id": task_id }))).into_response())
 }
 
+/// `GET /api/export/presets`: the export presets (the same table the assistant uses).
+pub async fn export_presets() -> Json<Value> {
+    Json(json!({ "presets": ip_core::export::EXPORT_PRESETS }))
+}
+
 /// Unknown `/api/*` -> JSON 404; everything else -> SPA from `web_dir` with `index.html` fallback.
 pub async fn fallback(State(st): State<AppState>, req: Request) -> Response {
     let path = req.uri().path();

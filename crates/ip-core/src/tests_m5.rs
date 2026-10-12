@@ -2089,6 +2089,7 @@ fn export_req(ids: Vec<i64>, dest: &Path, long_edge: Option<u32>) -> ExportReque
         apply_edits: true,
         upscale: None,
         strip_gps: false,
+        ..Default::default()
     }
 }
 
@@ -2428,10 +2429,7 @@ async fn wide_gamut_sources_are_converted_to_srgb_on_export() {
         long_edge: Some(160),
         quality: 100,
         name_template: "{name}".into(),
-        strip_gps: false,
-        upscale: None,
-        fit: None,
-        cancel: None,
+        ..Default::default()
     };
     let out = e.src.path().join("resized");
     std::fs::create_dir_all(&out).unwrap();

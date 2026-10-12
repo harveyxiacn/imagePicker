@@ -231,7 +231,7 @@ CREATE INDEX idx_photo_device ON photo(device_id);
     r#"
 ALTER TABLE analysis ADD COLUMN tilt_confidence REAL;
 "#,
-    // v11: task history (docs/api-contract-m5.md section F): progress counts and the end time of
+    // v11: task history (docs/api-contract-m5.md section G): progress counts and the end time of
     // a task; the list is read newest first.
     r#"
 ALTER TABLE task ADD COLUMN done INTEGER;

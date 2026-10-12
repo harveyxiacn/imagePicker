@@ -1,5 +1,5 @@
 import { delay, http, HttpResponse } from 'msw'
-import type { ExportBody, ImportBody, PhotoPatchBody, Photo } from '@/api/types'
+import type { ExportBody, ExportPreset, ImportBody, PhotoPatchBody, Photo } from '@/api/types'
 import { emit } from './bus'
 import {
   addSession,
@@ -266,6 +266,18 @@ export const handlers = [
     const { ids } = (await request.json()) as { ids: number[] }
     scheduleThumbs(ids)
     return new HttpResponse(null, { status: 204 })
+  }),
+
+  // mirrors EXPORT_PRESETS in crates/ip-core/src/export.rs (the server owns the table)
+  http.get('/api/export/presets', async () => {
+    await lat()
+    const presets: ExportPreset[] = [
+      { id: 'original', long_edge: null, aspect: null, quality: 95, format: 'original', strip_gps: false },
+      { id: 'wechat', long_edge: 2048, aspect: null, quality: 85, format: 'jpeg', strip_gps: true },
+      { id: 'xiaohongshu', long_edge: 1920, aspect: [3, 4], quality: 90, format: 'jpeg', strip_gps: true },
+      { id: 'instagram', long_edge: 1350, aspect: [4, 5], quality: 90, format: 'jpeg', strip_gps: true },
+    ]
+    return HttpResponse.json({ presets })
   }),
 
   http.post('/api/export', async ({ request }) => {

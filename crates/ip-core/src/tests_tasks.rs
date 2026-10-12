@@ -106,7 +106,7 @@ async fn an_upscaling_export_can_be_cancelled() {
             name_template: "{name}".into(),
             apply_edits: true,
             upscale: Some(2),
-            strip_gps: false,
+            ..ExportRequest::default()
         })
         .await
         .unwrap();
