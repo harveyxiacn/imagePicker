@@ -566,6 +566,7 @@ async fn export_copies_resizes_and_never_overwrites() {
         upscale: None,
         strip_gps: false,
         folders: None,
+        ..Default::default()
     };
 
     // 1. originals

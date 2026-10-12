@@ -960,7 +960,7 @@ async fn analysis_status(app: &Router, sid: i64) -> Value {
 
 /// Polls the status until `f` accepts it.
 async fn status_until(app: &Router, sid: i64, f: impl Fn(&Value) -> bool) -> Value {
-    for _ in 0..800 {
+    for _ in 0..4000 {
         let s = analysis_status(app, sid).await;
         if f(&s) {
             return s;
@@ -974,8 +974,13 @@ async fn status_until(app: &Router, sid: i64, f: impl Fn(&Value) -> bool) -> Val
 }
 
 async fn import_many(e: &Env, n: u64) -> i64 {
+    // tiny images: the lite analyzer decodes them for real, slowly in debug builds
     for i in 0..n {
-        photo(e.src.path(), &format!("p{i:03}.jpg"), i * 100);
+        let p = e.src.path().join(format!("p{i:03}.jpg"));
+        write_jpeg(&p, 64, 48, (i % 200) as u8);
+        let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+        f.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(BASE + i * 100))
+            .unwrap();
     }
     let r = post(
         e,

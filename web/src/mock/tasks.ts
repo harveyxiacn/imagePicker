@@ -1,5 +1,5 @@
 /**
- * Mock task history and cancellation (docs/api-contract-m5.md F): `GET /api/tasks`, `POST /api/tasks/:id/cancel`.
+ * Mock task history and cancellation (docs/api-contract-m5.md G): `GET /api/tasks`, `POST /api/tasks/:id/cancel`.
  * The mock M5 tasks and exports record themselves here and poll `isCancelled` between their steps.
  */
 import { http, HttpResponse } from 'msw'

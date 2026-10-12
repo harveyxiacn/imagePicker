@@ -178,9 +178,41 @@ pub struct ExportRequest {
     /// *result* (the render is made at `long_edge / upscale` first).
     #[serde(default)]
     pub upscale: Option<u32>,
-    /// M5: leave the GPS position out of the EXIF and XMP of re-encoded outputs.
+    /// M5: leave the GPS position out of the EXIF and XMP of every output (P0-8: copies of
+    /// originals are cleaned rather than copied as they are).
     #[serde(default)]
     pub strip_gps: bool,
+    /// P0-8: container of the outputs (`docs/api-contract-m5.md` F); `original` copies
+    /// unchanged photos in their own format and writes everything re-encoded as JPEG.
+    #[serde(default)]
+    pub format: crate::export::ExportFormat,
+    /// P0-8: leave out all EXIF / XMP / IPTC (implies `strip_gps`); the colour profile stays,
+    /// and so does the orientation of cleaned copies.
+    #[serde(default)]
+    pub strip_metadata: bool,
+    /// P0-8: centre-crop every output to this aspect ratio `[w, h]` (e.g. `[3, 4]`), then fit
+    /// it into `long_edge`.
+    #[serde(default)]
+    pub aspect: Option<[u32; 2]>,
+}
+
+impl Default for ExportRequest {
+    fn default() -> Self {
+        ExportRequest {
+            ids: Vec::new(),
+            dest: String::new(),
+            folders: None,
+            long_edge: None,
+            quality: default_quality(),
+            name_template: default_template(),
+            apply_edits: true,
+            upscale: None,
+            strip_gps: false,
+            format: crate::export::ExportFormat::Original,
+            strip_metadata: false,
+            aspect: None,
+        }
+    }
 }
 
 fn default_quality() -> u8 {

@@ -42,7 +42,7 @@
 
 - 所有生成任务：模型缺失 → `409 models_missing`；worker 不可用 → `503`；进度走 `task.progress`（`kind`: `besttake`/`inpaint`/`enhance`）。生成任务可取消并留有记录，见 F 节。
 - `/api/export` 新增 `"upscale"?: 2 | 4`：渲染后经 `enhance.run upscale` 放大再编码。
-- 重编码的导出（应用编辑 / `long_edge` / `upscale` / 裁切适配）的元数据：像素为 sRGB（带非 sRGB ICC 或 DCF Adobe RGB 标记的来源在解码时已转换），嵌入 sRGB ICC；EXIF 取自原文件（JPEG/HEIF/RAF 原样；TIFF 类 RAW、TIFF、CR3 由 IFD0/Exif/GPS 重建，不含 MakerNote；都没有时按目录元数据合成），去掉朝向与 IFD1 缩略图并改写像素尺寸；XMP 取 JPEG 内嵌包，否则取 `.xmp` 侧车，去掉 `tiff:Orientation`/尺寸、`crs:*`、darktable 历史、`xmp:Thumbnails`、人脸区域、动态照片/景深/增益图与扩展 XMP 引用；IPTC 只保留 APP13 中的 IPTC 记录（0x0404/0x0425）。`"strip_gps": true` 删除 EXIF GPS IFD 与 XMP 中所有 `GPS*` 属性。原样复制的导出不改动文件。
+- 重编码的导出（应用编辑 / `long_edge` / `upscale` / 裁切适配）的元数据：像素为 sRGB（带非 sRGB ICC 或 DCF Adobe RGB 标记的来源在解码时已转换），嵌入 sRGB ICC；EXIF 取自原文件（JPEG/HEIF/RAF 原样；TIFF 类 RAW、TIFF、CR3 由 IFD0/Exif/GPS 重建，不含 MakerNote；都没有时按目录元数据合成），去掉朝向与 IFD1 缩略图并改写像素尺寸；XMP 取 JPEG 内嵌包，否则取 `.xmp` 侧车，去掉 `tiff:Orientation`/尺寸、`crs:*`、darktable 历史、`xmp:Thumbnails`、人脸区域、动态照片/景深/增益图与扩展 XMP 引用；IPTC 只保留 APP13 中的 IPTC 记录（0x0404/0x0425）。`"strip_gps": true` 删除 EXIF GPS IFD 与 XMP 中所有 `GPS*` 属性。原样复制的导出不改动文件（P0-8 起 `strip_gps` / `strip_metadata` 时改为清理，见 F 节）。
 
 ## D. 人物与人像相关的修正（M4 联调发现）
 
@@ -59,7 +59,52 @@
 
 - 被取消的生成任务仍先发 `*.done`：`inpaint.done` / `enhance.done` 为 `ok:false, reason:"cancelled"`；`besttake.done` 中每个选择都是 `ok:false, reason:"cancelled"`。随后 `task.progress` 的 `state` 为 `cancelled`（`error` 为空）。
 
-## F. 任务记录与取消
+## F. 导出：格式、去元数据、预设与命名（P0-8）
+
+`POST /api/export` 新增字段（均可省略，省略时与之前相同）：
+
+| 字段 | 取值 | 说明 |
+|---|---|---|
+| `format` | `"original"`（默认）\| `"jpeg"` \| `"png"` \| `"tiff"` \| `"webp"`（别名 `jpg`、`tif`） | 输出格式。`original`：未改动的照片（未编辑、无 `long_edge` / `aspect` / `upscale`）按原文件复制（RAW 仍是 RAW），其余重新编码为 JPEG。指定格式时所有输出都是该格式；源文件已是该格式且未改动时直接复制（或按下文清理） |
+| `strip_gps` | bool | 删除 EXIF GPS IFD 与 XMP 中所有 `GPS*` 属性；**对原样复制的照片同样生效**（见下） |
+| `strip_metadata` | bool | 不写入任何 EXIF / XMP / IPTC（隐含 `strip_gps`）；ICC 保留；清理后的原图保留朝向 |
+| `aspect` | `[w, h]`，各 1..10000 | 居中裁切到该宽高比，再按 `long_edge` 缩小（不放大）；没有 `long_edge` 时只裁切 |
+
+- 扩展名：JPEG `.jpg`、PNG `.png`、TIFF `.tif`、WebP `.webp`；复制或清理的原图保留原扩展名。`quality` 只作用于 JPEG。
+- WebP 为**无损**（VP8L）：工作区内的纯 Rust 编码器（`image-webp`）没有有损模式；每边最多 16383 像素，超出时等比缩小。TIFF 为 8 位 RGB、无压缩（单个文件小于 4 GB）。不输出 16 位。
+
+重新编码的输出（像素为 sRGB，均嵌入 sRGB ICC）携带的元数据，清理规则同 C 节（去朝向、IFD1 缩略图、冲印参数等）：
+
+| 格式 | EXIF | XMP | IPTC | ICC |
+|---|---|---|---|---|
+| JPEG | APP1 | APP1 | APP13（只留 IPTC 记录） | APP2 |
+| PNG | `eXIf` | `iTXt`（`XML:com.adobe.xmp`，不压缩） | —（无标准位置，字段一般已在 XMP） | `iCCP` |
+| TIFF | IFD0 描述性标签（Make、Model、Artist、Copyright…）+ Exif IFD + GPS IFD，按来源 EXIF 的字节序写出；不含 MakerNote、Interop | 标签 700 | 标签 33723（IPTC-NAA） | 标签 34675 |
+| WebP | `EXIF` | `XMP ` | — | `ICCP`（VP8X 扩展头） |
+
+**原图的清理**（未改动的照片 + `strip_gps` / `strip_metadata`）：
+
+| 源格式 | 做法 |
+|---|---|
+| JPEG | 按段重写，扫描数据逐字节不变。`strip_gps`：EXIF 中 GPS IFD 原位清零（段长度不变，缩略图、朝向、MakerNote 保留）；XMP 去掉 `GPS*` 后用空白填回原长度；扩展 XMP 含 GPS（或无法解析）时整体去掉；EOI 之后附带图像（MPF、增益图）的 EXIF GPS 同样原位清零；头部长度有变化时修正 MPF 索引。`strip_metadata`：只保留 JFIF APP0、ICC APP2、Adobe APP14 与编码段，去掉 APP1 / APP13 / 其他 APPn / COM 与 EOI 之后的数据；朝向不为 1 时写入只含朝向的最小 EXIF |
+| PNG | 按块重写，`IDAT` 不变。`strip_gps`：`eXIf` 去 GPS；未压缩的 XMP `iTXt` 去 `GPS*`；压缩的 XMP 与 `Raw profile type …` 文本块去掉。`strip_metadata`：只保留关键块与颜色、透明、密度、动画块（`iCCP`、`sRGB`、`gAMA`、`cHRM`、`cICP`、`pHYs`、`tRNS`、`acTL`…），朝向同上 |
+| WebP | 按 RIFF 块重写，`VP8` / `VP8L` / `ALPH` / `ANMF` 不变；`EXIF`、`XMP ` 块按上述规则处理并更新 VP8X 标志 |
+| TIFF / RAW / HEIF | 无法就地清理：改为全尺寸重新编码（`format: original` 时为 JPEG，否则为所选格式） |
+
+原图无法解析时按其自身格式重新编码。
+
+**预设**：`GET /api/export/presets` → `{"presets":[{"id","long_edge","aspect","quality","format","strip_gps"}]}`。这是唯一的预设表（`ip_core::export::EXPORT_PRESETS`），导出对话框与 AI 助手的 `export` 工具（`preset` 枚举）共用：
+
+| id | long_edge | aspect | quality | format | strip_gps |
+|---|---|---|---|---|---|
+| `original` | null | null | 95 | `original` | false |
+| `wechat` | 2048 | null | 85 | `jpeg` | true |
+| `xiaohongshu` | 1920 | `[3,4]`（1440×1920） | 90 | `jpeg` | true |
+| `instagram` | 1350 | `[4,5]`（1080×1350） | 90 | `jpeg` | true |
+
+**命名模板**：`{name}` 原文件名、`{seq}` 4 位序号、`{date}` 拍摄日期 `YYYYMMDD`（没有时用文件时间，再没有为 `nodate`）、`{event}` 照片所属导入（会话）的标题（`noevent`）、`{scene}` 分析得到的场景类型，如 `portrait`（`noscene`）、`{camera}` 相机品牌型号（`nocamera`）、`{rating}` 用户星级 0–5（未评为 `0`）。占位符一次展开（值里的 `{…}` 不会再展开），目录取值截断为 64 个字符，未知占位符原样保留；之后按原规则替换非法字符。与本次导出或目标文件夹中已有文件重名时加 `_1`、`_2`…，**从不覆盖**。
+
+## G. 任务记录与取消
 
 生成任务（`besttake` / `inpaint` / `enhance`）、导出（`export`）与分析（`analysis`）开始时写入 `task` 表，结束时更新；只保留最新 200 条（新任务开始时删除更旧的已结束记录）。进行中的任务登记在内存中，可按 id 取消。
 

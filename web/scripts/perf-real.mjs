@@ -4,7 +4,7 @@
 //   cd web && pnpm build
 //   imagepicker bench gen <dir> --count 1000
 //   imagepicker bench seed --data-dir <data> --rows 20000 --files-dir <dir>
-//   node scripts/perf-real.mjs --bin <imagepicker> --data-dir <data> [--out result.json] [--label after]
+//   node scripts/perf-real.mjs --bin <imagepicker> --data-dir <data> [--out result.json] [--label after] [--channel msedge]
 //
 // Frame times come from a requestAnimationFrame sampler inside the page while the grid is scrolled
 // programmatically at a fixed speed. Headless Chromium rasterises in software, so absolute numbers
@@ -62,7 +62,7 @@ log(`session ${session.id}: ${session.photo_count} photos`);
 await fetch(BASE + '/api/onboarding/done', { method: 'POST' }).catch(() => undefined);
 
 const errors = [];
-const browser = await chromium.launch();
+const browser = await chromium.launch(args.channel ? { channel: args.channel } : {});
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 page.on('pageerror', (e) => errors.push(String(e)));

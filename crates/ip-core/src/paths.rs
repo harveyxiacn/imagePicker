@@ -35,6 +35,9 @@ pub struct DataDirs {
     pub catalog: PathBuf,
     pub thumbs: PathBuf,
     pub previews: PathBuf,
+    /// Full-resolution images for the loupe at 100% (originals and rendered edits), trimmed to
+    /// [`crate::thumbs::FULL_CACHE_BUDGET`]; counted as previews in the cache statistics.
+    pub full: PathBuf,
     pub logs: PathBuf,
     /// Imported `.cube` LUTs (`/api/luts/import`).
     pub luts: PathBuf,
@@ -59,6 +62,7 @@ impl DataDirs {
             catalog: root.join("catalog.db"),
             thumbs: root.join("cache").join("thumbs"),
             previews: root.join("cache").join("previews"),
+            full: root.join("cache").join("full"),
             logs: root.join("logs"),
             luts: root.join("luts"),
             masks: root.join("cache").join("masks"),
@@ -75,6 +79,7 @@ impl DataDirs {
     pub fn create(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.thumbs)?;
         std::fs::create_dir_all(&self.previews)?;
+        std::fs::create_dir_all(&self.full)?;
         std::fs::create_dir_all(&self.luts)?;
         std::fs::create_dir_all(&self.masks)?;
         std::fs::create_dir_all(&self.beauty)?;

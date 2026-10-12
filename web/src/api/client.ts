@@ -8,6 +8,7 @@ import type {
   ApiErrorBody,
   BurstFaces,
   ExportBody,
+  ExportPreset,
   FsList,
   GroupsResponse,
   HardwareInfo,
@@ -181,7 +182,8 @@ export const api = {
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),
-  // ---- task history / cancel (M5 F) ----
+  exportPresets: () => request<{ presets: ExportPreset[] }>('GET', '/export/presets'),
+  // ---- task history / cancel (M5 G) ----
   tasks: (limit = 50) => request<{ tasks: TaskRecord[] }>('GET', `/tasks?limit=${limit}`),
   cancelTask: (id: string) => request<{ task: TaskRecord }>('POST', `/tasks/${encodeURIComponent(id)}/cancel`),
   // ---- M7: AI runtime ----
@@ -329,3 +331,5 @@ export const faceCropUrl = (faceId: number, s: 128 | 256 = 128) => `${BASE}/face
 /** RGBA PNG of a patch asset (contract M5 C). */
 export const assetUrl = (photoId: number, asset: string) => `${BASE}/assets/${photoId}/${encodeURIComponent(asset)}`
 export const originalUrl = (id: number) => `${BASE}/original/${id}`
+/** Full-resolution image (upright sRGB JPEG at the photo's own size; the rendered edit when edited). */
+export const fullUrl = (id: number, v?: string) => `${BASE}/full/${id}${v ? `?v=${encodeURIComponent(v)}` : ''}`

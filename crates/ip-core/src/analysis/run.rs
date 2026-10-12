@@ -1193,12 +1193,10 @@ impl Core {
 
         // ---- paused: stop here, the rest waits for `continue` (no grouping yet)
         if paused && !cancel.is_cancelled() {
-            let st = self.update_run(sid, |s| {
-                s.state = RunState::Paused;
-                s.stage = None;
-                s.skipped_steps = skipped.clone();
-            });
-            let (tid, params, d, t) = (task_id.clone(), spec.to_json(), st.done, st.total);
+            // the task row is `paused` before anybody can see the state: an exit right after
+            // the status turns `paused` must still find a paused run
+            let cur = self.analysis_status(sid);
+            let (tid, params, d, t) = (task_id.clone(), spec.to_json(), cur.done, cur.total);
             let _ = self
                 .db
                 .call(move |c| {
@@ -1211,6 +1209,11 @@ impl Core {
             if let Some(r) = self.runs.lock().unwrap().get_mut(&sid) {
                 r.spec = spec.clone();
             }
+            let st = self.update_run(sid, |s| {
+                s.state = RunState::Paused;
+                s.stage = None;
+                s.skipped_steps = skipped.clone();
+            });
             self.emit_run(sid, &task_id, &st);
             tracing::info!(session = sid, done = d, total = t, "analysis paused");
             return;

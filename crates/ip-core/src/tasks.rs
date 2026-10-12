@@ -1,4 +1,4 @@
-//! Task history and cancellation (docs/api-contract-m5.md section F).
+//! Task history and cancellation (docs/api-contract-m5.md section G).
 //!
 //! Generation tasks (best take, inpainting, enhancement), exports and analysis runs write a row
 //! into the `task` table when they start and update it when they end; only the newest

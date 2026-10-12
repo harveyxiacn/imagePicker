@@ -381,6 +381,13 @@ pub async fn preview(
     jpeg_file(path, "public, max-age=3600").await
 }
 
+/// Full-resolution image for the loupe at 100% and above: upright sRGB JPEG at the photo's own
+/// pixel size (the rendered edit for edited photos). Generated on first use, then cached.
+pub async fn full(State(st): State<AppState>, ApiPath(id): ApiPath<i64>) -> ApiResult<Response> {
+    let path = st.core.full_path(id).await?;
+    jpeg_file(path, "public, max-age=3600").await
+}
+
 fn content_type(format: ImageFormat) -> &'static str {
     match format {
         ImageFormat::Jpeg => "image/jpeg",
@@ -436,6 +443,11 @@ pub async fn export(
     }
     let task_id = st.core.export(req).await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "task_id": task_id }))).into_response())
+}
+
+/// `GET /api/export/presets`: the export presets (the same table the assistant uses).
+pub async fn export_presets() -> Json<Value> {
+    Json(json!({ "presets": ip_core::export::EXPORT_PRESETS }))
 }
 
 /// Unknown `/api/*` -> JSON 404; everything else -> SPA from `web_dir` with `index.html` fallback.
