@@ -19,6 +19,8 @@
 | 优先级 | 项 | 来源 |
 |---|---|---|
 | P1 | HEIC/HEIF 解码路径的实机验证：本机只验证了 libheif（AI 组件自带）与内嵌 JPEG 两层；Windows WIC + HEIF/HEVC 扩展、macOS ImageIO 未实测；真实 iPhone / 安卓样张（网格、HDR、`imir`）与 AVIF 未测 | M1 imaging |
+| P1 | RAW+JPEG 配对（09 P0-7）已实现并在合成文件上测试；仍待：真实相机的 RAW+JPEG 样张（Canon CR3、Sony ARW、Nikon NEF、Fuji RAF）验证；配对只认同目录同主文件名，不认相机的 `_DSC1234` / `DSC1234` 变体命名；JPEG 在别处被删除后 RAW 仍作为它的 companion（显示为缺失，不会自动升格为网格项）；多个 JPEG 与同一 RAW 同名时 RAW 只跟第一张 | P0-7 |
+| P1 | 文件监听（09 P1-6）：整个根目录变化后全量重新扫描（10 万张级别的根目录每次扫描会有秒级 IO），网络盘 / NAS 上的变更通知不一定可靠（需手动「重新扫描」）；安卓与 iOS 不监听；回收站只在桌面版（Android 无回收站，仅 `_rejected` 文件夹） | P1-6 |
 | P2 | Android 端 HEIC 缩略图：Rust 侧只有内嵌 JPEG，需经媒体插件接入 `ImageDecoder` / `loadThumbnail` | M8 |
 | P1 | 构图分（倾斜检测已实现，阈值复核见「校准」） | M2 |
 | P1 | RAW 预览在真实相机文件上验证（目前仅合成样本） | M1 imaging |
@@ -48,6 +50,8 @@
 - GFPGAN：FFHQ 训练数据有独立条款；Real-ESRGAN ONNX 来自 facefusion 镜像（上游 BSD-3）。
 
 ## 已在集成中修复（记录）
+
+- 目录与文件（09 §5.1 P0-7、§5.2 P1-6，WP-F1）：①同目录同主文件名的 RAW+JPEG 导入后是一个网格项（JPEG 显示 / 分析，RAW 为 companion，`pair_id`），评分 / 旗标 / 色标同步到两者及各自的 XMP 侧车，分组与分析只算一次，导出可选 `pair_member`；②`POST /api/import` 支持 `exclude`（通配符 / 子文件夹 / 名字，重新扫描沿用）；③桌面端文件监听，增删文件约 2–3 秒内进网格；④缺失文件显示断链，`POST /api/sessions/{id}/relocate` 按相对路径 + 大小重新定位文件夹；⑤已淘汰照片经确认后可移入回收站（`trash`）或 `_rejected`，目录库跟随，绝不硬删（`tests_files.rs`、`ip-server/tests/files.rs`）
 
 - 数据安全 P0（09 §5.1 P0-1 / P0-3 / P0-4）：①原图只读成为硬约束——「侧车 + 内嵌」改为需二次确认的高级模式「修改原图（写入内嵌 XMP）」（`xmp_mode = modify_originals`，服务端要求 `confirm_modify_originals`，旧值降为 `sidecar`），其余模式下导入、分析、评分 / XMP 同步、编辑、导出后原图 SHA-256 不变（`tests_safety.rs`）；②目录库启动后后台 `quick_check`、每日 `VACUUM INTO` 备份留 7 份、打不开时移到 `backups/corrupt-*.db` 并以空目录库启动、可从备份恢复（`GET/POST /api/catalog*`，界面在启动弹窗与「设置 → 目录库备份」）；③人脸识别首次说明与同意（`faces.consented`），同意前不检测人脸、不计算人脸特征（lite 档同样），拒绝即 `faces.enabled = false`。同意文案待产品确认（09 §5.4 / P0-4）
 - 拍摄时间按查看者时区显示 → 改为拍摄地当地时间（M1）

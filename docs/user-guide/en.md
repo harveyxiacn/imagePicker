@@ -158,6 +158,10 @@ The first time an AI feature needs models, the *AI models required* dialog lists
 - Import scans sub-folders recursively: *Scanning…* → *Generating thumbnails…* → *Done*. You can browse and rate while thumbnails appear.
 - *Remove session* only removes the catalog record and caches; **originals are untouched**.
 - The *Import from SD card / phone* button is disabled for now.
+- **Import options** (the link under the drop area): list globs or sub-folders to leave out, one per line (`*.dng`, `backup/**`, `trip/rejects`; matching is case-insensitive, `*` stays inside a folder, `**` crosses folders). The same exclusions apply when the folder is rescanned.
+- **RAW + JPEG pairs**: a RAW file and a JPEG (or HEIC) with the same name in the same folder (`IMG_0001.CR2` + `IMG_0001.JPG`) become **one** grid item with an *RAW+JPEG* badge. The JPEG is shown and analysed, the RAW rides along: rating, flag and colour label apply to both files (and to both XMP sidecars when XMP sync is on: `IMG_0001.xmp` and `IMG_0001.CR2.xmp`). Groups and analysis count the pair once. A RAW without a JPEG next to it stays a normal item. When you export, choose *JPEG*, *RAW* or *Both* for such pairs.
+- **Changes on disk**: the desktop app watches imported folders. Files you add or remove show up within a few seconds; photos whose file has vanished stay in the catalog (with their ratings and edits) with a broken-link mark. If you moved or renamed the whole folder, use *Relocate folder…* in the banner above the grid and pick the new location: files are re-linked by relative path and size. *Rescan* does the same check by hand (useful on network drives).
+- **Move rejected files**: right-click a photo → *Move rejected files…* moves every photo marked as rejected (with its RAW and sidecars) to the **recycle bin** or into a **`_rejected` folder** next to the originals, after you confirm. Nothing is ever deleted permanently by the app; photos in the recycle bin show as missing until you restore them and rescan.
 
 HEIC/HEIF (phone photos) need a decoder, tried in this order: a JPEG preview inside the file → the system decoder (Windows: install *HEIF Image Extensions* and *HEVC Video Extensions* from the Microsoft Store; built into macOS) → libheif (Linux: install `libheif` with its HEVC plugin; with the AI components installed, the libheif they ship is used automatically). Without any of them these photos have no thumbnails, see [Troubleshooting](#19-troubleshooting--faq).
 
@@ -420,6 +424,7 @@ Press `Ctrl+E` (or *Export* in the top bar):
 | Naming template | `{name}` is the original file name; a live example is shown |
 | Upscale | Off / ×2 / ×4 (on CPU tiers each photo can take tens of seconds) |
 | Export into one folder per person | Used from the People page |
+| RAW+JPEG pairs | Export the JPEG (as shown, with edits; default), the RAW, or both |
 
 While an export runs, its progress shows at the bottom right with a *Cancel* button: files already written stay, the remaining photos are skipped.
 

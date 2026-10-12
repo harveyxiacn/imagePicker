@@ -44,7 +44,11 @@ interface Photo {
   burst_id: number | null;      // M1 恒为 null
   thumb_ready: boolean;         // 256 网格缩略图已生成
   thumb_version: string;        // 缓存破坏用，拼到 URL 上 ?v=（当前为 fast_key 前 8 位）
+  missing?: boolean;            // 文件已不在磁盘上（见「文件」）；始终返回，缺省按 false
+  companions?: Companion[];     // 与本照片配对的 RAW 文件（见「文件」）；无配对时省略
 }
+
+interface Companion { id: number; file_name: string; format: ImageFormat; file_size: number; missing: boolean }
 
 interface Session {
   id: number;
@@ -65,7 +69,10 @@ interface Session {
 | 方法 | 路径 | 请求 | 响应 |
 |---|---|---|---|
 | GET | `/api/health` | — | `{"ok":true,"version":"0.1.0"}` |
-| POST | `/api/import` | `{"path": string, "recursive"?: bool=true, "title"?: string}` | `201 {"session": Session}`；扫描在后台继续，照片分批出现（见事件） |
+| POST | `/api/import` | `{"path": string, "recursive"?: bool=true, "title"?: string, "exclude"?: string[]}` | `201 {"session": Session}`；扫描在后台继续，照片分批出现（见事件）。`exclude`（键名 `exclude[]` 亦可）见「文件」 |
+| POST | `/api/sessions/{id}/rescan` | — | `202 {"started": true}`；重新扫描文件夹（新增文件导入、消失的标 `missing`），与文件监听同一逻辑 |
+| POST | `/api/sessions/{id}/relocate` | `{"path": string, "dry_run"?: bool}` | `{"relocate": RelocateReport}`；见「文件」 |
+| POST | `/api/photos/reject-files` | `{"session_id": number, "ids"?: number[], "mode": "trash" \| "folder", "confirm": true}` | `{"result": RejectFilesReport}`；见「文件」 |
 | GET | `/api/sessions` | — | `{"sessions": Session[]}`（按 created_at 倒序） |
 | GET | `/api/sessions/{id}` | — | `{"session": Session}` |
 | DELETE | `/api/sessions/{id}` | — | `204`（仅删除目录库记录与缓存，**绝不删除原图**） |
@@ -77,7 +84,7 @@ interface Session {
 | GET | `/api/preview/{id}?s=2048` | — | `image/jpeg`，按需生成并缓存（s 允许 1024/2048/4096） |
 | GET | `/api/original/{id}` | — | 原文件字节流（Content-Type 按格式；RAW 用 `application/octet-stream`） |
 | POST | `/api/viewport` | `{"ids": number[]}` | `204`；提升这些照片缩略图生成优先级 |
-| POST | `/api/export` | `{"ids": number[], "dest": string, "long_edge"?: number \| null, "quality"?: number=90, "name_template"?: string="{name}"}` | `202 {"task_id": string}`；进度走事件 |
+| POST | `/api/export` | `{"ids": number[], "dest": string, "long_edge"?: number \| null, "quality"?: number=90, "name_template"?: string="{name}", "pair_member"?: "jpeg" \| "raw" \| "both"}` | `202 {"task_id": string}`；进度走事件 |
 | GET | `/api/fs/roots` | — | `{"roots": string[]}`（Windows 盘符 / `/` 与用户目录） |
 | GET | `/api/fs/list?path=` | — | `{"path": string, "parent": string \| null, "dirs": string[], "image_count": number}`（用于 WebUI 选择文件夹） |
 
@@ -116,6 +123,46 @@ interface SessionDevice {
 ```
 
 `GET /api/sessions/{id}/devices` → `{"devices": SessionDevice[]}`，按 `photo_count` 降序、再按 `name`（不区分大小写）排序；只列出在该会话中有照片的设备。游客可读。会话不存在 → 404。会话计数（`photo_count` 等）仍为全局，不受 `device` 过滤影响。
+
+## 文件：RAW+JPEG、排除、监听、缺失与安全淘汰
+
+**RAW+JPEG 配对。** 同一文件夹内主文件名相同（不区分大小写）的 RAW 与 JPEG/HEIF 导入后是**一个网格项**：显示与分析用 JPEG（JPEG 优先于 HEIF），RAW 是它的 *companion*，出现在 `Photo.companions` 里。companion 在库里有自己的 `photo` 行（`pair_id` 指向 JPEG），但不属于任何会话，所以网格、分组、分析、计数都只算一次；它不生成缩略图、不读元数据。单独的 RAW（旁边没有同名 JPEG）仍是普通网格项。
+
+- `PATCH /api/photos` 的评分 / 旗标 / 色标同时写到 companion；开启 XMP 同步时两个文件各有自己的侧车（JPEG 的 `<名>.xmp`，RAW 的 `<文件名>.<扩展名>.xmp`，如 `IMG_1.CR2.xmp`）。
+- 旧目录库（配对功能之前创建的）启动时自动配对已导入的 RAW；JPEG 还没有任何评分 / 旗标 / 色标而 RAW 有时，JPEG 沿用 RAW 的。
+- `POST /api/export` 的 `pair_member`：`jpeg`（默认，网格里看到的那张，含编辑）、`raw`（改导出 RAW companion；没有配对的照片照常导出）、`both`。
+
+**导入排除。** `exclude` 的每一项是：通配符（`*` 与 `?` 不跨目录，`**` 跨目录，如 `*.dng`、`backup/**`、`**/thumbs`）、相对于导入根目录的子文件夹路径（也可写根目录内的绝对路径，如 `trip/rejects`），或不含 `/` 的名字（任意深度下该名字的文件或文件夹）。不区分大小写。排除项与 `recursive` 一起记在会话里，之后的重新扫描（文件监听、`rescan`）沿用。名为 `_rejected` 的文件夹总是被忽略。
+
+**文件监听。** 桌面版（`serve` / 桌面应用）监视已导入的文件夹：新增、删除、改名的图片约 1 秒静默后触发一次重新扫描，通常 2–3 秒内体现在网格（`photos.added` 事件，客户端重新拉取）；移动端不监听，可手动 `rescan`。
+
+**缺失文件。** 文件消失的照片保留目录库记录（评分、编辑、分析都在），`missing = true`，`/api/original` 等对它返回 404，网格显示断链。文件回来（重新扫描）后自动恢复。companion 有自己的 `missing`。
+
+**重新定位。** 文件夹被移动或改名后，`POST /api/sessions/{id}/relocate` 把会话（及共用该根目录的所有会话）指向新位置，按**相对路径 + 文件大小**重新关联，评分 / 编辑 / 分析全部保留；随后自动重新扫描以接收大小变了的和新增的文件。`path` 须在允许访问的文件夹内；`dry_run: true` 只返回统计不修改。
+
+```ts
+interface RelocateReport {
+  total: number;     // 该文件夹所有照片（含 companion）的文件数
+  matched: number;   // 新位置相同相对路径且大小相同
+  changed: number;   // 相同相对路径但大小不同
+  absent: number;    // 新位置找不到
+  applied: boolean;
+}
+```
+
+一张都没匹配上 → `422`；新路径已作为另一个文件夹导入 → `409`；不是文件夹 → `400`。
+
+**安全淘汰。** `POST /api/photos/reject-files` 把会话里**已标淘汰**（`flag = -1`）的照片（`ids` 可再限定范围；非淘汰的永远不动）连同 RAW companion 和 XMP 侧车移走，**绝不删除**：`mode: "trash"` 放入系统回收站（目录库里这些照片变为 `missing`，从回收站还原后重新扫描即恢复，评分保留），`mode: "folder"` 移进文件所在目录下的 `_rejected` 子文件夹（目录库里的路径跟着改，仍可见）。必须带 `confirm: true`（界面在确认对话框之后才发），否则 `400`，且不动任何文件。
+
+```ts
+interface RejectFilesReport {
+  mode: "trash" | "folder";
+  photos: number;    // 处理成功的照片数（各含其 RAW）
+  files: number;     // 移动的文件数
+  skipped: number;   // 文件本来就不在的
+  errors: string[];  // 失败项；其余照片不受影响
+}
+```
 
 ## 行为澄清（实现后补充）
 
