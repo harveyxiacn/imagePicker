@@ -188,6 +188,10 @@ Click selects one photo, `Ctrl+click` multi-selects, `Ctrl+A` selects all; ratin
 | Hold `Z` | 100% magnifier | Loupe, Compare, Group |
 | `Shift+F` | Show / hide face boxes | Loupe, Compare, Group |
 
+**Zoom.** 100% shows the photo's own pixels: one image pixel per screen pixel, so focus and noise can be judged as they are (on a high-DPI screen with Windows scaling above 100% the photo is therefore smaller at 100% than the page text suggests). Browsing at *Fit* uses the preview only, so flipping through photos stays instant. Zooming in past what the preview holds (photos above about 16 MP) loads the full-resolution image in the background; the preview stays on screen until it arrives, the first time about half a second for a 24 MP JPEG, afterwards from the cache. RAW files show their embedded JPEG, so their 100% is that JPEG's resolution.
+
+**Compare.** `C` opens Compare with 2-up, 3-up or 4-up cells (buttons at the top right). If two or more photos are selected in the grid, those photos are the cells, in grid order; with more selected than cells, `←` `→` step through the selection and the view shows the page holding the cursor. With one or no photo selected, A is the photo you came from and the cells fill with the photos that follow the cursor.
+
 ### Rating & marking
 
 | Key | Action |
@@ -494,7 +498,7 @@ Default data directory (override with `IMAGEPICKER_DATA_DIR` or `--data-dir`):
 | What | Where (inside the data directory) |
 |---|---|
 | Catalog (ratings, flags, edits, people) | `catalog.db` |
-| Thumbnail / preview / AI mask / edit render / generated-result caches | `cache/` (clear in *Settings → Cache*; rebuilt on demand) |
+| Thumbnail / preview / full-resolution (`cache/full`, at most 1 GB) / AI mask / edit render / generated-result caches | `cache/` (clear in *Settings → Cache*; rebuilt on demand) |
 | Generated patch layers of edits | `edits/` |
 | Imported LUTs | `luts/` |
 | Logs | `logs/` |
