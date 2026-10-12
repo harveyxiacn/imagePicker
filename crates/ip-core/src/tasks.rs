@@ -356,6 +356,12 @@ impl Core {
             )));
         }
         self.tasks.overlay(&mut rec);
+        // The task may already have left the registry while its row still reads `running`
+        // (it is writing its final state): it is winding down all the same.
+        if rec.status == RUNNING {
+            rec.status = CANCELLING.to_string();
+            rec.cancellable = false;
+        }
         Ok(rec)
     }
 }
