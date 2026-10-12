@@ -321,7 +321,9 @@ fn env() -> Env {
 }
 
 async fn wait_state(core: &Arc<Core>, want: &str) -> Value {
-    for _ in 0..400 {
+    // up to 60 s: the fake uv / python scripts are slow to start on a loaded machine (a 20 s
+    // limit failed while other builds ran)
+    for _ in 0..1200 {
         let v = core.runtime.status(true).await;
         if v["state"] == want {
             return v;
