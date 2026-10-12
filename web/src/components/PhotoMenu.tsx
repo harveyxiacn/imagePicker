@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Download, PenLine, ScanFace } from 'lucide-react'
+import { Download, FolderInput, PenLine, ScanFace } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { applyProfilesToPhotos } from '@/lib/editActions'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
+import { RejectFilesDialog } from './FilesUi'
 import { MenuItem } from './MenuItem'
 
 interface MenuState {
@@ -21,6 +22,7 @@ export function usePhotoMenu(sessionId: number): { open: (e: { clientX: number; 
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [rejectOpen, setRejectOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   const open = useCallback((e: { clientX: number; clientY: number; preventDefault: () => void }, id: number) => {
@@ -93,9 +95,26 @@ export function usePhotoMenu(sessionId: number): { open: (e: { clientX: number; 
           >
             {t('photoMenu.export')}
           </MenuItem>
+          <MenuItem
+            icon={<FolderInput size={14} />}
+            onClick={() => {
+              setMenu(null)
+              setRejectOpen(true)
+            }}
+          >
+            <span data-testid="menu-reject-files">{t('files.rejectMenu')}</span>
+          </MenuItem>
         </div>,
         document.body,
       )
     : null
-  return { open, node }
+  return {
+    open,
+    node: (
+      <>
+        {node}
+        <RejectFilesDialog sessionId={sessionId} open={rejectOpen} onOpenChange={setRejectOpen} />
+      </>
+    ),
+  }
 }

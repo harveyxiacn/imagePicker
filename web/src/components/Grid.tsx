@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Ban, ChevronDown, ChevronRight, Flag as FlagIcon, ImageOff, Layers } from 'lucide-react'
+import { Ban, ChevronDown, ChevronRight, Flag as FlagIcon, ImageOff, Layers, Unlink } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
@@ -37,6 +37,8 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
   const rejected = photo.flag === -1
   const collapsedStack = stack !== null && !stack.expanded
   const badges = showBadges ? issueBadges(photo.issues) : []
+  const missing = photo.missing === true
+  const paired = (photo.companions?.length ?? 0) > 0
   return (
     <div
       className="relative shrink-0"
@@ -71,7 +73,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
             draggable={false}
             onError={() => setFailed(true)}
             className="h-full w-full object-contain transition-opacity"
-            style={{ opacity: rejected ? 0.4 : 1 }}
+            style={{ opacity: missing ? 0.35 : rejected ? 0.4 : 1, filter: missing ? 'grayscale(1)' : undefined }}
           />
         ) : failed ? (
           <div className="flex h-full w-full items-center justify-center text-faint">
@@ -81,6 +83,16 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
           <div className="skeleton h-full w-full" />
         )}
         {selected && <div className="pointer-events-none absolute inset-0 bg-accent/10" />}
+        {missing && (
+          <div
+            className="pointer-events-none absolute inset-0 flex items-center justify-center text-warning"
+            title={t('files.missing')}
+            aria-label={t('files.missing')}
+            data-testid="missing-badge"
+          >
+            <Unlink size={size >= 100 ? 26 : 16} className="drop-shadow" />
+          </div>
+        )}
         <div className="pointer-events-none absolute top-1 left-1 flex flex-col items-start gap-1">
           <div className="flex items-center gap-1">
             {photo.flag === 1 && <FlagIcon size={14} className="text-success drop-shadow" fill="currentColor" />}
@@ -122,7 +134,16 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
                 ☆{photo.ai_rating.toFixed(1)}
               </span>
             ) : null}
-            {photo.format !== 'jpeg' && (
+            {paired && (
+              <span
+                className="pointer-events-none absolute right-1 bottom-1 rounded bg-accent px-1 text-[10px] leading-4 font-semibold text-accent-fg"
+                title={t('files.pairTitle')}
+                data-testid="pair-badge"
+              >
+                {t('files.pair')}
+              </span>
+            )}
+            {!paired && photo.format !== 'jpeg' && (
               <span
                 className={`pointer-events-none absolute right-1 bottom-1 rounded px-1 text-[10px] leading-4 font-semibold uppercase ${
                   photo.format === 'raw' ? 'bg-accent text-accent-fg' : 'bg-black/65 text-white/85'

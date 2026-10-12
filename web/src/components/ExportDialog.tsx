@@ -44,6 +44,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const [scope, setScope] = useState<'selected' | 'all'>('selected')
   const [browse, setBrowse] = useState(false)
   const [upscale, setUpscale] = useState<0 | 2 | 4>(0)
+  const [pairMember, setPairMember] = useState<'jpeg' | 'raw' | 'both'>('jpeg')
   const hardware = useHardware().data
   const wantedPreset = useUi((s) => s.exportPreset)
   const [preset, setPreset] = useState<ExportPresetId | null>(null)
@@ -77,7 +78,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const longEdge = edge === 'original' ? null : edge === 'custom' ? custom : Number(edge)
 
   const mut = useMutation({
-    mutationFn: () => api.exportPhotos({ ...(byFolder ? { folders: byFolder } : { ids }), dest, long_edge: longEdge, quality, name_template: template || '{name}', ...(upscale ? { upscale } : {}) }),
+    mutationFn: () => api.exportPhotos({ ...(byFolder ? { folders: byFolder } : { ids }), dest, long_edge: longEdge, quality, name_template: template || '{name}', ...(upscale ? { upscale } : {}), ...(pairMember !== 'jpeg' ? { pair_member: pairMember } : {}) }),
     onSuccess: ({ task_id }) => {
       try {
         localStorage.setItem(LS_KEY, dest)
@@ -180,6 +181,17 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
                 <input type="number" className="field w-28" min={64} max={16384} value={custom} onChange={(e) => setCustom(Math.max(64, Number(e.target.value) || 64))} aria-label={t('export.custom')} />
               )}
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1" data-testid="export-pair-member">
+            <label htmlFor="exp-pair" className="text-muted">
+              {t('files.exportMember')}
+            </label>
+            <select id="exp-pair" className="field w-fit" value={pairMember} onChange={(e) => setPairMember(e.target.value as 'jpeg' | 'raw' | 'both')}>
+              <option value="jpeg">{t('files.exportJpeg')}</option>
+              <option value="raw">{t('files.exportRaw')}</option>
+              <option value="both">{t('files.exportBoth')}</option>
+            </select>
           </div>
 
           <div className="flex flex-col gap-1" data-testid="export-upscale">

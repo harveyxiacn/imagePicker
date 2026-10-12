@@ -11,6 +11,9 @@ import type {
   GroupsResponse,
   HardwareInfo,
   ImportBody,
+  RelocateReport,
+  RejectFilesReport,
+  RejectMode,
   ModelInfo,
   Person,
   Photo,
@@ -175,6 +178,12 @@ export const api = {
   sessions: () => request<{ sessions: Session[] }>('GET', '/sessions'),
   session: (id: number) => request<{ session: Session }>('GET', `/sessions/${id}`),
   deleteSession: (id: number) => request<void>('DELETE', `/sessions/${id}`),
+  // ---- files: rescan, relocate a moved folder, safe reject ----
+  rescanSession: (id: number) => request<{ started: boolean }>('POST', `/sessions/${id}/rescan`),
+  relocateSession: (id: number, path: string, dryRun = false) =>
+    request<{ relocate: RelocateReport }>('POST', `/sessions/${id}/relocate`, { path, dry_run: dryRun }),
+  rejectFiles: (body: { session_id: number; ids?: number[]; mode: RejectMode; confirm: boolean }) =>
+    request<{ result: RejectFilesReport }>('POST', '/photos/reject-files', body),
   photos: (q: PhotosQuery) => request<PhotosResponse>('GET', `/photos?${photosQueryString(q)}`),
   photo: (id: number) => request<{ photo: Photo }>('GET', `/photos/${id}`),
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),

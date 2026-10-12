@@ -188,6 +188,41 @@ export const handlers = [
     return deleteSession(Number(params.id)) ? new HttpResponse(null, { status: 204 }) : err(404, 'not_found', 'session not found')
   }),
 
+  // ---- files: rescan, relocate, safe reject ----
+  http.post('/api/sessions/:id/rescan', async ({ params }) => {
+    await lat()
+    return getSession(Number(params.id)) ? HttpResponse.json({ started: true }, { status: 202 }) : err(404, 'not_found', 'session not found')
+  }),
+  http.post('/api/sessions/:id/relocate', async ({ params, request }) => {
+    await lat()
+    const s = getSession(Number(params.id))
+    if (!s) return err(404, 'not_found', 'session not found')
+    const body = (await request.json()) as { path: string; dry_run?: boolean }
+    const total = s.photos.length
+    const report = { total, matched: total, changed: 0, absent: 0, applied: !body.dry_run }
+    if (!body.dry_run) {
+      s.session.root_path = body.path
+      for (const p of s.photos) {
+        p.missing = false
+        for (const c of p.companions ?? []) c.missing = false
+      }
+      emit({ type: 'photos.added', session_id: s.session.id, count: total })
+      emit({ type: 'session.updated', session: { ...s.session } })
+    }
+    return HttpResponse.json({ relocate: report })
+  }),
+  http.post('/api/photos/reject-files', async ({ request }) => {
+    await lat()
+    const body = (await request.json()) as { session_id: number; mode: 'trash' | 'folder'; confirm?: boolean }
+    const s = getSession(body.session_id)
+    if (!s) return err(404, 'not_found', 'session not found')
+    if (!body.confirm) return err(400, 'bad_request', 'confirmation required')
+    const rejected = s.photos.filter((p) => p.flag === -1)
+    if (body.mode === 'trash') for (const p of rejected) p.missing = true
+    emit({ type: 'photos.added', session_id: s.session.id, count: rejected.length })
+    return HttpResponse.json({ result: { mode: body.mode, photos: rejected.length, files: rejected.length, skipped: 0, errors: [] } })
+  }),
+
   http.get('/api/sessions/:id/devices', async ({ params }) => {
     await lat()
     const s = getSession(Number(params.id))

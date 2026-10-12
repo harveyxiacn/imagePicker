@@ -8,6 +8,7 @@ import { AssistantHost } from '@/components/assistant/AssistantDrawer'
 import { CollectionsSidebar } from '@/components/CollectionsSidebar'
 import { Compare } from '@/components/Compare'
 import { ExportDialog } from '@/components/ExportDialog'
+import { MissingBanner } from '@/components/FilesUi'
 import { FaceSearchDialog } from '@/components/FaceSearchDialog'
 import { FilterBar } from '@/components/FilterBar'
 import { Grid } from '@/components/Grid'
@@ -166,6 +167,8 @@ export function Library() {
           />
         </>
       )}
+
+      <MissingBanner sessionId={sessionId} photos={photos} />
 
       <div className="relative flex min-h-0 flex-1">
         {sidebarOpen && !isMobile && (
