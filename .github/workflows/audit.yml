@@ -46,7 +46,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # No dependency cache: `pnpm audit` reads the lockfile and never creates a pnpm store, so the
