@@ -973,7 +973,11 @@ async fn export_watermark_over_http() {
             r.json()
         );
     }
-    let r = post(&dest("bad"), Some(json!({"kind": "image", "image_path": "logo.png"}))).await;
+    let r = post(
+        &dest("bad"),
+        Some(json!({"kind": "image", "image_path": "logo.png"})),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST, "relative logo path");
     let r = post(&dest("bad"), Some(json!({"kind": "sticker"}))).await;
     assert!(r.status.is_client_error(), "unknown kind: {}", r.status);
@@ -987,8 +991,9 @@ async fn export_watermark_over_http() {
         let task_id = r.json()["task_id"].as_str().unwrap().to_string();
         tokio::time::timeout(Duration::from_secs(20), async {
             loop {
-                if let Ok(ip_core::Event::TaskProgress { task_id: t, state, .. }) =
-                    rx.recv().await
+                if let Ok(ip_core::Event::TaskProgress {
+                    task_id: t, state, ..
+                }) = rx.recv().await
                 {
                     if t == task_id && state == "done" {
                         break;
@@ -1045,6 +1050,12 @@ async fn fs_list_names_files_with_the_requested_extensions() {
         .collect();
     assert_eq!(files, ["a.ttf", "b.PNG"]);
     // without `ext` the key is absent
-    let r = call(&e.app, Method::GET, &format!("/api/fs/list?path={path}"), None).await;
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/fs/list?path={path}"),
+        None,
+    )
+    .await;
     assert!(r.json().get("files").is_none());
 }

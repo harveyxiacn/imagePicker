@@ -164,9 +164,21 @@ async fn every_format_carries_the_mark_only_where_it_belongs() {
             bright_in(&img, true, true) > 30,
             "{format:?}: the text is in the bottom right"
         );
-        assert_eq!(bright_in(&img, false, false), 0, "{format:?}: top left clean");
-        assert_eq!(bright_in(&img, true, false), 0, "{format:?}: top right clean");
-        assert_eq!(bright_in(&img, false, true), 0, "{format:?}: bottom left clean");
+        assert_eq!(
+            bright_in(&img, false, false),
+            0,
+            "{format:?}: top left clean"
+        );
+        assert_eq!(
+            bright_in(&img, true, false),
+            0,
+            "{format:?}: top right clean"
+        );
+        assert_eq!(
+            bright_in(&img, false, true),
+            0,
+            "{format:?}: bottom left clean"
+        );
         clear(e.out.path());
     }
 }
@@ -176,7 +188,11 @@ async fn a_copy_of_the_original_is_re_encoded_only_with_a_watermark() {
     let e = env();
     let (id, src) = import_flat(&e).await;
     run(&e, request(&e, id, ExportFormat::Original, None)).await;
-    assert_eq!(std::fs::read(only_file(e.out.path())).unwrap(), src, "plain copy");
+    assert_eq!(
+        std::fs::read(only_file(e.out.path())).unwrap(),
+        src,
+        "plain copy"
+    );
     clear(e.out.path());
     for (gps, meta) in [(false, false), (true, false), (false, true)] {
         let mut req = request(&e, id, ExportFormat::Original, Some(text_wm()));
@@ -219,7 +235,13 @@ async fn a_logo_is_placed_by_position_size_and_margin() {
     assert_eq!(img.get_pixel(16 + 32, 16 + 32).0, [0, 0, 255]);
     assert_eq!(img.get_pixel(16 + 63, 16 + 63).0, [0, 0, 255]);
     // the source is a JPEG: the flat colour is only close to RGB
-    let flat = |x: u32, y: u32| img.get_pixel(x, y).0.iter().zip(RGB).all(|(a, b)| a.abs_diff(b) <= 3);
+    let flat = |x: u32, y: u32| {
+        img.get_pixel(x, y)
+            .0
+            .iter()
+            .zip(RGB)
+            .all(|(a, b)| a.abs_diff(b) <= 3)
+    };
     assert!(flat(15, 15) && flat(16 + 64, 16 + 64) && flat(300, 220));
 }
 

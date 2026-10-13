@@ -387,7 +387,8 @@ impl PreparedWatermark {
         let mut lay = layout(font, text, px, self.spec.shadow);
         if lay.width > img.width || lay.height > img.height {
             // too big for the picture: shrink to fit
-            let k = (img.width as f32 / lay.width as f32).min(img.height as f32 / lay.height as f32);
+            let k =
+                (img.width as f32 / lay.width as f32).min(img.height as f32 / lay.height as f32);
             px = (px * k * 0.98).max(4.0);
             lay = layout(font, text, px, self.spec.shadow);
         }
@@ -449,7 +450,11 @@ fn layout(font: &FontArc, text: &str, px: f32, shadow: bool) -> Layout {
         x += sf.h_advance(id);
         prev = Some(id);
     }
-    let off = if shadow { (px / 16.0).round().max(1.0) } else { 0.0 };
+    let off = if shadow {
+        (px / 16.0).round().max(1.0)
+    } else {
+        0.0
+    };
     Layout {
         glyphs,
         ascent: sf.ascent(),
@@ -478,8 +483,9 @@ fn load_font(path: &str) -> Result<FontArc, String> {
         return Err(format!("watermark font {path} is not a usable font file"));
     }
     let bytes = std::fs::read(path).map_err(|e| format!("watermark font {path}: {e}"))?;
-    FontArc::try_from_vec(bytes)
-        .map_err(|_| format!("watermark font {path} is not a TTF / OTF font (collections are not supported)"))
+    FontArc::try_from_vec(bytes).map_err(|_| {
+        format!("watermark font {path} is not a TTF / OTF font (collections are not supported)")
+    })
 }
 
 fn load_logo(path: &str) -> Result<image::RgbaImage, String> {
@@ -597,7 +603,11 @@ mod tests {
         };
         let (plain, shadowed) = (draw(false), draw(true));
         let darker = |img: &RgbImage| img.data.iter().filter(|v| **v < 200).count();
-        assert_eq!(darker(&plain), 0, "white text on light grey has no dark pixel");
+        assert_eq!(
+            darker(&plain),
+            0,
+            "white text on light grey has no dark pixel"
+        );
         assert!(darker(&shadowed) > 0);
     }
 
@@ -698,7 +708,15 @@ mod tests {
         .unwrap();
         let mut img = flat(100, 100, 0);
         let r = wm.apply(&mut img, &WatermarkTokens::default()).unwrap();
-        assert_eq!(r, Rect { x: 0, y: 0, w: 10, h: 10 });
+        assert_eq!(
+            r,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 10,
+                h: 10
+            }
+        );
         // 200 * (128/255 * 0.5) = 50.2
         let v = px(&img, 3, 3)[0];
         assert!((49..=51).contains(&v), "{v}");

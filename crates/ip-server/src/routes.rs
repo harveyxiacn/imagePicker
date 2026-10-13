@@ -605,7 +605,10 @@ pub async fn export(
     }
     // the logo and font files must lie inside the allowed folders too
     if let Some(wm) = req.watermark.as_mut() {
-        for path in [&mut wm.image_path, &mut wm.font_path].into_iter().flatten() {
+        for path in [&mut wm.image_path, &mut wm.font_path]
+            .into_iter()
+            .flatten()
+        {
             if !path.trim().is_empty() {
                 *path = whitelisted(&st, path).await?;
             }
