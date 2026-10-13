@@ -192,6 +192,26 @@ pub fn search_embedding(
     session_id: Option<i64>,
     exclude_face: Option<i64>,
 ) -> Result<(Vec<Candidate>, Vec<SimilarFace>)> {
+    search_embedding_min(conn, q, session_id, exclude_face, MIN_SEARCH_SIMILARITY)
+}
+
+/// Validates a caller-chosen similarity floor (`None` = [`MIN_SEARCH_SIMILARITY`]).
+pub fn search_floor(min_similarity: Option<f64>) -> Result<f32> {
+    match min_similarity {
+        None => Ok(MIN_SEARCH_SIMILARITY),
+        Some(v) if (0.0..=1.0).contains(&v) => Ok(v as f32),
+        Some(_) => Err(CoreError::bad_request("min_similarity must be 0..1")),
+    }
+}
+
+/// [`search_embedding`] with an adjustable similarity floor.
+pub fn search_embedding_min(
+    conn: &Connection,
+    q: &[f32],
+    session_id: Option<i64>,
+    exclude_face: Option<i64>,
+    min_sim: f32,
+) -> Result<(Vec<Candidate>, Vec<SimilarFace>)> {
     let scope_join = if session_id.is_some() {
         " JOIN session_photo sp ON sp.photo_id=f.photo_id AND sp.session_id=?1"
     } else {
@@ -219,7 +239,7 @@ pub fn search_embedding(
         for row in rows {
             let (id, name, center) = row?;
             let s = cosine(q, &decode_f16(&center));
-            if s >= MIN_SEARCH_SIMILARITY {
+            if s >= min_sim {
                 people.push(Candidate {
                     person_id: id,
                     person_name: name,
@@ -259,7 +279,7 @@ pub fn search_embedding(
                 continue;
             }
             let s = cosine(q, &decode_f16(&emb));
-            if s >= MIN_SEARCH_SIMILARITY {
+            if s >= min_sim {
                 faces.push(SimilarFace {
                     face_id: id,
                     photo_id,
@@ -320,6 +340,17 @@ impl Core {
         face_id: i64,
         session_id: Option<i64>,
     ) -> Result<FaceSearchOut> {
+        self.faces_search_face_min(face_id, session_id, None).await
+    }
+
+    /// [`Self::faces_search_face`] with an adjustable similarity floor (`min_similarity`, 0..1).
+    pub async fn faces_search_face_min(
+        &self,
+        face_id: i64,
+        session_id: Option<i64>,
+        min_similarity: Option<f64>,
+    ) -> Result<FaceSearchOut> {
+        let floor = search_floor(min_similarity)?;
         if let Some(s) = session_id {
             self.session(s).await?;
         }
@@ -339,7 +370,7 @@ impl Core {
                     )
                         })?;
                 let (candidates, similar_faces) =
-                    search_embedding(c, &q, session_id, Some(face_id))?;
+                    search_embedding_min(c, &q, session_id, Some(face_id), floor)?;
                 Ok(FaceSearchOut {
                     faces_detected: vec![bbox],
                     query_face: Some(0),
@@ -358,6 +389,19 @@ impl Core {
         session_id: Option<i64>,
         face_index: Option<usize>,
     ) -> Result<FaceSearchOut> {
+        self.faces_search_image_min(bytes, session_id, face_index, None)
+            .await
+    }
+
+    /// [`Self::faces_search_image`] with an adjustable similarity floor (`min_similarity`, 0..1).
+    pub async fn faces_search_image_min(
+        &self,
+        bytes: Vec<u8>,
+        session_id: Option<i64>,
+        face_index: Option<usize>,
+        min_similarity: Option<f64>,
+    ) -> Result<FaceSearchOut> {
+        let floor = search_floor(min_similarity)?;
         if let Some(s) = session_id {
             self.session(s).await?;
         }
@@ -381,7 +425,9 @@ impl Core {
             self.next_task_seq()
         ));
         std::fs::write(&path, &bytes)?;
-        let result = self.embed_and_rank(&path, session_id, face_index).await;
+        let result = self
+            .embed_and_rank(&path, session_id, face_index, floor)
+            .await;
         let _ = std::fs::remove_file(&path);
         result
     }
@@ -391,6 +437,7 @@ impl Core {
         path: &std::path::Path,
         session_id: Option<i64>,
         face_index: Option<usize>,
+        floor: f32,
     ) -> Result<FaceSearchOut> {
         let orientation = ip_imaging::ImageFormat::from_path(path)
             .and_then(|f| self.imaging.read_metadata(path, f).ok())
@@ -443,7 +490,7 @@ impl Core {
         let q = resp.embeddings[idx].clone();
         let (candidates, similar_faces) = self
             .db
-            .call(move |c| search_embedding(c, &q, session_id, None))
+            .call(move |c| search_embedding_min(c, &q, session_id, None, floor))
             .await?;
         Ok(FaceSearchOut {
             faces_detected,

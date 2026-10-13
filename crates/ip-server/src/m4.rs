@@ -104,13 +104,17 @@ struct SearchJson {
     face_id: i64,
     #[serde(default)]
     session_id: Option<i64>,
+    /// Similarity floor (cosine, 0..1); default 0.25.
+    #[serde(default)]
+    min_similarity: Option<f64>,
 }
 
 fn multipart_err(e: axum::extract::multipart::MultipartError) -> ApiError {
     ApiError::new(e.status(), "bad_request", e.body_text())
 }
 
-/// `multipart/form-data` (`image`, optional `session_id`, `face_index`) or JSON `{face_id}`.
+/// `multipart/form-data` (`image`, optional `session_id`, `face_index`, `min_similarity`) or JSON
+/// `{face_id, session_id?, min_similarity?}`.
 pub async fn faces_search(State(st): State<AppState>, req: Request) -> ApiResult<Json<Value>> {
     let is_multipart = req
         .headers()
@@ -123,13 +127,15 @@ pub async fn faces_search(State(st): State<AppState>, req: Request) -> ApiResult
             ApiError::new(status, "bad_request", e.body_text())
         })?;
         return Ok(Json(json!(
-            st.core.faces_search_face(b.face_id, b.session_id).await?
+            st.core
+                .faces_search_face_min(b.face_id, b.session_id, b.min_similarity)
+                .await?
         )));
     }
     let mut mp = Multipart::from_request(req, &())
         .await
         .map_err(|e| ApiError::new(e.status(), "bad_request", e.body_text()))?;
-    let (mut image, mut session_id, mut face_index) = (None, None, None);
+    let (mut image, mut session_id, mut face_index, mut min_similarity) = (None, None, None, None);
     while let Some(field) = mp.next_field().await.map_err(multipart_err)? {
         match field.name().unwrap_or("") {
             "image" => image = Some(field.bytes().await.map_err(multipart_err)?),
@@ -151,6 +157,15 @@ pub async fn faces_search(State(st): State<AppState>, req: Request) -> ApiResult
                     })?);
                 }
             }
+            "min_similarity" => {
+                let t = field.text().await.map_err(multipart_err)?;
+                if !t.trim().is_empty() {
+                    min_similarity =
+                        Some(t.trim().parse::<f64>().map_err(|_| {
+                            ApiError::bad_request("min_similarity must be a number")
+                        })?);
+                }
+            }
             _ => {}
         }
     }
@@ -158,7 +173,7 @@ pub async fn faces_search(State(st): State<AppState>, req: Request) -> ApiResult
         image.ok_or_else(|| ApiError::bad_request("multipart field `image` is required"))?;
     Ok(Json(json!(
         st.core
-            .faces_search_image(image.to_vec(), session_id, face_index)
+            .faces_search_image_min(image.to_vec(), session_id, face_index, min_similarity)
             .await?
     )))
 }

@@ -3,8 +3,9 @@
  * URLSearchParams string. These helpers convert between that string and the UI `FilterState`.
  */
 import { photosQueryString } from '@/api/client'
-import { ISSUES, SCENE_TYPES, type ColorName, type FlagFilter, type Issue, type PersonState, type SceneType, type SortKey } from '@/api/types'
-import { buildPhotosQuery, DEFAULT_FILTER, DEFAULT_PERSON_FILTER, type FilterState } from './filter'
+import { ISSUES, SCENE_TYPES, SHARP_STATES, type ColorName, type FlagFilter, type Issue, type PersonState, type SceneType, type SortKey } from '@/api/types'
+import { splitCsvText } from './csvText'
+import { buildPhotosQuery, DEFAULT_FILTER, DEFAULT_PERSON_FILTER, isIsoDate, type FilterState } from './filter'
 
 const COLORS: ColorName[] = ['red', 'yellow', 'green', 'blue', 'purple']
 const FLAGS: FlagFilter[] = ['picked', 'rejected', 'unflagged', 'not_rejected']
@@ -29,6 +30,11 @@ const num = (v: string | null): number | null => {
   return Number.isFinite(n) ? n : null
 }
 const oneOf = <T extends string>(v: string | null, all: readonly T[]): T | null => (v !== null && (all as readonly string[]).includes(v) ? (v as T) : null)
+
+const faceSim = (v: string | null): number | null => {
+  const n = num(v)
+  return n !== null && n >= 0 && n <= 1 ? n : null
+}
 
 /** Parse a stored collection query into a full filter state (unknown params are ignored). */
 export function queryToFilter(query: string): FilterState {
@@ -61,6 +67,14 @@ export function queryToFilter(query: string): FilterState {
       facesMax: num(q.get('faces_max')),
       includeBackground: q.get('include_background') === '1' && (include.length > 0 || exclude.length > 0),
     },
+    lens: splitCsvText(q.get('lens')),
+    takenFrom: isIsoDate(q.get('taken_from')) ? q.get('taken_from') : null,
+    takenTo: isIsoDate(q.get('taken_to')) ? q.get('taken_to') : null,
+    tags: splitCsvText(q.get('tags')),
+    tagMode: q.get('tag_mode') === 'all' ? 'all' : 'any',
+    sharp: oneOf(q.get('sharp'), SHARP_STATES),
+    faceIds: nums(q.get('face_ids')),
+    faceSimilarity: faceSim(q.get('face_similarity')),
     sort: oneOf<SortKey>(q.get('sort'), SORTS) ?? DEFAULT_FILTER.sort,
   }
 }

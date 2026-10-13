@@ -45,6 +45,7 @@
 | P1 | Release 的 Android APK 任务（签名 keystore、`apksigner` 校验、产物路径）未在 CI 实跑；需配置 `ANDROID_KEYSTORE_*` 四个 secrets 后验证 | M8 release |
 | P2 | lite 档位的 `faces` 步骤不输出关键点 / 闭眼 / 表情（需 MediaPipe 或 ONNX 关键点模型） | M8.1 infer |
 | P2 | 分析任务健壮性余项（09 WP-B）：①按步骤增量只覆盖 `embed` / `aesthetic` / `iqa` / `scene`，`faces` / `identity` 与人脸行绑定，装了人脸模型后要整批重新分析（`force`）；②暂停只在批次之间生效（每批最多 32 张，远程 AI 的一批可能要数十秒）；③续跑的真实进程强杀只在测试里用「丢弃运行时」模拟，未在 Windows / macOS / Linux 上做真正的 kill -9 实机验证；④桌面「改用快速分析」不会清掉已有的 fast / standard 结果，混合档位的会话在评分上按各自的分项计算，未做跨档位校准 | M2 / 09 WP-B |
+| P2 | 筛选补全余项（09 P1-5）：①`lens` 按 EXIF 原始字符串精确匹配，同一支镜头的不同写法（`RF24-70` / `RF 24-70`）是不同选项，没有镜头名规范化（设备名有，镜头没有）；②`face_ids` 每次查询线性扫描会话内所有有身份特征的人脸（没有向量索引，耗时与人脸数成正比，大会话上未测量；列表总数缓存在目录库无写入期间有效）；③`sharp=unknown` 表示没有清晰度度量（未分析，或该步骤没有输出），界面上叫“未分析”；④`pnpm dev:mock` 的模拟后端没有关键词和人脸特征（关键词筛选恒为空，`face_ids` 被忽略）；⑤自然语言搜索（P1-4）不在此范围 | P1-5 |
 
 ## 助手
 
@@ -75,6 +76,7 @@
 - Loupe「100%」不是原始像素（P0-6）→ 放大超过 4096 预览所含像素时按需加载全分辨率图 `GET /api/full/{id}`（与预览同一解码路径：转正、sRGB；已编辑的照片为全尺寸渲染；`cache/full` 按最近使用裁剪到 1 GB）；100% 改为一个图像像素对应一个屏幕物理像素并对齐物理像素；「适应」与翻页仍只用预读的 2048 预览。RAW 的 100% 是内嵌 JPEG 的分辨率（不做 RAW 解马赛克）（WP-F2）
 - 对比只有 2/4 宫格且格子总取光标之后的照片（P1-7）→ 2/3/4 宫格（3 宫格并排一行）；网格里选中两张及以上时对比格取所选照片（按网格顺序，多于格数时 `←` `→` 在所选中翻页），否则维持「A + 光标起的后续照片」（WP-F2）
 - 导出色彩：带非 sRGB ICC（Display P3、Adobe RGB…）或 DCF Adobe RGB 标记的来源在解码时转换为 sRGB（moxcms，纯 Rust），缩略图、预览、渲染与导出一致；导出保留 XMP（去掉朝向、尺寸、冲印参数、人脸区域、动态照片/景深/增益图引用，`strip_gps` 时去掉所有 `GPS*`）与 IPTC（APP13 只留 IPTC 记录）；RAW/TIFF/CR3 导出复制原始 EXIF（重建 IFD0/Exif/GPS，不含 MakerNote），RAF/HEIF 原样复制（M5 core）
+- 筛选补全（09 P1-5）：`GET /api/photos` 新增 `lens`、`taken_from`/`taken_to`、`tags`/`tag_mode`、`sharp`、`face_ids`/`face_similarity`（未聚类的脸按身份特征近邻找照片，阈值可调，默认 0.38），`GET /api/sessions/{id}/filter-options` 给出镜头 / 关键词 / 时间跨度；`POST /api/faces/search` 新增 `min_similarity`；网页筛选栏有镜头、关键词、日期弹窗与清晰度芯片，右键人脸可“有相似人脸的照片”（见 api-contract-m1「筛选补全」）
 - 以脸搜脸「这是新的人」（#5）：结果里展示相似人脸（含当前所属人物）供勾选，`POST /api/people` 把它们（以库内人脸搜索时含查询脸）移到新人物并锁定，重新聚类/分析保持；人脸菜单新增「查找相似的脸」（M4 web）
 - 一键全员最佳不再总以组内最佳为底片（#3）：逐帧估算需替换的脸（按脸尺寸加权）、替换后仍低于本人最佳的表情、缺席人物，排除模糊/曝光问题帧，组内最佳只在别的帧明显更省事时让位；计划返回 `base_choice` 说明原因（编辑器底片按钮悬停可见），可用 `base_photo_id` 手动指定底片；表情分提升不足 0.04 的脸不再替换（M5 core）
 - P0-8 导出（已完成）：可选 JPEG / PNG / TIFF / WebP，各格式携带的 EXIF/XMP/IPTC/ICC 见 `api-contract-m5.md` F 节；对话框有「去除 GPS 位置」「去除全部元数据」，对原样复制的原图同样生效（JPEG/PNG/WebP 按段/块清理，图像数据不变；RAW/HEIF/TIFF 改为全尺寸重新编码）；导出预设只有服务端一张表（`GET /api/export/presets`，对话框与 AI 助手共用，含 3:4、4:5 裁切）；命名模板支持 `{event}` `{scene}` `{camera}` `{rating}`；导出失败时只删除本次创建的文件（规划文件名后才出现的同名文件不再被删除，也从不覆盖）
