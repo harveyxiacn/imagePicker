@@ -15,6 +15,8 @@ import type {
   PhotoAnalysis,
   Scene,
   SceneType,
+  TimelineEvent,
+  TimelineResponse,
   WorkerState,
 } from '@/api/types'
 import { avatarSvg, AVATAR_STYLES } from './avatar'
@@ -410,6 +412,39 @@ function regroup(sessionId: number): number[] {
 
 function groupsOf(sessionId: number): GroupsResponse {
   return { scenes: sceneStore.get(sessionId) ?? [] }
+}
+
+const MOCK_EVENT_GAP_MS = 2 * 3_600_000
+
+/** Events of a mock session: scenes in time order, cut at pauses of more than 2 h (like the server). */
+function timelineOf(sessionId: number): TimelineResponse {
+  const scenes = [...(sceneStore.get(sessionId) ?? [])].sort((a, b) => a.start_at - b.start_at)
+  const events: TimelineEvent[] = []
+  for (const sc of scenes) {
+    const last = events[events.length - 1]
+    const photos = sc.bursts.reduce((n, b) => n + b.photo_ids.length, 0)
+    if (last && sc.start_at - last.end_at <= MOCK_EVENT_GAP_MS) {
+      last.scenes.push(sc)
+      last.end_at = Math.max(last.end_at, sc.end_at)
+      last.photo_count += photos
+    } else {
+      events.push({
+        id: sc.id,
+        name: '',
+        title: null,
+        place: null,
+        start_at: sc.start_at,
+        end_at: sc.end_at,
+        offset_min: 480,
+        gps_lat: null,
+        gps_lon: null,
+        photo_count: photos,
+        scenes: [sc],
+      })
+    }
+  }
+  for (const e of events) e.name = new Date(e.start_at + 480 * 60_000).toISOString().slice(0, 16).replace('T', ' ')
+  return { events }
 }
 
 function refreshScenes(sessionId: number) {
@@ -846,6 +881,12 @@ export const aiHandlers = [
     const sid = Number(new URL(request.url).searchParams.get('session_id'))
     if (!getSession(sid)) return err(404, 'not_found', 'session not found')
     return HttpResponse.json(groupsOf(sid))
+  }),
+  http.get('/api/sessions/:id/timeline', async ({ params }) => {
+    await lat()
+    const sid = Number(params.id)
+    if (!getSession(sid)) return err(404, 'not_found', 'session not found')
+    return HttpResponse.json(timelineOf(sid))
   }),
   http.post('/api/groups/split', async ({ request }) => {
     await lat()

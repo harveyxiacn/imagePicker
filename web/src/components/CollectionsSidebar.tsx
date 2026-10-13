@@ -1,14 +1,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { FolderHeart, HeartHandshake, Library, Pencil, Plus, Trash2, X } from 'lucide-react'
-import { useState } from 'react'
+import { CalendarRange, FolderHeart, HeartHandshake, Library, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { api } from '@/api/client'
-import { useCollectionCount, useCollections } from '@/api/queries'
-import type { Collection } from '@/api/types'
+import { useCollectionCount, useCollections, useTimeline } from '@/api/queries'
+import type { Collection, TimelineEvent } from '@/api/types'
 import { qk } from '@/lib/cache'
-import { collectionActive, queryToFilter } from '@/lib/collections'
+import { collectionActive, filterToQuery, queryToFilter } from '@/lib/collections'
 import { isFilterActive } from '@/lib/filter'
+import { eventLabel, eventStillExists, toggleEvent } from '@/lib/timeline'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { Modal } from './Modal'
@@ -130,7 +131,57 @@ function Row({ c, sessionId }: { c: Collection; sessionId: number }) {
   )
 }
 
-/** Left sidebar of the library (doc 04 3.2): smart collections (built-in + saved) and shortcuts. */
+/** One event of the session timeline (docs/09 P1-1): click to browse only its photos. */
+function EventRow({ ev }: { ev: TimelineEvent }) {
+  const { i18n } = useTranslation()
+  const eventId = useUi((s) => s.filter.eventId)
+  const active = eventId === ev.id
+  const label = eventLabel(ev, i18n.language)
+  return (
+    <li>
+      <button
+        className="flex w-full items-start gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-elevated"
+        style={active ? { background: 'color-mix(in srgb, var(--accent) 16%, transparent)', color: 'var(--fg)' } : undefined}
+        aria-current={active ? 'true' : undefined}
+        onClick={() => useUi.getState().setFilter({ eventId: toggleEvent(eventId, ev.id) })}
+        data-testid="event-row"
+        data-event={ev.id}
+      >
+        <CalendarRange size={14} className="mt-0.5 shrink-0 text-muted" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{label.primary}</span>
+          <span className="block truncate text-xs text-faint">{label.secondary}</span>
+        </span>
+        <span className="tnum text-xs text-faint">{ev.photo_count.toLocaleString(i18n.language)}</span>
+      </button>
+    </li>
+  )
+}
+
+/** Events of the open session (shown when there are at least two to choose from). */
+function EventsSection({ sessionId }: { sessionId: number }) {
+  const { t } = useTranslation()
+  const q = useTimeline(sessionId)
+  const eventId = useUi((s) => s.filter.eventId)
+  const events = q.data
+  useEffect(() => {
+    // the grouping changed (or another session opened): an event that is gone selects nothing
+    if (events && !eventStillExists(events, eventId)) useUi.getState().setFilter({ eventId: null })
+  }, [events, eventId])
+  if (!events || events.length < 2) return null
+  return (
+    <>
+      <li className="px-2 pt-3 pb-1 text-[11px] font-semibold tracking-wide text-faint uppercase" data-testid="events-title">
+        {t('timeline.title')}
+      </li>
+      {events.map((ev) => (
+        <EventRow key={ev.id} ev={ev} />
+      ))}
+    </>
+  )
+}
+
+/** Left sidebar of the library (doc 04 3.2): smart collections (built-in + saved), events and shortcuts. */
 export function CollectionsSidebar({ sessionId }: { sessionId: number }) {
   const { t } = useTranslation()
   const q = useCollections()
@@ -165,12 +216,13 @@ export function CollectionsSidebar({ sessionId }: { sessionId: number }) {
         {list.map((c) => (
           <Row key={c.id} c={c} sessionId={sessionId} />
         ))}
+        <EventsSection sessionId={sessionId} />
       </ul>
       <div className="flex shrink-0 flex-col gap-1 border-t border-line p-2">
         <button
           className="btn w-full justify-start"
-          disabled={!isFilterActive(filter) || anyActive}
-          title={!isFilterActive(filter) ? t('collections.saveNeedsFilter') : undefined}
+          disabled={!isFilterActive(filter) || anyActive || filterToQuery(filter) === ''}
+          title={!isFilterActive(filter) || filterToQuery(filter) === '' ? t('collections.saveNeedsFilter') : undefined}
           onClick={() => useUi.getState().setSaveCollectionOpen(true)}
           data-testid="collection-save"
         >

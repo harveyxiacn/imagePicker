@@ -588,6 +588,79 @@ async fn name_tokens_come_from_the_catalog() {
     );
 }
 
+#[tokio::test]
+async fn event_token_is_the_events_name_or_else_the_import_title() {
+    let e = env();
+    write_jpeg(&e.src.path().join("a.jpg"), 32, 24, 10);
+    write_jpeg(&e.src.path().join("b.jpg"), 32, 24, 20);
+    let ph = import(&e, "Kyoto: day 1").await;
+    let (a, b, sid) = (ph["a.jpg"].id, ph["b.jpg"].id, ph["a.jpg"].session_id);
+    // `a` is in an event of 2024-02-29, 10:00-11:30 at UTC+9; `b` is in none
+    const DAY: i64 = 1_709_164_800_000;
+    let event = e
+        .core
+        .db
+        .call(move |c| {
+            c.execute(
+                "INSERT INTO event(session_id, start_at, end_at, offset_min) VALUES(?1,?2,?3,540)",
+                rusqlite::params![sid, DAY + 3_600_000, DAY + 9_000_000],
+            )?;
+            let ev = c.last_insert_rowid();
+            c.execute(
+                "INSERT INTO scene(session_id, start_at, end_at, event_id) VALUES(?1,?2,?3,?4)",
+                rusqlite::params![sid, DAY + 3_600_000, DAY + 9_000_000, ev],
+            )?;
+            let sc = c.last_insert_rowid();
+            c.execute(
+                "INSERT INTO burst(session_id, scene_id, size, manual) VALUES(?1,?2,1,0)",
+                rusqlite::params![sid, sc],
+            )?;
+            let bu = c.last_insert_rowid();
+            c.execute(
+                "UPDATE photo SET burst_id=?2, taken_at=?3 WHERE id=?1",
+                rusqlite::params![a, bu, DAY + 3_600_000],
+            )?;
+            c.execute(
+                "UPDATE photo SET taken_at=?2 WHERE id=?1",
+                rusqlite::params![b, DAY],
+            )?;
+            Ok(ev)
+        })
+        .await
+        .unwrap();
+    let names = |dir: &Path| -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|d| d.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    };
+    let out = e.src.path().join("generated");
+    let mut r = req(vec![a, b], &out);
+    r.name_template = "{event}_{seq}".into();
+    run(&e, r).await;
+    assert_eq!(
+        names(&out),
+        ["2024-02-29 1000-1130_0001.jpg", "Kyoto_ day 1_0002.jpg"],
+        "the event name has no colon; photos outside any event keep the import title"
+    );
+    // a title the user gave the event wins
+    e.core
+        .db
+        .call(move |c| {
+            c.execute("UPDATE event SET title='Hanami' WHERE id=?1", [event])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let out = e.src.path().join("titled");
+    let mut r = req(vec![a], &out);
+    r.name_template = "{event}_{seq}".into();
+    run(&e, r).await;
+    assert_eq!(names(&out), ["Hanami_0001.jpg"]);
+}
+
 /// Writes one export of every format and the cleaned originals into
 /// `$IMAGEPICKER_EXPORT_SAMPLES`, for checking them with other tools (exiftool, Pillow):
 /// `cargo test -p ip-core --lib write_export_samples -- --ignored`.

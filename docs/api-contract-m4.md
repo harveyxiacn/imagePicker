@@ -71,7 +71,7 @@ interface BeautyProfile {           // 不含 person_id；应用时填入
 | GET | `/api/people/best?session_id=&ids=1,2&n=3` | — | `{"people":[{"person_id","photos":[{"photo_id","score"}]}]}`（03 §4.4：该人表情分 × 照片综合分，同连拍组只取一张） |
 | POST | `/api/faces/search` | `multipart/form-data` 字段 `image`，或 JSON `{"face_id"}`；可选 `session_id` | `{"faces_detected":[[x,y,w,h]],"query_face":0,"candidates":[{"person_id","person_name","similarity"}],"similar_faces":[{"face_id","photo_id","person_id":number\|null,"person_name":string\|null,"similarity"}]}`（多张脸时可再带 `face_index` 重试；`similar_faces` 的 `person_id` 为该脸当前所属人物，`null` = 未归属） |
 | POST | `/api/people` | `{"face_ids": number[], "name"?: string\|null}` | `201 {"person"}`：「这是新的人」，见下 |
-| GET | `/api/collections` | — | `{"collections":[{"id","name","query":string /*URLSearchParams，与 /api/photos 相同参数，不含 session_id/cursor/limit*/,"builtin":bool}]}`；内置：`best_per_group`、`has_closed_eyes`、`undecided`、`edited` |
+| GET | `/api/collections` | — | `{"collections":[{"id","name","query":string /*URLSearchParams，与 /api/photos 相同参数，不含 session_id/cursor/limit*/,"builtin":bool}]}`；内置：`best_per_group`、`has_closed_eyes`、`undecided`、`edited`、`duplicates`（`duplicates=1`，api-contract-m2 C.6） |
 | POST | `/api/collections` | `{"name","query"}` | `201 {"collection"}` |
 | PATCH/DELETE | `/api/collections/{id}` | `{"name"?,"query"?}` | `{"collection"}` / `204`（内置不可改删 → 400） |
 | GET | `/api/taste` | — | `{"labels":number,"active":bool,"alpha":number /*0..0.6 融合权重*/,"holdout_accuracy":number\|null,"traits":[{"key","params"}] /*「你偏好低饱和」等，i18n key*/,"updated_at"}` |
