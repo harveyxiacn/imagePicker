@@ -314,6 +314,12 @@ fn start_server(app: &AppHandle, token: &str) -> anyhow::Result<(RunningServer, 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Rotating log files under `<data dir>/logs` and crash records under `<data dir>/crashes`
+    // (`IMAGEPICKER_DATA_DIR` or the platform default). Android resolves its data dir later, in
+    // `setup`, so it keeps console-only logging.
+    #[cfg(not(target_os = "android"))]
+    ip_server::logging::init(None, "info,ip_server=info", true);
+    #[cfg(target_os = "android")]
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

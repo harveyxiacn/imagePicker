@@ -23,6 +23,20 @@ use crate::protocol_m5::*;
 use crate::protocol_m6::*;
 use crate::{AiWorker, WorkerState, WorkerStatus};
 
+/// Receives `(kind, message, stderr tail)` when the worker dies or cannot start; the core
+/// turns it into a crash record (`kind` is `worker-exit` or `worker-start-failed`).
+#[derive(Clone)]
+pub struct CrashSink(pub Arc<CrashFn>);
+
+/// `(kind, message, stderr tail)`.
+pub type CrashFn = dyn Fn(&str, &str, &str) + Send + Sync;
+
+impl std::fmt::Debug for CrashSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CrashSink")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkerConfig {
     /// Full command (see [`process::build_argv`]); default `uv run imagepicker-ai serve ...`.
@@ -39,6 +53,10 @@ pub struct WorkerConfig {
     pub cooldown: Duration,
     /// The installed AI runtime (`<data>/runtime`), used when there is no override or dev repo.
     pub runtime: Option<RuntimeLaunch>,
+    /// Where the worker writes its own crash files (`IMAGEPICKER_CRASH_DIR`).
+    pub crash_dir: Option<PathBuf>,
+    /// Told about worker exits and failed starts, with the stderr tail.
+    pub crash_sink: Option<CrashSink>,
 }
 
 impl Default for WorkerConfig {
@@ -52,6 +70,8 @@ impl Default for WorkerConfig {
             backoff_base: Duration::from_millis(500),
             cooldown: Duration::from_secs(30),
             runtime: None,
+            crash_dir: None,
+            crash_sink: None,
         }
     }
 }
@@ -290,7 +310,14 @@ impl ManagedWorker {
         .map_err(WorkerError::Unavailable)?;
         let Launch { argv, dir, source } = launch;
         tracing::info!(argv = %argv[0], dir = ?dir, ?source, "starting AI worker");
-        let mut child = process::spawn_with_env(&argv, dir.as_deref(), &token, &opts.env).map_err(|e| {
+        let mut env = opts.env.clone();
+        if let Some(d) = &self.cfg.crash_dir {
+            env.push((
+                "IMAGEPICKER_CRASH_DIR".to_string(),
+                d.to_string_lossy().into_owned(),
+            ));
+        }
+        let mut child = process::spawn_with_env(&argv, dir.as_deref(), &token, &env).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 WorkerError::Unavailable(format!(
                     "`{}` not found (install uv, or set IMAGEPICKER_WORKER_CMD / IMAGEPICKER_WORKER_DIR): {e}",
@@ -322,6 +349,12 @@ impl ManagedWorker {
                 }
             });
         }
+        let report = |kind: &str, msg: &str, tail: &Arc<Mutex<VecDeque<String>>>| {
+            if let Some(sink) = &self.cfg.crash_sink {
+                let all = tail.lock().unwrap().iter().cloned().collect::<Vec<_>>();
+                (sink.0)(kind, msg, &all.join("\n"));
+            }
+        };
         let tail_text = |tail: &Arc<Mutex<VecDeque<String>>>| {
             tail.lock()
                 .unwrap()
@@ -365,6 +398,11 @@ impl ManagedWorker {
             Ok(Err(())) => {
                 // give the stderr reader a moment to flush
                 tokio::time::sleep(Duration::from_millis(200)).await;
+                report(
+                    "worker-start-failed",
+                    "worker exited before it was ready",
+                    &tail,
+                );
                 return Err(WorkerError::Protocol(format!(
                     "worker exited before it was ready:
 {}",
@@ -372,12 +410,17 @@ impl ManagedWorker {
                 )));
             }
             Err(_) => {
+                report(
+                    "worker-start-failed",
+                    "worker did not become ready in time",
+                    &tail,
+                );
                 return Err(WorkerError::Timeout(format!(
                     "worker did not become ready within {:?}:
 {}",
                     self.cfg.start_timeout,
                     tail_text(&tail)
-                )))
+                )));
             }
         };
         tokio::spawn(async move {
@@ -389,11 +432,13 @@ impl ManagedWorker {
         let client = RpcClient::connect("127.0.0.1", port, &token).await?;
         let generation = self.shared.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let (shared, watch_client) = (self.shared.clone(), client.clone());
+        let sink = self.cfg.crash_sink.clone();
+        let exit_tail = tail.clone();
         tokio::spawn(async move {
             watch_client.closed().await;
             if shared.generation.load(Ordering::SeqCst) == generation {
                 // Only flag a crash when nobody asked us to stop (state would be Stopped then).
-                shared.tx.send_if_modified(|s| {
+                let crashed = shared.tx.send_if_modified(|s| {
                     if matches!(s.state, WorkerState::Ready | WorkerState::Busy) {
                         s.state = WorkerState::Crashed;
                         s.error = Some("the AI worker process exited".into());
@@ -402,6 +447,21 @@ impl ManagedWorker {
                         false
                     }
                 });
+                if let (true, Some(sink)) = (crashed, sink) {
+                    // let the stderr reader drain what the dying process wrote last
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    let all = exit_tail
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    (sink.0)(
+                        "worker-exit",
+                        "the AI worker process exited",
+                        &all.join("\n"),
+                    );
+                }
             }
         });
         Ok(Conn {
