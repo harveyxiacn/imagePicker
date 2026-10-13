@@ -35,6 +35,15 @@ cargo run -p ip-cli -- --help                        # import / analyze / render
 
 `serve` accepts `--data-dir` (or `IMAGEPICKER_DATA_DIR`), `--lan` and `--password` / `IMAGEPICKER_PASSWORD`. Useful environment variables: `IMAGEPICKER_WORKER_DIR` / `IMAGEPICKER_WORKER_CMD` (where / how to start the AI worker), `IMAGEPICKER_MODELS_DIR`, `IMAGEPICKER_RENDER=cpu`, `IMAGEPICKER_DEV_CORS=1` (allow the Vite dev origins).
 
+#### Render tests and the GPU
+
+`cargo test -p ip-render` runs the render-correctness tests on the CPU renderer (stage-op order independence, preview vs export within CIEDE2000 mean < 1 / p99 < 2, determinism: `crates/ip-render/tests/correctness.rs`) and, when a GPU adapter exists, the CPU-vs-GPU parity tests. Without an adapter the parity tests skip and print `SKIP <test>: no GPU adapter found ...` (visible with `-- --nocapture`). A GPU runner must not go green by skipping: set `IMAGEPICKER_REQUIRE_GPU=1` and a missing adapter then fails those tests (and `gpu_is_present_when_required`) loudly instead.
+
+```sh
+IMAGEPICKER_REQUIRE_GPU=1 cargo test -p ip-render -- --nocapture
+cargo run --release -p ip-render --example bench_render -- --max-ms 50 --max-ms-portrait 200   # see bench/README.md
+```
+
 ### Web frontend (`web/`)
 
 ```sh

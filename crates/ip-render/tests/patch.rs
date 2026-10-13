@@ -260,8 +260,7 @@ fn patch_is_applied_before_crop() {
 // ---------------------------------------------------------------- parity
 
 fn parity(img: &RgbImage, st: &EditStack, assets: &PatchAssets, max: Option<u32>, label: &str) {
-    let Some(gpu) = create_strict_gpu_renderer() else {
-        eprintln!("SKIP parity {label}: no GPU adapter");
+    let Some(gpu) = strict_gpu_or_skip(&format!("parity {label}")) else {
         return;
     };
     let a = render_with(cpu().as_ref(), img, st, assets, max);

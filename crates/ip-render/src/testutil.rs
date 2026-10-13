@@ -910,3 +910,42 @@ impl MaskProvider for PatchAssets {
         Ok(self.assets.get(asset).cloned())
     }
 }
+
+// ---------------------------------------------------------------- GPU gating
+
+/// True when `IMAGEPICKER_REQUIRE_GPU` is `1` / `true`: GPU parity tests must really run.
+pub fn gpu_required() -> bool {
+    matches!(
+        std::env::var("IMAGEPICKER_REQUIRE_GPU").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
+
+/// The gating rule behind [`strict_gpu_or_skip`], separated so it can be tested without a GPU:
+/// an available renderer is returned; a missing one panics when `required`, otherwise it
+/// prints an explicit SKIP line (with the reason) and returns `None`.
+pub fn gpu_or_skip_with(
+    gpu: Option<Box<dyn Renderer>>,
+    required: bool,
+    test: &str,
+) -> Option<Box<dyn Renderer>> {
+    match gpu {
+        Some(g) => Some(g),
+        None if required => panic!(
+            "{test}: IMAGEPICKER_REQUIRE_GPU is set but no GPU adapter was found; \
+             the GPU parity test cannot be skipped"
+        ),
+        None => {
+            eprintln!(
+                "SKIP {test}: no GPU adapter found (set IMAGEPICKER_REQUIRE_GPU=1 to make this a failure)"
+            );
+            None
+        }
+    }
+}
+
+/// Strict GPU renderer for a parity test. Without an adapter the test skips with a printed
+/// reason, or fails loudly when `IMAGEPICKER_REQUIRE_GPU=1`.
+pub fn strict_gpu_or_skip(test: &str) -> Option<Box<dyn Renderer>> {
+    gpu_or_skip_with(create_strict_gpu_renderer(), gpu_required(), test)
+}
