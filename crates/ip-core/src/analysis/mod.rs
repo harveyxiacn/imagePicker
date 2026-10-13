@@ -2,11 +2,14 @@
 //! Contract: `docs/api-contract-m2.md`.
 
 pub mod cluster;
+pub mod duplicates;
 pub mod faces;
 pub mod grouping;
 pub mod incremental;
+pub mod layers;
 pub mod scoring;
 pub mod store;
+pub mod timeline;
 pub mod types;
 pub mod vecs;
 

@@ -16,6 +16,7 @@ export const qk = {
   analysisPlan: (sid: number) => ['analysis', 'plan', sid] as const,
   analysis: (photoId: number) => ['analysis', 'photo', photoId] as const,
   groups: (sid: number) => ['groups', sid] as const,
+  timeline: (sid: number) => ['timeline', sid] as const,
   editsAll: ['edits'] as const,
   edits: (photoId: number) => ['edits', photoId] as const,
   presets: ['presets'] as const,
@@ -300,6 +301,7 @@ export function applyEvents(
 
   for (const sid of groupsChanged) {
     void qc.invalidateQueries({ queryKey: qk.groups(sid) })
+    void qc.invalidateQueries({ queryKey: qk.timeline(sid) })
     void qc.invalidateQueries({ queryKey: ['burstFaces'] })
     scheduleListRefetch(qc, sid)
   }

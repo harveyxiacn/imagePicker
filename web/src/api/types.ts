@@ -74,7 +74,14 @@ export interface Photo {
   missing?: boolean
   /** RAW files paired with this photo by name (same folder, same base name); the photo is the JPEG */
   companions?: Companion[]
+  // ---- duplicates (api-contract-m2 "重复") ----
+  /** Smallest photo id of the duplicate group (catalog wide, across sessions); null = not a duplicate */
+  duplicate_group_id?: number | null
+  /** `exact` = a byte-identical copy exists; `near` = the same picture saved again without metadata */
+  duplicate_kind?: DuplicateKind
 }
+
+export type DuplicateKind = 'exact' | 'near'
 
 export interface Companion {
   id: number
@@ -153,6 +160,10 @@ export interface PhotosQuery {
   has_edits?: boolean
   /** Device ids and/or 'none' (photos without EXIF camera) */
   device?: Array<number | 'none'>
+  /** Only photos that have a duplicate anywhere in the catalog (built-in "duplicates" collection) */
+  duplicates?: boolean
+  /** Only photos of one event of `GET /sessions/{id}/timeline` */
+  event_id?: number
   /** Exact EXIF lens names (OR-ed) */
   lens?: string[]
   /** Capture-time range, `YYYY-MM-DD` (whole days, wall clock) or ms; both ends inclusive */
@@ -282,12 +293,28 @@ export type AnalysisStage = 'analyzing' | 'grouping' | 'scoring' | 'clustering'
 export interface HardwareInfo {
   worker: {
     state: WorkerState
+    /** The tier in effect (the manual override, if one is set). */
     tier: 'T0' | 'T1' | 'T2' | 'T3' | null
+    /** What hardware detection found; differs from `tier` only with an override. */
+    tier_detected?: 'T0' | 'T1' | 'T2' | 'T3' | null
+    tier_overridden?: boolean
     device: string | null
     providers: string[]
     gpu: { name: string; vram_mb: number } | null
     error: string | null
   }
+}
+
+/** Recorded standing for commercial use (registry `license_info.usage`); `unknown` = not established, not "forbidden". */
+export type ModelUsage = 'commercial-ok' | 'research-only' | 'non-commercial' | 'unknown'
+export type TrainingDataTerms = 'permissive' | 'research-only' | 'non-commercial' | 'undisclosed' | 'separate-terms' | 'not-recorded'
+
+export interface ModelLicenseInfo {
+  weights: string | null
+  training_data: string | null
+  training_data_terms: TrainingDataTerms
+  usage: ModelUsage
+  note: string | null
 }
 
 export interface ModelInfo {
@@ -296,6 +323,8 @@ export interface ModelInfo {
   size_mb: number
   license: string
   noncommercial: boolean
+  usage: ModelUsage
+  license_info?: ModelLicenseInfo
   installed: boolean
   required_for: AnalysisProfile[]
 }
@@ -381,6 +410,32 @@ export interface Scene {
 }
 export interface GroupsResponse {
   scenes: Scene[]
+}
+
+/** Event layer (api-contract-m2 "事件与重复"): scenes of one session cut at pauses > 2 h or moves > 5 km. */
+export interface TimelineEvent {
+  id: number
+  /** server default: title, else local date and time span ("2024-05-03 10:12-14:40") */
+  name: string
+  title: string | null
+  place: string | null
+  /** capture time (UTC ms) of the first / last photo */
+  start_at: number
+  end_at: number
+  /** UTC offset (minutes) of the first photo with a known offset */
+  offset_min: number | null
+  gps_lat: number | null
+  gps_lon: number | null
+  photo_count: number
+  scenes: Scene[]
+}
+export interface TimelineResponse {
+  events: TimelineEvent[]
+}
+export interface DuplicatesResponse {
+  group_id: number | null
+  photo_ids: number[]
+  exact_ids: number[]
 }
 
 export interface FaceTrack {
@@ -840,6 +895,27 @@ export interface EditsPutResponse {
 
 export type AutoMode = 'auto' | 'portrait' | 'landscape'
 
+/** `POST /edits/{id}/auto-crop` (nothing is saved): `straighten` levels the horizon, `compose` suggests a thirds crop. */
+export type AutoCropKind = 'straighten' | 'compose'
+export interface AutoCropBody {
+  kind: AutoCropKind
+  /** wanted pixel aspect (w/h); omitted = free */
+  ratio?: number
+  /** the current crop, if any */
+  rect?: [number, number, number, number]
+  angle?: number
+}
+export interface AutoCropResult {
+  /** null when nothing confident was found (`source` = "none") */
+  crop: { rect: [number, number, number, number]; angle: number } | null
+  /** "stored" | "estimated" (tilt) | "faces" | "saliency" (subject) | "none" */
+  source: 'stored' | 'estimated' | 'faces' | 'saliency' | 'none'
+  tilt_deg: number | null
+  confidence: number | null
+  /** straighten: |tilt| is inside the dead zone, the photo counts as level */
+  level: boolean
+}
+
 export interface SyncBody {
   from_id: number
   to_ids: number[]
@@ -959,6 +1035,8 @@ export interface EditSuggestion {
 /** `modify_originals` = sidecar + the XMP inside original JPEGs (the only mode that rewrites originals). */
 export type XmpMode = 'off' | 'sidecar' | 'modify_originals'
 export type ModelSource = 'auto' | 'hf' | 'hf-mirror' | 'modelscope'
+/** Hardware tier override: `auto` keeps detection. */
+export type TierOverride = 'auto' | 'T0' | 'T1' | 'T2' | 'T3'
 export type GroupStrictness = 'loose' | 'normal' | 'strict'
 export type RenderBackend = 'auto' | 'gpu' | 'cpu'
 
@@ -969,7 +1047,7 @@ export interface Settings {
   /** `consented`: the purpose explanation was accepted; no face is detected or recognised before that. */
   faces: { enabled: boolean; consented: boolean }
   privacy: { allow_network: boolean }
-  models: { dir: string; source: ModelSource }
+  models: { dir: string; source: ModelSource; tier_override: TierOverride }
   cache: { max_gb: number }
   render: { backend: RenderBackend }
   xmp_mode: XmpMode

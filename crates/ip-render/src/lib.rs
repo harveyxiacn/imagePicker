@@ -518,6 +518,7 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
     imp::builtin_presets()
 }
 
+pub mod crop_assist;
 mod imp;
 
 /// Procedurally generated built-in LUT for a preset `Lut.file` id (`film_warm`, `film_cool`,

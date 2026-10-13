@@ -53,6 +53,9 @@ impl From<CoreError> for ApiError {
             CoreError::Unprocessable(m) => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "unprocessable", m.clone())
             }
+            CoreError::UnprocessableCode(code, m) => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, m.clone())
+            }
             CoreError::Unsupported(m) => Self::new(
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 "unsupported_media",

@@ -18,7 +18,10 @@ use crate::fake_worker::{
     person, FakeFace, FakeSpec, FakeWorker, BESTTAKE_MODEL, ENHANCE_MODEL, INPAINT_MODEL,
     SDXL_MODEL,
 };
-use crate::generate::{auto_choices, body_box, plan_from_tracks, MaskCanvas, Stroke};
+use crate::generate::{
+    auto_choices, body_box, check_same_person, plan_from_tracks, MaskCanvas, Stroke,
+    MIN_IDENTITY_COS,
+};
 use crate::testutil::{write_jpeg, FakeImaging, FakeRenderer};
 use crate::*;
 
@@ -689,6 +692,239 @@ async fn besttake_reports_each_choice_and_validates_the_request() {
         start(a1, vec![choice(fa1[0].id, a2, fa2[0].id)]).await,
         Err(CoreError::WorkerUnavailable(_))
     ));
+}
+
+/// The `code` of a 422 that carries its own code, panicking on anything else.
+fn code_of<T: std::fmt::Debug>(r: crate::error::Result<T>) -> &'static str {
+    match r {
+        Err(CoreError::UnprocessableCode(code, msg)) => {
+            assert!(!msg.is_empty());
+            code
+        }
+        other => panic!("expected a coded 422, got {other:?}"),
+    }
+}
+
+/// Overwrites the stored identity embedding of a face (`None` removes it, as in the lite
+/// profile).
+async fn set_embedding(e: &Env, face: i64, emb: Option<Vec<f32>>) {
+    let blob = emb.map(|v| crate::analysis::vecs::encode_f16(&v));
+    e.core
+        .db
+        .call(move |c| {
+            c.execute(
+                "UPDATE face SET embedding=?2 WHERE id=?1",
+                rusqlite::params![face, blob],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+async fn identity(e: &Env, face: i64) -> crate::analysis::store::FaceIdentity {
+    e.core
+        .db
+        .call(move |c| crate::analysis::store::face_identity(c, face))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn besttake_refuses_pairings_of_different_people_bursts_or_looks() {
+    let s = scene().await;
+    let (a1, a2, a3, c1) = (
+        s.ph["a1.jpg"].id,
+        s.ph["a2.jpg"].id,
+        s.ph["a3.jpg"].id,
+        s.ph["c1.jpg"].id,
+    );
+    let (fa1, fa2, fa3, fc1) = (
+        faces_of(&s.e, a1).await,
+        faces_of(&s.e, a2).await,
+        faces_of(&s.e, a3).await,
+        faces_of(&s.e, c1).await,
+    );
+    let start = |base: i64, c: BestTakeChoice| {
+        let core = s.e.core.clone();
+        async move {
+            core.besttake_start(BestTakeRequest {
+                base_photo_id: base,
+                choices: vec![c],
+            })
+            .await
+        }
+    };
+    // the happy path still works: the same person from another frame of the burst
+    let (results, _) = run_besttake(&s.e, a1, vec![choice(fa1[0].id, a2, fa2[0].id)]).await;
+    assert!(results[0].ok, "{results:?}");
+
+    // another person of the same burst
+    assert_eq!(
+        code_of(start(a1, choice(fa1[0].id, a2, fa2[1].id)).await),
+        "besttake_person_mismatch"
+    );
+    // a face of a photo outside the burst (a stranger)
+    assert_eq!(
+        code_of(start(a1, choice(fa1[0].id, c1, fc1[0].id)).await),
+        "besttake_cross_burst"
+    );
+    // the cross-burst check wins over the person check
+    assert_eq!(
+        code_of(start(a1, choice(fa1[1].id, c1, fc1[0].id)).await),
+        "besttake_cross_burst"
+    );
+    // same track, but the identity embeddings disagree (orthogonal to the base face's)
+    let base_emb = identity(&s.e, fa1[1].id)
+        .await
+        .embedding
+        .expect("embedding");
+    assert!(base_emb.len() >= 2);
+    let mut other = vec![0.0f32; base_emb.len()];
+    other[0] = -base_emb[1];
+    other[1] = base_emb[0];
+    set_embedding(&s.e, fa3[1].id, Some(other)).await;
+    assert_eq!(
+        code_of(start(a1, choice(fa1[1].id, a3, fa3[1].id)).await),
+        "besttake_low_similarity"
+    );
+    // the pure check reports the same, with the threshold in the message
+    let err = check_same_person(
+        &identity(&s.e, fa1[1].id).await,
+        &identity(&s.e, fa3[1].id).await,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains(&format!("{MIN_IDENTITY_COS:.2}")));
+
+    // no identity embedding on either side (lite profile): only the burst and track checks
+    // apply, so the same person passes and another person is still refused
+    set_embedding(&s.e, fa3[1].id, None).await;
+    let (results, _) = run_besttake(&s.e, a1, vec![choice(fa1[1].id, a3, fa3[1].id)]).await;
+    assert!(results[0].ok, "{results:?}");
+    set_embedding(&s.e, fa1[0].id, None).await;
+    set_embedding(&s.e, fa2[1].id, None).await;
+    assert_eq!(
+        code_of(start(a1, choice(fa1[0].id, a2, fa2[1].id)).await),
+        "besttake_person_mismatch"
+    );
+}
+
+#[test]
+fn same_person_check_rules() {
+    use crate::analysis::store::FaceIdentity;
+    let id = |face_id, burst, track, person, emb: Option<Vec<f32>>| FaceIdentity {
+        face_id,
+        photo_id: face_id,
+        burst_id: burst,
+        track_id: track,
+        person_id: person,
+        embedding: emb,
+    };
+    let v = |x: f32, y: f32| Some(vec![x, y]);
+    let base = id(1, Some(1), Some(7), Some(3), v(1.0, 0.0));
+    assert!(check_same_person(&base, &id(2, Some(1), Some(7), Some(3), v(0.9, 0.1))).is_ok());
+    assert_eq!(
+        code_of(check_same_person(
+            &base,
+            &id(2, Some(2), Some(7), Some(3), v(1.0, 0.0))
+        )),
+        "besttake_cross_burst"
+    );
+    assert_eq!(
+        code_of(check_same_person(
+            &base,
+            &id(2, None, Some(7), Some(3), v(1.0, 0.0))
+        )),
+        "besttake_cross_burst"
+    );
+    assert_eq!(
+        code_of(check_same_person(
+            &base,
+            &id(2, Some(1), Some(8), Some(3), v(1.0, 0.0))
+        )),
+        "besttake_person_mismatch"
+    );
+    assert_eq!(
+        code_of(check_same_person(
+            &base,
+            &id(2, Some(1), Some(7), Some(3), v(0.0, 1.0))
+        )),
+        "besttake_low_similarity"
+    );
+    // untracked faces fall back to the person
+    let loose = id(1, Some(1), None, Some(3), None);
+    assert!(check_same_person(&loose, &id(2, Some(1), None, Some(3), None)).is_ok());
+    assert_eq!(
+        code_of(check_same_person(
+            &loose,
+            &id(2, Some(1), None, Some(4), None)
+        )),
+        "besttake_person_mismatch"
+    );
+    assert_eq!(
+        code_of(check_same_person(
+            &id(1, Some(1), None, None, None),
+            &id(2, Some(1), None, None, None)
+        )),
+        "besttake_person_mismatch"
+    );
+    // a missing embedding on one side only skips the similarity check
+    assert!(check_same_person(&base, &id(2, Some(1), Some(7), Some(3), None)).is_ok());
+}
+
+#[tokio::test]
+async fn automatic_best_takes_only_pair_faces_of_one_person() {
+    // synthetic burst: every automatic choice pairs two faces of one track
+    let mut out = burst(
+        &[
+            &[Some(0.2), Some(0.9), Some(0.5)],
+            &[Some(0.9), Some(0.3), Some(0.5)],
+            &[Some(0.3), Some(0.4), Some(0.95)],
+        ],
+        &[0.2, 0.2, 0.2],
+    );
+    turn(&mut out, 2, 1, 5.0);
+    let mut track_of: HashMap<i64, i64> = HashMap::new();
+    for t in &out.tracks {
+        for f in t.cells.values().flatten() {
+            track_of.insert(f.id, t.track_id);
+        }
+    }
+    let plan = auto_plan(&out, &[]);
+    let choices = auto_choices(&plan);
+    assert!(!choices.is_empty());
+    for c in &choices {
+        assert_eq!(
+            track_of[&c.base_face_id], track_of[&c.source_face_id],
+            "{c:?} pairs two people"
+        );
+        assert_ne!(c.source_photo_id, plan.base_photo_id);
+    }
+
+    // real scene: the automatic choices pass the same check the endpoint applies, and the task
+    // that composes them succeeds for every person
+    let s = scene().await;
+    let plan = s.e.core.besttake_plan(s.burst, None).await.unwrap();
+    let choices = auto_choices(&plan);
+    assert_eq!(choices.len(), 2);
+    for c in &choices {
+        let (b, f) = (
+            identity(&s.e, c.base_face_id).await,
+            identity(&s.e, c.source_face_id).await,
+        );
+        check_same_person(&b, &f).unwrap_or_else(|e| panic!("{c:?}: {e}"));
+        assert_eq!(f.photo_id, c.source_photo_id);
+    }
+    let mut rx = s.e.core.events.subscribe();
+    s.e.core.besttake_auto(s.burst, None).await.unwrap();
+    let seen = wait_for(&mut rx, |e| matches!(e, Event::BestTakeDone { .. })).await;
+    match seen.last().unwrap() {
+        Event::BestTakeDone { results, .. } => {
+            assert_eq!(results.len(), 2);
+            assert!(results.iter().all(|r| r.ok), "{results:?}");
+        }
+        _ => unreachable!(),
+    }
 }
 
 #[tokio::test]

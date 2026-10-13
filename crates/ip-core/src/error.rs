@@ -13,6 +13,10 @@ pub enum CoreError {
     /// Well-formed request whose content is invalid (HTTP 422), e.g. an edit stack out of range.
     #[error("{0}")]
     Unprocessable(String),
+    /// Like [`Self::Unprocessable`] with its own machine-readable `code` (HTTP 422), e.g.
+    /// `besttake_person_mismatch`.
+    #[error("{1}")]
+    UnprocessableCode(&'static str, String),
     /// The file exists but cannot be decoded here (HTTP 415 `unsupported_media`), e.g. a HEIC
     /// without a decoder, a RAW without an embedded preview or a damaged file.
     #[error("{0}")]
@@ -50,6 +54,7 @@ impl CoreError {
             Self::BadRequest(_) => "bad_request",
             Self::Conflict(_) => "conflict",
             Self::Unprocessable(_) => "unprocessable",
+            Self::UnprocessableCode(code, _) => code,
             Self::Unsupported(_) => "unsupported_media",
             Self::ModelsMissing(_) => "models_missing",
             Self::WorkerUnavailable(_) => "worker_unavailable",

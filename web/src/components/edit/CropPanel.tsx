@@ -1,7 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Crop as CropIcon, RotateCcw } from 'lucide-react'
+import { Crop as CropIcon, Loader2, RotateCcw, ScanLine, Sparkles } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Photo } from '@/api/types'
+import type { AutoCropKind, Photo } from '@/api/types'
+import { fmtDeg, runAutoCrop } from '@/lib/autoCrop'
 import { ASPECTS, aspectRatio, fitAspect, FULL_RECT, getCrop, setCrop } from '@/lib/edit'
 import { changeStack, commitLive, setLive } from '@/lib/editActions'
 import { useEdit } from '@/stores/edit'
@@ -17,6 +19,21 @@ export function CropPanel({ photo }: { photo: Photo }) {
   const crop = getCrop(stack)
   const imgAspect = (photo.width ?? 3) / (photo.height ?? 2)
   const aspect = crop?.aspect ?? 'original'
+  const [busy, setBusy] = useState<AutoCropKind | null>(null)
+
+  const auto = async (kind: AutoCropKind) => {
+    setBusy(kind)
+    try {
+      await runAutoCrop(qc, kind, imgAspect, {
+        label: t(kind === 'straighten' ? 'history.autoStraighten' : 'history.autoCrop'),
+        done: (res) => (kind === 'straighten' ? t('edit.straightened', { deg: fmtDeg(res.crop?.angle ?? 0) }) : t('edit.cropSuggested')),
+        level: t('edit.alreadyLevel'),
+        none: t('edit.noTilt'),
+      })
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const pickAspect = (id: string) => {
     const st = useEdit.getState()
@@ -50,6 +67,16 @@ export function CropPanel({ photo }: { photo: Photo }) {
             {id === 'original' || id === 'free' ? t(`edit.aspect_${id}`) : id}
           </button>
         ))}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5" data-testid="auto-crop-buttons">
+        <button className="btn btn-ai" disabled={busy !== null} title={t('edit.autoStraightenTip')} onClick={() => void auto('straighten')} data-testid="auto-straighten">
+          {busy === 'straighten' ? <Loader2 size={13} className="animate-spin" /> : <ScanLine size={13} />}
+          {t('edit.autoStraighten')}
+        </button>
+        <button className="btn btn-ai" disabled={busy !== null} title={t('edit.autoCropTip')} onClick={() => void auto('compose')} data-testid="auto-crop">
+          {busy === 'compose' ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+          {t('edit.autoCrop')}
+        </button>
       </div>
       <div className="mt-2">
         <Slider

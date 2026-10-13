@@ -102,6 +102,17 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
                 ✎
               </span>
             )}
+            {photo.duplicate_group_id != null && (
+              <span
+                className="rounded bg-black/65 px-1 text-[11px] leading-4 text-warning"
+                data-testid="duplicate-badge"
+                data-kind={photo.duplicate_kind}
+                title={t(photo.duplicate_kind === 'exact' ? 'duplicates.exact' : 'duplicates.near')}
+                aria-label={t(photo.duplicate_kind === 'exact' ? 'duplicates.exact' : 'duplicates.near')}
+              >
+                ⧉
+              </span>
+            )}
           </div>
           {badges.length > 0 && (
             <div className="flex gap-0.5 rounded bg-black/65 px-1 text-[11px] leading-4" data-testid="issue-badges">

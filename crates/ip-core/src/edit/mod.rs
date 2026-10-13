@@ -430,6 +430,118 @@ pub struct AutoRequest {
     pub mode: AutoMode,
 }
 
+/// What `POST /api/edits/{id}/auto-crop` computes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoCropKind {
+    /// Level the horizon: crop angle from the stored (or freshly estimated) tilt plus the
+    /// maximal inscribed crop.
+    Straighten,
+    /// Rule-of-thirds composition around the faces (else a saliency proxy).
+    Compose,
+}
+
+/// Body of `POST /api/edits/{id}/auto-crop` (nothing is saved).
+#[derive(Debug, Clone, Deserialize)]
+pub struct AutoCropRequest {
+    pub kind: AutoCropKind,
+    /// Wanted pixel aspect (w/h); omitted = free (straighten keeps the aspect of `rect`,
+    /// compose the image's own aspect).
+    #[serde(default)]
+    pub ratio: Option<f64>,
+    /// The current crop rect (normalised), if any.
+    #[serde(default)]
+    pub rect: Option<[f64; 4]>,
+    /// The current crop angle (compose keeps it), degrees.
+    #[serde(default)]
+    pub angle: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct AutoCrop {
+    pub rect: [f64; 4],
+    pub angle: f64,
+}
+
+/// Result of `POST /api/edits/{id}/auto-crop`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AutoCropOut {
+    /// `None` when there is nothing to suggest (`source` = "none": no confident tilt).
+    pub crop: Option<AutoCrop>,
+    /// "stored" | "estimated" (tilt) | "faces" | "saliency" (subject) | "none".
+    pub source: &'static str,
+    pub tilt_deg: Option<f64>,
+    pub confidence: Option<f64>,
+    /// Straighten: the photo is level (|tilt| inside the dead zone); `crop.angle` is 0.
+    pub level: bool,
+}
+
+/// Rounds a crop rect to 1e-4 without growing it, so it still fits the rotated image.
+fn shrink_round(r: [f64; 4]) -> [f64; 4] {
+    let q = 1e4;
+    let x0 = (r[0] * q).ceil() / q;
+    let y0 = (r[1] * q).ceil() / q;
+    let x1 = ((r[0] + r[2]) * q).floor() / q;
+    let y1 = ((r[1] + r[3]) * q).floor() / q;
+    [x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0)]
+}
+
+/// The pure part of [`Core::auto_crop`] (testable without a database).
+pub fn plan_auto_crop(
+    proxy: &ip_render::RgbImage,
+    kind: AutoCropKind,
+    stored: Option<(f64, f64)>,
+    faces: &[[f32; 4]],
+    ratio: Option<f64>,
+    cur_rect: [f64; 4],
+    cur_angle: f64,
+) -> AutoCropOut {
+    use ip_render::crop_assist::{
+        auto_straighten, find_subject, smart_crop, SubjectKind, TiltSource,
+    };
+    match kind {
+        AutoCropKind::Straighten => match auto_straighten(proxy, stored, ratio, cur_rect) {
+            None => AutoCropOut {
+                crop: None,
+                source: "none",
+                tilt_deg: None,
+                confidence: None,
+                level: false,
+            },
+            Some(s) => AutoCropOut {
+                crop: Some(AutoCrop {
+                    rect: shrink_round(s.rect),
+                    angle: s.angle,
+                }),
+                source: match s.source {
+                    TiltSource::Stored => "stored",
+                    TiltSource::Estimated => "estimated",
+                },
+                tilt_deg: Some(s.tilt_deg),
+                confidence: Some(s.confidence),
+                level: s.level,
+            },
+        },
+        AutoCropKind::Compose => {
+            let subject = find_subject(proxy, faces);
+            let rect = smart_crop(proxy.width, proxy.height, cur_angle, ratio, &subject);
+            AutoCropOut {
+                crop: Some(AutoCrop {
+                    rect: shrink_round(rect),
+                    angle: cur_angle,
+                }),
+                source: match subject.kind {
+                    SubjectKind::Faces => "faces",
+                    SubjectKind::Saliency => "saliency",
+                },
+                tilt_deg: None,
+                confidence: None,
+                level: false,
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct SyncRequest {
     pub from_id: i64,
@@ -714,6 +826,59 @@ impl Core {
             .run_gated(move |svc, _| {
                 let proxy = svc.proxy(&r, 1024)?;
                 Ok(ip_render::auto_adjust(&proxy, &ctx, mode))
+            })
+            .await
+    }
+
+    /// `POST /api/edits/{id}/auto-crop`: suggested crop (nothing is saved; the client puts it in
+    /// the edit stack). Straighten uses `analysis.tilt_deg` when confident, else the CPU
+    /// estimator of `ip-render` on the proxy.
+    pub async fn auto_crop(&self, photo_id: i64, req: AutoCropRequest) -> Result<AutoCropOut> {
+        if let Some(r) = req.ratio {
+            if !(r.is_finite() && (0.05..=20.0).contains(&r)) {
+                return Err(CoreError::bad_request("ratio must be within 0.05..20"));
+            }
+        }
+        if let Some(r) = req.rect {
+            if !r.iter().all(|v| v.is_finite()) || r[2] <= 0.0 || r[3] <= 0.0 {
+                return Err(CoreError::bad_request("rect must be a finite [x, y, w, h]"));
+            }
+        }
+        let angle = req.angle.unwrap_or(0.0);
+        if !angle.is_finite() || angle.abs() > 45.0 {
+            return Err(CoreError::bad_request("angle must be within -45..45"));
+        }
+        let r = self
+            .db
+            .call(move |c| catalog::photo_ref(c, photo_id))
+            .await?;
+        let (stored, ctx) = {
+            let stored = self
+                .db
+                .call(move |c| {
+                    use rusqlite::OptionalExtension;
+                    let row = c
+                        .query_row(
+                            "SELECT tilt_deg, tilt_confidence FROM analysis WHERE photo_id=?1",
+                            [photo_id],
+                            |row| {
+                                Ok((row.get::<_, Option<f64>>(0)?, row.get::<_, Option<f64>>(1)?))
+                            },
+                        )
+                        .optional()?;
+                    Ok(row.and_then(|(d, c)| Some((d?, c.unwrap_or(0.0)))))
+                })
+                .await?;
+            (stored, self.auto_context(photo_id).await?)
+        };
+        let kind = req.kind;
+        let cur_rect = req.rect.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+        self.render
+            .run_gated(move |svc, _| {
+                let proxy = svc.proxy(&r, 1024)?;
+                Ok(plan_auto_crop(
+                    &proxy, kind, stored, &ctx.faces, req.ratio, cur_rect, angle,
+                ))
             })
             .await
     }
