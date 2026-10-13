@@ -1,6 +1,7 @@
 //! HTTP + WebSocket API (axum). Contracts: docs/api-contract-m1.md .. m3.md.
 
 pub mod auth;
+pub mod card;
 pub mod error;
 pub mod files;
 pub mod fs;
@@ -129,6 +130,8 @@ pub fn build_router_auth(
     let api = Router::new()
         .route("/health", get(routes::health))
         .route("/import", post(routes::import))
+        .route("/import/sources", get(card::sources))
+        .route("/import/card", post(card::import_card))
         .route("/sessions", get(routes::list_sessions))
         .route(
             "/sessions/{id}",

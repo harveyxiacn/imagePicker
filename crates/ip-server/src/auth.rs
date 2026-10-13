@@ -505,7 +505,7 @@ fn guest_allows(method: &Method, path: &str, query: Option<&str>) -> bool {
         .split('/')
         .filter(|s| !s.is_empty())
         .collect();
-    const DENIED_ROOT: [&str; 18] = [
+    const DENIED_ROOT: [&str; 19] = [
         "catalog",
         "remote",
         "runtime",
@@ -524,6 +524,7 @@ fn guest_allows(method: &Method, path: &str, query: Option<&str>) -> bool {
         "besttake",
         "analysis",
         "tasks",
+        "import",
     ];
     const DENIED_SUB: [&str; 6] = [
         "people",
@@ -941,6 +942,7 @@ mod tests {
         assert!(!g(&Method::GET, "/api/tasks", None));
         assert!(!g(&Method::GET, "/api/assistant/status", None));
         assert!(!g(&Method::GET, "/api/fs/list", None));
+        assert!(!g(&Method::GET, "/api/import/sources", None));
         assert!(!g(&Method::GET, "/api/system/lan", None));
         assert!(!g(
             &Method::GET,
