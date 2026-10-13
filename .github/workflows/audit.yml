@@ -65,4 +65,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       # --no-emit-project keeps the project's own editable line out of the requirements file.
       - run: uv export --frozen --no-hashes --no-emit-project --format requirements-txt > req.txt
-      - run: uvx pip-audit -r req.txt
+      # Audit the pinned versions as written. Without --disable-pip, pip-audit pip-installs the list
+      # on this runner's Python and fails on backports pinned only for older Pythons.
+      - run: uvx pip-audit --disable-pip --no-deps -r req.txt
