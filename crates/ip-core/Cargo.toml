@@ -27,6 +27,8 @@ blake3.workspace = true
 rusqlite.workspace = true
 dirs.workspace = true
 image = { workspace = true, features = ["webp", "tiff"] }
+# text watermarks (F9.4): glyph rasterising, pure Rust
+ab_glyph = "0.2"
 async-trait.workspace = true
 regex.workspace = true
 argon2 = "0.6"

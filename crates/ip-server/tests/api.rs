@@ -914,3 +914,137 @@ async fn filters_complete_query_parsing_and_options() {
         assert_eq!(r.status, StatusCode::BAD_REQUEST);
     }
 }
+
+#[tokio::test]
+async fn export_watermark_over_http() {
+    let e = env();
+    let sid = import(&e, 2).await;
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos?session_id={sid}"),
+        None,
+    )
+    .await;
+    let ids: Vec<i64> = r.json()["photos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_i64().unwrap())
+        .collect();
+    let out = tempfile::tempdir().unwrap();
+    let post = |dest: &str, wm: Option<Value>| {
+        let mut body = json!({"ids": ids, "dest": dest, "format": "png"});
+        if let Some(wm) = wm {
+            body["watermark"] = wm;
+        }
+        call(&e.app, Method::POST, "/api/export", Some(body))
+    };
+    let dest = |n: &str| out.path().join(n).to_string_lossy().into_owned();
+
+    // settings are validated before a task starts
+    let text = |extra: Value| {
+        let mut wm = json!({"kind": "text", "text": "(c) me", "opacity": 0.8});
+        wm.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        wm
+    };
+    for (what, wm) in [
+        ("opacity", text(json!({"opacity": 3}))),
+        ("empty", text(json!({"text": ""}))),
+        ("color", text(json!({"color": "red"}))),
+        ("font_path", text(json!({"text": "水印"}))),
+        ("image_path", json!({"kind": "image"})),
+        (
+            "nope.png",
+            json!({"kind": "image", "image_path": out.path().join("nope.png").to_string_lossy()}),
+        ),
+    ] {
+        let r = post(&dest("bad"), Some(wm)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{what}");
+        assert_eq!(r.json()["error"]["code"], "bad_request", "{what}");
+        assert!(
+            r.json()["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains(what),
+            "{what}: {}",
+            r.json()
+        );
+    }
+    let r = post(&dest("bad"), Some(json!({"kind": "image", "image_path": "logo.png"}))).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "relative logo path");
+    let r = post(&dest("bad"), Some(json!({"kind": "sticker"}))).await;
+    assert!(r.status.is_client_error(), "unknown kind: {}", r.status);
+
+    // a valid mark: the task runs and the files differ from the plain export
+    let mut rx = e.core.events.subscribe();
+    let mut files = Vec::new();
+    for (name, wm) in [("plain", None), ("marked", Some(text(json!({}))))] {
+        let r = post(&dest(name), wm).await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{name}");
+        let task_id = r.json()["task_id"].as_str().unwrap().to_string();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                if let Ok(ip_core::Event::TaskProgress { task_id: t, state, .. }) =
+                    rx.recv().await
+                {
+                    if t == task_id && state == "done" {
+                        break;
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let mut names: Vec<_> = std::fs::read_dir(out.path().join(name))
+            .unwrap()
+            .map(|d| d.unwrap().path())
+            .collect();
+        names.sort();
+        assert_eq!(names.len(), 2, "{name}");
+        files.push(std::fs::read(&names[0]).unwrap());
+    }
+    assert_ne!(files[0], files[1], "the watermark changed the pixels");
+}
+
+#[tokio::test]
+async fn fs_list_names_files_with_the_requested_extensions() {
+    let e = env();
+    let dir = e.src.path().join("assets");
+    std::fs::create_dir(&dir).unwrap();
+    for n in ["b.PNG", "a.ttf", "c.txt", ".hidden.png"] {
+        std::fs::write(dir.join(n), b"x").unwrap();
+    }
+    let enc = |p: &str| {
+        p.replace('\\', "%5C")
+            .replace(':', "%3A")
+            .replace(' ', "%20")
+    };
+    let path = enc(&dir.to_string_lossy());
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/fs/list?path={path}&ext=.png,ttf"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let files: Vec<String> = r.json()["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            std::path::Path::new(f.as_str().unwrap())
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert_eq!(files, ["a.ttf", "b.PNG"]);
+    // without `ext` the key is absent
+    let r = call(&e.app, Method::GET, &format!("/api/fs/list?path={path}"), None).await;
+    assert!(r.json().get("files").is_none());
+}

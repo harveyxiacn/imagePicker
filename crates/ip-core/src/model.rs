@@ -221,6 +221,10 @@ pub struct ExportRequest {
     /// it into `long_edge`.
     #[serde(default)]
     pub aspect: Option<[u32; 2]>,
+    /// F9.4: text or logo blended into every output after resizing, before encoding. Photos
+    /// that would be copied as they are are re-encoded instead (`docs/api-contract-m5.md` F).
+    #[serde(default)]
+    pub watermark: Option<crate::watermark::Watermark>,
 }
 
 impl Default for ExportRequest {
@@ -238,6 +242,7 @@ impl Default for ExportRequest {
             format: crate::export::ExportFormat::Original,
             strip_metadata: false,
             aspect: None,
+            watermark: None,
         }
     }
 }

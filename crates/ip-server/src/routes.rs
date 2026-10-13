@@ -594,6 +594,14 @@ pub async fn export(
     if !req.dest.trim().is_empty() {
         req.dest = whitelisted(&st, &req.dest).await?;
     }
+    // the logo and font files must lie inside the allowed folders too
+    if let Some(wm) = req.watermark.as_mut() {
+        for path in [&mut wm.image_path, &mut wm.font_path].into_iter().flatten() {
+            if !path.trim().is_empty() {
+                *path = whitelisted(&st, path).await?;
+            }
+        }
+    }
     let task_id = st.core.export_with(req, extras.pair_member).await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "task_id": task_id }))).into_response())
 }
