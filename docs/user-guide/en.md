@@ -221,6 +221,8 @@ Click selects one photo, `Ctrl+click` multi-selects, `Ctrl+A` selects all; ratin
 | `Ctrl+E` | Export | everywhere (incl. edit page) |
 | `?` | Shortcut help | everywhere (incl. edit page) |
 
+**More filters.** The filter bar also offers (each appears only when the session has something to choose from): a *Lens* button to tick the lenses found in the session; a *Keywords* button to tick keywords (any of them by default, or tick *Photos must have all selected keywords*); a *Date* button with *From* / *To* dates (inclusive, in the local time of the place where the photos were taken, limited to the span of the session); and a *Sharpness* chip group: Sharp / Blurry / Not analysed (click again to clear; *Blurry* includes photos carrying the blurry issue, *Not analysed* means no sharpness result yet). Active conditions show as removable tags under the bar and are saved with the rest of the filter as a smart collection. Right-click a face and choose *Photos with similar faces*: a *Similar to chosen faces* tag appears; drag its slider to tune how alike a face must be (higher is stricter, default 38%, applied on release). In the Search-by-face dialog the *Minimum similarity* slider decides which faces count as similar (default 25%), and *Show these photos in the library* turns the face into the same filter.
+
 **Device filter.** When a session mixes several cameras or phones (or has photos without camera EXIF), the filter bar shows a *Device* button. Tick one or more devices (each shows a kind icon: phone, camera, drone, action camera) or *No camera info* to narrow the library; the button shows how many are active, and "Clear filters" resets it. The Inspector shows the same kind icon next to the camera name.
 
 ### Edit page shortcuts

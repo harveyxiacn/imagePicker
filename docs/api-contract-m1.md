@@ -76,6 +76,7 @@ interface Session {
 | GET | `/api/sessions` | — | `{"sessions": Session[]}`（按 created_at 倒序） |
 | GET | `/api/sessions/{id}` | — | `{"session": Session}` |
 | DELETE | `/api/sessions/{id}` | — | `204`（仅删除目录库记录与缓存，**绝不删除原图**） |
+| GET | `/api/sessions/{id}/filter-options` | — | `FilterOptions`（见「筛选补全」；会话不存在 404） |
 | GET | `/api/sessions/{id}/devices` | — | `{"devices": SessionDevice[]}`（见「设备」；会话不存在 404） |
 | GET | `/api/photos` | 查询参数见下 | `{"photos": Photo[], "total": number, "next_cursor": string \| null}` |
 | GET | `/api/photos/{id}` | — | `{"photo": Photo}` |
@@ -102,6 +103,12 @@ interface Session {
 | `limit` | 默认 500，最大 5000 |
 | `device` | 设备 id，逗号分隔（`device=3,5`，OR）；`none` = 没有设备的照片（可与 id 混用：`3,none`）；其他值 → 400。可与其余过滤、排序组合；`total` 为过滤后的数量 |
 
+| `lens` | 镜头名（EXIF `LensModel` 原样，区分大小写），逗号分隔，OR；名称里的逗号写 `\,`、反斜杠写 `\\`。见「筛选补全」 |
+| `taken_from` / `taken_to` | 拍摄时间范围，含两端：`YYYY-MM-DD`（整天，按拍摄地当地时间）或毫秒（与 `photo.taken_at` 同单位）；没有拍摄时间的照片被排除；`from` 晚于 `to` → 400 |
+| `tags` / `tag_mode` | 关键词（`photo_tag`，即 XMP `dc:subject`；同 `lens` 的转义），默认任一（`tag_mode=any`），`all` = 须包含全部；其他值 → 400 |
+| `sharp` | `sharp` / `blurry` / `unknown`（清晰度状态，定义见「筛选补全」）；其他值 → 400 |
+| `face_ids` / `face_similarity` | 有与这些脸（任一，最多 50 张）相似的脸的照片；`face_similarity` 为余弦相似度阈值 0..1，默认 `0.38`（聚类阈值）。见「筛选补全」 |
+
 > 前端会一次性按 5000 分页把整个会话的 ID 与字段拉完（2 万张以内），客户端虚拟化渲染。
 
 ## 设备
@@ -124,6 +131,30 @@ interface SessionDevice {
 ```
 
 `GET /api/sessions/{id}/devices` → `{"devices": SessionDevice[]}`，按 `photo_count` 降序、再按 `name`（不区分大小写）排序；只列出在该会话中有照片的设备。游客可读。会话不存在 → 404。会话计数（`photo_count` 等）仍为全局，不受 `device` 过滤影响。
+
+## 筛选补全（镜头、时间范围、关键词、清晰度、相似人脸）
+
+这些参数与既有过滤、排序、分页任意组合（AND），`total` 为过滤后的数量；游标分页对它们同样稳定（排序键不变，`id` 兜底）。智能集合的 `query` 也接受它们（同样校验）。
+
+- **镜头 `lens`。** 直接匹配 `photo.lens`（导入时从 EXIF 读入的原始字符串，不做规范化，所以 `RF24-70mm F2.8 L IS USM` 与 `RF 24-70mm F2.8 L IS USM` 是两支镜头）。没有镜头信息的照片不会被任何 `lens` 值命中。
+- **时间范围。** `taken_at` 是毫秒、已应用设备偏移（即拍摄地的墙上时间当作 UTC，见 `Photo.taken_at_offset_min`），所以 `YYYY-MM-DD` 按同一把尺子换算：`taken_from` 取当天 00:00:00.000，`taken_to` 取当天 23:59:59.999。
+- **关键词 `tags`。** 按 `POST /api/photos/tags` / XMP 同步写入的关键词匹配；比较前与写入时一样去掉首尾空白、去重，大小写敏感。
+- **清晰度 `sharp`。** 三态互不重叠、合起来覆盖会话：`blurry` = 分析的 `sharpness` < 0.35（`BLURRY_BELOW`，与「模糊」问题标签同一阈值）**或**照片带 `blurry` 问题标签（含「比同组最清晰的一张明显更糊」）；`sharp` = 有 `sharpness` 且 ≥ 0.35 且没有 `blurry` 标签；`unknown` = 没有清晰度度量（未分析，或该步骤没有输出）且没有 `blurry` 标签。
+- **相似人脸 `face_ids`。** 取这些脸的身份特征（不要求已聚类），在会话内所有有特征的脸里找余弦相似度 ≥ `face_similarity` 的，返回它们所在的照片（给定的脸所在的照片自然包含，若在该会话内）。多张脸取并集。脸不存在 → 400；脸没有身份特征（未做标准分析 / 未同意人脸识别）→ 409；`face_similarity` 超出 0..1 → 400。代价与会话内的人脸数成正比（每次查询一次线性扫描）。默认阈值 0.38 是聚类用的同一个值（同一人通常 0.43–0.66，不同人 < 0.2）；调高更严格。
+- **以脸搜脸的阈值。** `POST /api/faces/search`（JSON `{face_id, session_id?, min_similarity?}` 或 multipart 字段 `min_similarity`）新增 `min_similarity`（0..1，默认 0.25，低于它的结果不返回；超出范围 → 400）。
+
+### `GET /api/sessions/{id}/filter-options`
+
+筛选器的选项，游客可读，会话不存在 → 404：
+
+```ts
+interface FilterOptions {
+  lenses: { lens: string; photo_count: number }[];  // 未标记 missing 的照片，photo_count 降序，再按名称
+  tags: { tag: string; photo_count: number }[];     // 同上，最多 500 个
+  taken_min: number | null;                          // 最早 / 最晚的 taken_at（毫秒）；没有拍摄时间时为 null
+  taken_max: number | null;
+}
+```
 
 ## 文件：RAW+JPEG、排除、监听、缺失与安全淘汰
 

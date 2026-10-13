@@ -39,6 +39,7 @@ import type {
   BestPeopleResponse,
   Collection,
   FaceSearchResponse,
+  FilterOptions,
   PhotoPeopleResponse,
   Taste,
   BestTakePlan,
@@ -64,6 +65,7 @@ import type {
   SettingsPatch,
   TaskRecord,
 } from './types'
+import { joinCsvText } from '@/lib/csvText'
 import { diagnosticsFilename } from '@/lib/diagnostics'
 
 export class ApiError extends Error {
@@ -173,6 +175,14 @@ export function photosQueryString(q: PhotosQuery): string {
   if (q.faces_min !== undefined) p.set('faces_min', String(q.faces_min))
   if (q.faces_max !== undefined) p.set('faces_max', String(q.faces_max))
   if (q.device?.length) p.set('device', q.device.join(','))
+  if (q.lens?.length) p.set('lens', joinCsvText(q.lens))
+  if (q.taken_from) p.set('taken_from', q.taken_from)
+  if (q.taken_to) p.set('taken_to', q.taken_to)
+  if (q.tags?.length) p.set('tags', joinCsvText(q.tags))
+  if (q.tag_mode) p.set('tag_mode', q.tag_mode)
+  if (q.sharp) p.set('sharp', q.sharp)
+  if (q.face_ids?.length) p.set('face_ids', q.face_ids.join(','))
+  if (q.face_similarity !== undefined) p.set('face_similarity', String(q.face_similarity))
   if (q.has_edits) p.set('has_edits', '1')
   if (q.sort) p.set('sort', q.sort)
   if (q.cursor) p.set('cursor', q.cursor)
@@ -227,6 +237,7 @@ export const api = {
   mergeGroups: (burst_ids: number[]) => request<{ burst_id: number }>('POST', '/groups/merge', { burst_ids }),
   burstFaces: (id: number) => request<BurstFaces>('GET', `/bursts/${id}/faces`),
   acceptAi: (ids: number[]) => request<{ updated: number }>('POST', '/photos/accept-ai', { ids }),
+  filterOptions: (sessionId: number) => request<FilterOptions>('GET', `/sessions/${sessionId}/filter-options`),
   devices: (sessionId: number) => request<{ devices: Device[] }>('GET', `/sessions/${sessionId}/devices`),
   people: (session_id?: number) =>
     request<{ people: Person[] }>('GET', `/people${session_id !== undefined ? `?session_id=${session_id}` : ''}`),
@@ -258,12 +269,13 @@ export const api = {
   applyProfiles: (photo_ids: number[]) => request<{ updated: number }>('POST', '/edits/apply-profiles', { photo_ids }),
   bestPeople: (session_id: number, ids: number[], n: number) =>
     request<BestPeopleResponse>('GET', `/people/best?session_id=${session_id}&ids=${ids.join(',')}&n=${n}`),
-  faceSearch: (input: { image: File } | { face_id: number }, opts: { session_id?: number; face_index?: number } = {}) => {
+  faceSearch: (input: { image: File } | { face_id: number }, opts: { session_id?: number; face_index?: number; min_similarity?: number } = {}) => {
     if ('image' in input) {
       const fd = new FormData()
       fd.append('image', input.image)
       if (opts.session_id !== undefined) fd.append('session_id', String(opts.session_id))
       if (opts.face_index !== undefined) fd.append('face_index', String(opts.face_index))
+      if (opts.min_similarity !== undefined) fd.append('min_similarity', String(opts.min_similarity))
       return requestForm<FaceSearchResponse>('POST', '/faces/search', fd)
     }
     return request<FaceSearchResponse>('POST', '/faces/search', { ...input, ...opts })
