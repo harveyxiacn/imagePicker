@@ -7,7 +7,8 @@ import { useToasts } from '@/stores/toasts'
 import { emptyStack } from './edit'
 import { useHistory } from './history'
 import { ApiError } from '@/api/client'
-import { beforeFor, cancelGen, finalizeGen, genOnDone, genOnTask, resolveAfter } from './gen'
+import i18n from '@/i18n'
+import { beforeFor, cancelGen, finalizeGen, genOnDone, genOnTask, reportGenError, resolveAfter } from './gen'
 
 const server = new Map<number, EditStack>()
 const putCalls: { id: number; stack: EditStack }[] = []
@@ -64,6 +65,22 @@ describe('generative task results', () => {
     useGen.setState({ tasks: {}, results: {}, autoBase: null })
     useToasts.setState({ toasts: [], tasks: {} })
     useEdit.setState({ photoId: null, loaded: false, stack: emptyStack(), committed: emptyStack() })
+  })
+
+  it('reportGenError: a refused best-take pairing shows its localized 422 message', () => {
+    for (const code of ['besttake_cross_burst', 'besttake_person_mismatch', 'besttake_low_similarity']) {
+      useToasts.setState({ toasts: [], tasks: {} })
+      reportGenError(new ApiError(422, code, 'raw server text'), { sessionId: 1, retry: () => {} })
+      const toasts = useToasts.getState().toasts
+      expect(toasts).toHaveLength(1)
+      expect(toasts[0].kind).toBe('error')
+      expect(toasts[0].text).toBe(i18n.t(`gen.${code}`))
+      expect(toasts[0].text).not.toContain('raw server text')
+    }
+    // other 422s keep the server's own message
+    useToasts.setState({ toasts: [], tasks: {} })
+    reportGenError(new ApiError(422, 'unprocessable', 'face 5 is not in photo 2'), { sessionId: 1, retry: () => {} })
+    expect(useToasts.getState().toasts[0].text).toBe('face 5 is not in photo 2')
   })
 
   it('resolveAfter: server stack wins when the user did not edit meanwhile, else patches are merged into the live stack', () => {
