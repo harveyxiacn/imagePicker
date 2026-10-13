@@ -23,9 +23,9 @@
 
 ## Remaining gaps
 
-* **Single 100k-row session** (outside the PRD: 20k per session): pages cost about 10 ms and `-taken_at` 28 ms, because the session members still have to be visited to sort. An index that stores the sort key next to the session (a `session_photo(session_id, taken_at, photo_id)` table) would make every page O(limit); not done because it changes the schema and every write path.
+* **Single 100k-row session** (outside the PRD: 20k per session): fixed on 2026-10-13 (migration v13). The sort keys are kept next to the session membership with one index per sort, so a page is read in order and stops after `limit + 1` rows: 500-row pages cost 2.8-3.3 ms at 100k rows (was 9.6-29 ms), see [`large-sessions-2026-10-13.md`](large-sessions-2026-10-13.md). Writes cost about 17 us more per photo row (triggers + 5 indexes).
 * `rating_gte` on a single 20k session is slower than before (0.5 to 2.1 ms): the old plan used the rating index, which wins when almost nothing matches but lost badly (27 ms) at 100k rows.
-* `GET /api/sessions` aggregates every member row of every session (13 ms at 100k rows); it is refetched on `session.updated`. Counters on the `session` table would remove it.
+* `GET /api/sessions` reads the per-session counters (`session_stat`, maintained by triggers) instead of aggregating every member row: 0.23 ms with a 100k-row session (was 26.8 ms on this machine).
 * Preview generation for 12 MP originals is 35 ms (1024) / 65 ms (2048) cold; the loupe hides it by preloading neighbours, but jumping to a far photo waits for it (the 256 px thumbnail shows meanwhile).
 * Frame times come from headless Chromium with software rasterisation; a run on real GPU hardware with a real browser profile is still needed before calling the 60 fps target closed for dense grids on low-end laptops.
 * The fake worker returns synthetic `fast` results only (no faces, embeddings, aesthetic scores), so the real-server end-to-end test does not cover the people views.
