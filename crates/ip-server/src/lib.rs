@@ -12,6 +12,7 @@ pub mod m6;
 pub mod m7;
 pub mod remote;
 pub mod routes;
+pub mod timeline;
 pub mod ws;
 
 use std::net::SocketAddr;
@@ -134,6 +135,7 @@ pub fn build_router_auth(
             get(routes::get_session).delete(routes::delete_session),
         )
         .route("/sessions/{id}/devices", get(routes::session_devices))
+        .route("/sessions/{id}/timeline", get(timeline::session_timeline))
         .route("/sessions/{id}/rescan", post(files::rescan))
         .route("/sessions/{id}/relocate", post(files::relocate))
         .route("/photos/reject-files", post(files::reject_files))
@@ -142,6 +144,7 @@ pub fn build_router_auth(
             get(routes::list_photos).patch(routes::patch_photos),
         )
         .route("/photos/{id}", get(routes::get_photo))
+        .route("/photos/{id}/duplicates", get(timeline::photo_duplicates))
         .route("/thumb/{id}", get(routes::thumb))
         .route("/preview/{id}", get(routes::preview))
         .route("/full/{id}", get(routes::full))

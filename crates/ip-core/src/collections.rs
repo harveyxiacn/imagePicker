@@ -9,11 +9,12 @@ use crate::events::Event;
 use crate::Core;
 
 /// `(key, query)`; the display name is the i18n key `collection.<key>`.
-pub const BUILTIN: [(&str, &str); 4] = [
+pub const BUILTIN: [(&str, &str); 5] = [
     ("best_per_group", "burst_best_only=1"),
     ("has_closed_eyes", "issues_any=closed_eyes"),
     ("undecided", "flag=unflagged"),
     ("edited", "has_edits=1"),
+    ("duplicates", "duplicates=1"),
 ];
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

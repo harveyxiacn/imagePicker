@@ -319,7 +319,7 @@ struct GRow {
     emb: Option<Vec<f32>>,
 }
 
-fn blob_phash(b: Option<Vec<u8>>) -> Option<u64> {
+pub(crate) fn blob_phash(b: Option<Vec<u8>>) -> Option<u64> {
     let b = b?;
     let a: [u8; 8] = b.try_into().ok()?;
     Some(u64::from_be_bytes(a))
@@ -517,6 +517,7 @@ pub fn regroup_session(
             )?;
         }
     }
+    super::layers::rebuild_events(&tx, session_id)?;
     let ids = units.iter().map(|u| u.id).collect();
     tx.commit()?;
     Ok(ids)
@@ -1325,6 +1326,7 @@ pub fn groups_of_session(conn: &Connection, session_id: i64) -> Result<GroupsOut
                 start_at: s,
                 end_at: e,
                 bursts: Vec::new(),
+                event_id: None,
             })
             .bursts
             .push(BurstOut {
@@ -1966,6 +1968,7 @@ pub fn purge_session_groups(conn: &Connection, session_id: i64) -> Result<()> {
     )?;
     conn.execute("DELETE FROM burst WHERE session_id=?1", [session_id])?;
     conn.execute("DELETE FROM scene WHERE session_id=?1", [session_id])?;
+    conn.execute("DELETE FROM event WHERE session_id=?1", [session_id])?;
     Ok(())
 }
 

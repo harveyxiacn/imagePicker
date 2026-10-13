@@ -123,12 +123,15 @@ pub struct PhotosParams {
     has_edits: Option<String>,
     // ---- devices
     device: Option<String>,
+    // ---- duplicates, events
+    duplicates: Option<String>,
+    event_id: Option<i64>,
 }
 
 impl PhotosParams {
     /// Parameters of a smart collection's `query` string (no session/paging keys allowed).
     pub(crate) fn from_collection_query(q: &str) -> Result<Self, ApiError> {
-        const KEYS: [&str; 21] = [
+        const KEYS: [&str; 22] = [
             "rating_gte",
             "flag",
             "color_label",
@@ -148,6 +151,7 @@ impl PhotosParams {
             "faces_max",
             "has_edits",
             "device",
+            "duplicates",
             "session_id",
             "cursor",
         ];
@@ -311,6 +315,11 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
             None => None,
             Some(_) => Some(flag_of("has_edits", &p.has_edits)?),
         },
+        duplicates: match p.duplicates.as_deref().filter(|s| !s.is_empty()) {
+            None => None,
+            Some(_) => Some(flag_of("duplicates", &p.duplicates)?),
+        },
+        event_id: p.event_id,
     })
 }
 

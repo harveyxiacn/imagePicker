@@ -196,6 +196,47 @@ pub struct SceneOut {
     pub start_at: i64,
     pub end_at: i64,
     pub bursts: Vec<BurstOut>,
+    /// Only in `GET /api/sessions/{id}/timeline`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<i64>,
+}
+
+/// One event of the timeline (docs/09 P1-1): scenes of one session that are not separated by a
+/// pause of more than 2 h or a move of more than 5 km.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EventOut {
+    pub id: i64,
+    /// Display name: `title` when set, else the local date and time span (`2024-05-03 10:12-14:40`).
+    pub name: String,
+    pub title: Option<String>,
+    /// Place name; not set automatically (the coordinates are `gps_lat` / `gps_lon`).
+    pub place: Option<String>,
+    /// Capture time (UTC ms) of the first and last photo.
+    pub start_at: i64,
+    pub end_at: i64,
+    /// UTC offset (minutes) the first photo with a known offset was taken at.
+    pub offset_min: Option<i32>,
+    /// Mean position of the event's geotagged photos.
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
+    pub photo_count: i64,
+    pub scenes: Vec<SceneOut>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TimelineOut {
+    pub events: Vec<EventOut>,
+}
+
+/// `GET /api/photos/{id}/duplicates`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DuplicatesOut {
+    /// `None` = the photo is not a duplicate of anything.
+    pub group_id: Option<i64>,
+    /// Every photo of the group (catalog wide, every session), the asked one included.
+    pub photo_ids: Vec<i64>,
+    /// The members that are byte-identical copies of another member.
+    pub exact_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

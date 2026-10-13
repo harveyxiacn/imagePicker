@@ -550,6 +550,8 @@ pub fn photo_query_of(session_id: i64, f: &Value, limit: Option<i64>) -> PhotoQu
         faces_min: get("faces_min").and_then(Value::as_i64),
         faces_max: get("faces_max").and_then(Value::as_i64),
         has_edits: get("has_edits").and_then(Value::as_bool),
+        duplicates: None,
+        event_id: None,
     }
 }
 
