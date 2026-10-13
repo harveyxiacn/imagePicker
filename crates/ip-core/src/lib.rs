@@ -5,6 +5,7 @@ pub mod analysis;
 pub mod assistant;
 pub mod auth;
 pub mod backup;
+pub mod card;
 pub mod catalog;
 pub mod collections;
 pub mod db;
@@ -50,6 +51,7 @@ pub use edit::{
     AutoCropKind, AutoCropOut, AutoCropRequest, AutoRequest, CheckedStack, EditDoc, EditPut,
     LutOut, PresetCreate, PresetOut, Preview, PreviewRequest, RenderService, SyncRequest,
 };
+pub use card::{CardImportRequest, CardReport, CardSource};
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};
 pub use files::{RejectFilesReport, RejectFilesRequest, RelocateReport, RelocateRequest, Trasher};
