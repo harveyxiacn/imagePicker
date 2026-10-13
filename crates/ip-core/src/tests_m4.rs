@@ -960,7 +960,13 @@ async fn collections_crud_and_builtin_protection() {
     let keys: Vec<&str> = list.iter().map(|c| c.id.as_str()).collect();
     assert_eq!(
         keys,
-        vec!["best_per_group", "has_closed_eyes", "undecided", "edited"]
+        vec![
+            "best_per_group",
+            "has_closed_eyes",
+            "undecided",
+            "edited",
+            "duplicates"
+        ]
     );
     assert!(list
         .iter()
@@ -976,7 +982,7 @@ async fn collections_crud_and_builtin_protection() {
         ("My picks", "flag=picked&rating_gte=4", false)
     );
     assert!(c.id.starts_with("user_"));
-    assert_eq!(e.core.collections().await.unwrap().len(), 5);
+    assert_eq!(e.core.collections().await.unwrap().len(), 6);
     let c2 = e
         .core
         .update_collection(&c.id, Some("Renamed".into()), None)
@@ -1018,7 +1024,7 @@ async fn collections_crud_and_builtin_protection() {
         Err(CoreError::NotFound(_))
     ));
     e.core.delete_collection(&c.id).await.unwrap();
-    assert_eq!(e.core.collections().await.unwrap().len(), 4);
+    assert_eq!(e.core.collections().await.unwrap().len(), 5);
     assert!(matches!(
         e.core.delete_collection(&c.id).await,
         Err(CoreError::NotFound(_))

@@ -182,6 +182,15 @@ describe('device filter', () => {
     expect(photosQueryString(buildPhotosQuery(1, { ...DEFAULT_FILTER, device: [2, 'none'] }))).toBe('session_id=1&device=2%2Cnone')
   })
 
+  it('maps duplicates and the selected event', () => {
+    expect(buildPhotosQuery(4, { ...DEFAULT_FILTER, duplicates: true })).toEqual({ session_id: 4, duplicates: true })
+    expect(buildPhotosQuery(4, { ...DEFAULT_FILTER, eventId: 9 })).toEqual({ session_id: 4, event_id: 9 })
+    expect(photosQueryString(buildPhotosQuery(4, { ...DEFAULT_FILTER, duplicates: true, eventId: 9 }))).toBe('session_id=4&duplicates=1&event_id=9')
+    expect(isFilterActive({ ...DEFAULT_FILTER, duplicates: true })).toBe(true)
+    expect(isFilterActive({ ...DEFAULT_FILTER, eventId: 9 })).toBe(true)
+    expect(isFilterActive(DEFAULT_FILTER)).toBe(false)
+  })
+
   it('counts as an active filter and toggles', () => {
     expect(isFilterActive({ ...DEFAULT_FILTER, device: ['none'] })).toBe(true)
     expect(toggleDevice([], 3)).toEqual([3])

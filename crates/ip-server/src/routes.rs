@@ -130,6 +130,9 @@ pub struct PhotosParams {
     has_edits: Option<String>,
     // ---- devices
     device: Option<String>,
+    // ---- duplicates, events
+    duplicates: Option<String>,
+    event_id: Option<i64>,
     // ---- filters complete
     lens: Option<String>,
     taken_from: Option<String>,
@@ -164,6 +167,7 @@ impl PhotosParams {
             "faces_max",
             "has_edits",
             "device",
+            "duplicates",
             "lens",
             "taken_from",
             "taken_to",
@@ -443,6 +447,11 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
             None => None,
             Some(_) => Some(flag_of("has_edits", &p.has_edits)?),
         },
+        duplicates: match p.duplicates.as_deref().filter(|s| !s.is_empty()) {
+            None => None,
+            Some(_) => Some(flag_of("duplicates", &p.duplicates)?),
+        },
+        event_id: p.event_id,
     })
 }
 

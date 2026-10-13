@@ -293,7 +293,9 @@ fn sanitize(s: &str) -> String {
 /// Catalog values of the name tokens that [`PhotoRef`] does not carry.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NameInfo {
-    /// `{event}`: title of the import (session) the photo came in with.
+    /// `{event}`: name of the event the photo's scene belongs to (its title, or the date and time
+    /// span without colons, `2024-05-03 1012-1440`); the title of the import (session) the photo
+    /// came in with when the photo is in no event (not analysed yet).
     pub event: Option<String>,
     /// `{scene}`: scene type found by the analysis (`portrait`, `landscape`, `night`...).
     pub scene: Option<String>,
@@ -464,14 +466,33 @@ fn name_info(c: &rusqlite::Connection, ids: &[i64]) -> Result<HashMap<i64, NameI
             "SELECT p.id,
                     (SELECT s.title FROM session_photo sp JOIN session s ON s.id = sp.session_id
                       WHERE sp.photo_id = p.id ORDER BY s.id LIMIT 1),
-                    p.scene_type, p.camera, p.user_rating
-               FROM photo p WHERE p.id IN ({ph})"
+                    p.scene_type, p.camera, p.user_rating,
+                    e.title, e.start_at, e.end_at, e.offset_min
+               FROM photo p
+               LEFT JOIN burst b ON b.id = p.burst_id
+               LEFT JOIN scene sc ON sc.id = b.scene_id
+               LEFT JOIN event e ON e.id = sc.event_id
+              WHERE p.id IN ({ph})"
         ))?;
         let rows = st.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+            let title: Option<String> = row.get(5)?;
+            let span: Option<(i64, i64)> =
+                match (row.get::<_, Option<i64>>(6)?, row.get::<_, Option<i64>>(7)?) {
+                    (Some(s), Some(e)) => Some((s, e)),
+                    _ => None,
+                };
+            let offset: Option<i32> = row.get(8)?;
+            let event = match (title.filter(|t| !t.trim().is_empty()), span) {
+                (Some(t), _) => Some(t),
+                (None, Some((s, e))) => Some(crate::analysis::timeline::event_file_name(
+                    &crate::analysis::timeline::event_name(s, e, offset),
+                )),
+                (None, None) => row.get(1)?,
+            };
             Ok((
                 row.get::<_, i64>(0)?,
                 NameInfo {
-                    event: row.get(1)?,
+                    event,
                     scene: row.get(2)?,
                     camera: row.get(3)?,
                     rating: row.get(4)?,

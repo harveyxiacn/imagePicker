@@ -34,6 +34,7 @@ const BUILTIN_COLLECTIONS: Collection[] = [
   { id: 'has_closed_eyes', name: '有人闭眼', query: 'issues_any=closed_eyes', builtin: true },
   { id: 'undecided', name: '待定', query: 'flag=unflagged', builtin: true },
   { id: 'edited', name: '已编辑', query: 'has_edits=1', builtin: true },
+  { id: 'duplicates', name: '重复', query: 'duplicates=1', builtin: true },
 ]
 const userCollections: Collection[] = []
 let collectionSeq = 0
