@@ -21,6 +21,20 @@ describe('collection query <-> filter', () => {
     expect(queryToFilter('issues_any=closed_eyes')).toEqual(f({ issueMode: 'any', issues: ['closed_eyes'] }))
     expect(queryToFilter('flag=unflagged')).toEqual(f({ flag: 'unflagged' }))
     expect(queryToFilter('has_edits=1')).toEqual(f({ edited: true }))
+    expect(queryToFilter('duplicates=1')).toEqual(f({ duplicates: true }))
+  })
+
+  it('the duplicates collection is the filter and nothing else', () => {
+    expect(filterToQuery(f({ duplicates: true }))).toBe('duplicates=1')
+    expect(collectionActive('duplicates=1', f({ duplicates: true }))).toBe(true)
+    expect(collectionActive('duplicates=1', DEFAULT_FILTER)).toBe(false)
+  })
+
+  it('an event selection is session specific: never saved, and no collection is active under it', () => {
+    expect(filterToQuery(f({ eventId: 12 }))).toBe('')
+    expect(filterToQuery(f({ eventId: 12, duplicates: true }))).toBe('duplicates=1')
+    expect(queryToFilter('event_id=12').eventId).toBeNull()
+    expect(collectionActive('duplicates=1', f({ duplicates: true, eventId: 12 }))).toBe(false)
   })
 
   it('round-trips a rich filter (filter -> query -> filter -> query)', () => {

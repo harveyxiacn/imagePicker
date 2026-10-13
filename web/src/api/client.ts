@@ -10,7 +10,9 @@ import type {
   ExportBody,
   ExportPreset,
   FsList,
+  DuplicatesResponse,
   GroupsResponse,
+  TimelineResponse,
   HardwareInfo,
   ImportBody,
   RelocateReport,
@@ -166,6 +168,8 @@ export function photosQueryString(q: PhotosQuery): string {
   if (q.faces_max !== undefined) p.set('faces_max', String(q.faces_max))
   if (q.device?.length) p.set('device', q.device.join(','))
   if (q.has_edits) p.set('has_edits', '1')
+  if (q.duplicates) p.set('duplicates', '1')
+  if (q.event_id !== undefined) p.set('event_id', String(q.event_id))
   if (q.sort) p.set('sort', q.sort)
   if (q.cursor) p.set('cursor', q.cursor)
   if (q.limit) p.set('limit', String(q.limit))
@@ -188,6 +192,8 @@ export const api = {
     request<{ result: RejectFilesReport }>('POST', '/photos/reject-files', body),
   photos: (q: PhotosQuery) => request<PhotosResponse>('GET', `/photos?${photosQueryString(q)}`),
   photo: (id: number) => request<{ photo: Photo }>('GET', `/photos/${id}`),
+  photoDuplicates: (id: number) => request<DuplicatesResponse>('GET', `/photos/${id}/duplicates`),
+  timeline: (session_id: number) => request<TimelineResponse>('GET', `/sessions/${session_id}/timeline`),
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),

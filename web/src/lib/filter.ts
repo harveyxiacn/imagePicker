@@ -40,6 +40,10 @@ export interface FilterState {
   bestOnly: boolean
   /** M4: only photos that carry saved edits */
   edited: boolean
+  /** Only photos that have a duplicate in the catalog (built-in "duplicates" collection) */
+  duplicates: boolean
+  /** Only the photos of one event of the session timeline; session specific, never saved in a collection */
+  eventId: number | null
   sort: SortKey
 }
 
@@ -55,6 +59,8 @@ export const DEFAULT_FILTER: FilterState = {
   device: [],
   bestOnly: false,
   edited: false,
+  duplicates: false,
+  eventId: null,
   sort: 'taken_at',
 }
 
@@ -74,6 +80,8 @@ export function buildPhotosQuery(sessionId: number, f: FilterState): PhotosListQ
   if (f.sceneType) q.scene_type = f.sceneType
   if (f.bestOnly) q.burst_best_only = true
   if (f.edited) q.has_edits = true
+  if (f.duplicates) q.duplicates = true
+  if (typeof f.eventId === 'number') q.event_id = f.eventId
   if (f.device.length) q.device = [...f.device]
   const p = f.person
   if (p.include.length) {
@@ -103,6 +111,8 @@ export function isFilterActive(f: FilterState): boolean {
     f.sceneType !== null ||
     f.bestOnly ||
     f.edited ||
+    f.duplicates ||
+    typeof f.eventId === 'number' ||
     f.device.length > 0 ||
     isPersonFilterActive(f.person)
   )

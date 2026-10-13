@@ -16,6 +16,7 @@ export function filterPhotos(photos: Photo[], q: URLSearchParams): Photo[] {
     if (flag === 'not_rejected' && p.flag === -1) return false
     if (color && p.color_label !== color) return false
     if (q.get('has_edits') === '1' && !p.has_edits) return false
+    if (q.get('duplicates') === '1' && p.duplicate_group_id == null) return false
     if (devices && !devices.some((d) => (d === 'none' ? p.device_id === null : p.device_id === Number(d)))) return false
     return true
   })

@@ -127,6 +127,16 @@ export function useGroups(sessionId: number) {
   })
 }
 
+/** Events -> scenes -> bursts of a session (`GET /sessions/{id}/timeline`). */
+export function useTimeline(sessionId: number) {
+  return useQuery({
+    queryKey: qk.timeline(sessionId),
+    queryFn: () => api.timeline(sessionId),
+    select: (d) => d.events,
+    staleTime: 30_000,
+  })
+}
+
 export function useBurstFaces(burstId: number | null) {
   const ok = useNotGuest()
   return useQuery({
