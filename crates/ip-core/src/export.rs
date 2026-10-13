@@ -25,6 +25,7 @@ use crate::events::Event;
 use crate::imaging::Imaging;
 use crate::jpegmeta::{self, PreparedMeta};
 use crate::model::ExportRequest;
+use crate::watermark::{PreparedWatermark, WatermarkTokens};
 use crate::Core;
 
 #[path = "export_formats.rs"]
@@ -54,6 +55,9 @@ pub struct ExportOptions {
     /// Once cancelled, photos not started yet are skipped (error [`CANCELLED_PHOTO`]) and a
     /// running upscale is cut short; files already written stay.
     pub cancel: Option<CancelToken>,
+    /// Blended into every re-encoded output (PRD F9.4); copies of originals are re-encoded
+    /// instead of copied when set.
+    pub watermark: Option<Arc<PreparedWatermark>>,
 }
 
 impl Default for ExportOptions {
@@ -69,6 +73,7 @@ impl Default for ExportOptions {
             aspect: None,
             names: HashMap::new(),
             cancel: None,
+            watermark: None,
         }
     }
 }
@@ -363,6 +368,36 @@ fn render_name(template: &str, r: &PhotoRef, seq: usize, info: Option<&NameInfo>
     }
 }
 
+/// Values of the watermark text tokens of one photo.
+fn watermark_tokens(r: &PhotoRef, info: Option<&NameInfo>) -> WatermarkTokens {
+    let (date, year) = match r.taken_at.or(r.mtime_ms) {
+        Some(ms) => {
+            let (y, m, d) = civil_from_days(ms.div_euclid(86_400_000));
+            (format!("{y:04}-{m:02}-{d:02}"), format!("{y:04}"))
+        }
+        None => (String::new(), String::new()),
+    };
+    let text = |v: Option<&String>| -> String {
+        v.map(|v| v.trim().chars().take(TOKEN_MAX_CHARS).collect())
+            .unwrap_or_default()
+    };
+    WatermarkTokens {
+        name: Path::new(&r.file_name)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        date,
+        year,
+        camera: text(info.and_then(|i| i.camera.as_ref())),
+        event: text(info.and_then(|i| i.event.as_ref())),
+        scene: text(info.and_then(|i| i.scene.as_ref())),
+        rating: info
+            .and_then(|i| i.rating)
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
+    }
+}
+
 /// The extension of a copied original (`jpg` when it has none).
 fn source_ext(r: &PhotoRef) -> String {
     Path::new(&r.file_name)
@@ -625,8 +660,12 @@ enum Route {
 }
 
 fn route(r: &PhotoRef, opts: &ExportOptions, edited: bool) -> Route {
-    let changed =
-        edited || opts.long_edge.is_some() || opts.upscale.is_some() || opts.aspect.is_some();
+    // a watermark can only be drawn into decoded pixels: no byte-for-byte copy, no clean copy
+    let changed = edited
+        || opts.long_edge.is_some()
+        || opts.upscale.is_some()
+        || opts.aspect.is_some()
+        || opts.watermark.is_some();
     let encode = Route::Encode(opts.format.encoded());
     if changed || !opts.format.keeps(r.format) {
         encode
@@ -670,12 +709,13 @@ fn encode_photo(
     format: ExportFormat,
 ) -> std::result::Result<Vec<u8>, String> {
     let max_side = format.max_side();
-    if let (ExportFormat::Jpeg, None, None, None, Some(edge)) = (
+    if let (ExportFormat::Jpeg, None, None, None, Some(edge), None) = (
         format,
         stack,
         opts.upscale.as_ref(),
         opts.aspect,
         opts.long_edge,
+        opts.watermark.as_ref(),
     ) {
         // the imaging layer's fast path (embedded previews, DCT-domain scaling)
         let img = imaging
@@ -717,7 +757,10 @@ fn encode_photo(
         }
         None => img,
     };
-    let img = cap_side(img, max_side);
+    let mut img = cap_side(img, max_side);
+    if let Some(wm) = &opts.watermark {
+        wm.apply(&mut img, &watermark_tokens(r, opts.names.get(&r.id)));
+    }
     let meta = meta_for(imaging, r, opts, (img.width, img.height));
     formats::encode(&img, format, opts.quality, &meta)
 }
@@ -824,6 +867,16 @@ impl Core {
                 "aspect must be [width, height] with values 1..10000",
             ));
         }
+        // loads the logo / font; bad settings and unreadable files are the client's error
+        let watermark = match req.watermark.clone() {
+            Some(spec) => Some(Arc::new(
+                tokio::task::spawn_blocking(move || PreparedWatermark::new(spec))
+                    .await
+                    .map_err(|e| CoreError::Internal(anyhow::anyhow!("watermark loader: {e}")))?
+                    .map_err(CoreError::bad_request)?,
+            )),
+            None => None,
+        };
         if let Some(scale) = req.upscale {
             let scale = scale.to_string();
             self.preflight_models("enhance", &["upscale", scale.as_str()])
@@ -897,7 +950,11 @@ impl Core {
                 .await?;
             self.tasks.register(&task_id, cancel.clone(), total as i64);
         }
-        let names = if CATALOG_TOKENS.iter().any(|t| req.name_template.contains(t)) {
+        let wants_catalog = CATALOG_TOKENS.iter().any(|t| req.name_template.contains(t))
+            || watermark
+                .as_ref()
+                .is_some_and(|w| crate::watermark::uses_catalog_tokens(&w.spec().text));
+        let names = if wants_catalog {
             let ids: Vec<i64> = refs.iter().map(|r| r.id).collect();
             self.db.call(move |c| name_info(c, &ids)).await?
         } else {
@@ -914,6 +971,7 @@ impl Core {
             format: req.format,
             aspect: req.aspect.map(|[w, h]| (w, h)),
             names,
+            watermark,
             cancel: Some(cancel.clone()),
             upscale: req.upscale.map(|scale| UpscaleExport {
                 svc: self.render.clone(),
