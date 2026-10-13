@@ -456,6 +456,8 @@ mod tests_m6;
 #[cfg(test)]
 mod tests_safety;
 #[cfg(test)]
+mod tests_scale;
+#[cfg(test)]
 mod tests_tasks;
 
 impl Drop for Core {

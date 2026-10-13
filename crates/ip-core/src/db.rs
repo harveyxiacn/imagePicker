@@ -247,6 +247,86 @@ CREATE INDEX idx_photo_pair ON photo(pair_id);
 ALTER TABLE session ADD COLUMN recursive INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE session ADD COLUMN exclude TEXT;
 "#,
+    // v13: large sessions (docs/05 section 1.3): per-session counters (`session_stat`) and the
+    // sort keys of the grid copied next to the membership row (`session_photo.sk_*`) with
+    // indexes that return a page in sort order without visiting the whole session. Both are
+    // derived data kept in step by triggers; `catalog::rebuild_session_derived` recomputes them
+    // (also run when `catalog_meta.session_derived_epoch` differs from the code's epoch).
+    r#"
+CREATE TABLE catalog_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE session_stat (
+  session_id INTEGER PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+  photo_count INTEGER NOT NULL DEFAULT 0,
+  picked_count INTEGER NOT NULL DEFAULT 0,
+  rejected_count INTEGER NOT NULL DEFAULT 0,
+  rated_count INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO session_stat(session_id, photo_count, picked_count, rejected_count, rated_count)
+  SELECT s.id, COUNT(p.id), COALESCE(SUM(p.flag=1),0), COALESCE(SUM(p.flag=-1),0),
+         COALESCE(SUM(p.user_rating IS NOT NULL),0)
+  FROM session s LEFT JOIN session_photo sp ON sp.session_id=s.id LEFT JOIN photo p ON p.id=sp.photo_id
+  GROUP BY s.id;
+ALTER TABLE session_photo ADD COLUMN sk_taken INTEGER;
+ALTER TABLE session_photo ADD COLUMN sk_name TEXT;
+ALTER TABLE session_photo ADD COLUMN sk_rating INTEGER;
+ALTER TABLE session_photo ADD COLUMN sk_ai REAL;
+UPDATE session_photo SET (sk_taken, sk_name, sk_rating, sk_ai) =
+  (SELECT p.taken_at, p.file_name, p.user_rating, p.ai_score FROM photo p WHERE p.id=session_photo.photo_id);
+CREATE INDEX idx_sp_taken_asc ON session_photo(session_id, COALESCE(sk_taken, 9223372036854775807), photo_id);
+CREATE INDEX idx_sp_taken_desc ON session_photo(session_id, COALESCE(sk_taken, -9223372036854775807) DESC, photo_id);
+CREATE INDEX idx_sp_name ON session_photo(session_id, sk_name COLLATE NOCASE, photo_id);
+CREATE INDEX idx_sp_rating ON session_photo(session_id, COALESCE(sk_rating, -1) DESC, photo_id);
+CREATE INDEX idx_sp_ai ON session_photo(session_id, CAST(COALESCE(sk_ai, -0.001) * 1000000 AS INTEGER) DESC, photo_id);
+INSERT INTO catalog_meta(key, value) VALUES('session_derived_epoch', '1');
+
+CREATE TRIGGER trg_session_stat_new AFTER INSERT ON session BEGIN
+  INSERT OR REPLACE INTO session_stat(session_id) VALUES(NEW.id);
+END;
+CREATE TRIGGER trg_sp_insert AFTER INSERT ON session_photo BEGIN
+  UPDATE session_stat SET
+    photo_count = photo_count + 1,
+    picked_count = picked_count + COALESCE((SELECT flag=1 FROM photo WHERE id=NEW.photo_id), 0),
+    rejected_count = rejected_count + COALESCE((SELECT flag=-1 FROM photo WHERE id=NEW.photo_id), 0),
+    rated_count = rated_count + COALESCE((SELECT user_rating IS NOT NULL FROM photo WHERE id=NEW.photo_id), 0)
+  WHERE session_id=NEW.session_id;
+  UPDATE session_photo SET (sk_taken, sk_name, sk_rating, sk_ai) =
+    (SELECT taken_at, file_name, user_rating, ai_score FROM photo WHERE id=NEW.photo_id)
+  WHERE session_id=NEW.session_id AND photo_id=NEW.photo_id;
+END;
+CREATE TRIGGER trg_sp_delete AFTER DELETE ON session_photo
+WHEN EXISTS(SELECT 1 FROM session WHERE id=OLD.session_id) BEGIN
+  UPDATE session_stat SET
+    photo_count = photo_count - 1,
+    picked_count = picked_count - COALESCE((SELECT flag=1 FROM photo WHERE id=OLD.photo_id), 0),
+    rejected_count = rejected_count - COALESCE((SELECT flag=-1 FROM photo WHERE id=OLD.photo_id), 0),
+    rated_count = rated_count - COALESCE((SELECT user_rating IS NOT NULL FROM photo WHERE id=OLD.photo_id), 0)
+  WHERE session_id=OLD.session_id;
+END;
+CREATE TRIGGER trg_photo_unlink BEFORE DELETE ON photo BEGIN
+  DELETE FROM session_photo WHERE photo_id=OLD.id;
+END;
+CREATE TRIGGER trg_photo_flag AFTER UPDATE OF flag ON photo WHEN OLD.flag IS NOT NEW.flag BEGIN
+  UPDATE session_stat SET
+    picked_count = picked_count + COALESCE(NEW.flag=1, 0) - COALESCE(OLD.flag=1, 0),
+    rejected_count = rejected_count + COALESCE(NEW.flag=-1, 0) - COALESCE(OLD.flag=-1, 0)
+  WHERE session_id IN (SELECT session_id FROM session_photo WHERE photo_id=NEW.id);
+END;
+CREATE TRIGGER trg_photo_rating AFTER UPDATE OF user_rating ON photo WHEN OLD.user_rating IS NOT NEW.user_rating BEGIN
+  UPDATE session_stat SET
+    rated_count = rated_count + (NEW.user_rating IS NOT NULL) - (OLD.user_rating IS NOT NULL)
+  WHERE session_id IN (SELECT session_id FROM session_photo WHERE photo_id=NEW.id);
+  UPDATE session_photo SET sk_rating=NEW.user_rating WHERE photo_id=NEW.id;
+END;
+CREATE TRIGGER trg_photo_taken AFTER UPDATE OF taken_at ON photo WHEN OLD.taken_at IS NOT NEW.taken_at BEGIN
+  UPDATE session_photo SET sk_taken=NEW.taken_at WHERE photo_id=NEW.id;
+END;
+CREATE TRIGGER trg_photo_name AFTER UPDATE OF file_name ON photo WHEN OLD.file_name IS NOT NEW.file_name BEGIN
+  UPDATE session_photo SET sk_name=NEW.file_name WHERE photo_id=NEW.id;
+END;
+CREATE TRIGGER trg_photo_ai AFTER UPDATE OF ai_score ON photo WHEN OLD.ai_score IS NOT NEW.ai_score BEGIN
+  UPDATE session_photo SET sk_ai=NEW.ai_score WHERE photo_id=NEW.id;
+END;
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.
@@ -336,6 +416,7 @@ fn open_conns(path: &Path) -> Result<Vec<Connection>> {
     configure(&first)?;
     migrate(&mut first)?;
     crate::device::backfill(&first)?;
+    crate::catalog::ensure_session_derived(&first)?;
     let mut conns = vec![first];
     for _ in 1..POOL_SIZE {
         let c = Connection::open(path)?;
