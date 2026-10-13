@@ -195,14 +195,23 @@ pub fn apply_catalog(x: &mut Xmp, c: &CatalogValues) -> Result<bool, XmpError> {
     Ok(x.serialize() != before)
 }
 
-/// Writes `bytes` to `path` through a temporary file in the same directory.
-pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// A temporary sibling path for `path` that is unique per call. The process id alone is not
+/// enough: two writers of the same file in one process (the debounced flush and an explicit
+/// sync) would share the temp file, and the loser's rename fails with ENOENT.
+pub(crate) fn tmp_path(path: &Path) -> PathBuf {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let tmp = dir.join(format!(".{name}.ip-tmp-{}", std::process::id()));
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    dir.join(format!(".{name}.ip-tmp-{}-{n}", std::process::id()))
+}
+
+/// Writes `bytes` to `path` through a temporary file in the same directory.
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = tmp_path(path);
     let res = (|| {
         std::fs::write(&tmp, bytes)?;
         std::fs::rename(&tmp, path)
@@ -322,5 +331,42 @@ mod tests {
         assert_eq!(std::fs::read(&p).unwrap(), b"two");
         let n = std::fs::read_dir(d.path()).unwrap().count();
         assert_eq!(n, 1, "no temp file left behind");
+    }
+
+    /// Regression: concurrent writers of one sidecar used a shared `.ip-tmp-<pid>` file, so one
+    /// rename could steal the other's temp file and fail with "No such file or directory"
+    /// (seen on the macOS CI runner).
+    #[test]
+    fn concurrent_writers_of_one_file_do_not_collide() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a.xmp");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let hs: Vec<_> = (0..8)
+            .map(|t| {
+                let (p, b) = (p.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    b.wait();
+                    for i in 0..200 {
+                        atomic_write(&p, format!("{t}-{i}").as_bytes()).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in hs {
+            h.join().unwrap();
+        }
+        assert!(p.exists());
+        assert_eq!(
+            std::fs::read_dir(d.path()).unwrap().count(),
+            1,
+            "no temp left"
+        );
+    }
+
+    #[test]
+    fn temp_paths_are_unique_per_call() {
+        let p = Path::new("/x/a.xmp");
+        assert_ne!(tmp_path(p), tmp_path(p));
+        assert_eq!(tmp_path(p).parent(), p.parent());
     }
 }
