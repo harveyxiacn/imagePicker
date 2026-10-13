@@ -54,6 +54,19 @@ node bench/report.mjs bench/results/baseline.json bench/results/after.json bench
 `bench/data`), `--out`, `--only`. Use the same `--work` for both runs of a comparison so both see the
 same data. Timings on a shared machine move by 10-30%; compare runs made back to back.
 
+## Render benchmark (`bench_render`)
+
+`cargo run --release -p ip-render --example bench_render [-- options]` renders a 24 MP synthetic source with a heavy stack (plus patch and portrait stacks) and prints best / p50 / p95 milliseconds per case for the CPU and, if an adapter exists, the GPU. Without options it only reports. Thresholds make it exit with status 1 when exceeded (it is not part of CI; a GPU runner can enforce them):
+
+| Option | Meaning |
+|---|---|
+| `--runs N` | timed runs per case (default 5 / 3 / 2 depending on the case); use 20 or more for a stable p95 |
+| `--max-ms MS` | p95 limit for the "drag" cases on the active backend (GPU if present, else CPU); the target is 50 on a discrete GPU, 150 on an integrated one |
+| `--max-ms-portrait MS` | p95 limit for the portrait (warp + beauty) cases; the target is 200 |
+| `--max-ms-all MS` | p95 limit for every case of every stack |
+
+The limits apply to the GPU numbers when a GPU is present, otherwise to the CPU numbers, so a CPU-only machine will usually fail a GPU target; pass the thresholds only on the machine they were set for. Exceeded cases are listed on stderr under `THRESHOLD EXCEEDED`.
+
 ## Notes on the numbers
 
 * Import marks come from the WebSocket (`thumbs.ready` events are coalesced every 100 ms), so
