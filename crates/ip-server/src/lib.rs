@@ -171,6 +171,7 @@ pub fn build_router_auth(
         .route("/people", get(m2::people).post(m2::create_person))
         .route("/people/merge", post(m2::merge_people))
         .route("/people/{id}", patch(m2::patch_person))
+        .route("/people/{id}/faces", get(m2::person_faces))
         .route(
             "/edits/{id}",
             get(m3::get_edit).put(m3::put_edit).delete(m3::delete_edit),

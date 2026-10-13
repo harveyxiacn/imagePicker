@@ -1577,6 +1577,11 @@ impl Core {
         Ok(p)
     }
 
+    /// `GET /api/people/{id}/faces`: ids of the faces assigned to the person.
+    pub async fn person_face_ids(&self, id: i64) -> Result<Vec<i64>> {
+        self.db.call(move |c| store::person_face_ids(c, id)).await
+    }
+
     pub async fn merge_people(&self, req: MergePeopleRequest) -> Result<Person> {
         let (ids, into) = (req.ids.clone(), req.into);
         let sessions_before = {
