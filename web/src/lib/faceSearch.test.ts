@@ -7,6 +7,7 @@ import {
   initFaceSearch,
   initialFaceSearch,
   newPersonFaceIds,
+  DEFAULT_SEARCH_SIMILARITY,
   similarityPct,
   toggleChosen,
   type FaceQuery,
@@ -126,5 +127,25 @@ describe('"this is a new person" selection', () => {
     expect(s.status === 'results' && [...s.chosen].sort()).toEqual([2, 3, 5])
     s = faceSearchReducer(s, { type: 'toggleChosen', faceId: 4 })
     expect(s.status === 'results' && [...s.chosen].sort()).toEqual([2, 3, 4, 5])
+  })
+})
+
+describe('search again with another similarity floor', () => {
+  it('re-searches the same image face and the same library face', () => {
+    let s: FaceSearchState = faceSearchReducer(initialFaceSearch, { type: 'pick', file })
+    s = faceSearchReducer(s, { type: 'result', resp: resp(3, 1) })
+    s = faceSearchReducer(s, { type: 'research' })
+    expect(s).toMatchObject({ status: 'searching', faceIndex: 1, query: image })
+    s = faceSearchReducer(s, { type: 'result', resp: resp(3, 1) })
+    expect(s).toMatchObject({ status: 'results', faceIndex: 1 })
+
+    let f: FaceSearchState = faceSearchReducer(initialFaceSearch, { type: 'pickFace', faceId: 50, photoId: 5 })
+    f = faceSearchReducer(f, { type: 'result', resp: resp(1) })
+    expect(faceSearchReducer(f, { type: 'research' })).toMatchObject({ status: 'searching', faceIndex: null, query: libraryFace })
+  })
+
+  it('does nothing outside results and keeps the server default floor', () => {
+    expect(faceSearchReducer(initialFaceSearch, { type: 'research' })).toBe(initialFaceSearch)
+    expect(DEFAULT_SEARCH_SIMILARITY).toBe(0.25)
   })
 })

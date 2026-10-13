@@ -46,6 +46,31 @@ describe('collection query <-> filter', () => {
     expect(buildPhotosQuery(1, back)).toEqual(buildPhotosQuery(1, rich))
   })
 
+  it('round-trips lens, date range, keywords, sharpness and similar faces', () => {
+    const more = f({
+      lens: ['50mm', 'RF 24-70mm F2.8, L'],
+      takenFrom: '2024-05-01',
+      takenTo: '2024-05-31',
+      tags: ['kyoto', 'a,b'],
+      tagMode: 'all',
+      sharp: 'unknown',
+      faceIds: [4, 9],
+      faceSimilarity: 0.5,
+    })
+    const q = filterToQuery(more)
+    expect(new URLSearchParams(q).get('lens')).toBe('50mm,RF 24-70mm F2.8\\, L')
+    const back = queryToFilter(q)
+    expect(back).toEqual(more)
+    expect(filterToQuery(back)).toBe(q)
+    expect(collectionActive(q, more)).toBe(true)
+    expect(collectionActive(q, f({ ...more, sharp: 'sharp' }))).toBe(false)
+  })
+
+  it('drops invalid dates, sharpness values and similarities from a stored query', () => {
+    const back = queryToFilter('taken_from=yesterday&taken_to=2024-02-30&sharp=crisp&face_ids=1,x&face_similarity=7')
+    expect(back).toEqual(f({ faceIds: [1] }))
+  })
+
   it('"any issue" serialises to every issue and parses back to the empty selection', () => {
     const anyIssue = f({ issueMode: 'any', issues: [] })
     const back = queryToFilter(filterToQuery(anyIssue))

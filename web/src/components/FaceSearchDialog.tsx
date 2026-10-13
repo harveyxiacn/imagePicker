@@ -6,7 +6,18 @@ import { useMatch, useNavigate } from 'react-router-dom'
 import { api, ApiError, faceCropUrl } from '@/api/client'
 import { usePeople } from '@/api/queries'
 import { qk } from '@/lib/cache'
-import { faceSearchReducer, firstImage, initFaceSearch, newPersonFaceIds, queryPhoto, similarityPct, type FaceSearchEvent } from '@/lib/faceSearch'
+import {
+  DEFAULT_SEARCH_SIMILARITY,
+  faceSearchReducer,
+  firstImage,
+  initFaceSearch,
+  newPersonFaceIds,
+  queryPhoto,
+  SEARCH_SIMILARITY_MAX,
+  SEARCH_SIMILARITY_MIN,
+  similarityPct,
+  type FaceSearchEvent,
+} from '@/lib/faceSearch'
 import { DEFAULT_PERSON_FILTER } from '@/lib/filter'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -39,6 +50,9 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
   const [naming, setNaming] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const input = useRef<HTMLInputElement>(null)
+  /** Similarity floor of the search; the slider shows `minSim`, searches use the committed `minRef`. */
+  const [minSim, setMinSim] = useState(DEFAULT_SEARCH_SIMILARITY)
+  const minRef = useRef(DEFAULT_SEARCH_SIMILARITY)
   const people = usePeople(sessionId)
   const navigate = useNavigate()
   const inLibrary = useMatch('/s/:sessionId')
@@ -54,10 +68,11 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
     if (state.status !== 'searching') return
     let alive = true
     const q = state.query
+    const min_similarity = minRef.current
     const req =
       q.kind === 'image'
-        ? api.faceSearch({ image: q.file }, { session_id: sessionId, ...(state.faceIndex !== null ? { face_index: state.faceIndex } : {}) })
-        : api.faceSearch({ face_id: q.faceId }, { session_id: sessionId })
+        ? api.faceSearch({ image: q.file }, { session_id: sessionId, min_similarity, ...(state.faceIndex !== null ? { face_index: state.faceIndex } : {}) })
+        : api.faceSearch({ face_id: q.faceId }, { session_id: sessionId, min_similarity })
     req
       .then((resp) => alive && dispatch({ type: 'result', resp }))
       .catch((err: unknown) => alive && dispatch({ type: 'fail', message: err instanceof ApiError || err instanceof Error ? err.message : String(err) }))
@@ -98,6 +113,24 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
     if (inLibrary) useUi.getState().setFilter({ person })
     else {
       useUi.getState().openWithFilter({ person })
+      navigate(`/s/${sessionId}`)
+    }
+    close()
+  }
+
+  /** Re-run the search once the slider is released with a new floor. */
+  const commitMinSim = () => {
+    if (minSim === minRef.current) return
+    minRef.current = minSim
+    go({ type: 'research' })
+  }
+
+  /** Show the photos that have a face as similar as the slider says (the library's similar-faces filter). */
+  const filterLibrary = (faceId: number) => {
+    const patch = { faceIds: [faceId], faceSimilarity: Math.max(0.2, minSim) }
+    if (inLibrary) useUi.getState().setFilter(patch)
+    else {
+      useUi.getState().openWithFilter(patch)
       navigate(`/s/${sessionId}`)
     }
     close()
@@ -237,7 +270,32 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
                   </ul>
                 )}
 
-                <div className="mt-1 flex flex-col gap-1.5 border-t border-line pt-2" data-testid="face-search-similar">
+                <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-line pt-2 text-xs text-muted">
+                  <label className="flex items-center gap-2">
+                    {t('faceSearch.minSimilarity')}
+                    <input
+                      type="range"
+                      className="w-32"
+                      min={SEARCH_SIMILARITY_MIN}
+                      max={SEARCH_SIMILARITY_MAX}
+                      step={0.05}
+                      value={minSim}
+                      onChange={(e) => setMinSim(Number(e.target.value))}
+                      onPointerUp={commitMinSim}
+                      onKeyUp={commitMinSim}
+                      aria-label={t('faceSearch.minSimilarity')}
+                      data-testid="face-search-min"
+                    />
+                    <span className="tnum w-9">{similarityPct(minSim)}%</span>
+                  </label>
+                  {results.query.kind === 'face' && (
+                    <button className="btn ml-auto" onClick={() => filterLibrary(results.query.kind === 'face' ? results.query.faceId : 0)} data-testid="face-search-filter-library">
+                      {t('faceSearch.filterLibrary')}
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-1.5" data-testid="face-search-similar">
                   <div className="flex items-center justify-between gap-2 text-xs text-muted">
                     <span>{t('faceSearch.similarCount', { n: results.resp.similar_faces.length })}</span>
                     {results.resp.similar_faces.length > 0 && <span className="truncate text-faint">{t('faceSearch.tickHint')}</span>}
