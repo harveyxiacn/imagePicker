@@ -72,3 +72,19 @@ describe('history store', () => {
     expect(useHistory.getState().undoStack.at(-1)?.label).toBe('e249')
   })
 })
+
+describe('structural entries share the stack', () => {
+  it('a custom entry is undone and redone in order with photo entries', () => {
+    const noop = async () => undefined
+    const h = useHistory.getState()
+    h.clear()
+    h.push({ label: 'rate', changes: computeChanges([photo(1, null)], { user_rating: 3 }) })
+    h.push({ label: 'split', changes: [], custom: { undo: noop, redo: noop } })
+    const e = useHistory.getState().undo()
+    expect(e?.label).toBe('split')
+    expect(e?.custom).toBeDefined()
+    expect(useHistory.getState().undo()?.custom).toBeUndefined()
+    expect(useHistory.getState().redo()?.label).toBe('rate')
+    expect(useHistory.getState().redo()?.label).toBe('split')
+  })
+})

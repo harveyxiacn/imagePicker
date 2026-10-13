@@ -1702,6 +1702,16 @@ pub fn get_person(conn: &Connection, id: i64) -> Result<Person> {
     })
 }
 
+/// Ids of the faces assigned to a person (undo of a merge restores them).
+pub fn person_face_ids(conn: &Connection, id: i64) -> Result<Vec<i64>> {
+    get_person(conn, id)?;
+    let mut st = conn.prepare("SELECT id FROM face WHERE person_id=?1 ORDER BY id")?;
+    let v = st
+        .query_map([id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(v)
+}
+
 pub fn sessions_of_people(conn: &Connection, person_ids: &[i64]) -> Result<Vec<i64>> {
     if person_ids.is_empty() {
         return Ok(vec![]);
