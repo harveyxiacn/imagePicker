@@ -437,6 +437,7 @@ async fn guest_is_read_only() {
         (Method::DELETE, "/api/sessions/1"),
         (Method::POST, "/api/taste/reset"),
         (Method::POST, "/api/auth/password"),
+        (Method::POST, "/api/system/diagnostics"),
     ] {
         let r = send(
             &app,
@@ -455,6 +456,71 @@ async fn guest_is_read_only() {
     assert_eq!(
         send(&app, g("/api/sessions")).await.status,
         StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn diagnostics_bundle_is_owner_only_and_leaks_no_secrets() {
+    let e = env();
+    let app = e.lan_app(|_| {});
+    let uri = "/api/system/diagnostics";
+
+    // not logged in
+    let r = send(&app, post(uri, json!({})).lan()).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+
+    // a guest: neither POST nor GET
+    let guest = login(&app, GUEST_PW).await.cookie().unwrap();
+    let r = send(&app, post(uri, json!({})).lan().cookie(&guest)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.code(), "forbidden");
+    let r = send(&app, get(uri).lan().cookie(&guest)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    // the owner gets a zip download
+    let owner = login(&app, OWNER_PW).await.cookie().unwrap();
+    let r = send(&app, get(uri).lan().cookie(&owner)).await;
+    assert_eq!(r.status, StatusCode::METHOD_NOT_ALLOWED);
+    let r = send(&app, post(uri, json!({})).lan().cookie(&owner)).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.headers[header::CONTENT_TYPE], "application/zip");
+    assert_eq!(r.headers[header::CACHE_CONTROL], "no-store");
+    let disp = r.headers[header::CONTENT_DISPOSITION].to_str().unwrap();
+    assert!(
+        disp.starts_with("attachment; filename=\"imagepicker-diagnostics-")
+            && disp.ends_with(".zip\""),
+        "{disp}"
+    );
+    let entries = ip_core::diagnostics::read_zip(&r.body);
+    let names: Vec<&str> = entries.iter().map(|(n, _)| n.as_str()).collect();
+    for want in [
+        "manifest.json",
+        "system.json",
+        "settings.json",
+        "catalog.json",
+    ] {
+        assert!(names.contains(&want), "{want} missing from {names:?}");
+    }
+    // LAN settings are reported, the passwords (and their hashes) are not
+    let settings: Value = serde_json::from_slice(
+        &entries
+            .iter()
+            .find(|(n, _)| n == "settings.json")
+            .unwrap()
+            .1,
+    )
+    .unwrap();
+    assert_eq!(settings["lan"]["enabled"], true);
+    assert_eq!(settings["lan"]["port"], 7878);
+    for (n, data) in &entries {
+        let text = String::from_utf8_lossy(data);
+        assert!(!text.contains(OWNER_PW) && !text.contains(GUEST_PW), "{n}");
+        assert!(!text.contains("argon2"), "{n}: password hash");
+    }
+    let sec = std::fs::read_to_string(e.data.path().join("security.json")).unwrap_or_default();
+    assert!(
+        sec.contains("argon2"),
+        "the fixture keeps hashes in security.json"
     );
 }
 

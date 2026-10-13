@@ -759,10 +759,10 @@ fn print_report(r: &AnalyzeReport) {
     println!("people:        {}", r.people);
 }
 
-fn init_tracing(default: &str) {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+/// Logs to stderr and to rotating files under `<data dir>/logs`; panics are recorded under
+/// `<data dir>/crashes` (`ip_core::logging`).
+fn init_tracing(default: &str, data_dir: Option<&std::path::Path>) {
+    ip_core::logging::init(data_dir, default, true);
 }
 
 #[tokio::main]
@@ -777,7 +777,7 @@ async fn main() -> Result<()> {
             password,
             guest_password,
         } => {
-            init_tracing("info,tower_http=info");
+            init_tracing("info,tower_http=info", data_dir.as_deref());
             let password = password.or_else(|| {
                 std::env::var("IMAGEPICKER_PASSWORD")
                     .ok()
@@ -805,7 +805,7 @@ async fn main() -> Result<()> {
             no_recursive,
             title,
         } => {
-            init_tracing("warn");
+            init_tracing("warn", data_dir.as_deref());
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
             let stats = import_headless(&core, dir, !no_recursive, title).await?;
             print_stats(&stats);
@@ -820,7 +820,7 @@ async fn main() -> Result<()> {
             force,
             face_consent,
         } => {
-            init_tracing("warn");
+            init_tracing("warn", data_dir.as_deref());
             let profile = Profile::parse(&profile)
                 .ok_or_else(|| anyhow::anyhow!("--profile must be lite, fast or standard"))?;
             if let Some(d) = models_dir {
@@ -855,7 +855,7 @@ async fn main() -> Result<()> {
             base,
             data_dir,
         } => {
-            init_tracing("warn");
+            init_tracing("warn", data_dir.as_deref());
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
             let res = besttake_headless(&core, burst_id, base, auto).await;
             core.worker.shutdown().await;
@@ -886,7 +886,7 @@ async fn main() -> Result<()> {
             model,
             data_dir,
         } => {
-            init_tracing("warn");
+            init_tracing("warn", data_dir.as_deref());
             anyhow::ensure!(
                 bystanders || !face_ids.is_empty(),
                 "give --bystanders or --face-ids"
@@ -911,7 +911,7 @@ async fn main() -> Result<()> {
             engine,
             data_dir,
         } => {
-            init_tracing("warn");
+            init_tracing("warn", data_dir.as_deref());
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
             let (plan, done) = ask_headless(&core, session, &message, execute, engine).await?;
             print_plan_out(&plan);
@@ -928,7 +928,7 @@ async fn main() -> Result<()> {
         }
         Command::Bench { cmd } => tokio::task::block_in_place(|| bench::run(cmd)),
         Command::Taste { retrain, data_dir } => {
-            init_tracing("warn");
+            init_tracing("warn", data_dir.as_deref());
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
             let t = if retrain {
                 core.retrain_taste().await?
@@ -947,7 +947,7 @@ async fn main() -> Result<()> {
             data_dir,
             quality,
         } => {
-            init_tracing("warn");
+            init_tracing("warn", data_dir.as_deref());
             let core = Core::open(CoreConfig {
                 force_cpu: cpu,
                 ..CoreConfig::new(data_dir)

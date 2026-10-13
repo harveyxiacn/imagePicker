@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use ip_worker_client::process::pid_alive;
 use ip_worker_client::{
-    AiWorker, AnalyzeRequest, AnalyzeRequestItem, CancelToken, ManagedWorker, WorkerConfig,
-    WorkerError, WorkerState,
+    AiWorker, AnalyzeRequest, AnalyzeRequestItem, CancelToken, CrashSink, ManagedWorker,
+    WorkerConfig, WorkerError, WorkerState,
 };
 use serde_json::json;
 
@@ -249,4 +249,59 @@ async fn a_scoped_cancel_stops_a_generation_call_on_the_worker() {
     let stopped = w.raw_call("cancelled", json!({})).await.unwrap();
     assert_eq!(stopped.as_array().map(Vec::len), Some(1), "{stopped}");
     w.shutdown().await;
+}
+
+/// A config whose crash sink forwards `(kind, message, stderr tail)` to a channel.
+fn with_sink(
+    mut c: WorkerConfig,
+) -> (
+    WorkerConfig,
+    tokio::sync::mpsc::UnboundedReceiver<(String, String, String)>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    c.crash_sink = Some(CrashSink(std::sync::Arc::new(move |k, m, t| {
+        let _ = tx.send((k.to_string(), m.to_string(), t.to_string()));
+    })));
+    (c, rx)
+}
+
+#[tokio::test]
+async fn worker_exit_reaches_the_crash_sink() {
+    let (c, mut rx) = with_sink(cfg());
+    let w = ManagedWorker::new(c);
+    w.raw_call("pid", json!({})).await.unwrap();
+    let r = w.raw_call("crash", json!({})).await;
+    assert!(matches!(r, Err(WorkerError::Disconnected)), "{r:?}");
+    let (kind, msg, _tail) = tokio::time::timeout(Duration::from_secs(20), rx.recv())
+        .await
+        .expect("the sink is told")
+        .unwrap();
+    assert_eq!(kind, "worker-exit");
+    assert!(msg.contains("exited"), "{msg}");
+    w.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_failed_start_reaches_the_crash_sink_but_a_requested_stop_does_not() {
+    let (c, mut rx) = with_sink(WorkerConfig {
+        cmd: Some(format!(
+            "\"{}\" --nope {{token}}",
+            env!("CARGO_BIN_EXE_ip-fake-worker")
+        )),
+        ..cfg()
+    });
+    let w = ManagedWorker::new(c);
+    assert!(w.system_info().await.is_err());
+    let (kind, _msg, _tail) = rx.recv().await.unwrap();
+    assert_eq!(kind, "worker-start-failed");
+
+    let (c, mut rx) = with_sink(cfg());
+    let w = ManagedWorker::new(c);
+    w.raw_call("pid", json!({})).await.unwrap();
+    w.shutdown().await;
+    assert_eq!(w.status().state, WorkerState::Stopped);
+    drop(w);
+    // the sink (and its sender) went away with the worker without ever being called
+    let r = tokio::time::timeout(Duration::from_secs(20), rx.recv()).await;
+    assert!(matches!(r, Ok(None)), "{r:?}");
 }
