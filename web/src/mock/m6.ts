@@ -750,6 +750,15 @@ export const m6Handlers = [
     return json({ ...catalogStatus(), restored_from: name })
   }),
 
+  http.post('/api/system/diagnostics', async () => {
+    await delay(400)
+    // a stand-in for the real zip: the mock has no logs, crashes or catalog to bundle
+    return new HttpResponse(new Blob(['mock diagnostics bundle'], { type: 'application/zip' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="imagepicker-diagnostics-mock.zip"', 'Cache-Control': 'no-store' },
+    })
+  }),
+
   http.post('/api/xmp/sync', async ({ request }) => {
     await delay(300)
     const { session_id, direction } = (await request.json()) as { session_id: number; direction: 'read' | 'write' }

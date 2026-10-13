@@ -64,6 +64,7 @@ import type {
   SettingsPatch,
   TaskRecord,
 } from './types'
+import { diagnosticsFilename } from '@/lib/diagnostics'
 
 export class ApiError extends Error {
   status: number
@@ -115,6 +116,13 @@ async function toApiError(res: Response, path = ''): Promise<ApiError> {
     /* non-JSON error body */
   }
   return new ApiError(res.status, code, message, body)
+}
+
+/** POST /api/system/diagnostics: the diagnostics zip (owner only), with the file name the server chose. */
+export async function exportDiagnostics(): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(`${BASE}/system/diagnostics`, { method: 'POST' })
+  if (!res.ok) throw await toApiError(res, '/system/diagnostics')
+  return { blob: await res.blob(), filename: diagnosticsFilename(res.headers.get('Content-Disposition')) }
 }
 
 /** POST /api/render/preview: JPEG body plus `X-Render-Ms` / `X-Render-Backend` headers. Abortable. */
