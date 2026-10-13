@@ -74,7 +74,14 @@ export interface Photo {
   missing?: boolean
   /** RAW files paired with this photo by name (same folder, same base name); the photo is the JPEG */
   companions?: Companion[]
+  // ---- duplicates (api-contract-m2 "重复") ----
+  /** Smallest photo id of the duplicate group (catalog wide, across sessions); null = not a duplicate */
+  duplicate_group_id?: number | null
+  /** `exact` = a byte-identical copy exists; `near` = the same picture saved again without metadata */
+  duplicate_kind?: DuplicateKind
 }
+
+export type DuplicateKind = 'exact' | 'near'
 
 export interface Companion {
   id: number
@@ -153,6 +160,10 @@ export interface PhotosQuery {
   has_edits?: boolean
   /** Device ids and/or 'none' (photos without EXIF camera) */
   device?: Array<number | 'none'>
+  /** Only photos that have a duplicate anywhere in the catalog (built-in "duplicates" collection) */
+  duplicates?: boolean
+  /** Only photos of one event of `GET /sessions/{id}/timeline` */
+  event_id?: number
   /** Exact EXIF lens names (OR-ed) */
   lens?: string[]
   /** Capture-time range, `YYYY-MM-DD` (whole days, wall clock) or ms; both ends inclusive */
@@ -399,6 +410,32 @@ export interface Scene {
 }
 export interface GroupsResponse {
   scenes: Scene[]
+}
+
+/** Event layer (api-contract-m2 "事件与重复"): scenes of one session cut at pauses > 2 h or moves > 5 km. */
+export interface TimelineEvent {
+  id: number
+  /** server default: title, else local date and time span ("2024-05-03 10:12-14:40") */
+  name: string
+  title: string | null
+  place: string | null
+  /** capture time (UTC ms) of the first / last photo */
+  start_at: number
+  end_at: number
+  /** UTC offset (minutes) of the first photo with a known offset */
+  offset_min: number | null
+  gps_lat: number | null
+  gps_lon: number | null
+  photo_count: number
+  scenes: Scene[]
+}
+export interface TimelineResponse {
+  events: TimelineEvent[]
+}
+export interface DuplicatesResponse {
+  group_id: number | null
+  photo_ids: number[]
+  exact_ids: number[]
 }
 
 export interface FaceTrack {

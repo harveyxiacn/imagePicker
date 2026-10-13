@@ -270,7 +270,7 @@ Events are coalesced per 100 ms per type, so the floor is ~50 ms (half a tick on
 
 ## Remaining gaps
 
-* **Single 100k-row session** (outside the PRD: 20k per session): fixed on 2026-10-13 (migration v13). The sort keys are kept next to the session membership with one index per sort, so a page is read in order and stops after `limit + 1` rows: 500-row pages cost 2.8-3.3 ms at 100k rows (was 9.6-29 ms), see [`large-sessions-2026-10-13.md`](large-sessions-2026-10-13.md). Writes cost about 17 us more per photo row (triggers + 5 indexes).
+* **Single 100k-row session** (outside the PRD: 20k per session): fixed on 2026-10-13 (migration v14). The sort keys are kept next to the session membership with one index per sort, so a page is read in order and stops after `limit + 1` rows: 500-row pages cost 2.8-3.3 ms at 100k rows (was 9.6-29 ms), see [`large-sessions-2026-10-13.md`](large-sessions-2026-10-13.md). Writes cost about 17 us more per photo row (triggers + 5 indexes).
 * `rating_gte` on a single 20k session is slower than before (0.5 to 2.1 ms): the old plan used the rating index, which wins when almost nothing matches but lost badly (27 ms) at 100k rows.
 * `GET /api/sessions` reads the per-session counters (`session_stat`, maintained by triggers) instead of aggregating every member row: 0.23 ms with a 100k-row session (was 26.8 ms on this machine).
 * Preview generation for 12 MP originals is 35 ms (1024) / 65 ms (2048) cold; the loupe hides it by preloading neighbours, but jumping to a far photo waits for it (the 256 px thumbnail shows meanwhile).

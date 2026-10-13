@@ -249,6 +249,13 @@ impl Core {
             });
         }
 
+        // exact duplicates (also of other sessions) are known as soon as the content keys are
+        if total_meta > 0 {
+            if let Err(e) = self.refresh_duplicates().await {
+                tracing::warn!(error = %e, "duplicate detection failed");
+            }
+        }
+
         // 4. wait for the grid thumbnails of this import
         tracker.wait_idle().await;
         // 5. settings: analyse right away

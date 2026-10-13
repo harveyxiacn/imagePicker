@@ -242,11 +242,11 @@ fn derived_data_is_rebuilt_when_the_epoch_differs() {
 }
 
 #[test]
-fn the_v13_migration_backfills_an_existing_catalog() {
+fn the_v14_migration_backfills_an_existing_catalog() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = Connection::open(dir.path().join("old.db")).unwrap();
     c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
-    crate::db::migrate_to(&mut c, 12).unwrap();
+    crate::db::migrate_to(&mut c, 13).unwrap();
     let root = catalog::upsert_root(&c, "/lib/old").unwrap();
     let sid = catalog::create_session(&c, root, "old").unwrap();
     let batch: Vec<NewPhoto> = (0..25)

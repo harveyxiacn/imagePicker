@@ -57,11 +57,24 @@ impl Imaging for FakeImaging {
         } else {
             (Some("FAKE".to_string()), Some("FAKE Cam 1".to_string()))
         };
+        // `noexif_*`: a copy saved without metadata (no capture time, no camera, no GPS).
+        let no_exif = name.starts_with("noexif_");
+        // `geoA_*` / `geoB_*` / `geoC_*`: GPS positions 0 / 11 / 3.3 km east of each other
+        // (A and B are further apart than the 5 km of an event, A and C are not).
+        let (gps_lat, gps_lon) = match name.get(..5) {
+            Some("geoA_") => (Some(35.6762), Some(139.6503)),
+            Some("geoB_") => (Some(35.6762), Some(139.7700)),
+            Some("geoC_") => (Some(35.6762), Some(139.6860)),
+            _ => (None, None),
+        };
+        let (make, model) = if no_exif { (None, None) } else { (make, model) };
         Ok(Metadata {
             width: Some(w),
             height: Some(h),
             orientation: 1,
-            taken_at_ms: Some(mtime),
+            taken_at_ms: if no_exif { None } else { Some(mtime) },
+            gps_lat,
+            gps_lon,
             camera_make: make,
             camera_model: model,
             lens: Some("50mm".into()),

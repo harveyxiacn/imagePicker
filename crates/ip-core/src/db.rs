@@ -247,7 +247,24 @@ CREATE INDEX idx_photo_pair ON photo(pair_id);
 ALTER TABLE session ADD COLUMN recursive INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE session ADD COLUMN exclude TEXT;
 "#,
-    // v13: large sessions (docs/05 section 1.3): per-session counters (`session_stat`) and the
+    // v13: events and duplicates (docs/09 P1-1, P1-3). `event` (present since v1, unused until
+    // now) belongs to a session and holds what the event list shows; `scene.event_id` links the
+    // scenes. `photo.dup_group_id` is the smallest photo id of the duplicate group (catalog wide),
+    // `dup_kind` is `exact` (byte-identical twin) or `near` (same picture without metadata).
+    // Existing catalogs are filled in by `analysis::layers::backfill` when they migrate.
+    r#"
+ALTER TABLE event ADD COLUMN session_id INTEGER;
+ALTER TABLE event ADD COLUMN photo_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE event ADD COLUMN offset_min INTEGER;
+ALTER TABLE event ADD COLUMN gps_lat REAL;
+ALTER TABLE event ADD COLUMN gps_lon REAL;
+CREATE INDEX idx_event_session ON event(session_id, start_at);
+CREATE INDEX idx_scene_event ON scene(event_id);
+ALTER TABLE photo ADD COLUMN dup_group_id INTEGER;
+ALTER TABLE photo ADD COLUMN dup_kind TEXT;
+CREATE INDEX idx_photo_dup ON photo(dup_group_id) WHERE dup_group_id IS NOT NULL;
+"#,
+    // v14: large sessions (docs/05 section 1.3): per-session counters (`session_stat`) and the
     // sort keys of the grid copied next to the membership row (`session_photo.sk_*`) with
     // indexes that return a page in sort order without visiting the whole session. Both are
     // derived data kept in step by triggers; `catalog::rebuild_session_derived` recomputes them
@@ -414,8 +431,12 @@ const POOL_SIZE: usize = if cfg!(target_os = "android") { 3 } else { 6 };
 fn open_conns(path: &Path) -> Result<Vec<Connection>> {
     let mut first = Connection::open(path)?;
     configure(&first)?;
+    let before = first.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?;
     migrate(&mut first)?;
     crate::device::backfill(&first)?;
+    if before < 13 {
+        crate::analysis::layers::backfill(&mut first)?;
+    }
     crate::catalog::ensure_session_derived(&first)?;
     let mut conns = vec![first];
     for _ in 1..POOL_SIZE {
