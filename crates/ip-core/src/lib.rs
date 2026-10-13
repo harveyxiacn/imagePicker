@@ -10,6 +10,7 @@ pub mod catalog;
 pub mod collections;
 pub mod db;
 pub mod device;
+pub mod diagnostics;
 pub mod edit;
 pub mod error;
 pub mod events;
@@ -22,6 +23,7 @@ pub mod jpegmeta;
 pub mod jsonfix;
 pub mod lazy_renderer;
 pub mod lite;
+pub mod logging;
 pub mod model;
 pub mod paths;
 pub mod remote;
@@ -204,6 +206,21 @@ impl Core {
                 if wc.models_dir.is_none() {
                     wc.models_dir = Some(dirs.root.join("models"));
                 }
+                wc.crash_dir = Some(dirs.crashes.clone());
+                let crashes = dirs.crashes.clone();
+                wc.crash_sink = Some(ip_worker_client::CrashSink(Arc::new(
+                    move |kind, message, stderr_tail| {
+                        let _ = logging::write_crash(
+                            &crashes,
+                            &logging::CrashReport {
+                                kind: kind.to_string(),
+                                message: message.to_string(),
+                                detail: format!("worker stderr (last lines):\n{stderr_tail}"),
+                                ..Default::default()
+                            },
+                        );
+                    },
+                )));
                 Arc::new(ManagedWorker::new(wc))
             }
         };
@@ -438,6 +455,8 @@ mod tests;
 #[cfg(test)]
 mod tests_crop;
 #[cfg(test)]
+mod tests_diag;
+#[cfg(test)]
 mod tests_files;
 #[cfg(test)]
 mod tests_filters;
@@ -459,6 +478,8 @@ mod tests_m6;
 mod tests_p1c;
 #[cfg(test)]
 mod tests_safety;
+#[cfg(test)]
+mod tests_scale;
 #[cfg(test)]
 mod tests_tasks;
 

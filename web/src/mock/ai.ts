@@ -1021,6 +1021,13 @@ export const aiHandlers = [
     const p = peopleList(null).find((x) => x.id === rec.id)
     return HttpResponse.json({ person: p ?? { id: rec.id, name: rec.name, cover_face_id: 0, photo_count: 0, hidden: rec.hidden } })
   }),
+  http.get('/api/people/:id/faces', async ({ params }) => {
+    await lat()
+    const id = Number(params.id)
+    if (!people.has(id)) return err(404, 'not_found', 'person not found')
+    const ids = [...faceById.values()].filter((f) => f.person_id === id).map((f) => f.id)
+    return HttpResponse.json({ face_ids: ids.sort((a, b) => a - b) })
+  }),
   http.post('/api/people/merge', async ({ request }) => {
     await lat()
     const { ids, into } = (await request.json()) as { ids: number[]; into: number }

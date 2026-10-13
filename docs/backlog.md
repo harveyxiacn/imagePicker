@@ -39,7 +39,7 @@
 | P2 | SDXL 增强包未用真实权重测试；OpenCV 构建无 AKAZE，仅 ORB 对齐 | M5 worker |
 | P2 | 取消生成任务时 worker 立即以 `-32800` 结束请求，但 `inpaint.run` / `enhance.run` / `besttake.compose` 在线程池里的计算不会中断，跑完才释放（紧接着的生成请求会排在它后面）；需在推理循环里检查取消标志 | M5 worker |
 | P1 | 网格 60fps 需在真实 GPU 浏览器上复测（无头软件光栅下仅 4× 降频 CPU 快速滚动时掉帧） | M7 perf |
-| P2 | 单会话 10 万张时每页约 10ms、`-taken_at` 约 28ms（需会话排序键表）；`GET /api/sessions` 10 万行约 13ms（需计数缓存） | M7 perf |
+| P2 | 单会话 10 万张的分页与会话列表已达标（迁移 v14：`session_photo.sk_*` 排序键 + 索引、`session_stat` 计数；每页 2.8–3.3ms、`GET /api/sessions` 0.23ms，见 `bench/large-sessions-2026-10-13.md`）。遗留：写入代价约 +17µs/行（10 万行种子 1.3s → 3.0s）；带筛选（评分 / 旗标 / 人物）的页仍需顺排序索引扫描会话，选择性很高的筛选在 10 万张时 4–7ms | M7 perf |
 | P1 | macOS / Linux 安装后的 AI 组件安装流程未实测；国内镜像对 `uv sync --frozen` 可能无效 | M7 runtime |
 | P1 | 应用内自动更新（tauri-plugin-updater + 签名密钥） | M7 release |
 | P2 | AUR PKGBUILD 未在 Arch 上 makepkg 实测 | M7 release |
@@ -47,9 +47,11 @@
 | P2 | 皮肤蒙版回退方案未扣除眉毛 | M4 render |
 | P1 | `ip-infer`（`infer` 特性）尚未在 Android 上链接 ONNX Runtime（NNAPI/XNNPACK）；端侧 YuNet 目前仅桌面可用，检测器为单实例互斥（分析线程间串行） | M8.1 infer |
 | P1 | Release 的 Android APK 任务（签名 keystore、`apksigner` 校验、产物路径）未在 CI 实跑；需配置 `ANDROID_KEYSTORE_*` 四个 secrets 后验证 | M8 release |
+| P2 | 运维余项（09 P1-13）：①Windows 原生异常（SEH）与 Rust `abort` 不经过 panic 钩子，Rust 侧的原生崩溃不留记录（Python 侧由 `faulthandler` 覆盖）；②日志与崩溃记录的路径 / 密钥遮盖是正则、尽力而为（带空格的 Windows 路径只保证遮盖到图片文件名），分享前仍应让用户检查；③Android 仍只写控制台日志（数据目录在 Tauri `setup` 才确定）；④诊断包的硬件概况没有内存 / 显存之外的系统信息（无 `sysinfo` 依赖），操作系统只有系统名与架构，没有版本号 | P1-13 |
 | P2 | lite 档位的 `faces` 步骤不输出关键点 / 闭眼 / 表情（需 MediaPipe 或 ONNX 关键点模型） | M8.1 infer |
 | P2 | 分析任务健壮性余项（09 WP-B）：①按步骤增量只覆盖 `embed` / `aesthetic` / `iqa` / `scene`，`faces` / `identity` 与人脸行绑定，装了人脸模型后要整批重新分析（`force`）；②暂停只在批次之间生效（每批最多 32 张，远程 AI 的一批可能要数十秒）；③续跑的真实进程强杀只在测试里用「丢弃运行时」模拟，未在 Windows / macOS / Linux 上做真正的 kill -9 实机验证；④桌面「改用快速分析」不会清掉已有的 fast / standard 结果，混合档位的会话在评分上按各自的分项计算，未做跨档位校准 | M2 / 09 WP-B |
 | P2 | 筛选补全余项（09 P1-5）：①`lens` 按 EXIF 原始字符串精确匹配，同一支镜头的不同写法（`RF24-70` / `RF 24-70`）是不同选项，没有镜头名规范化（设备名有，镜头没有）；②`face_ids` 每次查询线性扫描会话内所有有身份特征的人脸（没有向量索引，耗时与人脸数成正比，大会话上未测量；列表总数缓存在目录库无写入期间有效）；③`sharp=unknown` 表示没有清晰度度量（未分析，或该步骤没有输出），界面上叫“未分析”；④`pnpm dev:mock` 的模拟后端没有关键词和人脸特征（关键词筛选恒为空，`face_ids` 被忽略）；⑤自然语言搜索（P1-4）不在此范围 | P1-5 |
+| P2 | 可访问性余项（09 WP-O）：①撤销合并人物时按人脸重建人物，原人物 ID 与已保存的美颜档案不会恢复，撤销「并入分组」假定两组在时间上相连；②字体缩放上限 150%（09 验收口径写的是 200%），个别写死像素尺寸的控件（缩略图、手机端 44px 触控目标）不随字号变化；③axe 冒烟脚本只覆盖桌面视口的 mock 数据，未检查手机布局、屏幕阅读器实际朗读与 Tauri 窗口；未接入 CI；④高对比度 / 字号只存本机，不随服务端设置同步到其他设备 | P1-16 |
 
 ## 助手
 
@@ -68,9 +70,11 @@
 ## 已在集成中修复（记录）
 
 - Best Take 同人校验（09 §5.1 P0-2，WP-I）：`POST /api/besttake` 对源脸与底片脸不在同一连拍、不在同一轨迹/人物、或身份嵌入余弦低于 `MIN_IDENTITY_COS`（0.30）时返回 422（`besttake_cross_burst` / `besttake_person_mismatch` / `besttake_low_similarity`），界面显示对应的本地化提示；缺身份嵌入（lite）时只做连拍与轨迹/人物检查；自动路径只在同一轨迹内选脸（`tests_m5.rs`、`ip-server/tests/m5.rs`、`web/src/lib/gen.test.ts`）。契约见 `api-contract-m5.md` C 节
+- 可访问性与交互（09 §5.2 P1-16，WP-O）：①设置 → 语言与外观新增「高对比度」（`data-contrast="high"`，深色 / 浅色均有 AA 色板与 3px 焦点环）和「界面字号」90%–150%（`--font-scale`，rem 化的字号 / 控件，任意像素字号类同步缩放），两项只存本机（`imagepicker.ui`）；②`Ctrl+K` 命令面板（`CommandPalette.tsx`）对键位表动作与页面跳转模糊搜索，键位表仍是唯一来源；③撤销覆盖组拆分 / 合并与人物重命名 / 隐藏 / 合并 / 移动人脸（`lib/structureUndo.ts`，新增只读接口 `GET /api/people/{id}/faces` 供撤销合并）；④`pnpm a11y`（Playwright + axe-core，对 mock 后端）；⑤全局焦点环与输入框聚焦环。余项见「功能缺口」
 - 目录与文件（09 §5.1 P0-7、§5.2 P1-6，WP-F1）：①同目录同主文件名的 RAW+JPEG 导入后是一个网格项（JPEG 显示 / 分析，RAW 为 companion，`pair_id`），评分 / 旗标 / 色标同步到两者及各自的 XMP 侧车，分组与分析只算一次，导出可选 `pair_member`；②`POST /api/import` 支持 `exclude`（通配符 / 子文件夹 / 名字，重新扫描沿用）；③桌面端文件监听，增删文件约 2–3 秒内进网格；④缺失文件显示断链，`POST /api/sessions/{id}/relocate` 按相对路径 + 大小重新定位文件夹；⑤已淘汰照片经确认后可移入回收站（`trash`）或 `_rejected`，目录库跟随，绝不硬删（`tests_files.rs`、`ip-server/tests/files.rs`）
 
 - 数据安全 P0（09 §5.1 P0-1 / P0-3 / P0-4）：①原图只读成为硬约束——「侧车 + 内嵌」改为需二次确认的高级模式「修改原图（写入内嵌 XMP）」（`xmp_mode = modify_originals`，服务端要求 `confirm_modify_originals`，旧值降为 `sidecar`），其余模式下导入、分析、评分 / XMP 同步、编辑、导出后原图 SHA-256 不变（`tests_safety.rs`）；②目录库启动后后台 `quick_check`、每日 `VACUUM INTO` 备份留 7 份、打不开时移到 `backups/corrupt-*.db` 并以空目录库启动、可从备份恢复（`GET/POST /api/catalog*`，界面在启动弹窗与「设置 → 目录库备份」）；③人脸识别首次说明与同意（`faces.consented`），同意前不检测人脸、不计算人脸特征（lite 档同样），拒绝即 `faces.enabled = false`。同意文案待产品确认（09 §5.4 / P0-4）
+- 运维（09 §5.2 P1-13，WP-A）：①日志——服务端 / 桌面端写滚动日志到 `<数据目录>/logs`（按日或 5 MiB 换文件，14 天、40 MiB 封顶）；②崩溃记录——Rust panic 在默认钩子之前写 `crashes/crash-*.txt`（时间、版本、系统、线程、信息、回溯），AI worker 的未处理异常（`worker-crash-*.txt`）与原生崩溃（`faulthandler`，`worker-native-*.log`）进同一目录，worker 意外退出时核心保存其 stderr 末尾；③诊断包——设置页「诊断」→「导出诊断信息」（`POST /api/system/diagnostics`，仅所有者）生成 zip：版本、系统与硬件概况、脱敏设置、最近日志与崩溃记录（路径与密钥遮盖）、目录库统计（数量、架构版本、完整性检查）；不含照片、缩略图、人脸裁剪与特征向量、目录库本身、照片路径（`logging.rs`、`diagnostics.rs`、`tests_diag.rs`、`ip-server/tests/security.rs`、`ai-worker/tests/test_crash.py`，api-contract-m6 §G）
 - 分析可靠性（09 §5.1 P0-5、§5.2 P1-18）：①**续跑**——运行参数存在 `task.params`，应用重启后上次未结束的分析自动续跑，只发送剩余照片（已入库的批次不重算，`force` 运行同样），同一运行最多自动续跑 3 次；②**暂停 / 继续**——`POST /api/analysis/pause|continue`，批次之间停下，状态 `paused` 经 `analysis.progress` / `task.progress` 事件推送，重启后仍为暂停；桌面状态栏与手机分析面板有对应按钮；③**lite 兜底**——桌面分析档位新增「快速（本机）」；模型缺失、AI 组件未安装或 worker 不可用时，`fallback_lite` 运行改用 `ip-lite` 完成同一批照片，失败的运行带 `error_code`，界面（模型同意框、安装提示、状态栏）提供「改用快速分析」；④**按步骤增量**——由 `analysis.model_versions` 判断，安装新模型后只补算对应步骤（`GET /api/analysis/plan` 预告），不重算嵌入 / 人脸 / 人物（api-contract-m2 C.5）
 - 拍摄时间按查看者时区显示 → 改为拍摄地当地时间（M1）
 - HEIC/HEIF 缩略图：内嵌 JPEG → WIC / ImageIO → 运行时加载 libheif（含 AI 组件自带）分层降级，方向以 `irot`/`imir` 为准（M1，见 02 §5.1）

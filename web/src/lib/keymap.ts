@@ -93,6 +93,7 @@ export const BINDINGS: Binding[] = [
   { id: 'personFilter.open', keys: ['shift+p'], scopes: ALL, group: 'ai', desc: 'personFilter' },
   { id: 'assistant.toggle', keys: ['mod+j'], scopes: WITH_EDIT, group: 'ai', desc: 'assistant' },
   { id: 'export.open', keys: ['mod+e'], scopes: WITH_EDIT, group: 'misc', desc: 'export' },
+  { id: 'palette.toggle', keys: ['mod+k'], scopes: WITH_EDIT, group: 'misc', desc: 'palette' },
   { id: 'help.toggle', keys: ['?'], scopes: WITH_EDIT, group: 'misc', desc: 'help' },
 ]
 

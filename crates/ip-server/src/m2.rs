@@ -241,6 +241,15 @@ pub async fn patch_person(
     ))
 }
 
+pub async fn person_faces(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        json!({ "face_ids": st.core.person_face_ids(id).await? }),
+    ))
+}
+
 pub async fn merge_people(
     State(st): State<AppState>,
     ApiJson(req): ApiJson<MergePeopleRequest>,

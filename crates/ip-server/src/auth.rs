@@ -944,6 +944,8 @@ mod tests {
         assert!(!g(&Method::GET, "/api/fs/list", None));
         assert!(!g(&Method::GET, "/api/import/sources", None));
         assert!(!g(&Method::GET, "/api/system/lan", None));
+        assert!(!g(&Method::GET, "/api/system/diagnostics", None));
+        assert!(!g(&Method::POST, "/api/system/diagnostics", None));
         assert!(!g(
             &Method::GET,
             "/api/photos",

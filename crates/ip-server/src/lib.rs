@@ -32,6 +32,7 @@ use tower_http::trace::TraceLayer;
 
 pub use auth::{AuthState, ServerOptions};
 pub use ip_core::auth::SecurityStore;
+pub use ip_core::logging;
 pub use routes::AppState;
 
 #[derive(Debug, Clone)]
@@ -162,6 +163,7 @@ pub fn build_router_auth(
         .route("/fs/roots", get(fs::get_roots))
         .route("/fs/list", get(fs::get_list))
         .route("/system/hardware", get(m2::hardware))
+        .route("/system/diagnostics", post(m7::diagnostics))
         .route("/models", get(m2::models))
         .route("/models/ensure", post(m2::models_ensure))
         .route("/analysis/run", post(m2::analysis_run))
@@ -181,6 +183,7 @@ pub fn build_router_auth(
         .route("/people", get(m2::people).post(m2::create_person))
         .route("/people/merge", post(m2::merge_people))
         .route("/people/{id}", patch(m2::patch_person))
+        .route("/people/{id}/faces", get(m2::person_faces))
         .route(
             "/edits/{id}",
             get(m3::get_edit).put(m3::put_edit).delete(m3::delete_edit),

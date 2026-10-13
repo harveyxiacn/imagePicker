@@ -217,6 +217,7 @@ Click selects one photo, `Ctrl+click` multi-selects, `Ctrl+A` selects all; ratin
 | `,` `.` | Previous / next group | Grid, Group |
 | `Enter` / `Shift+Enter` | Pick A / pick A and go to next group | Group |
 | `Shift+P` | Person filter | all but the edit page |
+| `Ctrl+K` | Command palette: fuzzy-search the actions available on the current screen (generated from the keymap) and page shortcuts; `↑` `↓` select, `Enter` runs | everywhere (incl. edit page) |
 | `Ctrl+J` | Open AI assistant | everywhere (incl. edit page) |
 | `Ctrl+E` | Export | everywhere (incl. edit page) |
 | `?` | Shortcut help | everywhere (incl. edit page) |
@@ -301,7 +302,7 @@ Select a photo inside a stack and press `B`:
 
 - **A / B compare**: A is the left base frame (marked *Recommended*), B the right comparison; `Tab` swaps, `S` syncs zoom and pan; the strip below chooses B;
 - **Pick A** (`Enter`) and **Keep best, reject the rest** (pick A, mark the other frames rejected; undoable);
-- **Split here** (B and later become a new group), **Merge with previous / next group**: fix the AI grouping by hand;
+- **Split here** (B and later become a new group), **Merge with previous / next group**: fix the AI grouping by hand; both can be undone with `Ctrl+Z` (undoing a merge splits again at the old boundary);
 - `,` / `.` previous / next group, `Shift+Enter` picks A and moves to the next group;
 - **Expression matrix**: rows are people, columns frames, colours show the expression (green: eyes open and smiling, yellow: so-so, red: closed eyes / blurry); the *Best* column lists each person's best frames. A hint names frames "everyone is happy with"; if there is none you can *Compose best expressions for everyone*.
 
@@ -326,6 +327,7 @@ After analysis, faces are clustered into **people** on your machine (AuraFace id
 
   ![People page](../images/people.png)
 
+- **Undoable**: renaming, hiding / unhiding and merging people, and moving faces with *Not this person* / *This is a new person*, can be undone with `Ctrl+Z` and redone with `Ctrl+Shift+Z`. Undoing a merge re-creates the merged people from their original faces (names and hidden state are kept; person ids and saved beauty profiles are not restored).
 - **Best per person**: switch to the *Best per person* view to see N best photos per person (1 / 3 / 5…).
 - **Export by person**: exports the selected people's photos into one folder per person.
 - **Search by face**: drop or paste (`Ctrl+V`) an external photo (JPG/PNG/WebP) to find the same person in your library; the image is processed locally only. The results list likely people (click one to filter) and similar faces.
@@ -546,6 +548,12 @@ Security notes: enable only on a trusted LAN and use a strong password; failed l
 - If the catalog is damaged so badly that it cannot be opened, the app moves it to `backups/corrupt-….db`, starts with an empty catalog and shows *The catalog cannot be opened* with the available backups; damage found by the start-up check is reported the same way. Pick a backup and click *Restore*; originals are not affected.
 - Restoring replaces the current catalog with the backup (changes made after it are lost); the replaced catalog is kept as `backups/replaced-….db` and the page reloads. You can also restore any backup from *Settings → Catalog backups*.
 
+### Logs, crash records & diagnostics
+
+- The app writes log files to `logs/` in the data directory (`imagepicker-<date>.<n>.log`, UTC). A new file starts every day and after 5 MiB; files older than 14 days are deleted and the folder is kept under 40 MiB.
+- If the app crashes (a Rust panic) or the AI worker dies with an unhandled error or a native fault, a crash record is written to `crashes/` first (time, version, system, thread, message, backtrace; for the worker the last lines of its output). The latest 30 are kept.
+- *Settings → Diagnostics → Export diagnostics* saves a zip for bug reports: versions, an OS and hardware summary, your settings (passwords and tokens removed), the latest logs and crash records (file paths and secrets masked), and catalog statistics (counts, schema version, integrity check, root folder names). It **never** contains photos, thumbnails, face crops or face features, the catalog itself, or the path or name of any photo. Nothing is uploaded; the owner only (guests cannot export). Masking is automatic but best effort: open the zip and look before you share it.
+
 ### Data locations
 
 Default data directory (override with `IMAGEPICKER_DATA_DIR` or `--data-dir`):
@@ -563,7 +571,8 @@ Default data directory (override with `IMAGEPICKER_DATA_DIR` or `--data-dir`):
 | Thumbnail / preview / full-resolution (`cache/full`, at most 1 GB) / AI mask / edit render / generated-result caches | `cache/` (clear in *Settings → Cache*; rebuilt on demand) |
 | Generated patch layers of edits | `edits/` |
 | Imported LUTs | `luts/` |
-| Logs | `logs/` |
+| Logs (rotating, 14 days / 40 MiB) | `logs/` |
+| Crash records | `crashes/` |
 | AI models | default `<platform data dir>/imagePicker/models`, shown in Settings (`IMAGEPICKER_MODELS_DIR` overrides) |
 
 Backup tip: the app backs `catalog.db` up to `backups/` every day (see above); for a full backup copy `backups/` (or `catalog.db` while the app is closed) and `edits/`; caches and models can be rebuilt.
@@ -595,12 +604,13 @@ Open with the gear icon on Home or in the top bar.
 | **Faces & privacy** | Face recognition switch, face recognition consent (show explanation / withdraw), clear all face data, allow network |
 | **Cache** | Usage per cache kind, clear, cache limit (default 20 GB; least recently used is evicted) |
 | **Catalog backups** | Integrity state, latest backup, *Back up now*, the backups with *Restore* (see section 16) |
+| **Diagnostics** | *Export diagnostics*: a zip for bug reports without photos, face data or photo paths (see section 16) |
 | **Task history** | Recent best take, removal, enhancement, export and analysis tasks with their outcome (the last 200 are kept); running ones can be cancelled; tasks still running when the app exited are marked *Interrupted*. *Tasks* in the library status bar opens it too |
 | **Rendering** | Render backend: Auto / GPU / CPU |
 | **LAN / WebUI** | See section 15; also *Allowed folders* (import, export and folder browsing are limited to these roots) |
 | **Interop (XMP)** | Off / Sidecar / Modify originals (confirmed twice), see section 17 |
 | **Shortcuts** | Read-only, generated from the built-in keymap |
-| **Language & appearance** | UI language (简体中文 / English), theme (dark / light / follow system) |
+| **Language & appearance** | UI language (简体中文 / English), theme (dark / light / follow system), **High contrast** (text, borders and focus rings meet WCAG AA; works with dark and light) and **Interface font size** (90%–150%; scales interface text and controls, not photos). The last two are stored on the current device / browser only |
 
 ![Settings: hardware & models](../images/settings-hardware.png)
 
