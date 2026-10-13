@@ -64,6 +64,10 @@ pub fn upsert_root(conn: &Connection, path: &str) -> Result<i64> {
         "INSERT INTO root_folder(path, added_at) VALUES(?1, ?2) ON CONFLICT(path) DO NOTHING",
         params![path, now_ms()],
     )?;
+    // portable mode: a root on the app's own drive follows the drive letter (`portable::rebase_roots`)
+    if crate::portable::is_on_drive(path, crate::portable::app_drive().as_deref()) {
+        conn.execute("UPDATE root_folder SET portable=1 WHERE path=?1", [path])?;
+    }
     Ok(
         conn.query_row("SELECT id FROM root_folder WHERE path=?1", [path], |r| {
             r.get(0)
