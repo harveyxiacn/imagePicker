@@ -37,7 +37,11 @@ fn env() -> Env {
     let card = tempfile::tempdir().unwrap();
     write_jpeg(&card.path().join("DCIM/100CANON/IMG_0001.JPG"), 32, 32, 10);
     write_jpeg(&card.path().join("DCIM/100CANON/IMG_0002.JPG"), 32, 32, 80);
-    std::fs::write(card.path().join("DCIM/100CANON/IMG_0001.CR2"), vec![3u8; 2048]).unwrap();
+    std::fs::write(
+        card.path().join("DCIM/100CANON/IMG_0001.CR2"),
+        vec![3u8; 2048],
+    )
+    .unwrap();
     Env {
         core,
         app,
@@ -59,7 +63,10 @@ async fn call(app: &Router, method: Method, uri: &str, body: Option<Value>) -> (
     let resp = app.clone().oneshot(req).await.unwrap();
     let status = resp.status();
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 fn body(e: &Env) -> Value {
@@ -110,19 +117,38 @@ async fn card_import_is_validated() {
     let outside = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
     let mut b = body(&e);
     b["dest"] = json!(outside);
-    cases.push(("dest outside the roots", b, StatusCode::FORBIDDEN, "forbidden_path"));
+    cases.push((
+        "dest outside the roots",
+        b,
+        StatusCode::FORBIDDEN,
+        "forbidden_path",
+    ));
     let mut b = body(&e);
     b["source"] = json!(outside);
-    cases.push(("source outside the roots", b, StatusCode::FORBIDDEN, "forbidden_path"));
+    cases.push((
+        "source outside the roots",
+        b,
+        StatusCode::FORBIDDEN,
+        "forbidden_path",
+    ));
     let mut b = body(&e);
     b["dest"] = json!(format!("{}/..", e.dest.path().display()));
     cases.push(("traversal", b, StatusCode::FORBIDDEN, "forbidden_path"));
     let mut b = body(&e);
     b["dest"] = json!(e.card.path().join("DCIM").to_string_lossy());
-    cases.push(("dest on the card", b, StatusCode::BAD_REQUEST, "bad_request"));
+    cases.push((
+        "dest on the card",
+        b,
+        StatusCode::BAD_REQUEST,
+        "bad_request",
+    ));
     for (what, b, status, code) in cases {
         let (s, v) = call(&e.app, Method::POST, "/api/import/card", Some(b)).await;
-        assert_eq!((s, v["error"]["code"].as_str()), (status, Some(code)), "{what}: {v}");
+        assert_eq!(
+            (s, v["error"]["code"].as_str()),
+            (status, Some(code)),
+            "{what}: {v}"
+        );
     }
     assert!(!e.dest.path().join("2024").exists());
     let (_, tasks) = call(&e.app, Method::GET, "/api/tasks", None).await;
@@ -146,7 +172,10 @@ async fn card_import_copies_and_creates_a_session() {
         if task["id"] == id && task["status"] != "running" && task["status"] != "cancelling" {
             break task;
         }
-        assert!(t.elapsed() < Duration::from_secs(60), "task never ended: {task}");
+        assert!(
+            t.elapsed() < Duration::from_secs(60),
+            "task never ended: {task}"
+        );
         tokio::time::sleep(Duration::from_millis(30)).await;
     };
     assert_eq!(task["kind"], "card_import");
@@ -154,17 +183,31 @@ async fn card_import_copies_and_creates_a_session() {
     let report = &task["params"]["report"];
     assert_eq!(report["found"], 3);
     assert_eq!(report["copied"], 3);
-    let sid = report["session_id"].as_i64().expect("session id in the report");
+    let sid = report["session_id"]
+        .as_i64()
+        .expect("session id in the report");
     e.core
         .wait_session_ready(sid, Duration::from_secs(30))
         .await
         .unwrap();
-    let (_, v) = call(&e.app, Method::GET, &format!("/api/photos?session_id={sid}"), None).await;
-    assert_eq!(v["photos"].as_array().unwrap().len(), 2, "RAW+JPEG is one photo");
+    let (_, v) = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos?session_id={sid}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        v["photos"].as_array().unwrap().len(),
+        2,
+        "RAW+JPEG is one photo"
+    );
     let (_, v) = call(&e.app, Method::GET, "/api/sessions", None).await;
     assert_eq!(v["sessions"][0]["title"], "Fake card");
     // copies, not moves
-    let year_dir = std::fs::read_dir(e.dest.path().join("card")).unwrap().count();
+    let year_dir = std::fs::read_dir(e.dest.path().join("card"))
+        .unwrap()
+        .count();
     assert_eq!(year_dir, 1);
     assert!(e.card.path().join("DCIM/100CANON/IMG_0001.CR2").exists());
 }

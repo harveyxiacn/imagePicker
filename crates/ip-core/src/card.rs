@@ -134,8 +134,8 @@ fn enumerate_volumes() -> Vec<Volume> {
         };
         let path = PathBuf::from(&root);
         // fixed, network and optical drives are never candidates: do not even touch them
-        let has_dcim = matches!(kind, DriveKind::Removable | DriveKind::Unknown)
-            && dcim_dir(&path).is_some();
+        let has_dcim =
+            matches!(kind, DriveKind::Removable | DriveKind::Unknown) && dcim_dir(&path).is_some();
         let (mut label, mut total_bytes, mut free_bytes) = (None, None, None);
         if has_dcim {
             let mut name = [0u16; 261];
@@ -158,9 +158,8 @@ fn enumerate_volumes() -> Vec<Volume> {
             }
             let (mut avail, mut total, mut free) = (0u64, 0u64, 0u64);
             // SAFETY: the three out pointers are valid for the call's duration.
-            let ok = unsafe {
-                GetDiskFreeSpaceExW(wide.as_ptr(), &mut avail, &mut total, &mut free)
-            };
+            let ok =
+                unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut avail, &mut total, &mut free) };
             if ok != 0 {
                 total_bytes = Some(total);
                 free_bytes = Some(avail);
@@ -373,7 +372,9 @@ pub fn expand_pattern(pattern: &str, y: i64, m: u32, d: u32) -> Vec<String> {
     if p.is_empty() {
         return Vec::new();
     }
-    p.split('/').map(|c| expand_token_text(c, y, m, d)).collect()
+    p.split('/')
+        .map(|c| expand_token_text(c, y, m, d))
+        .collect()
 }
 
 // ------------------------------------------------------------------ copy engine
@@ -539,7 +540,12 @@ fn copy_one(
                 break;
             }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(CopyErr::Dest(format!("cannot write in {}: {e}", dir.display()))),
+            Err(e) => {
+                return Err(CopyErr::Dest(format!(
+                    "cannot write in {}: {e}",
+                    dir.display()
+                )))
+            }
         }
     }
     let (Some(tmp), Some(mut file)) = (tmp_path, tmp_file) else {
@@ -566,13 +572,15 @@ fn copy_one(
         Ok(v) => v,
         Err(e) => {
             cleanup(&tmp);
-            return Err(if cancel.is_cancelled() && e.kind() == io::ErrorKind::Interrupted {
-                CopyErr::Cancelled
-            } else if WriteFailed::is(&e) {
-                CopyErr::Dest(format!("cannot write {}: {e}", final_path.display()))
-            } else {
-                CopyErr::Source(format!("cannot read {}: {e}", item.src.display()))
-            });
+            return Err(
+                if cancel.is_cancelled() && e.kind() == io::ErrorKind::Interrupted {
+                    CopyErr::Cancelled
+                } else if WriteFailed::is(&e) {
+                    CopyErr::Dest(format!("cannot write {}: {e}", final_path.display()))
+                } else {
+                    CopyErr::Source(format!("cannot read {}: {e}", item.src.display()))
+                },
+            );
         }
     };
     drop(src);
@@ -694,8 +702,8 @@ pub fn copy_sets(
                     Stop::Cancelled => out.cancelled = true,
                     Stop::Abort(msg) => out.aborted = Some(msg),
                 }
-                out.not_attempted = total
-                    .saturating_sub(out.copied.len() + out.present.len() + out.failed.len());
+                out.not_attempted =
+                    total.saturating_sub(out.copied.len() + out.present.len() + out.failed.len());
                 return out;
             }
         }
@@ -717,9 +725,8 @@ fn copy_set(
         return Err(Stop::Cancelled);
     }
     if !ok_dirs.contains(&set.dest_dir) {
-        std::fs::create_dir_all(&set.dest_dir).map_err(|e| {
-            Stop::Abort(format!("cannot create {}: {e}", set.dest_dir.display()))
-        })?;
+        std::fs::create_dir_all(&set.dest_dir)
+            .map_err(|e| Stop::Abort(format!("cannot create {}: {e}", set.dest_dir.display())))?;
         let canon = std::fs::canonicalize(&set.dest_dir)
             .map_err(|e| Stop::Abort(format!("cannot use {}: {e}", set.dest_dir.display())))?;
         if !canon.starts_with(root) {
@@ -756,8 +763,10 @@ fn copy_set(
     }
     let Some(plan) = chosen else {
         for item in &set.items {
-            out.failed
-                .push((item.src.clone(), "no free file name at the destination".into()));
+            out.failed.push((
+                item.src.clone(),
+                "no free file name at the destination".into(),
+            ));
         }
         return Ok(());
     };
@@ -862,7 +871,11 @@ fn load_known(c: &mut rusqlite::Connection) -> Result<Known> {
     for row in rows {
         let (name, size, mtime, key) = row?;
         if let (Some(n), Some(s), Some(m)) = (name, size, mtime) {
-            known.by_name.entry((n.to_lowercase(), s)).or_default().push(m);
+            known
+                .by_name
+                .entry((n.to_lowercase(), s))
+                .or_default()
+                .push(m);
         }
         known.keys.extend(key);
     }
@@ -987,7 +1000,8 @@ impl Core {
                 .await;
             let done = (report.copied + report.reused) as i64;
             let total = done + (report.failed_count + report.not_attempted) as i64;
-            core.task_end(&task, (done, total), state, error, None).await;
+            core.task_end(&task, (done, total), state, error, None)
+                .await;
         });
         Ok(id)
     }
@@ -1021,10 +1035,10 @@ impl Core {
                     .file_name()
                     .map(|n| n.to_string_lossy().to_lowercase())
                     .unwrap_or_default();
-                let by_name = known
-                    .by_name
-                    .get(&(name, f.size as i64))
-                    .is_some_and(|ms| ms.iter().any(|m| (m - f.mtime_ms).abs() <= MTIME_TOLERANCE_MS));
+                let by_name = known.by_name.get(&(name, f.size as i64)).is_some_and(|ms| {
+                    ms.iter()
+                        .any(|m| (m - f.mtime_ms).abs() <= MTIME_TOLERANCE_MS)
+                });
                 by_name
                     || imaging
                         .content_key(&f.path)
@@ -1133,10 +1147,7 @@ impl Core {
         imported.extend(outcome.present.iter().cloned());
         if !imported.is_empty() {
             let root = common_dir(&imported, &job.dest_root);
-            let title = job
-                .title
-                .clone()
-                .unwrap_or_else(|| job.source_name.clone());
+            let title = job.title.clone().unwrap_or_else(|| job.source_name.clone());
             let session = self
                 .import_with(
                     crate::ImportRequest {
@@ -1173,7 +1184,11 @@ fn card_outcome(r: &CardReport) -> (&'static str, Option<String>) {
         };
     }
     if r.failed_count > 0 {
-        let first = r.failed.first().map(|f| f.error.clone()).unwrap_or_default();
+        let first = r
+            .failed
+            .first()
+            .map(|f| f.error.clone())
+            .unwrap_or_default();
         return if imported == 0 {
             (FAILED, Some(first))
         } else {

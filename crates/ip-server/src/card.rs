@@ -15,13 +15,15 @@ use crate::error::{ApiError, ApiJson, ApiResult};
 use crate::routes::{whitelisted, AppState};
 
 async fn detected() -> ApiResult<Vec<ip_core::CardSource>> {
-    tokio::task::spawn_blocking(card_sources).await.map_err(|e| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal",
-            format!("card detection failed: {e}"),
-        )
-    })
+    tokio::task::spawn_blocking(card_sources)
+        .await
+        .map_err(|e| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+                format!("card detection failed: {e}"),
+            )
+        })
 }
 
 /// `GET /api/import/sources`: removable volumes that carry a `DCIM` folder.

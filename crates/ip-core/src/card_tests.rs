@@ -102,7 +102,7 @@ fn patterns_are_validated_and_expanded() {
         "x/{dd}/*",
         "dot.",
         "a/ lead",
-        "a/trail ",
+        "trail /x",
         "a/b/c/d/e/f/g",
         "tab\t{yyyy}",
     ] {
@@ -112,7 +112,10 @@ fn patterns_are_validated_and_expanded() {
         expand_pattern(DEFAULT_PATTERN, 2024, 3, 9),
         ["2024", "2024-03-09"]
     );
-    assert_eq!(expand_pattern("{yyyymmdd} x/{mm}{dd}", 2024, 3, 9), ["20240309 x", "0309"]);
+    assert_eq!(
+        expand_pattern("{yyyymmdd} x/{mm}{dd}", 2024, 3, 9),
+        ["20240309 x", "0309"]
+    );
     assert!(expand_pattern("", 2024, 3, 9).is_empty());
 }
 
@@ -315,7 +318,10 @@ fn copies_are_verified_and_keep_the_modification_time() {
         "no temporary files are left"
     );
     for c in &out.copied {
-        assert_eq!(std::fs::read(&c.src).unwrap(), std::fs::read(&c.dst).unwrap());
+        assert_eq!(
+            std::fs::read(&c.src).unwrap(),
+            std::fs::read(&c.dst).unwrap()
+        );
         assert_eq!(c.bytes, std::fs::metadata(&c.src).unwrap().len());
     }
     let copy_mtime = item(&dest.path().join("x/y/a.jpg")).mtime_ms;
@@ -344,10 +350,19 @@ fn a_different_file_with_the_same_name_is_never_overwritten() {
         std::fs::read(dir.join("a.jpg")).unwrap(),
         b"somebody else's photo"
     );
-    assert_eq!(std::fs::read(dir.join("a_1.cr2")).unwrap(), b"and a stray raw");
+    assert_eq!(
+        std::fs::read(dir.join("a_1.cr2")).unwrap(),
+        b"and a stray raw"
+    );
     // both members of the pair got suffix 2 (suffix 1 collides with the stray RAW)
-    assert_eq!(std::fs::read(dir.join("a_2.jpg")).unwrap(), std::fs::read(&files[0]).unwrap());
-    assert_eq!(std::fs::read(dir.join("a_2.cr2")).unwrap(), std::fs::read(&files[1]).unwrap());
+    assert_eq!(
+        std::fs::read(dir.join("a_2.jpg")).unwrap(),
+        std::fs::read(&files[0]).unwrap()
+    );
+    assert_eq!(
+        std::fs::read(dir.join("a_2.cr2")).unwrap(),
+        std::fs::read(&files[1]).unwrap()
+    );
 }
 
 #[test]
@@ -389,7 +404,11 @@ fn an_unreadable_file_fails_alone_and_leaves_nothing_behind() {
     assert_eq!(out.failed.len(), 1);
     assert!(out.failed[0].0.ends_with("a.jpg"));
     assert!(out.failed[0].1.contains("bad sector"), "{:?}", out.failed);
-    assert_eq!(out.copied.len(), 2, "the RAW and the other photo are copied");
+    assert_eq!(
+        out.copied.len(),
+        2,
+        "the RAW and the other photo are copied"
+    );
     assert!(out.aborted.is_none() && !out.cancelled);
     assert_eq!(all_files(&dir), ["a.cr2", "b.jpg"]);
 }
@@ -410,7 +429,11 @@ fn a_file_that_changed_size_is_not_catalogued() {
         &no_progress,
     );
     assert_eq!(out.failed.len(), 1);
-    assert!(out.failed[0].1.contains("changed while"), "{:?}", out.failed);
+    assert!(
+        out.failed[0].1.contains("changed while"),
+        "{:?}",
+        out.failed
+    );
     assert!(all_files(dest.path()).is_empty());
 }
 
@@ -437,7 +460,11 @@ fn cancelling_mid_copy_removes_the_partial_file_and_keeps_the_rest() {
     assert!(out.cancelled);
     assert_eq!(out.copied.len(), 2, "the first set was complete");
     assert_eq!(out.not_attempted, 2);
-    assert_eq!(all_files(&dir), ["a.cr2", "a.jpg"], "no partial b.jpg, no temp file");
+    assert_eq!(
+        all_files(&dir),
+        ["a.cr2", "a.jpg"],
+        "no partial b.jpg, no temp file"
+    );
 }
 
 #[test]
@@ -477,7 +504,10 @@ fn a_destination_folder_cannot_lead_outside_through_a_symlink() {
     );
     assert!(out.copied.is_empty());
     assert!(out.aborted.as_deref().unwrap().contains("outside"));
-    assert!(all_files(outside.path()).is_empty(), "nothing was written outside");
+    assert!(
+        all_files(outside.path()).is_empty(),
+        "nothing was written outside"
+    );
 }
 
 // ------------------------------------------------------------------ the task
@@ -616,16 +646,25 @@ async fn imports_a_card_into_dated_folders_and_pairs_raw_and_jpeg() {
 
     // imported as one session; the RAW is the JPEG's companion
     let sid = rep.session_id.expect("a session was created");
+    e.core.wait_session_ready(sid, WAIT).await.unwrap();
     let s = e.core.session(sid).await.unwrap();
     assert!(!s.title.is_empty());
     let photos = session_files(&e.core, sid).await;
     let names: Vec<&str> = photos.iter().map(|p| p.file_name.as_str()).collect();
     assert_eq!(
         names,
-        ["IMG_0001.JPG", "IMG_0001_1.JPG", "IMG_0002.JPG", "IMG_0003.JPG"],
+        [
+            "IMG_0001.JPG",
+            "IMG_0001_1.JPG",
+            "IMG_0002.JPG",
+            "IMG_0003.JPG"
+        ],
         "the RAW is not a grid item of its own"
     );
-    let pair = photos.iter().find(|p| p.file_name == "IMG_0001.JPG").unwrap();
+    let pair = photos
+        .iter()
+        .find(|p| p.file_name == "IMG_0001.JPG")
+        .unwrap();
     assert_eq!(pair.companions.len(), 1);
     assert_eq!(pair.companions[0].file_name, "IMG_0001.CR2");
     assert_eq!(s.photo_count, 4);
@@ -637,6 +676,10 @@ async fn a_second_import_of_the_same_card_copies_nothing() {
     let id = e.core.card_import(e.request()).await.unwrap();
     let (_, first) = finished(&e.core, &id).await;
     assert_eq!(first.copied, 5);
+    e.core
+        .wait_session_ready(first.session_id.unwrap(), WAIT)
+        .await
+        .unwrap();
     let files = all_files(e.dest.path());
     let id = e.core.card_import(e.request()).await.unwrap();
     let (rec, rep) = finished(&e.core, &id).await;
@@ -713,7 +756,9 @@ async fn the_pattern_chooses_the_folders() {
     let (_, rep) = finished(&e.core, &id).await;
     assert_eq!(rep.copied, 5);
     let names = all_files(e.dest.path());
-    assert!(names.iter().all(|n| n.starts_with("20240301/") || n.starts_with("20240302/")));
+    assert!(names
+        .iter()
+        .all(|n| n.starts_with("20240301/") || n.starts_with("20240302/")));
     let s = e.core.session(rep.session_id.unwrap()).await.unwrap();
     assert_eq!(s.title, "Trip");
 
@@ -774,7 +819,9 @@ async fn an_unreadable_file_is_reported_and_the_rest_is_imported() {
     assert_eq!((rep.copied, rep.failed_count), (5, 1));
     assert!(rep.failed[0].path.ends_with("IMG_0004.JPG"));
     assert!(rep.failed[0].error.contains("bad sector"));
-    assert!(!all_files(e.dest.path()).iter().any(|n| n.contains("IMG_0004")));
+    assert!(!all_files(e.dest.path())
+        .iter()
+        .any(|n| n.contains("IMG_0004")));
     let photos = session_files(&e.core, rep.session_id.unwrap()).await;
     assert_eq!(photos.len(), 4);
 }
