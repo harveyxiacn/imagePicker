@@ -858,6 +858,27 @@ export interface EditsPutResponse {
 
 export type AutoMode = 'auto' | 'portrait' | 'landscape'
 
+/** `POST /edits/{id}/auto-crop` (nothing is saved): `straighten` levels the horizon, `compose` suggests a thirds crop. */
+export type AutoCropKind = 'straighten' | 'compose'
+export interface AutoCropBody {
+  kind: AutoCropKind
+  /** wanted pixel aspect (w/h); omitted = free */
+  ratio?: number
+  /** the current crop, if any */
+  rect?: [number, number, number, number]
+  angle?: number
+}
+export interface AutoCropResult {
+  /** null when nothing confident was found (`source` = "none") */
+  crop: { rect: [number, number, number, number]; angle: number } | null
+  /** "stored" | "estimated" (tilt) | "faces" | "saliency" (subject) | "none" */
+  source: 'stored' | 'estimated' | 'faces' | 'saliency' | 'none'
+  tilt_deg: number | null
+  confidence: number | null
+  /** straighten: |tilt| is inside the dead zone, the photo counts as level */
+  level: boolean
+}
+
 export interface SyncBody {
   from_id: number
   to_ids: number[]

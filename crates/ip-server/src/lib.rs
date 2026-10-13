@@ -180,6 +180,7 @@ pub fn build_router_auth(
             get(m3::get_edit).put(m3::put_edit).delete(m3::delete_edit),
         )
         .route("/edits/{id}/auto", post(m3::auto_edit))
+        .route("/edits/{id}/auto-crop", post(m3::auto_crop))
         .route("/edits/sync", post(m3::sync_edits))
         .route("/render/preview", post(m3::render_preview))
         .route("/presets", get(m3::list_presets).post(m3::create_preset))

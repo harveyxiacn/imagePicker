@@ -6,7 +6,9 @@ use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ip_core::ip_render::Backend;
-use ip_core::{AutoRequest, PresetCreate, PreviewRequest, SyncRequest};
+use ip_core::{
+    AutoCropOut, AutoCropRequest, AutoRequest, PresetCreate, PreviewRequest, SyncRequest,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -76,6 +78,14 @@ pub async fn auto_edit(
     Ok(Json(AutoResponse {
         adjust: st.core.auto_adjust(id, req.mode).await?,
     }))
+}
+
+pub async fn auto_crop(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+    ApiJson(req): ApiJson<AutoCropRequest>,
+) -> ApiResult<Json<AutoCropOut>> {
+    Ok(Json(st.core.auto_crop(id, req).await?))
 }
 
 pub async fn sync_edits(
