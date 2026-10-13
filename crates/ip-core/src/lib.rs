@@ -177,7 +177,11 @@ impl Core {
         let (db, catalog_guard) = backup::open_catalog(&dirs)?;
         // portable mode: roots on the app's own drive follow its drive letter
         let app_drive = (data_dir_source == DataDirSource::Portable)
-            .then(|| exe_dir.as_deref().and_then(|d| portable::drive_of(&d.to_string_lossy())))
+            .then(|| {
+                exe_dir
+                    .as_deref()
+                    .and_then(|d| portable::drive_of(&d.to_string_lossy()))
+            })
             .flatten();
         portable::set_app_drive(app_drive.clone());
         if let Some(drive) = app_drive {

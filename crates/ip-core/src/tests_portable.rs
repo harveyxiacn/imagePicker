@@ -51,12 +51,24 @@ async fn marker_next_to_the_exe_keeps_every_dir_inside_it() {
         &d.gen,
         &d.backups,
     ] {
-        assert!(inside(p, &root), "{} escapes {}", p.display(), root.display());
+        assert!(
+            inside(p, &root),
+            "{} escapes {}",
+            p.display(),
+            root.display()
+        );
     }
-    assert!(d.catalog.is_file(), "catalog must be created in the portable folder");
+    assert!(
+        d.catalog.is_file(),
+        "catalog must be created in the portable folder"
+    );
     assert!(inside(core.runtime.root(), &root), "AI runtime location");
     let s = core.settings();
-    assert!(inside(Path::new(&s.models.dir), &root), "default models dir {}", s.models.dir);
+    assert!(
+        inside(Path::new(&s.models.dir), &root),
+        "default models dir {}",
+        s.models.dir
+    );
     // nothing but the data folder and the marker was created next to the exe
     let mut names: Vec<_> = std::fs::read_dir(exe.path())
         .unwrap()
@@ -84,8 +96,12 @@ async fn explicit_dir_and_env_beat_the_marker() {
     assert_eq!(c.data_dir_source, DataDirSource::Explicit);
     assert_eq!(c.data_dir(), a.path());
     drop(c);
-    let c = Core::open_with(cfg(None), Some(b.path().into()), Some(exe.path().to_path_buf()))
-        .unwrap();
+    let c = Core::open_with(
+        cfg(None),
+        Some(b.path().into()),
+        Some(exe.path().to_path_buf()),
+    )
+    .unwrap();
     assert_eq!(c.data_dir_source, DataDirSource::Env);
     assert_eq!(c.data_dir(), b.path());
     assert!(!c.cache_info().await.unwrap().portable);
@@ -133,10 +149,7 @@ async fn open_follows_the_app_drive_for_portable_roots() {
     assert!(data.join("catalog.db").is_file());
     // the real drive of a tempdir is not a letter on Linux, so exercise the same step directly
     let core = Core::open_with(cfg(None), None, Some(exe.path().to_path_buf())).unwrap();
-    let rep = core
-        .db
-        .with(|c| portable::rebase_roots(c, "G:"))
-        .unwrap();
+    let rep = core.db.with(|c| portable::rebase_roots(c, "G:")).unwrap();
     assert_eq!(rep.moved, 1);
     let p: String = core
         .db

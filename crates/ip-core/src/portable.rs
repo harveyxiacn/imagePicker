@@ -86,7 +86,9 @@ pub fn rebase_roots(conn: &Connection, drive: &str) -> Result<RebaseReport> {
     for (id, path, portable) in rows {
         let Some(old) = drive_of(&path) else { continue };
         if portable && !old.eq_ignore_ascii_case(drive) {
-            let Some(new) = rebase(&path, drive) else { continue };
+            let Some(new) = rebase(&path, drive) else {
+                continue;
+            };
             let taken: bool = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM root_folder WHERE path=?1 AND id<>?2)",
                 params![new, id],
@@ -128,8 +130,14 @@ mod tests {
 
     #[test]
     fn rebase_keeps_the_rest() {
-        assert_eq!(rebase(r"E:\Photos\2024", "F:").as_deref(), Some(r"F:\Photos\2024"));
-        assert_eq!(rebase(r"\\?\E:\Photos", "F:").as_deref(), Some(r"\\?\F:\Photos"));
+        assert_eq!(
+            rebase(r"E:\Photos\2024", "F:").as_deref(),
+            Some(r"F:\Photos\2024")
+        );
+        assert_eq!(
+            rebase(r"\\?\E:\Photos", "F:").as_deref(),
+            Some(r"\\?\F:\Photos")
+        );
         assert_eq!(rebase("/mnt/e", "F:"), None);
         assert!(is_on_drive(r"e:\a", Some("E:")));
         assert!(!is_on_drive(r"C:\a", Some("E:")));
@@ -152,8 +160,10 @@ mod tests {
     }
 
     fn path_of(c: &Connection, id: i64) -> String {
-        c.query_row("SELECT path FROM root_folder WHERE id=?1", [id], |r| r.get(0))
-            .unwrap()
+        c.query_row("SELECT path FROM root_folder WHERE id=?1", [id], |r| {
+            r.get(0)
+        })
+        .unwrap()
     }
 
     /// Fake drive mapping: the app was on `E:`, the same disk now shows up as `F:`.
@@ -176,7 +186,11 @@ mod tests {
             }
         );
         let flagged: i64 = c
-            .query_row("SELECT portable FROM root_folder WHERE id=?1", [fresh], |r| r.get(0))
+            .query_row(
+                "SELECT portable FROM root_folder WHERE id=?1",
+                [fresh],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(flagged, 1);
         // running again changes nothing

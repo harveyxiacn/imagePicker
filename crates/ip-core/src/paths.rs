@@ -243,9 +243,15 @@ mod tests {
         let none = exe_dir(false, false);
         assert_eq!(portable_data_dir(none.path()), None);
         let marker = exe_dir(true, false);
-        assert_eq!(portable_data_dir(marker.path()), Some(marker.path().join("data")));
+        assert_eq!(
+            portable_data_dir(marker.path()),
+            Some(marker.path().join("data"))
+        );
         let folder = exe_dir(false, true);
-        assert_eq!(portable_data_dir(folder.path()), Some(folder.path().join("data")));
+        assert_eq!(
+            portable_data_dir(folder.path()),
+            Some(folder.path().join("data"))
+        );
         // a *folder* named like the marker is not a marker
         let fake = exe_dir(false, false);
         std::fs::create_dir(fake.path().join(PORTABLE_MARKER)).unwrap();

@@ -1094,6 +1094,10 @@ export const CACHE_KINDS: CacheKind[] = ['thumbs', 'previews', 'masks', 'edits',
 export interface CacheInfo {
   bytes: number
   items: Record<CacheKind, number>
+  /** The data folder (catalog, caches, settings, logs). */
+  data_dir?: string
+  /** Portable mode: the data folder sits next to the executable. */
+  portable?: boolean
 }
 
 export interface OnboardingInfo {
