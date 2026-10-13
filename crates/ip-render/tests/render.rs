@@ -841,8 +841,7 @@ fn parity_case(
 
 #[test]
 fn gpu_cpu_parity_on_random_stacks() {
-    let Some(gpu) = create_strict_gpu_renderer() else {
-        eprintln!("SKIP gpu_cpu_parity_on_random_stacks: no GPU adapter");
+    let Some(gpu) = strict_gpu_or_skip("gpu_cpu_parity_on_random_stacks") else {
         return;
     };
     println!("GPU: {:?}", gpu_adapter_name());
@@ -888,8 +887,7 @@ fn gpu_cpu_parity_on_random_stacks() {
 
 #[test]
 fn gpu_cpu_parity_identity_presets_and_downscale() {
-    let Some(gpu) = create_strict_gpu_renderer() else {
-        eprintln!("SKIP gpu_cpu_parity_identity_presets_and_downscale: no GPU adapter");
+    let Some(gpu) = strict_gpu_or_skip("gpu_cpu_parity_identity_presets_and_downscale") else {
         return;
     };
     let img = scene(640, 480, 9);
@@ -921,8 +919,7 @@ fn gpu_cpu_parity_identity_presets_and_downscale() {
 #[test]
 fn gpu_tiling_matches_untiled_semantics() {
     // Many rows with a sharpen (neighbour reads cross tile edges only through recompute).
-    let Some(gpu) = create_strict_gpu_renderer() else {
-        eprintln!("SKIP gpu_tiling: no GPU adapter");
+    let Some(gpu) = strict_gpu_or_skip("gpu_tiling") else {
         return;
     };
     let img = scene(1500, 1100, 17);
