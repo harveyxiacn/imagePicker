@@ -120,7 +120,7 @@ export const m6Gate = http.all('/api/*', ({ request }) => {
 // ============================================================================
 
 let settings: Settings = mergeSettings(DEFAULT_SETTINGS, {
-  models: { dir: 'C:\\Users\\demo\\AppData\\Local\\imagePicker\\models', source: 'auto' },
+  models: { dir: 'C:\\Users\\demo\\AppData\\Local\\imagePicker\\models', source: 'auto', tier_override: 'auto' },
   roots: ['C:\\Users\\demo\\Pictures', 'D:\\Archive'],
   // the demo library is already analysed with people, i.e. face recognition was agreed to
   faces: { enabled: true, consented: true },

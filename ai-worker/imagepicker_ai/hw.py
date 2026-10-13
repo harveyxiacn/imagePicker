@@ -57,6 +57,8 @@ class HardwareInfo:
     torch_cuda: bool = False
     tier: str = "T0"
     tier_reason: str = ""
+    tier_detected: str = ""  # what detection said; differs from `tier` only with a manual override
+    tier_overridden: bool = False
     providers: list[str] = field(default_factory=lambda: ["CPUExecutionProvider"])
     device: str = "cpu"  # cuda | rocm | mps | dml | cpu  (best accelerator actually usable)
 
@@ -72,6 +74,28 @@ class HardwareInfo:
 
 
 # ---------------------------------------------------------------- tier mapping (pure)
+
+TIERS = ("T0", "T1", "T2", "T3")
+TIER_ENV = "IMAGEPICKER_TIER"
+
+
+def parse_tier_override(value: str | None) -> str | None:
+    """`T0`..`T3` (case-insensitive) -> that tier; `auto`, empty, unset or anything else -> None."""
+    v = (value or "").strip().upper()
+    return v if v in TIERS else None
+
+
+def apply_tier_override(hw: HardwareInfo, override: str | None) -> HardwareInfo:
+    """Record the detected tier and, for a valid `override`, replace the effective one."""
+    hw.tier_detected = hw.tier
+    forced = parse_tier_override(override)
+    if forced is None or forced == hw.tier:
+        hw.tier_overridden = False
+        return hw
+    hw.tier_overridden = True
+    hw.tier_reason = f"manual override {forced} (detected {hw.tier}: {hw.tier_reason})"
+    hw.tier = forced
+    return hw
 
 
 def _tier_for_vram(vram_mb: int) -> str:
@@ -316,8 +340,13 @@ def _windows_gpu_names() -> list[str]:
         return []
 
 
-def detect(device_pref: str = "auto") -> HardwareInfo:
-    """Probe the machine. `device_pref='cpu'` keeps tier detection but forces CPU providers."""
+def detect(device_pref: str = "auto", tier_override: str | None = None) -> HardwareInfo:
+    """Probe the machine. `device_pref='cpu'` keeps tier detection but forces CPU providers.
+
+    `tier_override` (or, when None, the `IMAGEPICKER_TIER` environment variable the app sets from
+    Settings -> Hardware & models) replaces the detected tier with T0..T3; `auto` keeps detection.
+    The detected tier stays available as `tier_detected`.
+    """
     vm = psutil.virtual_memory()
     sysname = platform.system()
     hw = HardwareInfo(
@@ -351,6 +380,9 @@ def detect(device_pref: str = "auto") -> HardwareInfo:
             hw.gpus.append(GpuInfo(vendor, n))
 
     hw.tier, hw.tier_reason = compute_tier(hw)
+    apply_tier_override(
+        hw, tier_override if tier_override is not None else os.environ.get(TIER_ENV)
+    )
     hw.providers = select_providers(hw.ort_providers_available, device_pref)
     hw.device = _device_of(hw.providers, hw.apple_mps)
     return hw

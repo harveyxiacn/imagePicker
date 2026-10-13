@@ -146,8 +146,8 @@ The first time an AI feature needs models, the *AI models required* dialog lists
 ![Model consent](../images/model-consent.png)
 
 - *Download and continue* starts the download; *Move to background* keeps working meanwhile;
-- Models marked "non-commercial" are for personal use only;
-- Sources: Auto (falls back to a mirror) / Hugging Face / HF mirror / ModelScope, chosen in *Settings → Hardware & models*;
+- Models marked "non-commercial" or "research only" are not for commercial use, and models marked "licence unknown" have no established commercial-use standing yet (for example undisclosed training data): the badge next to the licence says so, and hovering it shows the training data and notes. Personal use is fine; check the terms before any commercial use;
+- Sources: Auto (falls back to a mirror) / Hugging Face / HF mirror / ModelScope, chosen in *Settings → Hardware & models*. The source you pick is tried first (with the HF mirror selected, the first request already goes to the mirror), the others are fallbacks;
 - Models are stored locally; afterwards no network is needed. You can delete models in Settings to free space.
 
 ## 4. Importing photos
@@ -568,7 +568,7 @@ Open with the gear icon on Home or in the top bar.
 
 | Section | Contents |
 |---|---|
-| **Hardware & models** | AI worker state, tier, compute device, assistant engine; model download source, models directory, model table (size / licence / status; download and delete) |
+| **Hardware & models** | AI worker state, tier (with a manual override: Auto or T0–T3; the AI worker restarts when idle to apply it), compute device, assistant engine; model download source, models directory, model table (size / licence / status; download and delete) |
 | **Analysis** | Default profile, analyse after import, burst-grouping strictness |
 | **Faces & privacy** | Face recognition switch, face recognition consent (show explanation / withdraw), clear all face data, allow network |
 | **Cache** | Usage per cache kind, clear, cache limit (default 20 GB; least recently used is evicted) |

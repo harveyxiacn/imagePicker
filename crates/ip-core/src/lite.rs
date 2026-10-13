@@ -131,6 +131,7 @@ fn lite_info() -> SystemInfo {
         hardware: ip_worker_client::HardwareJson {
             device: "cpu".into(),
             gpus: vec![],
+            ..Default::default()
         },
     }
 }

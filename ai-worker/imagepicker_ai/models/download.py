@@ -1,4 +1,4 @@
-"""Model downloader: HF official -> $HF_ENDPOINT -> hf-mirror, resume, sha256, atomic move (doc 07 §1).
+"""Model downloader: chosen endpoint first, then HF official / hf-mirror, resume, sha256, atomic move (doc 07 §1).
 
 Layout:
   <models_dir>/<model id>/<file path>      final, verified files (+ .manifest.json = "complete" marker)
@@ -38,9 +38,18 @@ class Cancelled(Exception):
 
 
 def hf_endpoints() -> list[str]:
-    """official -> HF_ENDPOINT (if set) -> hf-mirror.com, de-duplicated."""
+    """Endpoints to try, in order, de-duplicated.
+
+    The endpoint the user picked comes first, so with a mirror selected not a single request
+    goes to the default host before the mirror was tried: `HF_ENDPOINT` (set by the app for
+    "official" and "mirror"), else hf-mirror.com when `IMAGEPICKER_MODEL_SOURCE=hf-mirror`.
+    The rest follow as fallbacks: official, then hf-mirror.com.
+    """
+    preferred = os.environ.get("HF_ENDPOINT")
+    if not preferred and os.environ.get("IMAGEPICKER_MODEL_SOURCE") == "hf-mirror":
+        preferred = MIRROR_ENDPOINT
     out: list[str] = []
-    for ep in (OFFICIAL_ENDPOINT, os.environ.get("HF_ENDPOINT"), MIRROR_ENDPOINT):
+    for ep in (preferred, OFFICIAL_ENDPOINT, MIRROR_ENDPOINT):
         if ep:
             ep = ep.rstrip("/")
             if ep not in out:

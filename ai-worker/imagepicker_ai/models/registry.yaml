@@ -10,7 +10,17 @@
 #   precision     fp32 | fp16 | int8 (informational)
 #   tiers         tiers for which this is a default/recommended model
 #   vram_mb/ram_mb/size_mb  budget numbers used by ModelManager
-#   license / noncommercial
+#   license / noncommercial   weights licence id; noncommercial = the weights licence forbids commercial use
+#   license_info  structured licence facts (docs/07 section 5 is generated from these, see
+#                 ai-worker/scripts/gen_model_table.py; `usage` is shown to the user as a badge):
+#                   training_data        what the model was trained on (free text, optional)
+#                   training_data_terms  permissive | research-only | non-commercial | undisclosed |
+#                                        separate-terms | not-recorded
+#                   usage                commercial-ok | research-only | non-commercial | unknown
+#                   note                 provenance / caveats (free text, optional)
+#                 These record what docs/07 and docs/backlog.md already state; `unknown` means the
+#                 standing is not established (not "forbidden"). A model whose training data terms are
+#                 research-only / non-commercial / undisclosed / separate-terms may not be `commercial-ok`.
 #   required_for  analyze steps that need this model (informational, surfaced by models.list)
 #   resident      keep loaded unless budget forces eviction (analysis models); false = LRU/idle evicted first
 #   exclusive_group  at most one loaded model per group (e.g. vlm vs diffusion)
@@ -31,6 +41,9 @@
   size_mb: 0.3
   required_for: [faces, identity, besttake.compose]
   license: MIT
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: true
 
 - id: mediapipe-face-landmarker
@@ -49,6 +62,9 @@
   size_mb: 3.7
   required_for: [faces, besttake.compose, besttake, enhance, enhance.face_restore]
   license: Apache-2.0
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: true
 
 # MediaPipe Pose Landmarker (full, float16 v1): 33 body keypoints (BlazePose GHUM). Used by
@@ -70,6 +86,9 @@
   size_mb: 9.0
   required_for: [beauty.prepare]
   license: Apache-2.0
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
 
 # SigLIP2-base image tower, fp32. Pre-exported ONNX from onnx-community (upstream: google/siglip2-base-patch16-224).
@@ -90,6 +109,9 @@
   size_mb: 355
   required_for: [embed, scene]
   license: Apache-2.0
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: true
 
 # Same tower in fp16 (half the size / VRAM; preferred on GPU).
@@ -110,6 +132,9 @@
   size_mb: 178
   required_for: [embed, scene]
   license: Apache-2.0
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: true
 
 # Text tower (natural-language search). 256k-token Gemma vocab makes this large; fp16 halves it.
@@ -132,6 +157,9 @@
   size_mb: 550
   required_for: [scene, search]
   license: Apache-2.0
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
 
 # PyTorch/transformers fallback (image + text in one checkpoint).
@@ -157,6 +185,9 @@
   size_mb: 1430
   required_for: []
   license: Apache-2.0
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
   optional: true
 
@@ -178,6 +209,11 @@
   size_mb: 249
   required_for: [identity]
   license: Apache-2.0
+  license_info:
+    training_data: "commercially usable data (fal.ai AuraFace-v1)"
+    training_data_terms: permissive
+    usage: commercial-ok
+    note: "Only the recognition net glintr100.onnx is used."
   resident: true
 
 # NIMA (Neural Image Assessment, Talebi & Milanfar 2018), MobileNet(v1) weights from
@@ -206,6 +242,11 @@
   size_mb: 6.2
   required_for: [aesthetic]
   license: Apache-2.0
+  license_info:
+    training_data: "AVA (photographer-rated aesthetics)"
+    training_data_terms: research-only
+    usage: unknown
+    note: "Weights Apache-2.0 (idealo/image-quality-assessment, litert-community re-export); the training dataset has research-use terms of its own. Pre-release licence audit pending (doc 07 section 4)."
   resident: true
 
 - id: nima-technical
@@ -223,6 +264,11 @@
   size_mb: 6.2
   required_for: [iqa]
   license: Apache-2.0
+  license_info:
+    training_data: "TID2013 (synthetic distortions)"
+    training_data_terms: research-only
+    usage: unknown
+    note: "Weights Apache-2.0 (idealo/image-quality-assessment, litert-community re-export); the training dataset has research-use terms of its own. Pre-release licence audit pending (doc 07 section 4)."
   resident: true
 
 # ---------------------------------------------------------------------------------------------
@@ -251,6 +297,9 @@
   size_mb: 183
   required_for: [mask.subject, mask.person, besttake.compose]
   license: MIT
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
   exclusive_group: segment_subject
 
@@ -269,6 +318,9 @@
   size_mb: 214
   required_for: [mask.subject, mask.person, besttake.compose]
   license: MIT
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
   exclusive_group: segment_subject
 
@@ -287,6 +339,9 @@
   size_mb: 109
   required_for: [mask.subject, mask.person, besttake.compose]
   license: MIT
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
   exclusive_group: segment_subject
 
@@ -305,6 +360,9 @@
   size_mb: 467
   required_for: [mask.subject, mask.person, besttake.compose]
   license: MIT
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
   optional: true
   exclusive_group: segment_subject
@@ -327,6 +385,9 @@
   size_mb: 15.6
   required_for: [mask.skin, mask.hair, mask.clothes, besttake.compose, besttake]
   license: Apache-2.0
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
 
 # Sky: U^2-Net sky segmenter by xiongzhu666/Sky-Segmentation-and-Post-processing (MIT), 320x320,
@@ -349,6 +410,11 @@
   size_mb: 168
   required_for: [mask.sky]
   license: MIT
+  license_info:
+    training_data: "not disclosed by the author"
+    training_data_terms: undisclosed
+    usage: unknown
+    note: "Repository MIT; the author does not disclose the training data. mask.sky has a model-free fallback (masks/sky.py)."
   resident: false
 
 
@@ -376,6 +442,9 @@
   size_mb: 198
   required_for: [inpaint, inpaint.run]
   license: Apache-2.0
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
 
 # SCUNet (Swin-Conv-UNet, cszn/SCUNet, Apache-2.0): blind real-world denoising, PSNR-oriented
@@ -399,6 +468,9 @@
   size_mb: 73.4
   required_for: [enhance, enhance.denoise]
   license: Apache-2.0
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
 
 # GFPGAN v1.4 (TencentARC/GFPGAN, Apache-2.0 code and weights; the FFHQ training data has its own
@@ -419,6 +491,11 @@
   size_mb: 324.5
   required_for: [enhance, enhance.face_restore]
   license: Apache-2.0
+  license_info:
+    training_data: "FFHQ"
+    training_data_terms: separate-terms
+    usage: unknown
+    note: "Code and weights Apache-2.0 (ONNX export neurobytemind/GFPGANv1.4.onnx); the FFHQ dataset has its own terms. Licence audit pending."
   resident: false
 
 # Real-ESRGAN (xinntao/Real-ESRGAN, BSD-3-Clause): RealESRGAN_x2plus / RealESRGAN_x4plus ONNX
@@ -439,6 +516,10 @@
   size_mb: 66.3
   required_for: [enhance, enhance.upscale]
   license: BSD-3-Clause
+  license_info:
+    training_data_terms: not-recorded
+    usage: unknown
+    note: "Upstream xinntao/Real-ESRGAN is BSD-3-Clause; the ONNX export is hosted at facefusion/models-3.0.0, which carries no licence metadata of its own. Licence audit pending."
   resident: false
 
 - id: realesrgan-x2-fp16
@@ -456,6 +537,10 @@
   size_mb: 34.5
   required_for: [enhance, enhance.upscale]
   license: BSD-3-Clause
+  license_info:
+    training_data_terms: not-recorded
+    usage: unknown
+    note: "Upstream xinntao/Real-ESRGAN is BSD-3-Clause; the ONNX export is hosted at facefusion/models-3.0.0, which carries no licence metadata of its own. Licence audit pending."
   resident: false
 
 - id: realesrgan-x4
@@ -473,6 +558,10 @@
   size_mb: 66.3
   required_for: [enhance, enhance.upscale]
   license: BSD-3-Clause
+  license_info:
+    training_data_terms: not-recorded
+    usage: unknown
+    note: "Upstream xinntao/Real-ESRGAN is BSD-3-Clause; the ONNX export is hosted at facefusion/models-3.0.0, which carries no licence metadata of its own. Licence audit pending."
   resident: false
 
 - id: realesrgan-x4-fp16
@@ -490,6 +579,10 @@
   size_mb: 34.5
   required_for: [enhance, enhance.upscale]
   license: BSD-3-Clause
+  license_info:
+    training_data_terms: not-recorded
+    usage: unknown
+    note: "Upstream xinntao/Real-ESRGAN is BSD-3-Clause; the ONNX export is hosted at facefusion/models-3.0.0, which carries no licence metadata of its own. Licence audit pending."
   resident: false
 
 # SDXL Inpainting 0.1 (diffusers/stable-diffusion-xl-1.0-inpainting-0.1, CreativeML OpenRAIL++-M):
@@ -525,6 +618,10 @@
   size_mb: 6700
   required_for: [inpaint, inpaint.run, pro]
   license: OpenRAIL++
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
+    note: "CreativeML OpenRAIL++-M attaches use-based restrictions; see the licence text."
   resident: false
   optional: true
   exclusive_group: diffusion
@@ -561,6 +658,9 @@
   size_mb: 3350
   required_for: [assistant, llm.plan]
   license: MIT
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
   optional: true
   exclusive_group: diffusion
@@ -593,6 +693,9 @@
   size_mb: 2450
   required_for: [assistant, llm.plan]
   license: Apache-2.0
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
   optional: true
   exclusive_group: diffusion
@@ -623,6 +726,9 @@
   size_mb: 2450
   required_for: [assistant, vlm.suggest, vlm.describe]
   license: MIT
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
   optional: true
   exclusive_group: diffusion
@@ -653,6 +759,9 @@
   size_mb: 3050
   required_for: [assistant, vlm.suggest, vlm.describe]
   license: MIT
+  license_info:
+    training_data_terms: not-recorded
+    usage: commercial-ok
   resident: false
   optional: true
   exclusive_group: diffusion

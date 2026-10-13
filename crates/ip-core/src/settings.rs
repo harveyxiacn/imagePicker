@@ -90,6 +90,9 @@ pub struct ModelsSettings {
     pub dir: String,
     /// `auto` | `hf` | `hf-mirror` | `modelscope`
     pub source: String,
+    /// Hardware tier override: `auto` (use detection) | `T0` | `T1` | `T2` | `T3`. Handed to the
+    /// worker as `IMAGEPICKER_TIER`; applies when the worker (re)starts.
+    pub tier_override: String,
 }
 
 impl Default for ModelsSettings {
@@ -97,6 +100,7 @@ impl Default for ModelsSettings {
         Self {
             dir: String::new(),
             source: "auto".into(),
+            tier_override: "auto".into(),
         }
     }
 }
@@ -221,6 +225,11 @@ impl Settings {
             &["auto", "hf", "hf-mirror", "modelscope"],
         )?;
         one_of(
+            "models.tier_override",
+            &self.models.tier_override,
+            &["auto", "T0", "T1", "T2", "T3"],
+        )?;
+        one_of(
             "render.backend",
             &self.render.backend,
             &["auto", "gpu", "cpu"],
@@ -274,6 +283,9 @@ impl Settings {
             "IMAGEPICKER_MODEL_SOURCE".into(),
             self.models.source.clone(),
         ));
+        if self.models.tier_override != "auto" {
+            env.push(("IMAGEPICKER_TIER".into(), self.models.tier_override.clone()));
+        }
         if !self.privacy.allow_network {
             env.push(("HF_HUB_OFFLINE".into(), "1".into()));
             env.push(("IMAGEPICKER_OFFLINE".into(), "1".into()));
@@ -495,7 +507,22 @@ impl Core {
             if o.xmp_mode != new.xmp_mode {
                 self.xmp_mode_changed(&new.xmp_mode);
             }
+            if o.models.tier_override != new.models.tier_override {
+                self.restart_idle_worker();
+            }
         }
+    }
+
+    /// Stops an idle worker so that its next start picks up new process options (the tier
+    /// override). A busy or starting worker is left alone and uses them on its next start.
+    fn restart_idle_worker(&self) {
+        if tokio::runtime::Handle::try_current().is_err()
+            || self.worker.status().state != ip_worker_client::WorkerState::Ready
+        {
+            return;
+        }
+        let w = self.worker.clone();
+        tokio::spawn(async move { w.shutdown().await });
     }
 
     fn apply_render_backend(&self, backend: &str) {
@@ -674,6 +701,46 @@ mod tests {
         assert!(o
             .env
             .contains(&("IMAGEPICKER_MODEL_SOURCE".into(), "modelscope".into())));
+    }
+
+    #[test]
+    fn tier_override_is_validated_persisted_and_passed_to_the_worker() {
+        let (d, s) = store();
+        assert_eq!(s.get().models.tier_override, "auto");
+        assert!(!s
+            .get()
+            .worker_options()
+            .env
+            .iter()
+            .any(|(k, _)| k == "IMAGEPICKER_TIER"));
+        for bad in ["T4", "t1", "lite", ""] {
+            let e = s
+                .patch(&json!({"models": {"tier_override": bad}}))
+                .unwrap_err();
+            assert!(matches!(e, CoreError::Unprocessable(_)), "{bad}: {e:?}");
+        }
+        let (_, new) = s
+            .patch(&json!({"models": {"tier_override": "T1"}}))
+            .unwrap();
+        assert!(new
+            .worker_options()
+            .env
+            .contains(&("IMAGEPICKER_TIER".into(), "T1".into())));
+        assert_eq!(
+            SettingsStore::load(d.path()).get().models.tier_override,
+            "T1",
+            "persisted"
+        );
+        // null (or "auto") goes back to detection: no variable at all
+        let (_, back) = s
+            .patch(&json!({"models": {"tier_override": null}}))
+            .unwrap();
+        assert_eq!(back.models.tier_override, "auto");
+        assert!(!back
+            .worker_options()
+            .env
+            .iter()
+            .any(|(k, _)| k == "IMAGEPICKER_TIER"));
     }
 
     #[test]
