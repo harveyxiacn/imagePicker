@@ -14,6 +14,7 @@
 | P1 | 自动拉直 / 智能裁剪（真实照片复核） | 2026-10-13 实现（P1-11，03 §3.1.1 / §6.6）。拉直沿用存储的 `tilt_deg`，合成倾斜样本最大残余 0.14°（≤ 0.5° 验收，见 03 §6.6）；智能裁剪的三分法/缩放常量（`MIN_SCALE`、`SUBJECT_FILL`、`CENTRE_SHARE`）与显著性代理只在合成图上验证。仍待：真实照片人工盲评；无脸时的显著性代理对杂乱画面较弱；尚无 Android 编辑页入口；尚不考虑裁剪后的主体姿态/视线方向 |
 | P1 | 自适应同步参数 | `edit/sync.rs` 的 `K_PER_LN`、`T_PER_LN` 在 FakeRenderer 上调参，需在真实渲染器上复核 |
 | P1 | 美颜强度 | 形变/美颜强度在合成人像上标定，真实人脸效果需人工盲评 |
+| P1 | 渲染正确性证据（09 P1-10，CPU 部分） | 2026-10-13 `ip-render/tests/correctness.rs`：几何/补丁/LUT/锐化阶段操作任意排列逐位一致（全局/局部/美颜层按栈顺序叠加，相对顺序属于编辑内容，不在排列范围内）；预览（半尺寸代理 → 256 px）与导出（原尺寸 → 缩小）CIEDE2000 均值 < 0.6、p99 < 2.2，人像身体形变 p99 约 4.7（细长肢体硬边，上限 6）；GPU 一致性测试在 `IMAGEPICKER_REQUIRE_GPU=1` 且无适配器时失败（CONTRIBUTING.md）；`bench_render --max-ms/--max-ms-portrait` 阈值已就绪（bench/README.md），未接入 CI。仍待：在 GPU 机器上以 `IMAGEPICKER_REQUIRE_GPU=1` 实跑并强制 < 50 ms（独显）/ < 150 ms（集显）/ 美颜 < 200 ms；合成图上的结论需真实照片复核 |
 
 ## 功能缺口
 
@@ -30,6 +31,7 @@
 | P2 | HEIC/HEIF 色彩余项：HDR（`nclx` 传递函数 PQ / HLG、iPhone 增益图）不做色调映射，按 SDR 原样显示；WIC 路径的色彩转换未实测（本机无 HEIF 编解码器） | M5 core |
 | P2 | 导出元数据余项：DNG/CR3/HEIC 文件内部的 XMP、PNG/WebP/TIFF 内嵌 XMP/IPTC 不复制（只用 JPEG 内嵌包或 `.xmp` 侧车）；扩展 XMP（>64 KB）丢弃；导出不写入目录库的评分/关键词；RAW 预览色彩空间只看预览 JPEG 自带 ICC / DCF 标记，RAW EXIF 重建仅在合成样本上验证 | M5 core |
 | P2 | 导出格式余项：WebP 只有无损（纯 Rust 编码器无有损模式，文件较大）；TIFF 为 8 位无压缩，无 16 位输出；PNG/WebP 不写 IPTC 块（只在 XMP 中）；TIFF 导出不带 MakerNote；无「打印 300dpi」预设与用户自定义导出预设 | P0-8 |
+| P2 | 导出水印余项（F9.4）：内置字体 DejaVu Sans 不含中日韩文字，中文水印须自选 TTF / OTF 字体文件（请求里文字缺字会 400）；单行文字，无换行 / 描边 / 旋转 / 平铺；对话框无实时预览；水印设置不在服务端预设表里，只在浏览器里记住上次设置（预设按钮不改水印）；Logo 按 sRGB 直接混合，不做 alpha 预乘缩放；字体 / Logo 每次导出任务读取一次，不缓存；`.ttc` 字体合集不支持 | F9.4 |
 | P2 | 色彩转换前生成的缩略图/预览缓存不会自动重建（清除缓存后重新生成）；导出只输出 sRGB（无 P3 输出），色域外颜色裁切 | M5 core |
 | P2 | 最佳表情选底片的系数（`MIN_GAIN` 0.04、残留 ×6、缺席 ×3、切换余量 0.25）只在合成矩阵上验证，需真实连拍复核；不估计相机移动；手动换底片时网页仍用自动底片的计划（可合成性按自动底片的姿态判断、原自动底片不在候选中），可改用 `?base_photo_id=` 重新取计划 | M5 |
 | P1 | 大面积消除（超过 512px 的洞）结果偏糊、有残影；默认 LaMa，需 SDXL 增强包实测（真实照片：去除雕像） | M5 worker |
@@ -38,7 +40,7 @@
 | P2 | SDXL 增强包未用真实权重测试；OpenCV 构建无 AKAZE，仅 ORB 对齐 | M5 worker |
 | P2 | 取消生成任务时 worker 立即以 `-32800` 结束请求，但 `inpaint.run` / `enhance.run` / `besttake.compose` 在线程池里的计算不会中断，跑完才释放（紧接着的生成请求会排在它后面）；需在推理循环里检查取消标志 | M5 worker |
 | P1 | 网格 60fps 需在真实 GPU 浏览器上复测（无头软件光栅下仅 4× 降频 CPU 快速滚动时掉帧） | M7 perf |
-| P2 | 单会话 10 万张时每页约 10ms、`-taken_at` 约 28ms（需会话排序键表）；`GET /api/sessions` 10 万行约 13ms（需计数缓存） | M7 perf |
+| P2 | 单会话 10 万张的分页与会话列表已达标（迁移 v14：`session_photo.sk_*` 排序键 + 索引、`session_stat` 计数；每页 2.8–3.3ms、`GET /api/sessions` 0.23ms，见 `bench/large-sessions-2026-10-13.md`）。遗留：写入代价约 +17µs/行（10 万行种子 1.3s → 3.0s）；带筛选（评分 / 旗标 / 人物）的页仍需顺排序索引扫描会话，选择性很高的筛选在 10 万张时 4–7ms | M7 perf |
 | P1 | macOS / Linux 安装后的 AI 组件安装流程未实测；国内镜像对 `uv sync --frozen` 可能无效 | M7 runtime |
 | P1 | 应用内自动更新（tauri-plugin-updater + 签名密钥） | M7 release |
 | P2 | AUR PKGBUILD 未在 Arch 上 makepkg 实测 | M7 release |
@@ -51,6 +53,7 @@
 | P2 | lite 档位的 `faces` 步骤不输出关键点 / 闭眼 / 表情（需 MediaPipe 或 ONNX 关键点模型） | M8.1 infer |
 | P2 | 分析任务健壮性余项（09 WP-B）：①按步骤增量只覆盖 `embed` / `aesthetic` / `iqa` / `scene`，`faces` / `identity` 与人脸行绑定，装了人脸模型后要整批重新分析（`force`）；②暂停只在批次之间生效（每批最多 32 张，远程 AI 的一批可能要数十秒）；③续跑的真实进程强杀只在测试里用「丢弃运行时」模拟，未在 Windows / macOS / Linux 上做真正的 kill -9 实机验证；④桌面「改用快速分析」不会清掉已有的 fast / standard 结果，混合档位的会话在评分上按各自的分项计算，未做跨档位校准 | M2 / 09 WP-B |
 | P2 | 筛选补全余项（09 P1-5）：①`lens` 按 EXIF 原始字符串精确匹配，同一支镜头的不同写法（`RF24-70` / `RF 24-70`）是不同选项，没有镜头名规范化（设备名有，镜头没有）；②`face_ids` 每次查询线性扫描会话内所有有身份特征的人脸（没有向量索引，耗时与人脸数成正比，大会话上未测量；列表总数缓存在目录库无写入期间有效）；③`sharp=unknown` 表示没有清晰度度量（未分析，或该步骤没有输出），界面上叫“未分析”；④`pnpm dev:mock` 的模拟后端没有关键词和人脸特征（关键词筛选恒为空，`face_ids` 被忽略）；⑤自然语言搜索（P1-4）不在此范围 | P1-5 |
+| P2 | 可访问性余项（09 WP-O）：①撤销合并人物时按人脸重建人物，原人物 ID 与已保存的美颜档案不会恢复，撤销「并入分组」假定两组在时间上相连；②字体缩放上限 150%（09 验收口径写的是 200%），个别写死像素尺寸的控件（缩略图、手机端 44px 触控目标）不随字号变化；③axe 冒烟脚本只覆盖桌面视口的 mock 数据，未检查手机布局、屏幕阅读器实际朗读与 Tauri 窗口；未接入 CI；④高对比度 / 字号只存本机，不随服务端设置同步到其他设备 | P1-16 |
 
 ## 助手
 
@@ -69,6 +72,7 @@
 ## 已在集成中修复（记录）
 
 - Best Take 同人校验（09 §5.1 P0-2，WP-I）：`POST /api/besttake` 对源脸与底片脸不在同一连拍、不在同一轨迹/人物、或身份嵌入余弦低于 `MIN_IDENTITY_COS`（0.30）时返回 422（`besttake_cross_burst` / `besttake_person_mismatch` / `besttake_low_similarity`），界面显示对应的本地化提示；缺身份嵌入（lite）时只做连拍与轨迹/人物检查；自动路径只在同一轨迹内选脸（`tests_m5.rs`、`ip-server/tests/m5.rs`、`web/src/lib/gen.test.ts`）。契约见 `api-contract-m5.md` C 节
+- 可访问性与交互（09 §5.2 P1-16，WP-O）：①设置 → 语言与外观新增「高对比度」（`data-contrast="high"`，深色 / 浅色均有 AA 色板与 3px 焦点环）和「界面字号」90%–150%（`--font-scale`，rem 化的字号 / 控件，任意像素字号类同步缩放），两项只存本机（`imagepicker.ui`）；②`Ctrl+K` 命令面板（`CommandPalette.tsx`）对键位表动作与页面跳转模糊搜索，键位表仍是唯一来源；③撤销覆盖组拆分 / 合并与人物重命名 / 隐藏 / 合并 / 移动人脸（`lib/structureUndo.ts`，新增只读接口 `GET /api/people/{id}/faces` 供撤销合并）；④`pnpm a11y`（Playwright + axe-core，对 mock 后端）；⑤全局焦点环与输入框聚焦环。余项见「功能缺口」
 - 目录与文件（09 §5.1 P0-7、§5.2 P1-6，WP-F1）：①同目录同主文件名的 RAW+JPEG 导入后是一个网格项（JPEG 显示 / 分析，RAW 为 companion，`pair_id`），评分 / 旗标 / 色标同步到两者及各自的 XMP 侧车，分组与分析只算一次，导出可选 `pair_member`；②`POST /api/import` 支持 `exclude`（通配符 / 子文件夹 / 名字，重新扫描沿用）；③桌面端文件监听，增删文件约 2–3 秒内进网格；④缺失文件显示断链，`POST /api/sessions/{id}/relocate` 按相对路径 + 大小重新定位文件夹；⑤已淘汰照片经确认后可移入回收站（`trash`）或 `_rejected`，目录库跟随，绝不硬删（`tests_files.rs`、`ip-server/tests/files.rs`）
 
 - 数据安全 P0（09 §5.1 P0-1 / P0-3 / P0-4）：①原图只读成为硬约束——「侧车 + 内嵌」改为需二次确认的高级模式「修改原图（写入内嵌 XMP）」（`xmp_mode = modify_originals`，服务端要求 `confirm_modify_originals`，旧值降为 `sidecar`），其余模式下导入、分析、评分 / XMP 同步、编辑、导出后原图 SHA-256 不变（`tests_safety.rs`）；②目录库启动后后台 `quick_check`、每日 `VACUUM INTO` 备份留 7 份、打不开时移到 `backups/corrupt-*.db` 并以空目录库启动、可从备份恢复（`GET/POST /api/catalog*`，界面在启动弹窗与「设置 → 目录库备份」）；③人脸识别首次说明与同意（`faces.consented`），同意前不检测人脸、不计算人脸特征（lite 档同样），拒绝即 `faces.enabled = false`。同意文案待产品确认（09 §5.4 / P0-4）

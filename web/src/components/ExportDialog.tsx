@@ -6,10 +6,11 @@ import { api } from '@/api/client'
 import { useHardware } from '@/api/queries'
 import { missingModelsOf } from '@/lib/analysis'
 import { errorText } from '@/lib/errors'
-import { applyPreset as presetForm, ASPECTS, DEFAULT_FORM, exampleName, exportBody, FORMATS, NAME_TOKENS, usesQuality, type EdgeChoice, type ExportForm } from '@/lib/exportOptions'
+import { applyPreset as presetForm, ASPECTS, DEFAULT_FORM, exampleName, exportBody, FORMATS, loadWatermark, NAME_TOKENS, saveWatermark, usesQuality, watermarkIncomplete, type EdgeChoice, type ExportForm } from '@/lib/exportOptions'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
+import { ExportWatermark } from './ExportWatermark'
 import { FolderBrowser } from './FolderBrowser'
 import { Modal } from './Modal'
 
@@ -34,9 +35,10 @@ const readDest = () => {
 export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders }: Props) {
   const { t } = useTranslation()
   const [dest, setDest] = useState(readDest)
-  const [form, setForm] = useState<ExportForm>(DEFAULT_FORM)
+  const [form, setForm] = useState<ExportForm>(() => ({ ...DEFAULT_FORM, watermark: loadWatermark() }))
   const set = (patch: Partial<ExportForm>) => setForm((f) => ({ ...f, ...patch }))
-  const { edge, custom, quality, format, aspect, stripGps, stripMetadata } = form
+  const { edge, custom, quality, format, aspect, stripGps, stripMetadata, watermark } = form
+  const setWatermark = (patch: Partial<ExportForm['watermark']>) => setForm((f) => ({ ...f, watermark: { ...f.watermark, ...patch } }))
   const [template, setTemplate] = useState('{name}')
   const [scope, setScope] = useState<'selected' | 'all'>('selected')
   const [browse, setBrowse] = useState(false)
@@ -80,6 +82,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
       } catch {
         /* ignore */
       }
+      saveWatermark(form.watermark) // last-used option
       // Show the toast immediately; task.progress events will update it.
       updateTask({ type: 'task.progress', task_id, kind: 'export', done: 0, total: ids.length, state: 'running' })
       onOpenChange(false)
@@ -105,7 +108,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
             <button className="btn" onClick={() => onOpenChange(false)}>
               {t('common.cancel')}
             </button>
-            <button className="btn btn-primary" disabled={!dest.trim() || ids.length === 0 || mut.isPending} onClick={() => mut.mutate()}>
+            <button className="btn btn-primary" disabled={!dest.trim() || ids.length === 0 || mut.isPending || watermarkIncomplete(watermark)} onClick={() => mut.mutate()}>
               {mut.isPending && <Loader2 size={14} className="animate-spin" />}
               {t('export.start', { n: ids.length })}
             </button>
@@ -213,6 +216,8 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
             </label>
             {(stripGps || stripMetadata) && <div className="text-xs text-faint">{t('export.stripHint')}</div>}
           </div>
+
+          <ExportWatermark value={watermark} onChange={setWatermark} />
 
           <div className="flex flex-col gap-1" data-testid="export-pair-member">
             <label htmlFor="exp-pair" className="text-muted">

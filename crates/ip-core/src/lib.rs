@@ -34,6 +34,7 @@ pub mod tasks;
 pub mod taste;
 pub mod thumbs;
 pub mod watch;
+pub mod watermark;
 pub mod xmp;
 
 #[cfg(any(test, feature = "testutil"))]
@@ -522,7 +523,11 @@ mod tests_portable;
 #[cfg(test)]
 mod tests_safety;
 #[cfg(test)]
+mod tests_scale;
+#[cfg(test)]
 mod tests_tasks;
+#[cfg(test)]
+mod tests_watermark;
 
 impl Drop for Core {
     fn drop(&mut self) {

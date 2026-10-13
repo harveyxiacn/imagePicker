@@ -226,6 +226,7 @@ Click selects one photo, `Ctrl+click` multi-selects, `Ctrl+A` selects all; ratin
 | `,` `.` | Previous / next group | Grid, Group |
 | `Enter` / `Shift+Enter` | Pick A / pick A and go to next group | Group |
 | `Shift+P` | Person filter | all but the edit page |
+| `Ctrl+K` | Command palette: fuzzy-search the actions available on the current screen (generated from the keymap) and page shortcuts; `↑` `↓` select, `Enter` runs | everywhere (incl. edit page) |
 | `Ctrl+J` | Open AI assistant | everywhere (incl. edit page) |
 | `Ctrl+E` | Export | everywhere (incl. edit page) |
 | `?` | Shortcut help | everywhere (incl. edit page) |
@@ -310,7 +311,7 @@ Select a photo inside a stack and press `B`:
 
 - **A / B compare**: A is the left base frame (marked *Recommended*), B the right comparison; `Tab` swaps, `S` syncs zoom and pan; the strip below chooses B;
 - **Pick A** (`Enter`) and **Keep best, reject the rest** (pick A, mark the other frames rejected; undoable);
-- **Split here** (B and later become a new group), **Merge with previous / next group**: fix the AI grouping by hand;
+- **Split here** (B and later become a new group), **Merge with previous / next group**: fix the AI grouping by hand; both can be undone with `Ctrl+Z` (undoing a merge splits again at the old boundary);
 - `,` / `.` previous / next group, `Shift+Enter` picks A and moves to the next group;
 - **Expression matrix**: rows are people, columns frames, colours show the expression (green: eyes open and smiling, yellow: so-so, red: closed eyes / blurry); the *Best* column lists each person's best frames. A hint names frames "everyone is happy with"; if there is none you can *Compose best expressions for everyone*.
 
@@ -335,6 +336,7 @@ After analysis, faces are clustered into **people** on your machine (AuraFace id
 
   ![People page](../images/people.png)
 
+- **Undoable**: renaming, hiding / unhiding and merging people, and moving faces with *Not this person* / *This is a new person*, can be undone with `Ctrl+Z` and redone with `Ctrl+Shift+Z`. Undoing a merge re-creates the merged people from their original faces (names and hidden state are kept; person ids and saved beauty profiles are not restored).
 - **Best per person**: switch to the *Best per person* view to see N best photos per person (1 / 3 / 5…).
 - **Export by person**: exports the selected people's photos into one folder per person.
 - **Search by face**: drop or paste (`Ctrl+V`) an external photo (JPG/PNG/WebP) to find the same person in your library; the image is processed locally only. The results list likely people (click one to filter) and similar faces.
@@ -466,6 +468,7 @@ Press `Ctrl+E` (or *Export* in the top bar):
 | Remove GPS location / Remove all metadata | See below |
 | JPEG quality | Default 90; PNG, TIFF and WebP are lossless and ignore it |
 | Naming template | `{name}` original file name, `{seq}` sequence number, `{date}` capture date, `{event}` event name (date and time span, e.g. `2024-05-03 1012-1440`; the import name for photos not analysed yet), `{scene}` scene (e.g. portrait), `{camera}` camera, `{rating}` stars; a live example is shown. Name clashes get `_1`, `_2`…: existing files are never overwritten |
+| Watermark | Tick it to add a **text** or **logo image** watermark: position (3×3 grid), margin and opacity; text also has colour, size and shadow and may contain `{name}` `{date}` `{year}` `{camera}` `{event}` `{scene}` `{rating}` (e.g. `© {year} {camera}`); for a logo pick a PNG (transparency is respected) and set its width as a percentage of the long edge. The settings are remembered for next time |
 | Upscale | Off / ×2 / ×4 (on CPU tiers each photo can take tens of seconds) |
 | Export into one folder per person | Used from the People page |
 | RAW+JPEG pairs | Export the JPEG (as shown, with edits; default), the RAW, or both |
@@ -484,6 +487,8 @@ Export includes all your edits and carries the original's metadata over: EXIF (f
 Photos with a wide-gamut colour profile (Display P3, Adobe RGB) are converted to sRGB, as are their thumbnails and previews, and every re-encoded export embeds an sRGB ICC profile.
 
 **Remove GPS location** deletes the GPS position from EXIF and XMP; **Remove all metadata** writes no EXIF, XMP or IPTC at all (the colour profile stays). Both also apply to photos that would be copied unchanged: JPEG, PNG and WebP originals are only cleaned, their image data stays byte for byte the same (a photo stored rotated keeps its orientation tag, otherwise it would show sideways); RAW, HEIF and TIFF originals cannot be cleaned in place and are written as a full-size JPEG (or the chosen format) instead. With neither option, exporting at original size without edits copies the file unchanged.
+
+A **watermark** is drawn into the pixels after resizing and colour conversion, identically for every format. So with a watermark, photos that would otherwise be copied as they are (original format, original size, unedited) are **re-encoded** instead (as JPEG with the original format option), and the dialog says so; the original files are never modified. The built-in font (DejaVu Sans) covers Latin, Greek and Cyrillic but **not Chinese, Japanese or Korean**: for those, press *Choose…* next to *Font* and pick a TTF / OTF font file (collections such as `.ttc` are not supported), otherwise the export is refused with a message about the missing characters. Logo and font files must lie inside the allowed folders.
 
 > Known limitations: WebP is lossless only (larger files) and at most 16383 px per side; TIFF is 8-bit uncompressed, and there is no 16-bit or Display P3 output; HEIC/HEIF photos can only be re-encoded on export where a HEIF decoder is available (as for thumbnails, see [Importing photos](#4-importing-photos)), and HDR (PQ/HLG) content is not tone-mapped; XMP stored inside DNG/CR3 files and extended XMP (over 64 KB, e.g. depth maps) is not copied (`.xmp` sidecars are); thumbnails made by an earlier version keep their colours until the cache is cleared (*Settings → Cache*).
 
@@ -617,7 +622,7 @@ Open with the gear icon on Home or in the top bar.
 | **LAN / WebUI** | See section 15; also *Allowed folders* (import, export and folder browsing are limited to these roots) |
 | **Interop (XMP)** | Off / Sidecar / Modify originals (confirmed twice), see section 17 |
 | **Shortcuts** | Read-only, generated from the built-in keymap |
-| **Language & appearance** | UI language (简体中文 / English), theme (dark / light / follow system) |
+| **Language & appearance** | UI language (简体中文 / English), theme (dark / light / follow system), **High contrast** (text, borders and focus rings meet WCAG AA; works with dark and light) and **Interface font size** (90%–150%; scales interface text and controls, not photos). The last two are stored on the current device / browser only |
 
 ![Settings: hardware & models](../images/settings-hardware.png)
 

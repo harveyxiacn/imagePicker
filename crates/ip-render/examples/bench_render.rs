@@ -1,5 +1,14 @@
 //! `cargo run --release -p ip-render --example bench_render`
 //! 24 MP synthetic source, heavy stack; CPU vs GPU for preview / drag / export.
+//!
+//! Options (all optional; without thresholds the run only reports and exits 0):
+//! * `--runs N`: timed runs per case (default 5 for proxy cases, 3 for 24 MP, 2 for export).
+//! * `--max-ms MS`: exit 1 when the p95 of any "drag" case on the active backend (GPU if an
+//!   adapter exists, else CPU) exceeds MS, e.g. 50 on a GPU runner.
+//! * `--max-ms-portrait MS`: the same for the portrait (warp + beauty) cases, e.g. 200.
+//! * `--max-ms-all MS`: the same for every case of every stack.
+//!
+//! Each case prints best / p50 / p95 in milliseconds. This is not wired into CI.
 use std::collections::BTreeMap;
 use std::time::Instant;
 
@@ -153,7 +162,7 @@ fn time(
     masks: &dyn MaskProvider,
     max: Option<u32>,
     runs: usize,
-) -> f64 {
+) -> Stats {
     let req = RenderRequest {
         source: src,
         stack: st,
@@ -162,17 +171,129 @@ fn time(
         max_long_edge: max,
     };
     let _ = r.render(&req).unwrap(); // warm-up (device init, pipelines)
-    let mut best = f64::MAX;
-    for _ in 0..runs {
+    let mut samples = Vec::with_capacity(runs);
+    for _ in 0..runs.max(1) {
         let t = Instant::now();
         let out = r.render(&req).unwrap();
         std::hint::black_box(&out);
-        best = best.min(t.elapsed().as_secs_f64() * 1000.0);
+        samples.push(t.elapsed().as_secs_f64() * 1000.0);
     }
-    best
+    Stats::new(samples)
+}
+
+/// Timing summary of one case, in milliseconds.
+#[derive(Clone, Copy)]
+struct Stats {
+    best: f64,
+    p50: f64,
+    p95: f64,
+}
+
+impl Stats {
+    fn new(mut v: Vec<f64>) -> Stats {
+        v.sort_by(|a, b| a.total_cmp(b));
+        // Nearest-rank percentiles.
+        let at = |p: f64| v[((v.len() as f64 * p).ceil() as usize).clamp(1, v.len()) - 1];
+        Stats {
+            best: v[0],
+            p50: at(0.5),
+            p95: at(0.95),
+        }
+    }
+
+    fn cell(&self) -> String {
+        format!("{:7.1}/{:7.1}/{:7.1}", self.best, self.p50, self.p95)
+    }
+}
+
+/// Thresholds from the command line and the failures collected while running.
+#[derive(Default)]
+struct Limits {
+    runs: Option<usize>,
+    drag: Option<f64>,
+    portrait: Option<f64>,
+    all: Option<f64>,
+    failures: Vec<String>,
+}
+
+impl Limits {
+    fn parse() -> Limits {
+        let mut l = Limits::default();
+        let mut args = std::env::args().skip(1);
+        while let Some(a) = args.next() {
+            let mut num = |name: &str| -> f64 {
+                args.next().and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("{name} needs a number");
+                    std::process::exit(2)
+                })
+            };
+            match a.as_str() {
+                "--runs" => l.runs = Some(num("--runs") as usize),
+                "--max-ms" => l.drag = Some(num("--max-ms")),
+                "--max-ms-portrait" => l.portrait = Some(num("--max-ms-portrait")),
+                "--max-ms-all" => l.all = Some(num("--max-ms-all")),
+                other => {
+                    eprintln!(
+                        "unknown argument {other}; usage: bench_render [--runs N] [--max-ms MS] [--max-ms-portrait MS] [--max-ms-all MS]"
+                    );
+                    std::process::exit(2);
+                }
+            }
+        }
+        l
+    }
+
+    fn runs(&self, default: usize) -> usize {
+        self.runs.unwrap_or(default).max(1)
+    }
+
+    /// Records a failure when `p95` of `case` exceeds a threshold that applies to it.
+    fn check(&mut self, stack: &str, case: &str, backend: &str, p95: f64) {
+        let mut limits = vec![self.all];
+        if case.starts_with("drag") {
+            limits.push(self.drag);
+        }
+        if stack == "portrait" {
+            limits.push(self.portrait);
+        }
+        for lim in limits.into_iter().flatten() {
+            if p95 > lim {
+                self.failures.push(format!(
+                    "{stack} / {case} on {backend}: p95 {p95:.1} ms > {lim:.1} ms"
+                ));
+                return;
+            }
+        }
+    }
+}
+
+/// Times one case on the CPU and (when present) the GPU, prints a row and checks limits
+/// against the active backend (GPU if present, else CPU).
+fn run_case(
+    lim: &mut Limits,
+    stack: &str,
+    name: &str,
+    (cpu, gpu): (&dyn Renderer, &dyn Renderer),
+    (src, st, masks): (&RgbImage, &EditStack, &dyn MaskProvider),
+    max: Option<u32>,
+    runs: usize,
+) {
+    let runs = lim.runs(runs);
+    let c = time(cpu, src, st, masks, max, runs);
+    let g = (gpu.backend() == Backend::Gpu).then(|| time(gpu, src, st, masks, max, runs));
+    println!(
+        "{name:<34} {:>24} {:>24}",
+        c.cell(),
+        g.map(|g| g.cell()).unwrap_or_else(|| "n/a".into())
+    );
+    match g {
+        Some(g) => lim.check(stack, name, "gpu", g.p95),
+        None => lim.check(stack, name, "cpu", c.p95),
+    }
 }
 
 fn main() {
+    let mut lim = Limits::parse();
     let (w, h) = (6000u32, 4000u32);
     println!(
         "generating {}x{} ({} MP) source...",
@@ -222,7 +343,10 @@ fn main() {
             max_long_edge: Some(2400),
         })
         .unwrap();
-    println!("{:<34} {:>10} {:>10}", "case", "CPU ms", "GPU ms");
+    println!(
+        "{:<34} {:>24} {:>24}",
+        "case", "CPU best/p50/p95 ms", "GPU best/p50/p95 ms"
+    );
     let cases: [(&str, &RgbImage, Option<u32>, usize); 5] = [
         ("preview 1600 (from 2400 proxy)", &proxy, Some(1600), 5),
         ("drag 800 (from 2400 proxy)", &proxy, Some(800), 5),
@@ -231,13 +355,15 @@ fn main() {
         ("export full-res 24 MP", &big, None, 2),
     ];
     for (name, src, max, runs) in cases {
-        let c = time(cpu.as_ref(), src, &st, &masks, max, runs);
-        let g = if gpu.backend() == Backend::Gpu {
-            format!("{:10.1}", time(gpu.as_ref(), src, &st, &masks, max, runs))
-        } else {
-            "      n/a".into()
-        };
-        println!("{name:<34} {c:>10.1} {g}");
+        run_case(
+            &mut lim,
+            "heavy",
+            name,
+            (cpu.as_ref(), gpu.as_ref()),
+            (src, &st, &masks),
+            max,
+            runs,
+        );
     }
 
     // ---- portrait stack (face warp + body warp + beauty, all on)
@@ -306,23 +432,25 @@ portrait stack (synthetic 3:4 portrait, people geometry from testutil)"
             }),
         ],
     };
-    println!("{:<34} {:>10} {:>10}", "case", "CPU ms", "GPU ms");
+    println!(
+        "{:<34} {:>24} {:>24}",
+        "case", "CPU best/p50/p95 ms", "GPU best/p50/p95 ms"
+    );
     let cases: [(&str, &RgbImage, Option<u32>, usize); 3] = [
         ("preview 1600 (from 2400 proxy)", &proxy, Some(1600), 5),
         ("preview 1600 (from 24 MP)", &big, Some(1600), 3),
         ("export full-res 24 MP", &big, None, 2),
     ];
     for (name, src, max, runs) in cases {
-        let c = time(cpu.as_ref(), src, &patch_st, &assets, max, runs);
-        let g = if gpu.backend() == Backend::Gpu {
-            format!(
-                "{:10.1}",
-                time(gpu.as_ref(), src, &patch_st, &assets, max, runs)
-            )
-        } else {
-            "      n/a".into()
-        };
-        println!("{name:<34} {c:>10.1} {g}");
+        run_case(
+            &mut lim,
+            "patch",
+            name,
+            (cpu.as_ref(), gpu.as_ref()),
+            (src, &patch_st, &assets),
+            max,
+            runs,
+        );
     }
 
     let people = PortraitMasks(vec![portrait.person.clone()]);
@@ -336,19 +464,32 @@ portrait stack (synthetic 3:4 portrait, people geometry from testutil)"
             max_long_edge: Some(2400),
         })
         .unwrap();
-    println!("{:<34} {:>10} {:>10}", "case", "CPU ms", "GPU ms");
+    println!(
+        "{:<34} {:>24} {:>24}",
+        "case", "CPU best/p50/p95 ms", "GPU best/p50/p95 ms"
+    );
     let cases: [(&str, &RgbImage, Option<u32>, usize); 3] = [
         ("preview 1600 (from 2400 proxy)", &pproxy, Some(1600), 5),
         ("preview 1600 (from 24 MP)", &portrait.image, Some(1600), 3),
         ("export full-res 24 MP", &portrait.image, None, 2),
     ];
     for (name, src, max, runs) in cases {
-        let c = time(cpu.as_ref(), src, &pst, &people, max, runs);
-        let g = if gpu.backend() == Backend::Gpu {
-            format!("{:10.1}", time(gpu.as_ref(), src, &pst, &people, max, runs))
-        } else {
-            "      n/a".into()
-        };
-        println!("{name:<34} {c:>10.1} {g}");
+        run_case(
+            &mut lim,
+            "portrait",
+            name,
+            (cpu.as_ref(), gpu.as_ref()),
+            (src, &pst, &people),
+            max,
+            runs,
+        );
+    }
+
+    if !lim.failures.is_empty() {
+        eprintln!("\nTHRESHOLD EXCEEDED:");
+        for f in &lim.failures {
+            eprintln!("  {f}");
+        }
+        std::process::exit(1);
     }
 }

@@ -76,6 +76,7 @@
 | `strip_gps` | bool | 删除 EXIF GPS IFD 与 XMP 中所有 `GPS*` 属性；**对原样复制的照片同样生效**（见下） |
 | `strip_metadata` | bool | 不写入任何 EXIF / XMP / IPTC（隐含 `strip_gps`）；ICC 保留；清理后的原图保留朝向 |
 | `aspect` | `[w, h]`，各 1..10000 | 居中裁切到该宽高比，再按 `long_edge` 缩小（不放大）；没有 `long_edge` 时只裁切 |
+| `watermark` | 对象（见下「水印」），省略 = 无水印 | F9.4：文字或 Logo 水印，缩放与色彩转换之后、编码之前画进每张输出（所有格式）。**设置水印后，本来会原样复制 / 清理的原图改为重新编码**（`original` 格式输出 JPEG），原文件不被改动 |
 
 - 扩展名：JPEG `.jpg`、PNG `.png`、TIFF `.tif`、WebP `.webp`；复制或清理的原图保留原扩展名。`quality` 只作用于 JPEG。
 - WebP 为**无损**（VP8L）：工作区内的纯 Rust 编码器（`image-webp`）没有有损模式；每边最多 16383 像素，超出时等比缩小。TIFF 为 8 位 RGB、无压缩（单个文件小于 4 GB）。不输出 16 位。
@@ -99,6 +100,26 @@
 | TIFF / RAW / HEIF | 无法就地清理：改为全尺寸重新编码（`format: original` 时为 JPEG，否则为所选格式） |
 
 原图无法解析时按其自身格式重新编码。
+
+**水印（F9.4）**：`watermark` 对象，非法设置在启动任务前返回 `400 bad_request`（`message` 带字段名），Logo / 字体文件须在允许访问的文件夹内（否则 `403 forbidden_path`；相对路径 `400`）：
+
+| 字段 | 取值 | 说明 |
+|---|---|---|
+| `kind` | `"text"` \| `"image"`（必填） | 文字或 Logo |
+| `text` | 非空字符串，≤ 200 字符 | `kind: text`：单行文字，可含占位符 `{name}` `{date}`（`YYYY-MM-DD`）`{year}` `{camera}` `{event}` `{scene}` `{rating}`（一次展开，取值同命名模板但缺失时为空；未知占位符原样保留）和 `©` 等字符 |
+| `image_path` | 绝对路径 | `kind: image`：Logo 文件（建议带 alpha 的 PNG；`image` 库能解码的格式均可，≤ 32 MB，每边 ≤ 8192 px） |
+| `font_path` | 绝对路径，可省略 | `kind: text`：TTF / OTF 字体文件（不支持 `.ttc` 合集）。省略时使用内置 DejaVu Sans（拉丁、希腊、西里尔；**不含中日韩文字**）。文字里有字体缺少的字符（如中文）时返回 400 并提示选择字体文件，不会画出方框 |
+| `position` | `top-left` `top` `top-right` `left` `center` `right` `bottom-left` `bottom` `bottom-right`（默认 `bottom-right`） | 九宫格位置 |
+| `margin_pct` | 0..40（默认 2） | 与边缘的距离，长边的百分比 |
+| `size_pct` | 1..100（默认 20） | `image`：Logo 宽度，长边的百分比（放不进画面时等比缩小） |
+| `font_size_pct` | 0.5..50（默认 3） | `text`：字号，长边的百分比（文字比画面宽时自动缩小） |
+| `opacity` | 0..1（默认 0.6） | 不透明度（与 Logo 自身 alpha 相乘） |
+| `color` | `#rrggbb` / `#rgb`（默认 `#ffffff`） | `text`：文字颜色 |
+| `shadow` | bool（默认 true） | `text`：黑色投影（偏移约字号的 1/16，不透明度为 `opacity` 的 0.7 倍） |
+
+「长边」指水印所在输出图（缩放 / 裁切之后）的长边。水印文字渲染用纯 Rust（`ab_glyph`），内置字体与许可见 `docs/07` §6。
+
+`GET /api/fs/list?path=…&ext=png,ttf`（水印文件选择器）：除 `dirs`、`image_count` 外，再返回 `files`：该目录中扩展名匹配（不分大小写，逗号分隔，可带点）的文件完整路径，按文件名排序；没有 `ext` 参数时无 `files` 键。
 
 **预设**：`GET /api/export/presets` → `{"presets":[{"id","long_edge","aspect","quality","format","strip_gps"}]}`。这是唯一的预设表（`ip_core::export::EXPORT_PRESETS`），导出对话框与 AI 助手的 `export` 工具（`preset` 枚举）共用：
 

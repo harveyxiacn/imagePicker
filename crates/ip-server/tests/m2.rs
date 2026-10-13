@@ -662,6 +662,17 @@ async fn full_flow_over_http() {
     assert!(nf["person_id"].is_number() && nf["id"] == any_face_id);
     let r = call(
         &e.app,
+        Method::GET,
+        &format!("/api/people/{pb}/faces"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.json()["face_ids"].is_array());
+    let r = call(&e.app, Method::GET, "/api/people/999999/faces", None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(
+        &e.app,
         Method::POST,
         "/api/people/merge",
         Some(json!({"ids": [pb], "into": pa})),

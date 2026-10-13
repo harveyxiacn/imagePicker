@@ -893,8 +893,7 @@ fn beauty_follows_the_warp() {
 // ---------------------------------------------------------------- CPU / GPU parity
 
 fn parity(p: &SynthPortrait, img: &RgbImage, st: &EditStack, max: Option<u32>, label: &str) {
-    let Some(gpu) = create_strict_gpu_renderer() else {
-        eprintln!("SKIP parity {label}: no GPU adapter");
+    let Some(gpu) = strict_gpu_or_skip(&format!("parity {label}")) else {
         return;
     };
     let a = render_with(cpu().as_ref(), p, img, st, max);

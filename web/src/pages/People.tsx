@@ -14,6 +14,8 @@ import { can } from '@/lib/auth'
 import { buildBestSections, sectionsToFolders } from '@/lib/bestN'
 import { qk } from '@/lib/cache'
 import { applyProfilesToPhotos } from '@/lib/editActions'
+import { useHistory } from '@/lib/history'
+import { mergePeopleEntry, personPatchEntry, refreshPeople, type MergedPersonSnapshot } from '@/lib/structureUndo'
 import { DEFAULT_PERSON_FILTER } from '@/lib/filter'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -113,6 +115,11 @@ function PeopleInner() {
     try {
       await api.patchPerson(p.id, body)
       refresh()
+      const before: { name?: string | null; hidden?: boolean } = {}
+      if ('name' in body) before.name = p.name
+      if (body.hidden !== undefined) before.hidden = p.hidden
+      const label = 'name' in body ? t('history.renamePerson') : body.hidden ? t('history.hidePerson') : t('history.unhidePerson')
+      useHistory.getState().push(personPatchEntry({ label, api, personId: p.id, before, next: body, after: () => refreshPeople(qc) }))
     } catch (err) {
       fail(err)
       refresh()
@@ -177,8 +184,17 @@ function PeopleInner() {
   const doMerge = async () => {
     if (into === null) return
     setMergeOpen(false)
+    const merging = chosen.filter((p) => p.id !== into)
+    // Snapshot the people that are about to disappear so the merge can be undone (no entry if the faces cannot be read).
+    const merged: MergedPersonSnapshot[] | null = await Promise.all(
+      merging.map(async (p) => ({ id: p.id, name: p.name, hidden: p.hidden, faceIds: (await api.personFaces(p.id)).face_ids })),
+    ).catch(() => null)
     try {
       await api.mergePeople(chosen.map((p) => p.id), into)
+      if (merged) {
+        const intoNameBefore = chosen.find((p) => p.id === into)?.name ?? null
+        useHistory.getState().push(mergePeopleEntry({ label: t('history.mergePeople', { n: chosen.length }), api, into, intoNameBefore, merged, after: () => refreshPeople(qc) }))
+      }
       setSelected(new Set())
       refresh()
       push('success', t('people.merged', { n: chosen.length }), 2500)

@@ -284,7 +284,21 @@ macOS 中 `Ctrl` 对应 `⌘`。快捷键可在设置中自定义。
 | 圆角 | 6px（控件）、8px（卡片）；缩略图 2px |
 | 动效 | 120–200ms，ease-out；尊重系统"减少动态效果"设置 |
 | 图标 | Lucide |
-| 无障碍 | 对比度 ≥ 4.5:1；所有图标按钮有 aria-label；焦点环可见 |
+| 无障碍 | 见下方「无障碍」小节 |
+
+### 6.1 无障碍
+
+| 项 | 做法 |
+|---|---|
+| 高对比度 | 设置 → 语言与外观 → 「高对比度」，在 `<html>` 上设置 `data-contrast="high"`，由 `index.css` 覆盖色彩令牌：深色为黑底白字（正文 ≥ 15:1，次要文字 ≥ 9:1）、浅色为白底黑字；分隔线 ≥ 3:1，焦点环 3px 白 / 黑，强调色与 AI 紫均按 AA 取色。可叠加在深色或浅色主题上 |
+| 界面字号 | 设置 → 「界面字号」90%–150%（步长 5%），写入 `--font-scale`；`html { font-size: calc(16px * var(--font-scale)) }`，字号 / 间距 / 控件高度均为 rem，任意像素字号工具类（`text-[11px]` 等）在 `index.css` 中同样乘以该系数。两项偏好只存本机（`localStorage` 的 `imagepicker.ui`），应用逻辑见 `lib/appearance.ts` |
+| 键盘 | 全部功能可只用键盘完成；`Ctrl+K` 命令面板（`CommandPalette.tsx`）对键位表中当前屏幕可执行的动作与页面跳转做模糊搜索，条目由 `lib/keymap.ts` 的 `BINDINGS` 生成，`?` 帮助与设置里的快捷键表同源，新增动作只需改键位表 |
+| 焦点 | 全局 `:focus-visible` 焦点环（2px，高对比度 3px）；输入框聚焦同样显示；对话框使用 Radix Dialog：焦点陷阱、`Esc` 关闭并把焦点还给触发元素 |
+| 名称 | 所有图标按钮有 `aria-label` 或 `title`；开关用 `role="switch"`，命令面板为 combobox + listbox（`aria-activedescendant`） |
+| 对比度 | 常规主题正文与次要文字 ≥ 4.5:1（`--faint` 已提亮 / 加深到可读值） |
+| 动效 | 尊重系统「减少动态效果」 |
+| 撤销 | 评分 / 旗标 / 编辑栈沿用统一历史；组的拆分 / 合并与人物的重命名、隐藏、合并、移动人脸也进入同一历史（`Ctrl+Z` / `Ctrl+Shift+Z`） |
+| 自动检查 | `pnpm dev:mock` 后运行 `pnpm a11y`（`web/scripts/a11y-smoke.mjs`）：Playwright + axe-core 依次检查首页、图库、导出对话框、命令面板、帮助、单张、对比、人物、设置，深色与深色高对比度两种模式，serious / critical 违规即失败。未接入 CI（需要浏览器与 mock 服务，约 1–2 分钟） |
 
 ## 7. 新手引导与空状态
 

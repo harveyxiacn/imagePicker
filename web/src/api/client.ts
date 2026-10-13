@@ -253,6 +253,8 @@ export const api = {
     request<{ people: Person[] }>('GET', `/people${session_id !== undefined ? `?session_id=${session_id}` : ''}`),
   patchPerson: (id: number, body: { name?: string | null; hidden?: boolean }) =>
     request<{ person: Person }>('PATCH', `/people/${id}`, body),
+  /** Ids of the faces assigned to a person (needed to undo a merge). */
+  personFaces: (id: number) => request<{ face_ids: number[] }>('GET', `/people/${id}/faces`),
   mergePeople: (ids: number[], into: number) => request<{ person: Person }>('POST', '/people/merge', { ids, into }),
   setFacePerson: (id: number, person_id: number | null) =>
     request<{ face: Face }>('POST', `/faces/${id}/person`, { person_id }),
@@ -340,8 +342,10 @@ export const api = {
   remoteDevices: () => request<{ devices: RemoteDevice[] }>('GET', '/remote/devices'),
   remoteRevoke: (id: string) => request<void>('DELETE', `/remote/devices/${encodeURIComponent(id)}`),
   fsRoots: () => request<{ roots: string[] }>('GET', '/fs/roots'),
-  fsList: (path?: string) =>
-    request<FsList>('GET', `/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  fsList: (path?: string, ext?: string[]) => {
+    const q = [path ? `path=${encodeURIComponent(path)}` : '', ext?.length ? `ext=${encodeURIComponent(ext.join(','))}` : ''].filter(Boolean).join('&')
+    return request<FsList>('GET', `/fs/list${q ? `?${q}` : ''}`)
+  },
 }
 
 /** Page size used when pulling a whole session (contract: max 5000). */

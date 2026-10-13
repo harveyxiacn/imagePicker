@@ -17,8 +17,16 @@ export interface EditChange {
   after: EditStack
 }
 
+/** Inverse / replay of a structural edit (group split / merge, person edits) that is not a photo PATCH. */
+export interface CustomUndo {
+  undo: () => Promise<void>
+  redo: () => Promise<void>
+}
+
 export interface HistoryEntry {
   label: string
+  /** group split / merge and person edits: run through their own API calls (see `structureUndo.ts`) */
+  custom?: CustomUndo
   /** rating / flag / label changes (empty for pure edit entries) */
   changes: Change[]
   /** edit-stack changes; one entry may cover several photos (paste / sync) */

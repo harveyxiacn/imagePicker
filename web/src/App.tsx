@@ -6,6 +6,7 @@ import { startEvents } from '@/api/events'
 import { useMe, useSettings } from '@/api/queries'
 import { can, LOGIN_PATH, loginTarget, setRole, shouldRedirectOn401 } from '@/lib/auth'
 import { qk } from '@/lib/cache'
+import { applyAppearance } from '@/lib/appearance'
 import { showsBottomNav } from '@/lib/layout'
 import { useIsMobile } from '@/lib/useLayout'
 import { onAssistantDone } from '@/lib/assistantRun'
@@ -24,6 +25,7 @@ import { Edit } from '@/pages/Edit'
 import { Library } from '@/pages/Library'
 import { People } from '@/pages/People'
 import { Taste } from '@/pages/Taste'
+import { CommandPalette } from '@/components/CommandPalette'
 import { Toasts } from '@/components/Toasts'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -37,16 +39,15 @@ const queryClient = new QueryClient({
 
 function useTheme() {
   const theme = useUi((s) => s.theme)
+  const contrast = useUi((s) => s.contrast)
+  const fontScale = useUi((s) => s.fontScale)
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: light)')
-    const apply = () => {
-      const light = theme === 'light' || (theme === 'system' && mq.matches)
-      document.documentElement.dataset.theme = light ? 'light' : 'dark'
-    }
+    const apply = () => applyAppearance(document.documentElement, { theme, contrast, fontScale }, mq.matches)
     apply()
     mq.addEventListener('change', apply)
     return () => mq.removeEventListener('change', apply)
-  }, [theme])
+  }, [theme, contrast, fontScale])
 }
 
 function useLang() {
@@ -143,6 +144,7 @@ function Shell() {
       <Onboarding />
       <FaceConsentDialog />
       <CatalogRecovery />
+      <CommandPalette />
       <Toasts />
     </>
   )

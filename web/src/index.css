@@ -8,8 +8,8 @@
   --elevated: #333333;
   --line: #3a3a3a;
   --fg: #e8e8e8;
-  --muted: #9a9a9a;
-  --faint: #6b6b6b;
+  --muted: #a6a6a6;
+  --faint: #959595;
   --accent: #f5a524;
   --accent-fg: #1a1200;
   --ai: #a371f7;
@@ -25,6 +25,8 @@
   --label-purple: #d36bb0;
   --shadow: 0 8px 28px rgb(0 0 0 / 0.45);
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --focus: var(--accent);
+  --font-scale: 1;
 }
 
 :root[data-theme='light'] {
@@ -34,14 +36,54 @@
   --elevated: #ffffff;
   --line: #d2d2d2;
   --fg: #1c1c1c;
-  --muted: #5e5e5e;
-  --faint: #8c8c8c;
+  --muted: #555555;
+  --faint: #666666;
   --accent: #d98c00;
-  --accent-fg: #ffffff;
+  --accent-fg: #1a1200;
   --ai: #7c4dd6;
   --skeleton-a: #e0e0e0;
   --skeleton-b: #ebebeb;
   --shadow: 0 8px 28px rgb(0 0 0 / 0.18);
+}
+
+/* High contrast (Settings > Appearance): WCAG AA text (>= 4.5:1, mostly >= 7:1), visible borders and focus rings (>= 3:1). */
+:root[data-contrast='high'] {
+  --bg: #000000;
+  --panel: #0d0d0d;
+  --elevated: #1a1a1a;
+  --line: #8f8f8f;
+  --fg: #ffffff;
+  --muted: #dcdcdc;
+  --faint: #bdbdbd;
+  --accent: #ffcc33;
+  --accent-fg: #000000;
+  --ai: #cdb0ff;
+  --success: #5ee27a;
+  --warning: #ffcf40;
+  --danger: #ff8a82;
+  --skeleton-a: #1a1a1a;
+  --skeleton-b: #2e2e2e;
+  --focus: #ffffff;
+  --shadow: 0 8px 28px rgb(0 0 0 / 0.8);
+}
+:root[data-theme='light'][data-contrast='high'] {
+  --bg: #ffffff;
+  --panel: #f4f4f4;
+  --elevated: #ffffff;
+  --line: #595959;
+  --fg: #000000;
+  --muted: #2b2b2b;
+  --faint: #474747;
+  --accent: #8a4b00;
+  --accent-fg: #ffffff;
+  --ai: #4a1fa8;
+  --success: #0b6b1f;
+  --warning: #6e4a00;
+  --danger: #a8071a;
+  --skeleton-a: #e3e3e3;
+  --skeleton-b: #f0f0f0;
+  --focus: #000000;
+  --shadow: 0 8px 28px rgb(0 0 0 / 0.3);
 }
 
 @theme inline {
@@ -62,12 +104,16 @@
     'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
   --radius-control: 6px;
   --radius-card: 8px;
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-base: 15px;
-  --text-xl: 20px;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-xl: 1.25rem;
 }
 
+/* UI font scale (Settings > Appearance): rem-based sizes follow the root font size. */
+html {
+  font-size: calc(16px * var(--font-scale, 1));
+}
 html,
 body,
 #root {
@@ -79,7 +125,7 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
@@ -91,8 +137,30 @@ body {
 }
 
 *:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 1px;
+}
+:root[data-contrast='high'] *:focus-visible {
+  outline-width: 3px;
+  outline-offset: 2px;
+}
+:root[data-contrast='high'] .btn,
+:root[data-contrast='high'] .chip,
+:root[data-contrast='high'] .field {
+  border-color: var(--line);
+}
+/* Arbitrary pixel text sizes follow the font scale too. */
+.text-\[9px\] {
+  font-size: calc(9px * var(--font-scale, 1));
+}
+.text-\[10px\] {
+  font-size: calc(10px * var(--font-scale, 1));
+}
+.text-\[11px\] {
+  font-size: calc(11px * var(--font-scale, 1));
+}
+.text-\[12px\] {
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 ::-webkit-scrollbar {
@@ -113,8 +181,8 @@ body {
 
 kbd {
   font-family: inherit;
-  font-size: 11px;
-  min-width: 20px;
+  font-size: 0.6875rem;
+  min-width: 1.25rem;
   padding: 1px 6px;
   text-align: center;
   border-radius: 4px;
@@ -129,13 +197,13 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 10px;
+  height: 1.75rem;
+  padding: 0 0.625rem;
   border-radius: var(--radius-control);
   border: 1px solid var(--line);
   background: var(--elevated);
   color: var(--fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -168,7 +236,7 @@ kbd {
   border-color: var(--line);
 }
 .btn-icon {
-  width: 28px;
+  width: 1.75rem;
   padding: 0;
   justify-content: center;
 }
@@ -183,17 +251,20 @@ kbd {
 }
 
 .field {
-  height: 28px;
-  padding: 0 8px;
+  height: 1.75rem;
+  padding: 0 0.5rem;
   border-radius: var(--radius-control);
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--fg);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 .field:focus {
   border-color: var(--accent);
-  outline: none;
+}
+.field:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }
 
 input[type='range'] {
@@ -297,7 +368,7 @@ input[type='range'].lr-slider[data-changed='true']::-webkit-slider-thumb {
   background: transparent;
   color: var(--fg);
   text-align: right;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
   -moz-appearance: textfield;
   appearance: textfield;
@@ -308,7 +379,6 @@ input[type='range'].lr-slider[data-changed='true']::-webkit-slider-thumb {
 .lr-num:focus {
   border-color: var(--accent);
   background: var(--bg);
-  outline: none;
 }
 .lr-num::-webkit-outer-spin-button,
 .lr-num::-webkit-inner-spin-button {
@@ -340,13 +410,13 @@ input[type='range'].lr-slider[data-changed='true']::-webkit-slider-thumb {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 12px;
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  border-radius: 0.75rem;
   border: 1px solid var(--line);
   background: var(--elevated);
   color: var(--fg);
-  font-size: 12px;
+  font-size: 0.75rem;
   cursor: pointer;
   white-space: nowrap;
   transition:
