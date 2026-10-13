@@ -313,7 +313,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           packages: platform-tools # the default list names the retired "tools" package
       - name: Install NDK 27
