@@ -19,7 +19,7 @@
 
 ### 状态
 
-**预发布（v0.1，开发中）**：核心功能（导入、分析、分组、评分、人物、最佳表情、编辑、人像美化、修复、导出、AI 助手、局域网 WebUI、XMP 互通、设置）已实现并通过 mock 与合成数据验证。已知限制见 [待办与已知问题](docs/backlog.md)：评分阈值尚未在大规模真实照片上校准；HEIC/HEIF 缩略图、搜索框（自然语言搜索）、Android 版尚未提供。安装包与 AI 组件安装器已就绪，首个正式版发布前请参考下文「从源码运行」。
+**预发布（v0.1，开发中）**：核心功能（导入、分析、分组、评分、人物、最佳表情、编辑、人像美化、修复、导出、AI 助手、局域网 WebUI、XMP 互通、设置）已实现并通过 mock 与合成数据验证。已知限制见 [待办与已知问题](docs/backlog.md)：评分阈值尚未在大规模真实照片上校准；搜索框（自然语言搜索）、Android 版尚未提供；HEIC/HEIF 依赖系统或 AI 组件中的解码器，未在真实 iPhone/安卓样张上实测。安装包与 AI 组件安装器已就绪，首个正式版发布前请参考下文「从源码运行」。
 
 ### 功能亮点
 
@@ -114,7 +114,7 @@ Thousands of shots from a trip, party or wedding? Drop the folder in and hit Ana
 
 ### Status
 
-**Pre-release (v0.1, in development).** The core feature set (import, analysis, grouping, scoring, people, best take, editing, portrait retouching, repair, export, AI assistant, LAN WebUI, XMP interop, settings) is implemented and verified against a mock backend and synthetic data. See [backlog](docs/backlog.md) for known limitations: score thresholds are not yet calibrated on a large real-photo set; HEIC/HEIF thumbnails, the search box (natural-language search) and the Android app are not available yet. Installers and the built-in AI component setup are ready; until the first release is published, see "Run from source" below.
+**Pre-release (v0.1, in development).** The core feature set (import, analysis, grouping, scoring, people, best take, editing, portrait retouching, repair, export, AI assistant, LAN WebUI, XMP interop, settings) is implemented and verified against a mock backend and synthetic data. See [backlog](docs/backlog.md) for known limitations: score thresholds are not yet calibrated on a large real-photo set; the search box (natural-language search) and the Android app are not available yet; HEIC/HEIF relies on the OS or AI-component decoder and has not been tested on real iPhone/Android samples. Installers and the built-in AI component setup are ready; until the first release is published, see "Run from source" below.
 
 ### Highlights
 
