@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ExportPreset } from '@/api/types'
 import { applyPreset, aspectOf, DEFAULT_FORM, DEFAULT_WATERMARK, exampleName, exportBody, extensionOf, loadWatermark, parseWatermark, saveWatermark, usesQuality, watermarkBody, watermarkIncomplete } from './exportOptions'
 
@@ -82,14 +82,24 @@ describe('export options', () => {
       expect(f.watermark).toEqual(on)
     })
 
+    afterEach(() => vi.unstubAllGlobals())
+
     it('remembers the last used settings and survives garbage', () => {
+      const store = new Map<string, string>()
+      vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) })
       const w = { ...on, text: 'mine', position: 'bottom-left' as const, opacity: 80 }
       saveWatermark(w)
       expect(loadWatermark()).toEqual(w)
       expect(parseWatermark(null)).toEqual(DEFAULT_WATERMARK)
       expect(parseWatermark('not json')).toEqual(DEFAULT_WATERMARK)
+      expect(loadWatermark()).toEqual(w)
+      vi.stubGlobal('localStorage', {
+        getItem: () => {
+          throw new Error('blocked')
+        },
+      })
+      expect(loadWatermark()).toEqual(DEFAULT_WATERMARK)
       expect(parseWatermark(JSON.stringify({ enabled: true, opacity: 500, position: 'nowhere', color: 'red', marginPct: -1, text: 5 }))).toEqual({ ...DEFAULT_WATERMARK, enabled: true })
-      localStorage.clear()
     })
   })
 })
