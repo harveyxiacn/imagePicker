@@ -1189,6 +1189,45 @@ async fn settings_persist_and_apply_live() {
 }
 
 #[tokio::test]
+async fn tier_override_reaches_the_worker_and_auto_returns_to_detection() {
+    let e = env();
+    let hw = e.core.hardware(true).await.unwrap();
+    assert_eq!(hw.tier.as_deref(), Some("T3"));
+    assert!(!hw.tier_overridden);
+    e.core
+        .patch_settings(json!({"models":{"tier_override":"T1"}}))
+        .await
+        .unwrap();
+    let opts = e.worker.last_options.lock().unwrap().clone().unwrap();
+    assert!(opts.env.contains(&("IMAGEPICKER_TIER".into(), "T1".into())));
+    // the idle worker was stopped so that its next start uses the override
+    for _ in 0..100 {
+        if e.core.hardware(false).await.unwrap().state == "stopped" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(e.core.hardware(false).await.unwrap().state, "stopped");
+    let hw = e.core.hardware(true).await.unwrap();
+    assert_eq!(hw.tier.as_deref(), Some("T1"));
+    assert_eq!(hw.tier_detected.as_deref(), Some("T3"));
+    assert!(hw.tier_overridden);
+    // "auto": the variable is gone again and detection decides
+    e.core
+        .patch_settings(json!({"models":{"tier_override":"auto"}}))
+        .await
+        .unwrap();
+    let opts = e.worker.last_options.lock().unwrap().clone().unwrap();
+    assert!(!opts.env.iter().any(|(k, _)| k == "IMAGEPICKER_TIER"));
+    assert!(matches!(
+        e.core
+            .patch_settings(json!({"models":{"tier_override":"T7"}}))
+            .await,
+        Err(CoreError::Unprocessable(_))
+    ));
+}
+
+#[tokio::test]
 async fn faces_disabled_skips_identity_steps() {
     let e = env();
     photo(e.src.path(), "f1.jpg", 0);

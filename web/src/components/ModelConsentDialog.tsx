@@ -5,10 +5,12 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useModels } from '@/api/queries'
 import { startAnalysis } from '@/lib/analysis'
+import { effectiveUsage, licenceWarnings } from '@/lib/licence'
 import { offerRuntimeInstall } from '@/lib/runtime'
 import { formatBytes } from '@/lib/format'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
+import { LicenseBadge } from './LicenseBadge'
 import { Modal } from './Modal'
 
 const mb = (n: number) => (n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : n >= 10 ? `${Math.round(n)} MB` : `${n} MB`)
@@ -29,7 +31,7 @@ export function ModelConsentDialog() {
 
   const list = (models.data ?? []).filter((m) => consent?.models.includes(m.id))
   const total = list.reduce((n, m) => n + m.size_mb, 0)
-  const hasNc = list.some((m) => m.noncommercial)
+  const warnings = licenceWarnings(list)
 
   const downloading = ensureTaskId !== null && task?.state !== 'failed' && task?.state !== 'done'
   const failed = task?.state === 'failed' ? (task.error ?? t('models.failed')) : ensureError
@@ -114,33 +116,31 @@ export function ModelConsentDialog() {
                 key={m.id}
                 className="flex items-center gap-3 rounded-control border px-3 py-2"
                 style={{
-                  borderColor: m.noncommercial ? 'color-mix(in srgb, var(--warning) 60%, transparent)' : 'var(--line)',
-                  background: m.noncommercial ? 'color-mix(in srgb, var(--warning) 9%, transparent)' : undefined,
+                  borderColor: effectiveUsage(m) !== 'commercial-ok' ? 'color-mix(in srgb, var(--warning) 60%, transparent)' : 'var(--line)',
+                  background: effectiveUsage(m) !== 'commercial-ok' ? 'color-mix(in srgb, var(--warning) 9%, transparent)' : undefined,
                 }}
                 data-nc={m.noncommercial}
+                data-usage={effectiveUsage(m)}
               >
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{m.id}</div>
                   <div className="truncate text-xs text-muted">{m.task.map((k) => t(`models.task_${k}`, { defaultValue: k })).join(' · ')}</div>
                 </div>
                 <span className="tnum text-xs text-muted">{mb(m.size_mb)}</span>
-                <span
-                  className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${m.noncommercial ? 'bg-warning/20 font-semibold text-warning' : 'bg-panel text-muted'}`}
-                  title={m.noncommercial ? t('models.ncHint') : m.license}
-                >
-                  {m.noncommercial && <AlertTriangle size={12} />}
-                  {m.license}
-                  {m.noncommercial && ` · ${t('models.nc')}`}
-                </span>
+                <LicenseBadge model={m} />
               </li>
             ))}
             {models.isError && <li className="text-danger">{(models.error as Error).message}</li>}
           </ul>
         )}
-        {hasNc && (
-          <div className="mt-3 flex items-start gap-2 rounded-control bg-warning/10 p-2 text-xs text-warning">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-            {t('models.ncWarning')}
+        {warnings.length > 0 && (
+          <div className="mt-3 flex flex-col gap-1.5" data-testid="licence-warnings">
+            {warnings.map((u) => (
+              <div key={u} className="flex items-start gap-2 rounded-control bg-warning/10 p-2 text-xs text-warning" data-usage={u}>
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                {t(`models.warn_${u}`)}
+              </div>
+            ))}
           </div>
         )}
         {canLite && failed && (

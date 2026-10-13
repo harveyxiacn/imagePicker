@@ -148,6 +148,8 @@ mod tests {
             size_mb: 1.0,
             license: "MIT".into(),
             noncommercial: false,
+            usage: "commercial-ok".into(),
+            license_info: Default::default(),
             installed,
             recommended: true,
             optional: false,

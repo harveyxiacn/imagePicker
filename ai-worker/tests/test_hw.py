@@ -119,6 +119,7 @@ def test_provider_selection_order():
 
 
 def test_detect_with_mocked_machine(monkeypatch):
+    monkeypatch.delenv("IMAGEPICKER_TIER", raising=False)
     monkeypatch.setattr(
         hwmod, "_nvidia_smi", lambda: [GpuInfo("nvidia", "NVIDIA GeForce RTX 4090", 24564, "616.0")]
     )
@@ -141,3 +142,75 @@ def test_detect_runs_for_real():
     assert hw.ram_mb > 0
     assert hw.tier in ("T0", "T1", "T2", "T3")
     assert hw.providers[-1] == "CPUExecutionProvider"
+
+
+# ---------------------------------------------------------------- manual tier override
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("T2", "T2"),
+        (" t0 ", "T0"),
+        ("auto", None),
+        ("", None),
+        (None, None),
+        ("T9", None),
+        ("x", None),
+    ],
+)
+def test_parse_tier_override(value, expected):
+    assert hwmod.parse_tier_override(value) == expected
+
+
+def _mock_4090(monkeypatch):
+    monkeypatch.setattr(
+        hwmod, "_nvidia_smi", lambda: [GpuInfo("nvidia", "NVIDIA GeForce RTX 4090", 24564, "616.0")]
+    )
+    monkeypatch.setattr(hwmod, "_ort_providers", lambda: CUDA)
+    monkeypatch.setattr(hwmod, "_cpu_name", lambda: "Fake CPU")
+
+
+def test_detect_honours_the_env_override_and_auto_returns_to_detection(monkeypatch):
+    _mock_4090(monkeypatch)
+    monkeypatch.setenv("IMAGEPICKER_TIER", "T1")
+    hw = hwmod.detect()
+    assert (hw.tier, hw.tier_detected, hw.tier_overridden) == ("T1", "T3", True)
+    assert "manual override T1" in hw.tier_reason and "RTX 4090" in hw.tier_reason
+    assert hw.providers == CUDA and hw.device == "cuda"  # hardware use is unchanged
+    assert hw.to_dict()["tier_detected"] == "T3"
+    for auto in ("auto", "", "bogus"):
+        monkeypatch.setenv("IMAGEPICKER_TIER", auto)
+        hw = hwmod.detect()
+        assert (hw.tier, hw.tier_detected, hw.tier_overridden) == ("T3", "T3", False)
+    monkeypatch.delenv("IMAGEPICKER_TIER")
+    assert hwmod.detect().tier == "T3"
+
+
+def test_explicit_argument_beats_the_env(monkeypatch):
+    _mock_4090(monkeypatch)
+    monkeypatch.setenv("IMAGEPICKER_TIER", "T1")
+    assert hwmod.detect(tier_override="T0").tier == "T0"
+    assert hwmod.detect(tier_override="auto").tier == "T3"
+
+
+def test_override_equal_to_detection_is_not_reported_as_override(monkeypatch):
+    _mock_4090(monkeypatch)
+    monkeypatch.setenv("IMAGEPICKER_TIER", "T3")
+    hw = hwmod.detect()
+    assert hw.tier == "T3" and not hw.tier_overridden
+
+
+async def test_worker_service_uses_the_overridden_tier(monkeypatch, tmp_path):
+    from imagepicker_ai.service import WorkerService
+
+    _mock_4090(monkeypatch)
+    monkeypatch.setenv("IMAGEPICKER_TIER", "T0")
+    svc = WorkerService(models_dir=str(tmp_path / "m"), idle_unload_s=0)
+    info = await svc.system_info({}, None)
+    assert info["tier"] == "T0"
+    assert info["hardware"]["tier_detected"] == "T3" and info["hardware"]["tier_overridden"] is True
+    # tier-dependent choices follow the effective tier: "recommended" models are those of T0
+    listing = (await svc.models_list({}, None))["models"]
+    rec = {m["id"] for m in listing if m["recommended"]}
+    assert "siglip2-base" in rec and "siglip2-base-fp16" not in rec

@@ -202,6 +202,8 @@ export const api = {
   removeRuntime: () => request<void>('DELETE', '/runtime'),
   // ---- M2 ----
   hardware: () => request<HardwareInfo>('GET', '/system/hardware'),
+  /** Starts the AI worker if needed so that tier and hardware are current. */
+  hardwareProbe: () => request<HardwareInfo>('GET', '/system/hardware?probe=1'),
   models: () => request<{ models: ModelInfo[] }>('GET', '/models'),
   ensureModels: (ids: string[]) => request<{ task_id: string }>('POST', '/models/ensure', { ids }),
   runAnalysis: (body: { session_id: number; profile: AnalysisProfile; photo_ids?: number[]; fallback_lite?: boolean }) =>

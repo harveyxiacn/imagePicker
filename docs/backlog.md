@@ -57,6 +57,8 @@
 - NIMA 美学/技术质量模型：权重 Apache-2.0，训练数据 AVA / TID2013 有研究用途条款。
 - 天空分割 `skyseg-u2net`：训练数据未公开。
 - GFPGAN：FFHQ 训练数据有独立条款；Real-ESRGAN ONNX 来自 facefusion 镜像（上游 BSD-3）。
+- 以上条目已在 `registry.yaml` 的 `license_info` 中结构化记录（`usage: unknown`，附训练数据条款与备注），应用内以徽标提示，`docs/07` §5 由注册表生成（P1-17）。`unknown` 只表示尚未确认，**是否可商用仍待许可决定**：NIMA ×2（AVA / TID2013 研究条款）、`skyseg-u2net`（训练数据未公开）、`gfpgan-v1.4`（FFHQ）、`realesrgan-*` ×4（第三方镜像无许可元数据）。其余 20 项仅按权重许可标为 `commercial-ok`，训练数据条款多为 `not-recorded`，发布前审计时需逐项补全。
+- ModelScope 下载源尚无实现（注册表无 `source.modelscope`），选它时按「自动」处理。
 
 ## 已在集成中修复（记录）
 
