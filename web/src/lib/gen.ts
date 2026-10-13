@@ -51,6 +51,9 @@ export interface ErrorCtx {
   retry: () => void
 }
 
+/** 422 codes of `POST /api/besttake` for a face that must not replace another (docs/api-contract-m5.md). */
+const BESTTAKE_PAIRING_CODES = ['besttake_cross_burst', 'besttake_person_mismatch', 'besttake_low_similarity']
+
 /** 409 models_missing -> consent dialog then retry; 503 / timeouts / everything else -> toast. */
 export function reportGenError(err: unknown, ctx: ErrorCtx): void {
   const missing = missingModelsOf(err)
@@ -60,6 +63,10 @@ export function reportGenError(err: unknown, ctx: ErrorCtx): void {
   }
   if (err instanceof ApiError && err.status === 503) {
     toast('error', tr('gen.workerUnavailable'))
+    return
+  }
+  if (err instanceof ApiError && err.status === 422 && BESTTAKE_PAIRING_CODES.includes(err.code)) {
+    toast('error', tr(`gen.${err.code}`))
     return
   }
   if (err instanceof ApiError && (err.status === 408 || err.status === 504)) {

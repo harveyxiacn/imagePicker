@@ -23,7 +23,7 @@ use serde_json::{json, Map, Value};
 
 use crate::analysis::map_worker_err;
 use crate::analysis::scoring::Issue;
-use crate::analysis::store as astore;
+use crate::analysis::store::{self as astore, FaceIdentity};
 use crate::analysis::types::{BurstFacesOut, Face};
 use crate::catalog::{self, PhotoRef};
 use crate::edit::sync::rank;
@@ -38,6 +38,14 @@ use crate::Core;
 pub const POSE_LIMIT_DEG: f64 = 25.0;
 /// Most choices one best-take request may carry.
 pub const MAX_CHOICES: usize = 32;
+/// Least cosine similarity of the identity embeddings of a best-take source face and the face it
+/// replaces. It is the clustering's in-burst track continuation threshold
+/// ([`crate::analysis::cluster::TRACK_COS`]): AuraFace scores the same person 0.43-0.66 and
+/// different people below 0.2, so 0.30 sits in the gap and still tolerates the pose and
+/// expression changes between burst frames that a best take is made of. Skipped when either
+/// face has no identity embedding (lite profile): then only the burst and track / person checks
+/// of [`check_same_person`] apply.
+pub const MIN_IDENTITY_COS: f32 = crate::analysis::cluster::TRACK_COS;
 /// Long edge of the removal mask handed to `inpaint.run` (analysis resolution).
 pub const INPAINT_MASK_EDGE: u32 = 1024;
 /// Edge feather stored on generated patches (fraction of the rect's short side).
@@ -466,6 +474,48 @@ pub fn auto_choices(plan: &BestTakePlan) -> Vec<BestTakeChoice> {
             })
         })
         .collect()
+}
+
+/// The guard of `POST /api/besttake`: `src` may replace `base` only when both faces are of the
+/// same person in one burst. Errors are 422s with these codes:
+/// - `besttake_cross_burst`: the photos are not in the same burst;
+/// - `besttake_person_mismatch`: the faces are not in one face track (when either has no track,
+///   not of one person);
+/// - `besttake_low_similarity`: both have identity embeddings and their cosine is below
+///   [`MIN_IDENTITY_COS`].
+pub fn check_same_person(base: &FaceIdentity, src: &FaceIdentity) -> Result<()> {
+    let (b, s) = (base.face_id, src.face_id);
+    if base.burst_id.is_none() || base.burst_id != src.burst_id {
+        return Err(CoreError::UnprocessableCode(
+            "besttake_cross_burst",
+            format!(
+                "photo {} is not in the same burst as photo {}",
+                src.photo_id, base.photo_id
+            ),
+        ));
+    }
+    let same = match (base.track_id, src.track_id) {
+        (Some(x), Some(y)) => x == y,
+        _ => base.person_id.is_some() && base.person_id == src.person_id,
+    };
+    if !same {
+        return Err(CoreError::UnprocessableCode(
+            "besttake_person_mismatch",
+            format!("face {s} is not the same person as face {b}"),
+        ));
+    }
+    if let (Some(x), Some(y)) = (&base.embedding, &src.embedding) {
+        let cos = crate::analysis::vecs::cosine(x, y);
+        if cos < MIN_IDENTITY_COS {
+            return Err(CoreError::UnprocessableCode(
+                "besttake_low_similarity",
+                format!(
+                    "face {s} does not look like face {b} (identity similarity {cos:.2}, at least {MIN_IDENTITY_COS:.2} needed)"
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 // ------------------------------------------------------------------ mask building (pure)
@@ -934,6 +984,10 @@ impl Core {
                             "the source photo must differ from the base photo".into(),
                         ));
                     }
+                    check_same_person(
+                        &astore::face_identity(c, ch.base_face_id)?,
+                        &astore::face_identity(c, ch.source_face_id)?,
+                    )?;
                     faces.push((bf, sf, src));
                 }
                 Ok((base, faces))
