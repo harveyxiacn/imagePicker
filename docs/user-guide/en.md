@@ -70,6 +70,15 @@ Home: drop a folder (desktop) or click *Choose folder* to import; *Recent* lists
 2. The installers are **not code-signed yet**, so Windows SmartScreen may say "Windows protected your PC": click *More info → Run anyway*. You can verify the download against `SHA256SUMS.txt` on the Releases page (PowerShell: `Get-FileHash .\imagePicker_*_x64-setup.exe`).
 3. If WebView2 is missing, install the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) first.
 
+### Windows portable (USB drive, no installer)
+
+1. Unpack a portable zip (`imagePicker_<version>_x64-portable.zip`, assembled as described in `docs/release.md`) anywhere, for example onto an external drive. It contains `imagePicker.exe` and an empty file `imagepicker.portable` next to it.
+2. Start `imagePicker.exe`. Everything the app stores (catalog, thumbnails, settings, logs, crash records, models, AI components) goes to the `data\` folder beside the exe, not to your Windows profile. *Settings → Cache* shows **Portable mode: on (data next to the app)** and the data folder. Your photos are never copied.
+3. To make an existing copy portable, close the app, create an empty file called `imagepicker.portable` next to `imagePicker.exe` (there is deliberately no button for it) and, to keep your catalog, move the contents of `%APPDATA%\imagePicker` into a new `data\` folder there. Delete the marker (and move the data back) to return to the normal mode.
+4. If the drive shows up under another letter on the next computer (`E:` → `F:`), photo folders that are on **the same drive as the app** follow automatically. Folders on other drives keep their path; if they are missing, use *Relocate folder* (section 4). The AI components may have to be reinstalled in *Settings → AI components*; downloaded models are kept.
+
+Order in which the data folder is chosen: `--data-dir` → `IMAGEPICKER_DATA_DIR` → portable folder → `%APPDATA%\imagePicker`. Window size and position are still remembered in your Windows profile.
+
 ### macOS
 
 Download the `.dmg` (universal: Intel and Apple silicon) and drag the app to *Applications*. The app is **not signed or notarised yet**, so Gatekeeper blocks the first launch: in Finder **right-click → Open → Open**, or click *Open Anyway* in *System Settings → Privacy & Security*, or run `xattr -dr com.apple.quarantine /Applications/imagePicker.app` in Terminal.
