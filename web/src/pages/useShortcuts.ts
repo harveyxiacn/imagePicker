@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { guestBlocked } from '@/lib/actions'
 import { canNow } from '@/lib/auth'
 import { COLOR_KEYS, dispatchKey, isTypingTarget, type Handlers, type Scope } from '@/lib/keymap'
+import { registerPaletteHost } from '@/lib/paletteHost'
 import { useUi } from '@/stores/ui'
 import type { Controller } from './useController'
 
@@ -69,6 +70,15 @@ export function buildHandlers(ctrl: Controller): Handlers {
 export function useShortcuts(ctrl: Controller) {
   useEffect(() => {
     const handlers = buildHandlers(ctrl)
+    // the command palette (Ctrl+K) lists and runs the same handlers
+    const unregister = registerPaletteHost({
+      scope: () => useUi.getState().view,
+      has: (id) => !!handlers[id],
+      run: (id) => {
+        if (GUEST_BLOCKED.test(id) && !canNow('rate')) void guestBlocked()
+        else handlers[id]?.('')
+      },
+    })
     const onKey = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target)) return
       const ui = useUi.getState()
@@ -99,6 +109,9 @@ export function useShortcuts(ctrl: Controller) {
       if (handled) e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      unregister()
+      window.removeEventListener('keydown', onKey)
+    }
   }, [ctrl])
 }

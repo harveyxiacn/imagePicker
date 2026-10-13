@@ -50,11 +50,22 @@ export async function editPhotos(
   await commit(qc, changes, 'after')
 }
 
+/** Group / person entries call their own inverse requests; a failure is reported instead of thrown. */
+async function runCustom(e: HistoryEntry, dir: 'undo' | 'redo'): Promise<void> {
+  if (!e.custom) return
+  try {
+    await e.custom[dir]()
+  } catch (err) {
+    useToasts.getState().push('error', i18n.t('history.undoFailed', { reason: err instanceof Error ? err.message : String(err) }) as string)
+  }
+}
+
 export async function undo(qc: QueryClient): Promise<HistoryEntry | undefined> {
   const e = useHistory.getState().undo()
   if (e) {
     if (e.changes.length) await commit(qc, e.changes, 'before')
     if (e.edits?.length) await applyEditChanges(qc, e.edits, 'before')
+    await runCustom(e, 'undo')
   }
   return e
 }
@@ -64,6 +75,7 @@ export async function redo(qc: QueryClient): Promise<HistoryEntry | undefined> {
   if (e) {
     if (e.changes.length) await commit(qc, e.changes, 'after')
     if (e.edits?.length) await applyEditChanges(qc, e.edits, 'after')
+    await runCustom(e, 'redo')
   }
   return e
 }

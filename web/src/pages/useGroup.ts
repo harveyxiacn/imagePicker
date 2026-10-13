@@ -1,11 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api } from '@/api/client'
+import { api, fetchAllPhotos } from '@/api/client'
 import { useBurstPhotos, useGroups } from '@/api/queries'
 import type { Burst, Photo, Scene } from '@/api/types'
 import { editPhotoGroups } from '@/lib/actions'
 import { qk } from '@/lib/cache'
+import { useHistory } from '@/lib/history'
+import { mergeGroupsEntry, splitGroupEntry } from '@/lib/structureUndo'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 
@@ -48,6 +50,17 @@ export function useGroup(sessionId: number) {
     ui.setCompareA(best.id)
     ui.setActive(b.id)
   }, [active, burstId, photos])
+
+  /** After a group split / merge (or its undo / redo): refresh the caches and keep the group view on a group that still exists. */
+  const refreshGroups = useCallback(
+    (focus?: number) => {
+      void qc.invalidateQueries({ queryKey: qk.groups(sessionId) })
+      // only the per-burst photo lists (the library grid does not change)
+      void qc.invalidateQueries({ queryKey: qk.photosAll, predicate: (q) => (q.queryKey[2] as { burst_id?: number } | undefined)?.burst_id !== undefined })
+      if (focus !== undefined && useUi.getState().view === 'group') useUi.getState().setGroupBurst(focus)
+    },
+    [qc, sessionId],
+  )
 
   const go = useCallback(
     (dir: 1 | -1) => {
@@ -94,12 +107,13 @@ export function useGroup(sessionId: number) {
       const { burst_ids } = await api.splitGroup(burstId, ui.activeId)
       const aIdx = photos.findIndex((p) => p.id === ui.compareA)
       ui.setGroupBurst(aIdx >= at ? burst_ids[1] : burst_ids[0])
-      void qc.invalidateQueries({ queryKey: qk.groups(sessionId) })
+      refreshGroups()
+      useHistory.getState().push(splitGroupEntry({ label: t('history.splitGroup'), api, burstIds: burst_ids, atPhotoId: ui.activeId, after: refreshGroups }))
       push('success', t('group.splitDone'), 2200)
     } catch (err) {
       push('error', err instanceof Error ? err.message : String(err))
     }
-  }, [burstId, photos, qc, sessionId, push, t])
+  }, [burstId, photos, refreshGroups, push, t])
 
   const merge = useCallback(
     async (dir: 1 | -1) => {
@@ -111,15 +125,20 @@ export function useGroup(sessionId: number) {
         return
       }
       try {
+        // The later group (in shot order) starts where an undo has to split again; the server keeps the earlier id.
+        const mine = photos[0]
+        const theirs = [...(await fetchAllPhotos({ session_id: sessionId, burst_id: other.id })).photos].sort(timeOrder)[0]
+        const splitAt = mine && theirs ? (timeOrder(theirs, mine) > 0 ? theirs : mine) : undefined
         const { burst_id } = await api.mergeGroups([burstId, other.id])
         useUi.getState().setGroupBurst(burst_id)
-        void qc.invalidateQueries({ queryKey: qk.groups(sessionId) })
+        refreshGroups()
+        if (splitAt) useHistory.getState().push(mergeGroupsEntry({ label: t('history.mergeGroups'), api, mergedId: burst_id, splitAtPhotoId: splitAt.id, after: refreshGroups }))
         push('success', t('group.mergeDone'), 2200)
       } catch (err) {
         push('error', err instanceof Error ? err.message : String(err))
       }
     },
-    [burstId, allBursts, qc, sessionId, push, t],
+    [burstId, allBursts, photos, sessionId, refreshGroups, push, t],
   )
 
   return { burstId, burst, index, count: multi.length, photos, loading: q.isPending || q.isPlaceholderData, compareA, activeId, go, pickA, keepBest, split, merge }

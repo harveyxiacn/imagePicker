@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next'
+import { FONT_SCALE_DEFAULT, FONT_SCALE_MAX, FONT_SCALE_MIN, FONT_SCALE_STEP } from '@/lib/appearance'
 import { helpGroups } from '@/lib/keymap'
 import { useUi, type Lang, type Theme } from '@/stores/ui'
-import { Card, Row, Select } from './controls'
+import { Card, Row, Select, Toggle } from './controls'
 import { useSetting } from './useSetting'
 
 const GROUPS = helpGroups()
@@ -50,6 +51,8 @@ export function AppearanceSection() {
   const { set } = useSetting()
   const lang = useUi((s) => s.lang)
   const theme = useUi((s) => s.theme)
+  const contrast = useUi((s) => s.contrast)
+  const fontScale = useUi((s) => s.fontScale)
   return (
     <Card title={t('settings.appearance.title')} testId="settings-appearance">
       <Row label={t('settings.appearance.language')}>
@@ -78,6 +81,34 @@ export function AppearanceSection() {
             set('theme', v)
           }}
         />
+      </Row>
+      <Row label={t('settings.appearance.highContrast')} hint={t('settings.appearance.highContrastHint')}>
+        <Toggle
+          label={t('settings.appearance.highContrast')}
+          testId="setting-contrast"
+          checked={contrast === 'high'}
+          onChange={(v) => useUi.getState().setContrast(v ? 'high' : 'normal')}
+        />
+      </Row>
+      <Row label={t('settings.appearance.fontScale')} hint={t('settings.appearance.fontScaleHint')}>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={FONT_SCALE_MIN}
+            max={FONT_SCALE_MAX}
+            step={FONT_SCALE_STEP}
+            value={fontScale}
+            aria-label={t('settings.appearance.fontScale')}
+            aria-valuetext={`${fontScale}%`}
+            className="w-36"
+            onChange={(e) => useUi.getState().setFontScale(Number(e.target.value))}
+            data-testid="setting-font-scale"
+          />
+          <span className="tnum w-10 text-right">{fontScale}%</span>
+          <button className="btn" disabled={fontScale === FONT_SCALE_DEFAULT} onClick={() => useUi.getState().setFontScale(FONT_SCALE_DEFAULT)}>
+            {t('settings.appearance.fontScaleReset')}
+          </button>
+        </div>
       </Row>
     </Card>
   )

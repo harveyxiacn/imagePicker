@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import type { Face } from '@/api/types'
 import { qk } from '@/lib/cache'
+import { useHistory } from '@/lib/history'
+import { movedFacesEntry, personPatchEntry, refreshPeople } from '@/lib/structureUndo'
 import { setPersonTri } from '@/lib/filter'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -67,6 +69,17 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
       await api.setFacePerson(face.id, null)
       void qc.invalidateQueries({ queryKey: qk.peopleAll })
       void qc.invalidateQueries({ queryKey: ['analysis', 'photo', face.photo_id] })
+      if (face.person_id !== null) {
+        useHistory.getState().push(
+          movedFacesEntry({
+            label: t('history.moveFace'),
+            api,
+            faces: [{ id: face.id, from: face.person_id }],
+            again: async () => void (await api.setFacePerson(face.id, null)),
+            after: () => refreshPeople(qc),
+          }),
+        )
+      }
       useToasts.getState().push('info', t('face.splitDone'), 2200)
     } catch (err) {
       useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
@@ -77,7 +90,9 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
     const face = naming
     if (!face || face.person_id === null) return
     try {
-      await api.patchPerson(face.person_id, { name: name.trim() || null })
+      const next = name.trim() || null
+      await api.patchPerson(face.person_id, { name: next })
+      useHistory.getState().push(personPatchEntry({ label: t('history.renamePerson'), api, personId: face.person_id, before: { name: face.person_name }, next: { name: next }, after: () => refreshPeople(qc) }))
       void qc.invalidateQueries({ queryKey: qk.peopleAll })
       void qc.invalidateQueries({ queryKey: ['analysis', 'photo'] })
       void qc.invalidateQueries({ queryKey: ['burstFaces'] })

@@ -1,13 +1,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ConnectionStatus } from '@/api/events'
+import { clampFontScale, type Contrast, type Theme } from '@/lib/appearance'
 import type { CompareCount } from '@/lib/compare'
 import { DEFAULT_FILTER, type FilterState } from '@/lib/filter'
 import type { GridRow } from '@/lib/stacks'
 import { EMPTY_SELECTION, type SelectionState } from '@/lib/selection'
 
 export type View = 'grid' | 'loupe' | 'compare' | 'group'
-export type Theme = 'dark' | 'light' | 'system'
+export type { Theme, Contrast } from '@/lib/appearance'
 export type Lang = 'zh-CN' | 'en'
 
 interface UiState {
@@ -56,6 +57,10 @@ interface UiState {
   thumbSize: number
   inspectorOpen: boolean
   theme: Theme
+  /** High-contrast palette (WCAG AA text and focus rings), on top of dark / light. */
+  contrast: Contrast
+  /** UI font scale in percent (90-150); applied through the `--font-scale` CSS variable. */
+  fontScale: number
   lang: Lang
   /** Library shows scene headers + collapsed stacks (true) or a flat list (false). */
   grouped: boolean
@@ -91,6 +96,11 @@ interface UiState {
   setThumbSize: (n: number) => void
   setInspectorOpen: (b: boolean) => void
   setTheme: (t: Theme) => void
+  setContrast: (c: Contrast) => void
+  setFontScale: (pct: number) => void
+  /** Command palette (Ctrl+K). */
+  paletteOpen: boolean
+  setPaletteOpen: (b: boolean) => void
   setLang: (l: Lang) => void
   /** Reset per-session transient state when entering a library. */
   resetSessionState: () => void
@@ -133,6 +143,9 @@ export const useUi = create<UiState>()(
       thumbSize: 176,
       inspectorOpen: !narrow,
       theme: 'dark',
+      contrast: 'normal',
+      fontScale: 100,
+      paletteOpen: false,
       lang: 'zh-CN',
 
       setGroupBurst: (groupBurstId) => set({ groupBurstId }),
@@ -165,6 +178,9 @@ export const useUi = create<UiState>()(
       setThumbSize: (thumbSize) => set({ thumbSize }),
       setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
       setTheme: (theme) => set({ theme }),
+      setContrast: (contrast) => set({ contrast }),
+      setFontScale: (pct) => set({ fontScale: clampFontScale(pct) }),
+      setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
       setLang: (lang) => set({ lang }),
       resetSessionState: () =>
         set((s) => ({
@@ -182,6 +198,7 @@ export const useUi = create<UiState>()(
           personFilterOpen: false,
           acceptAllOpen: false,
           helpOpen: false,
+          paletteOpen: false,
           exportOpen: false,
           saveCollectionOpen: false,
           faceSearchOpen: false,
@@ -195,6 +212,8 @@ export const useUi = create<UiState>()(
         inspectorOpen: s.inspectorOpen,
         sidebarOpen: s.sidebarOpen,
         theme: s.theme,
+        contrast: s.contrast,
+        fontScale: s.fontScale,
         lang: s.lang,
         syncZoom: s.syncZoom,
         compareCount: s.compareCount,

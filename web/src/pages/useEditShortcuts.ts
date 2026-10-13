@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { dispatchKey, isTextEntryTarget, type Handlers } from '@/lib/keymap'
+import { registerPaletteHost } from '@/lib/paletteHost'
 import { useEdit } from '@/stores/edit'
 import { useRepair } from '@/stores/repair'
 import { useUi } from '@/stores/ui'
@@ -38,6 +39,7 @@ export function useEditShortcuts(actions: EditActions) {
       'export.open': () => useUi.getState().setExportOpen(true),
       'help.toggle': () => useUi.getState().setHelpOpen(!useUi.getState().helpOpen),
     }
+    const unregister = registerPaletteHost({ scope: () => 'edit', has: (id) => !!handlers[id], run: (id) => handlers[id]?.('') })
     const onKey = (e: KeyboardEvent) => {
       if (isTextEntryTarget(e.target)) return
       const dialogOpen = !!document.querySelector('[role="dialog"]')
@@ -47,6 +49,9 @@ export function useEditShortcuts(actions: EditActions) {
       if (dispatchKey(e, 'edit', handlers)) e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      unregister()
+      window.removeEventListener('keydown', onKey)
+    }
   }, [actions])
 }

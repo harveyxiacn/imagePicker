@@ -8,6 +8,8 @@ import { usePeople } from '@/api/queries'
 import { qk } from '@/lib/cache'
 import { faceSearchReducer, firstImage, initFaceSearch, newPersonFaceIds, queryPhoto, similarityPct, type FaceSearchEvent } from '@/lib/faceSearch'
 import { DEFAULT_PERSON_FILTER } from '@/lib/filter'
+import { useHistory } from '@/lib/history'
+import { movedFacesEntry, refreshPeople } from '@/lib/structureUndo'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { Modal } from './Modal'
@@ -108,7 +110,21 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
     if (newIds.length === 0 || naming === null || creating) return
     setCreating(true)
     try {
-      const { person } = await api.createPerson(newIds, naming.trim() || null)
+      const name = naming.trim() || null
+      const { person } = await api.createPerson(newIds, name)
+      // undoable when every face came from a person (unassigned faces cannot be put back)
+      const from = newIds.map((id) => ({ id, from: results?.resp.similar_faces.find((f) => f.face_id === id)?.person_id ?? null }))
+      if (from.every((f) => f.from !== null)) {
+        useHistory.getState().push(
+          movedFacesEntry({
+            label: t('history.moveFace'),
+            api,
+            faces: from as { id: number; from: number }[],
+            again: async () => void (await api.createPerson(newIds, name)),
+            after: () => refreshPeople(qc),
+          }),
+        )
+      }
       void qc.invalidateQueries({ queryKey: qk.peopleAll })
       void qc.invalidateQueries({ queryKey: ['analysis', 'photo'] })
       void qc.invalidateQueries({ queryKey: ['burstFaces'] })
