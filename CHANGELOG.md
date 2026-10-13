@@ -124,6 +124,7 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - RAW+JPEG pairs, import exclusions, file watching, relocate and safe reject ([58bc09c](https://github.com/harveyxiacn/imagePicker/commit/58bc09c2283f85e2d43773940566fe4873263a82))
 - Sync changelog, completion review and backlog with merged PRs ([a623c47](https://github.com/harveyxiacn/imagePicker/commit/a623c471b459ed0b5650abec95d0641ce637f082))
 - Analysis resume, pause/continue, lite fallback and incremental steps ([3087b37](https://github.com/harveyxiacn/imagePicker/commit/3087b37fd51d91fcc34cfde518e56df7f76d258d))
+- Regenerate the changelog after #15; README no longer says HEIC is unavailable ([ba5b339](https://github.com/harveyxiacn/imagePicker/commit/ba5b339fc92856bb7025e086ce80faede1413ef0))
 
 ### Tests
 
@@ -142,6 +143,7 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **core:** Accept cancelled as well as cancelling right after a cancel request ([d3a98eb](https://github.com/harveyxiacn/imagePicker/commit/d3a98ebbaeb4b854757470aa014bcf64d6901dc4))
 - **core:** Keep the lite analysis tests light under load ([9ac8e38](https://github.com/harveyxiacn/imagePicker/commit/9ac8e38d796ce82b227876677cb017efa4530f8c))
 - **core:** Give analysis runs five minutes of wall-clock time in tests_m2 ([7fc7eb1](https://github.com/harveyxiacn/imagePicker/commit/7fc7eb14607ed64447d416a92d6101e35066b079))
+- **core:** Give lite analysis runs five minutes of wall-clock time in tests_lite ([f98b9a2](https://github.com/harveyxiacn/imagePicker/commit/f98b9a2043229412ebf097bf7337ed1699df7f42))
 
 ### CI and build
 
