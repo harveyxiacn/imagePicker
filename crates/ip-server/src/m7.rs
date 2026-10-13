@@ -1,7 +1,7 @@
 //! M7 routes: the installable AI runtime (`/api/runtime`), owner only.
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ip_core::runtime::InstallRequest;
@@ -32,4 +32,24 @@ pub async fn cancel_runtime(State(st): State<AppState>) -> StatusCode {
 pub async fn delete_runtime(State(st): State<AppState>) -> ApiResult<StatusCode> {
     st.core.runtime_remove().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /api/system/diagnostics`: the diagnostics bundle (zip) as a download. Owner only: the
+/// guest and device roles are refused by the auth middleware (`system` is denied to guests).
+pub async fn diagnostics(State(st): State<AppState>) -> ApiResult<Response> {
+    let settings = crate::m6::full_settings(&st)?;
+    let bundle = st.core.diagnostics_bundle(settings).await?;
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", bundle.file_name),
+            ),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        bundle.bytes,
+    )
+        .into_response())
 }

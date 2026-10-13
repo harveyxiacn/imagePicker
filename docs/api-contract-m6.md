@@ -122,3 +122,24 @@
 - `POST /api/catalog/backup` → 新备份的 `{name, kind, created_at, bytes}`；`recovery` 状态下 `409`（先恢复，避免空目录库挤掉好的备份）。
 - `POST /api/catalog/restore {"name"}` → 恢复后的状态。备份须是可读、`quick_check` 通过、表结构不新于当前版本的目录库，否则 `422`；名称不合法 `400`、不存在 `404`；分析运行中或连接 30 秒内不释放 `409`。当前目录库另存为 `backups/replaced-<时间>.db`（`replaced`、`corrupt` 各保留 3 份）。客户端恢复后重新加载页面。
 - 仅所有者可用（访客 `403`）。
+
+## G. 日志、崩溃记录与诊断包（运维，09 P1-13）
+
+- **日志**：`ip-cli serve` 与桌面应用把 `tracing` 日志同时写到 stderr 和 `<数据目录>/logs/imagepicker-<UTC 日期>.<序号>.log`。单个文件达到 5 MiB 或跨 UTC 日期时换新文件；超过 14 天的文件、以及总量超过 40 MiB 时最旧的文件被删除。过滤用 `RUST_LOG`（默认 `info`）。Android 仍只写控制台。AI 组件安装日志仍是 `logs/runtime-install.log`。
+- **崩溃记录**（`<数据目录>/crashes/`）：
+  - Rust panic：默认 panic 钩子运行**之前**写 `crash-<UTC 时间>-<pid>-<n>.txt`（`kind`、`time`、`version`、`os`、`pid`、`thread`、`location`、`message`、`backtrace`）。保留最近 30 份。
+  - AI worker：核心启动 worker 时传入环境变量 `IMAGEPICKER_CRASH_DIR`；Python 未处理的异常（主线程、其他线程、asyncio 任务）写 `worker-crash-*.txt`，原生崩溃（段错误等）由 `faulthandler` 写入 `worker-native-*.log`（正常退出且为空时删除）。
+  - worker 进程意外退出或启动失败时，核心把其 stderr 末尾的最多 30 行写成 `crash-*.txt`（`kind` 为 `worker-exit` / `worker-start-failed`）。
+- `POST /api/system/diagnostics`（无请求体）→ `200 application/zip`，`Content-Disposition: attachment; filename="imagepicker-diagnostics-<UTC 日期>-<时间>.zip"`，`Cache-Control: no-store`。仅所有者可用：访客与已配对设备 `403`（`system` 在访客拒绝列表中），未登录 `401`。内容（全部是文本，不含任何二进制图像数据）：
+
+  | 条目 | 内容 |
+  |---|---|
+  | `manifest.json` | 格式版本、生成时间、各文件大小、「不包含」清单 |
+  | `system.json` | 应用版本、AI 组件（runtime）版本、操作系统 / 架构、逻辑 CPU 数、渲染后端、worker 状态 / 档位 / 计算设备 / GPU 名称与显存 |
+  | `settings.json` | `GET /api/settings` 的内容；键名含 `password`、`token`、`secret`、`api_key`、`hash`、`salt`、`cookie`、`authorization`、`credential` 的值替换为 `"[redacted]"`，`*_url` 只保留「已设置」，`roots` 只保留数量与文件夹名称，其余字符串里的绝对路径被遮盖 |
+  | `catalog.json` | `PRAGMA user_version` 与期望版本、完整 `PRAGMA integrity_check` 结果、目录库状态、各表计数（照片、缺失照片、会话、已分析、有编辑、连拍、人脸、人物、标签、预设、智能相册、任务）、根文件夹名称与各自的照片数、目录库与缓存的字节数、最近 20 条任务的种类 / 状态 / 错误 / 时间 |
+  | `logs/*.log` | 最新的日志文件，每个文件最多取末尾 1 MiB、合计 4 MiB（从整行开始） |
+  | `crashes/*` | 崩溃记录，每个最多末尾 256 KiB、合计 2 MiB |
+
+  日志与崩溃记录逐行经过遮盖：绝对路径（Windows 盘符 / UNC / 常见 POSIX 前缀）的目录部分替换为 `<path>`，图片与 `.xmp` 文件名替换为 `<photo>`；`password=…`、`token=…`、`Bearer …`、URL 里的 `user:pass@` 替换为 `[redacted]`。这是尽力而为的正则遮盖，不保证覆盖所有格式。
+  **永不包含**：照片、缩略图、预览、人脸裁剪、蒙版、人脸或照片的嵌入向量、目录库数据库及备份、任何照片路径或文件名、密码、哈希、令牌与已配对设备。

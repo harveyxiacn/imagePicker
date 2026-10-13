@@ -16,6 +16,8 @@ import sys
 
 import psutil
 
+from . import crash
+
 
 def _parse_addr(addr: str) -> tuple[str, int]:
     host, _, port = addr.rpartition(":")
@@ -81,6 +83,7 @@ async def _serve(args: argparse.Namespace) -> int:
     )
 
     loop = asyncio.get_running_loop()
+    loop.set_exception_handler(crash.loop_exception_handler)
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, svc.stop_event.set)
@@ -113,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     if args.cmd == "serve":
+        # unhandled exceptions and native faults go to <data>/crashes (IMAGEPICKER_CRASH_DIR)
+        crash.install()
         try:
             return asyncio.run(_serve(args))
         except KeyboardInterrupt:
