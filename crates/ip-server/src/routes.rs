@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ip_core::{
     Core, ExportRequest, FlagFilter, ImportRequest, Issue, PatchRequest, PersonMode, PersonState,
-    PhotoQuery, SortKey, COLOR_LABELS,
+    PhotoQuery, SharpState, SortKey, COLOR_LABELS,
 };
 use ip_imaging::ImageFormat;
 use serde::Deserialize;
@@ -88,6 +88,13 @@ pub async fn session_devices(
     Ok(Json(json!({ "devices": st.core.devices(id).await? })))
 }
 
+pub async fn session_filter_options(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(st.core.filter_options(id).await?)))
+}
+
 pub async fn delete_session(
     State(st): State<AppState>,
     ApiPath(id): ApiPath<i64>,
@@ -123,12 +130,21 @@ pub struct PhotosParams {
     has_edits: Option<String>,
     // ---- devices
     device: Option<String>,
+    // ---- filters complete
+    lens: Option<String>,
+    taken_from: Option<String>,
+    taken_to: Option<String>,
+    tags: Option<String>,
+    tag_mode: Option<String>,
+    sharp: Option<String>,
+    face_ids: Option<String>,
+    face_similarity: Option<f64>,
 }
 
 impl PhotosParams {
     /// Parameters of a smart collection's `query` string (no session/paging keys allowed).
     pub(crate) fn from_collection_query(q: &str) -> Result<Self, ApiError> {
-        const KEYS: [&str; 21] = [
+        const KEYS: &[&str] = &[
             "rating_gte",
             "flag",
             "color_label",
@@ -148,6 +164,14 @@ impl PhotosParams {
             "faces_max",
             "has_edits",
             "device",
+            "lens",
+            "taken_from",
+            "taken_to",
+            "tags",
+            "tag_mode",
+            "sharp",
+            "face_ids",
+            "face_similarity",
             "session_id",
             "cursor",
         ];
@@ -183,6 +207,80 @@ fn flag_of(name: &str, v: &Option<String>) -> Result<bool, ApiError> {
             "{name} must be 1/0/true/false"
         ))),
     }
+}
+
+/// Comma separated text values; `\,` is a literal comma and `\\` a backslash. Blank items are
+/// dropped, the rest is trimmed.
+pub(crate) fn csv_text(v: &Option<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut chars = v.as_deref().unwrap_or("").chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next() {
+                Some(n) => cur.push(n),
+                None => cur.push('\\'),
+            },
+            ',' => out.push(std::mem::take(&mut cur)),
+            c => cur.push(c),
+        }
+    }
+    out.push(cur);
+    out.into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Days since 1970-01-01 of a proleptic Gregorian date (Hinnant's `days_from_civil`).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// A capture-time bound: milliseconds (the `taken_at` unit) or a `YYYY-MM-DD` date, which
+/// covers the whole day (`end` = its last millisecond).
+pub(crate) fn taken_bound(
+    name: &str,
+    v: &Option<String>,
+    end: bool,
+) -> Result<Option<i64>, ApiError> {
+    let Some(t) = v.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let bad = || ApiError::bad_request(format!("{name} must be milliseconds or YYYY-MM-DD"));
+    if let Ok(ms) = t.parse::<i64>() {
+        return Ok(Some(ms));
+    }
+    let mut it = t.split('-');
+    let (Some(y), Some(m), Some(d), None) = (it.next(), it.next(), it.next(), it.next()) else {
+        return Err(bad());
+    };
+    if y.len() != 4 || m.len() != 2 || d.len() != 2 {
+        return Err(bad());
+    }
+    let (y, m, d) = (
+        y.parse::<i64>().map_err(|_| bad())?,
+        m.parse::<i64>().map_err(|_| bad())?,
+        d.parse::<i64>().map_err(|_| bad())?,
+    );
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let dim = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return Err(bad()),
+    };
+    if !(1..=dim).contains(&d) {
+        return Err(bad());
+    }
+    let start = days_from_civil(y, m, d) * 86_400_000;
+    Ok(Some(if end { start + 86_400_000 - 1 } else { start }))
 }
 
 fn csv_ids(name: &str, v: &Option<String>) -> Result<Vec<i64>, ApiError> {
@@ -284,10 +382,44 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
             })?);
         }
     }
+    let taken_from = taken_bound("taken_from", &p.taken_from, false)?;
+    let taken_to = taken_bound("taken_to", &p.taken_to, true)?;
+    if let (Some(a), Some(b)) = (taken_from, taken_to) {
+        if a > b {
+            return Err(ApiError::bad_request("taken_from is after taken_to"));
+        }
+    }
+    let tags_all = match p.tag_mode.as_deref().filter(|s| !s.is_empty()) {
+        None | Some("any") => false,
+        Some("all") => true,
+        Some(_) => return Err(ApiError::bad_request("tag_mode must be any|all")),
+    };
+    let sharp = match p.sharp.as_deref().filter(|s| !s.is_empty()) {
+        None => None,
+        Some(s) => Some(
+            SharpState::parse(s)
+                .ok_or_else(|| ApiError::bad_request("sharp must be sharp|blurry|unknown"))?,
+        ),
+    };
+    if p.face_similarity.is_some_and(|v| !(0.0..=1.0).contains(&v)) {
+        return Err(ApiError::bad_request("face_similarity must be 0..1"));
+    }
+    let face_ids = csv_ids("face_ids", &p.face_ids)?;
+    if face_ids.len() > 50 {
+        return Err(ApiError::bad_request("face_ids takes at most 50 faces"));
+    }
     Ok(PhotoQuery {
         session_id,
         devices,
         device_none,
+        lenses: csv_text(&p.lens),
+        taken_from,
+        taken_to,
+        tags: csv_text(&p.tags),
+        tags_all,
+        sharp,
+        face_ids,
+        face_similarity: p.face_similarity,
         rating_gte: p.rating_gte,
         flag,
         color_label,
