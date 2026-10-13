@@ -52,6 +52,14 @@ pub struct Photo {
     /// `POST /api/sessions/{id}/relocate`.
     #[serde(default)]
     pub missing: bool,
+    // ---- duplicates (docs/api-contract-m2.md "重复")
+    /// Smallest photo id of the duplicate group this photo belongs to (catalog wide); `None` =
+    /// not a duplicate of anything.
+    #[serde(default)]
+    pub duplicate_group_id: Option<i64>,
+    /// `exact` (a byte-identical copy exists) or `near` (the same picture without metadata).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate_kind: Option<String>,
     /// RAW (or other) files paired with this photo by name; the photo itself is the JPEG/HEIF.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub companions: Vec<Companion>,
@@ -378,6 +386,13 @@ pub struct PhotoQuery {
     pub devices: Vec<i64>,
     /// Include photos without a device.
     pub device_none: bool,
+    // ---- duplicates
+    /// `Some(true)`: only photos that have a duplicate somewhere in the catalog; `Some(false)`:
+    /// only photos that do not.
+    pub duplicates: Option<bool>,
+    // ---- events
+    /// Only photos of the scenes of this event (`GET /api/sessions/{id}/timeline`).
+    pub event_id: Option<i64>,
     // ---- filters complete (docs/api-contract-m1.md "筛选补全")
     /// Only photos shot with one of these lenses (exact EXIF lens names, OR-ed); empty = off.
     pub lenses: Vec<String>,

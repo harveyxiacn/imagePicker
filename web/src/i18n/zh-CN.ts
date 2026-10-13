@@ -941,6 +941,14 @@ export const zhCN = {
     builtin_has_closed_eyes: '有人闭眼',
     builtin_undecided: '待定',
     builtin_edited: '已编辑',
+    builtin_duplicates: '重复',
+  },
+  timeline: {
+    title: '事件',
+  },
+  duplicates: {
+    exact: '重复：图库里有与此文件完全相同的副本',
+    near: '重复：同一张画面被去掉信息后重新保存过',
   },
   faceSearch: {
     button: '以脸搜脸',

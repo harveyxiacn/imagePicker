@@ -44,7 +44,7 @@ Home: drop a folder (desktop) or click *Choose folder* to import; *Recent* lists
 |---|---|
 | Top bar | View switch: **Grid / Loupe / Compare / Group**; *Analyze*, *AI Assistant*, *People*, *Export*; AI engine status (tier and GPU) |
 | Filter bar | Rating, AI rating, flag, colour label, people, issues, scene, sort, thumbnail size, *Grouped* toggle |
-| Left "Smart collections" | Built-in: Best per group, Has closed eyes, Undecided, Edited; save the current filter as your own collection |
+| Left "Smart collections" | Built-in: Best per group, Has closed eyes, Undecided, Edited, Duplicates; save the current filter as your own collection; the *Events* list of the open session sits below |
 | Grid | Split by scene; bursts collapse into stacks (badge shows the count); thumbnails show stars, flag and issue icons |
 | Right inspector | Score breakdown, AI suggestion (with *Accept*), flag, colour, faces, EXIF (`Tab` hides / shows it) |
 | Status bar | Thumbnail progress, selection count, picked / rejected / rated totals, connection state |
@@ -305,6 +305,19 @@ Select a photo inside a stack and press `B`:
 - `,` / `.` previous / next group, `Shift+Enter` picks A and moves to the next group;
 - **Expression matrix**: rows are people, columns frames, colours show the expression (green: eyes open and smiling, yellow: so-so, red: closed eyes / blurry); the *Best* column lists each person's best frames. A hint names frames "everyone is happy with"; if there is none you can *Compose best expressions for everyone*.
 
+### Events
+
+Analysis also gathers scenes into **events**: a new event starts when two neighbouring scenes are more than 2 hours apart, or (when the photos carry GPS) more than 5 km apart. The *Events* list in the left sidebar shows the open session's events (only when it has at least two): the first line is the date, the second the time span of that day and the position (coordinates when there is GPS), and the count sits on the right. Click an event to browse only its photos; click it again (or *All photos*) to clear. Events are recomputed after you split or merge groups. The `{event}` token of the export name template is this event name (for example `2024-05-03 1012-1440`).
+
+### Duplicates
+
+Duplicate photos anywhere in the library (including other sessions) carry a ⧉ badge in the top-left corner of the grid cell:
+
+- **Exact**: a copy with identical file content (copied to another folder, imported twice). Found right after import;
+- **Near**: the same picture saved again without its capture metadata (downloaded from a chat app, saved from the web, a screenshot of the file). Needs an analysis first; neighbouring frames of a burst are not treated as duplicates.
+
+*Smart collections → Duplicates* shows just these photos. imagePicker only marks them; it never deletes or moves a file.
+
 ## 8. People & face filters
 
 After analysis, faces are clustered into **people** on your machine (AuraFace identity features).
@@ -443,7 +456,7 @@ Press `Ctrl+E` (or *Export* in the top bar):
 | Format | Original format (unedited photos at original size are copied as they are, RAW stays RAW; everything else is JPEG) / JPEG / PNG / TIFF (8-bit, uncompressed) / WebP (lossless) |
 | Remove GPS location / Remove all metadata | See below |
 | JPEG quality | Default 90; PNG, TIFF and WebP are lossless and ignore it |
-| Naming template | `{name}` original file name, `{seq}` sequence number, `{date}` capture date, `{event}` import name, `{scene}` scene (e.g. portrait), `{camera}` camera, `{rating}` stars; a live example is shown. Name clashes get `_1`, `_2`…: existing files are never overwritten |
+| Naming template | `{name}` original file name, `{seq}` sequence number, `{date}` capture date, `{event}` event name (date and time span, e.g. `2024-05-03 1012-1440`; the import name for photos not analysed yet), `{scene}` scene (e.g. portrait), `{camera}` camera, `{rating}` stars; a live example is shown. Name clashes get `_1`, `_2`…: existing files are never overwritten |
 | Upscale | Off / ×2 / ×4 (on CPU tiers each photo can take tens of seconds) |
 | Export into one folder per person | Used from the People page |
 | RAW+JPEG pairs | Export the JPEG (as shown, with edits; default), the RAW, or both |

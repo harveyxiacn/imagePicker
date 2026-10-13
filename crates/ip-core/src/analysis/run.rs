@@ -1350,6 +1350,11 @@ impl Core {
         tracing::info!(ms = t.elapsed().as_millis() as u64, "scored");
         let _ = outcome;
 
+        // duplicates: needs the perceptual hashes of this run (and sees the other sessions)
+        if let Err(e) = self.refresh_duplicates().await {
+            tracing::warn!(error = %e, "duplicate detection failed");
+        }
+
         self.events.emit(Event::GroupsUpdated { session_id: sid });
         self.events.emit(Event::PeopleUpdated { session_id: sid });
         let all_ids: Vec<i64> = self
@@ -1385,6 +1390,37 @@ impl Core {
         self.db
             .call(move |c| store::groups_of_session(c, session_id))
             .await
+    }
+
+    /// `GET /api/sessions/{id}/timeline`: events -> scenes -> bursts.
+    pub async fn timeline(&self, session_id: i64) -> Result<TimelineOut> {
+        self.db
+            .call(move |c| super::layers::timeline_of_session(c, session_id))
+            .await
+    }
+
+    /// `GET /api/photos/{id}/duplicates`.
+    pub async fn duplicates_of(&self, photo_id: i64) -> Result<DuplicatesOut> {
+        self.db
+            .call(move |c| super::layers::duplicates_of(c, photo_id))
+            .await
+    }
+
+    /// Recomputes the duplicate groups of the whole catalog (after an import and after an
+    /// analysis); clients of the sessions whose photos changed are told to refetch.
+    pub async fn refresh_duplicates(&self) -> Result<()> {
+        let change = self.db.call(super::layers::refresh_duplicates).await?;
+        if !change.changed.is_empty() {
+            tracing::info!(
+                grouped = change.grouped,
+                changed = change.changed.len(),
+                "duplicates updated"
+            );
+        }
+        for session_id in change.sessions {
+            self.events.emit(Event::GroupsUpdated { session_id });
+        }
+        Ok(())
     }
 
     pub async fn burst_faces(&self, burst_id: i64) -> Result<BurstFacesOut> {
@@ -1423,6 +1459,8 @@ impl Core {
                 for b in &ids {
                     store::retrack_burst(c, *b)?;
                 }
+                // scenes merged or emptied by the edit: the events follow
+                super::layers::regroup_events(c, session_id)?;
                 store::rescore_bursts(c, &ids)
             })
             .await?;

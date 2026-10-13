@@ -16,6 +16,7 @@ const STATES: PersonState[] = ['eyes_open', 'smiling', 'looking', 'subject']
 export function filterToQuery(f: FilterState): string {
   const p = new URLSearchParams(photosQueryString(buildPhotosQuery(0, f)))
   p.delete('session_id')
+  p.delete('event_id') // events belong to one session; a collection spans the library
   return p.toString()
 }
 
@@ -57,6 +58,7 @@ export function queryToFilter(query: string): FilterState {
     sceneType: oneOf<SceneType>(q.get('scene_type'), SCENE_TYPES),
     bestOnly: q.get('burst_best_only') === '1',
     edited: q.get('has_edits') === '1',
+    duplicates: q.get('duplicates') === '1',
     person: {
       ...DEFAULT_PERSON_FILTER,
       include,
@@ -83,4 +85,4 @@ export function queryToFilter(query: string): FilterState {
 export const canonicalQuery = (query: string): string => filterToQuery(queryToFilter(query))
 
 /** Does the live filter equal this collection? */
-export const collectionActive = (query: string, f: FilterState): boolean => canonicalQuery(query) === filterToQuery(f)
+export const collectionActive = (query: string, f: FilterState): boolean => typeof f.eventId !== 'number' && canonicalQuery(query) === filterToQuery(f)

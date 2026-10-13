@@ -613,7 +613,13 @@ async fn collections_over_http_and_queries_filter() {
     let ids: Vec<&str> = list.iter().map(|c| c["id"].as_str().unwrap()).collect();
     assert_eq!(
         ids,
-        ["best_per_group", "has_closed_eyes", "undecided", "edited"]
+        [
+            "best_per_group",
+            "has_closed_eyes",
+            "undecided",
+            "edited",
+            "duplicates"
+        ]
     );
     assert!(list.iter().all(|c| c["builtin"] == true));
 
@@ -661,6 +667,8 @@ async fn collections_over_http_and_queries_filter() {
             "has_closed_eyes" => assert_eq!(t, 1, "{q}"),
             "undecided" => assert_eq!(t, 3, "{q}"),
             "edited" => assert_eq!(t, 1, "{q}"),
+            // a1, b1 and c1 are the same flat-colour JPEG (the fixture's shade is t % 200)
+            "duplicates" => assert_eq!(t, 3, "{q}"),
             _ => unreachable!(),
         }
     }

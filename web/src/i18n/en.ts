@@ -943,6 +943,14 @@ export const en: Messages = {
     builtin_has_closed_eyes: 'Closed eyes',
     builtin_undecided: 'Undecided',
     builtin_edited: 'Edited',
+    builtin_duplicates: 'Duplicates',
+  },
+  timeline: {
+    title: 'Events',
+  },
+  duplicates: {
+    exact: 'Duplicate: an identical copy of this file exists in the library',
+    near: 'Duplicate: the same picture saved again without metadata',
   },
   faceSearch: {
     button: 'Search by face',
