@@ -537,6 +537,58 @@ async fn besttake_plan_post_and_auto_over_http() {
 }
 
 #[tokio::test]
+async fn besttake_refuses_other_people_and_other_bursts_with_422() {
+    let e = env();
+    let s = scene(&e).await;
+    let (a1, a2, c1) = (s.ids["a1.jpg"], s.ids["a2.jpg"], s.ids["c1.jpg"]);
+    let faces = |photo: i64| {
+        let app = e.app.clone();
+        async move {
+            call(
+                &app,
+                Method::GET,
+                &format!("/api/photos/{photo}/analysis"),
+                None,
+            )
+            .await
+            .json()["faces"]
+                .clone()
+        }
+    };
+    let (f1, f2, fc) = (faces(a1).await, faces(a2).await, faces(c1).await);
+    let post = |base_face: &Value, src_photo: i64, src_face: &Value| {
+        let app = e.app.clone();
+        let body = json!({"base_photo_id": a1, "choices": [{
+            "base_face_id": base_face["id"], "source_photo_id": src_photo,
+            "source_face_id": src_face["id"]}]});
+        async move { call(&app, Method::POST, "/api/besttake", Some(body)).await }
+    };
+
+    // person B's face onto person A (same burst)
+    let r = post(&f1[0], a2, &f2[1]).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(r.code(), "besttake_person_mismatch");
+    let msg = r.json()["error"]["message"].as_str().unwrap().to_string();
+    assert!(msg.contains("same person"), "{msg}");
+
+    // a face of a photo from another burst
+    let r = post(&f1[0], c1, &fc[0]).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(r.code(), "besttake_cross_burst");
+    assert!(!r.json()["error"]["message"].as_str().unwrap().is_empty());
+
+    // nothing was started, and the same person is still accepted
+    assert!(e
+        .core
+        .tasks_list(None)
+        .await
+        .unwrap()
+        .iter()
+        .all(|t| t.kind != "besttake"));
+    assert_eq!(post(&f1[0], a2, &f2[0]).await.status, StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
 async fn inpaint_and_enhance_over_http() {
     let e = env();
     let s = scene(&e).await;

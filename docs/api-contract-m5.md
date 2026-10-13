@@ -40,6 +40,13 @@
 | POST | `/api/photos/{id}/enhance` | `{"op":"denoise"\|"face_restore","strength":0..1}` | `202 {"task_id"}`；追加/替换同类补丁 |
 | GET | `/api/assets/{photo_id}/{asset}` | — | `image/png`（调试/前端预览补丁用） |
 
+- **`POST /api/besttake`（及 `besttake/auto`）的同人校验**：每个选择中，源脸（`source_face_id`）必须与被替换的底片脸（`base_face_id`）是同一个人，否则整个请求 `422`，不启动任务、不改任何编辑栈。错误体 `{"error":{"code","message"}}`，`code` 为：
+  - `besttake_cross_burst`：源照片与底片不在同一连拍/分组（`photo.burst_id` 不同或为空）；
+  - `besttake_person_mismatch`：两张脸不在同一条人脸轨迹（`face.track_id`）；任一方没有轨迹时，改为要求同一个非空 `person_id`；
+  - `besttake_low_similarity`：两张脸都有身份嵌入，但余弦相似度低于 `MIN_IDENTITY_COS = 0.30`（`ip-core/src/generate.rs`，取自聚类的连拍内轨迹延续阈值 `TRACK_COS`；AuraFace 同一人约 0.43-0.66、不同人 < 0.2，0.30 落在两者之间，又容许连拍帧之间姿态与表情的变化）。
+  - 校验顺序：先 `besttake_cross_burst`，再 `besttake_person_mismatch`，最后 `besttake_low_similarity`。原有的 422（`unprocessable`：脸不在所给照片、源照片即底片、同一底片脸重复出现）不变。
+  - **身份嵌入缺失**（lite 档位不计算身份嵌入，或该脸没有嵌入）：跳过相似度检查，只做连拍与轨迹/人物检查；此时同一轨迹内被聚类误并的人无法被拦截。
+  - 自动路径（`besttake/auto`、计划里的 `best_photo_id`）只在同一轨迹内选脸，因此永远通过这些检查；`tests_m5.rs` 有断言。
 - 所有生成任务：模型缺失 → `409 models_missing`；worker 不可用 → `503`；进度走 `task.progress`（`kind`: `besttake`/`inpaint`/`enhance`）。生成任务可取消并留有记录，见 F 节。
 - `/api/export` 新增 `"upscale"?: 2 | 4`：渲染后经 `enhance.run upscale` 放大再编码。
 - 重编码的导出（应用编辑 / `long_edge` / `upscale` / 裁切适配）的元数据：像素为 sRGB（带非 sRGB ICC 或 DCF Adobe RGB 标记的来源在解码时已转换），嵌入 sRGB ICC；EXIF 取自原文件（JPEG/HEIF/RAF 原样；TIFF 类 RAW、TIFF、CR3 由 IFD0/Exif/GPS 重建，不含 MakerNote；都没有时按目录元数据合成），去掉朝向与 IFD1 缩略图并改写像素尺寸；XMP 取 JPEG 内嵌包，否则取 `.xmp` 侧车，去掉 `tiff:Orientation`/尺寸、`crs:*`、darktable 历史、`xmp:Thumbnails`、人脸区域、动态照片/景深/增益图与扩展 XMP 引用；IPTC 只保留 APP13 中的 IPTC 记录（0x0404/0x0425）。`"strip_gps": true` 删除 EXIF GPS IFD 与 XMP 中所有 `GPS*` 属性。原样复制的导出不改动文件（P0-8 起 `strip_gps` / `strip_metadata` 时改为清理，见 F 节）。
@@ -102,7 +109,7 @@
 | `xiaohongshu` | 1920 | `[3,4]`（1440×1920） | 90 | `jpeg` | true |
 | `instagram` | 1350 | `[4,5]`（1080×1350） | 90 | `jpeg` | true |
 
-**命名模板**：`{name}` 原文件名、`{seq}` 4 位序号、`{date}` 拍摄日期 `YYYYMMDD`（没有时用文件时间，再没有为 `nodate`）、`{event}` 照片所属导入（会话）的标题（`noevent`）、`{scene}` 分析得到的场景类型，如 `portrait`（`noscene`）、`{camera}` 相机品牌型号（`nocamera`）、`{rating}` 用户星级 0–5（未评为 `0`）。占位符一次展开（值里的 `{…}` 不会再展开），目录取值截断为 64 个字符，未知占位符原样保留；之后按原规则替换非法字符。与本次导出或目标文件夹中已有文件重名时加 `_1`、`_2`…，**从不覆盖**。
+**命名模板**：`{name}` 原文件名、`{seq}` 4 位序号、`{date}` 拍摄日期 `YYYYMMDD`（没有时用文件时间，再没有为 `nodate`）、`{event}` 照片所属事件的名称（事件层，api-contract-m2 C.6：用户给的标题，否则日期与时间段去掉冒号，如 `2024-05-03 1012-1440`）；不在任何事件里的照片（尚未分析）用导入（会话）的标题（`noevent`）、`{scene}` 分析得到的场景类型，如 `portrait`（`noscene`）、`{camera}` 相机品牌型号（`nocamera`）、`{rating}` 用户星级 0–5（未评为 `0`）。占位符一次展开（值里的 `{…}` 不会再展开），目录取值截断为 64 个字符，未知占位符原样保留；之后按原规则替换非法字符。与本次导出或目标文件夹中已有文件重名时加 `_1`、`_2`…，**从不覆盖**。
 
 ## G. 任务记录与取消
 

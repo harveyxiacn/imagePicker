@@ -74,16 +74,23 @@ def test_url_file_without_hf_ok():
 
 
 def test_endpoint_order(monkeypatch):
+    official, mirror = "https://huggingface.co", "https://hf-mirror.com"
     monkeypatch.delenv("HF_ENDPOINT", raising=False)
-    assert hf_endpoints() == ["https://huggingface.co", "https://hf-mirror.com"]
+    monkeypatch.delenv("IMAGEPICKER_MODEL_SOURCE", raising=False)
+    assert hf_endpoints() == [official, mirror]
+    # the chosen endpoint comes first, official / hf-mirror stay as fallbacks
     monkeypatch.setenv("HF_ENDPOINT", "https://my.mirror/")
-    assert hf_endpoints() == [
-        "https://huggingface.co",
-        "https://my.mirror",
-        "https://hf-mirror.com",
-    ]
-    monkeypatch.setenv("HF_ENDPOINT", "https://hf-mirror.com")
-    assert hf_endpoints() == ["https://huggingface.co", "https://hf-mirror.com"]
+    assert hf_endpoints() == ["https://my.mirror", official, mirror]
+    monkeypatch.setenv("HF_ENDPOINT", mirror)
+    assert hf_endpoints() == [mirror, official]
+    monkeypatch.setenv("HF_ENDPOINT", official)
+    assert hf_endpoints() == [official, mirror]
+    # source = hf-mirror without an explicit endpoint also puts the mirror first
+    monkeypatch.delenv("HF_ENDPOINT")
+    monkeypatch.setenv("IMAGEPICKER_MODEL_SOURCE", "hf-mirror")
+    assert hf_endpoints() == [mirror, official]
+    monkeypatch.setenv("IMAGEPICKER_MODEL_SOURCE", "auto")
+    assert hf_endpoints() == [official, mirror]
 
 
 # --------------------------------------------------------------------------- downloader (mocked network)

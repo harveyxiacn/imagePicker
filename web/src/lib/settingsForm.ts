@@ -15,6 +15,7 @@ export type SettingPath =
   | 'faces.consented'
   | 'privacy.allow_network'
   | 'models.source'
+  | 'models.tier_override'
   | 'cache.max_gb'
   | 'render.backend'
   | 'xmp_mode'
@@ -98,7 +99,7 @@ export const DEFAULT_SETTINGS: Settings = {
   analysis: { default_profile: 'standard', auto_analyze_on_import: false, group_strictness: 'normal' },
   faces: { enabled: true, consented: false },
   privacy: { allow_network: true },
-  models: { dir: '', source: 'auto' },
+  models: { dir: '', source: 'auto', tier_override: 'auto' },
   cache: { max_gb: 20 },
   render: { backend: 'auto' },
   xmp_mode: 'off',

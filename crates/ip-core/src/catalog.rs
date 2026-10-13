@@ -507,11 +507,12 @@ const PHOTO_COLS: &str = "p.id, r.path, p.rel_path, p.file_name, COALESCE(p.form
     p.ai_score, COALESCE(p.issues,0), p.rank_in_burst, (SELECT b.size FROM burst b WHERE b.id=p.burst_id), p.scene_type,
     p.face_count, p.subject_face_count, COALESCE(p.analysis_version,0),
     COALESCE(p.has_edits,0), p.edit_hash,
-    p.device_id, (SELECT d.kind FROM device d WHERE d.id=p.device_id), COALESCE(p.missing,0)";
+    p.device_id, (SELECT d.kind FROM device d WHERE d.id=p.device_id), COALESCE(p.missing,0),
+    p.dup_group_id, p.dup_kind";
 
 /// Number of columns in `PHOTO_COLS`; queries append the session id at this index and the
 /// sort key (for cursors) right after it. Update when adding columns.
-const PHOTO_COL_COUNT: usize = 36;
+const PHOTO_COL_COUNT: usize = 38;
 
 /// Column `PHOTO_COL_COUNT` (after PHOTO_COLS) is the session id.
 fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
@@ -556,6 +557,8 @@ fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
             crate::device::DeviceKind::parse(&k).unwrap_or(crate::device::DeviceKind::Unknown)
         }),
         missing: r.get::<_, i64>(35)? != 0,
+        duplicate_group_id: r.get(36)?,
+        duplicate_kind: r.get(37)?,
         companions: Vec::new(),
     })
 }
@@ -890,6 +893,18 @@ fn push_m2_filters(q: &PhotoQuery, wheres: &mut Vec<String>, args: &mut Vec<Valu
         Some(true) => wheres.push("COALESCE(p.has_edits,0) = 1".into()),
         Some(false) => wheres.push("COALESCE(p.has_edits,0) = 0".into()),
         None => {}
+    }
+    match q.duplicates {
+        Some(true) => wheres.push("p.dup_group_id IS NOT NULL".into()),
+        Some(false) => wheres.push("p.dup_group_id IS NULL".into()),
+        None => {}
+    }
+    if let Some(e) = q.event_id {
+        wheres.push(
+            "p.burst_id IN (SELECT b.id FROM burst b JOIN scene s ON s.id=b.scene_id WHERE s.event_id = ?)"
+                .into(),
+        );
+        args.push(Value::Integer(e));
     }
     if let Some(n) = q.faces_min {
         wheres.push(format!(

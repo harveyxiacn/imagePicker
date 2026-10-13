@@ -11,6 +11,7 @@
 |---|---|---|
 | P0 | 评分阈值校准（真实照片复核） | 2026-10-09 已在 1000 张合成图库（`bench/data/qwen-photo-library`，`bench/eval-library.py`）上校准问题标签：过曝/欠曝要求细节丢失（白底人像、霓虹夜景不再误报），噪点阈值 0.60→0.22，连拍内清晰度 < 0.8× 最清晰帧标「模糊」。lite 档位：过曝精确率 0.52→0.92，欠曝 0.56→0.77，噪点召回 0→0.83，模糊精确率 0.28→0.37 / 召回 0.35→0.52。仍待：真实照片复核；背景虚化人像的模糊误报（需人脸区域清晰度）；美学/IQA 换算、分组松紧、星级映射 |
 | P1 | 倾斜检测阈值（真实照片复核） | 2026-10-09 实现（03 §3.1.1，所有档位同一算法）。只在合成图库的旋转集上标定：置信度 ≥ 0.2 且 2°–10° 时精确率 0.91，但召回低（\|角\| ≥ 3° 时 0.14，有直线的照片 0.21）；原图库 2.4% 被标（部分生成图本身就斜）。仍待：真实照片复核；仰拍建筑（竖线会聚）、车窗/桌面等单侧透视的误报；广角畸变的弯线不计入 |
+| P1 | 自动拉直 / 智能裁剪（真实照片复核） | 2026-10-13 实现（P1-11，03 §3.1.1 / §6.6）。拉直沿用存储的 `tilt_deg`，合成倾斜样本最大残余 0.14°（≤ 0.5° 验收，见 03 §6.6）；智能裁剪的三分法/缩放常量（`MIN_SCALE`、`SUBJECT_FILL`、`CENTRE_SHARE`）与显著性代理只在合成图上验证。仍待：真实照片人工盲评；无脸时的显著性代理对杂乱画面较弱；尚无 Android 编辑页入口；尚不考虑裁剪后的主体姿态/视线方向 |
 | P1 | 自适应同步参数 | `edit/sync.rs` 的 `K_PER_LN`、`T_PER_LN` 在 FakeRenderer 上调参，需在真实渲染器上复核 |
 | P1 | 美颜强度 | 形变/美颜强度在合成人像上标定，真实人脸效果需人工盲评 |
 
@@ -23,6 +24,8 @@
 | P1 | 文件监听（09 P1-6）：整个根目录变化后全量重新扫描（10 万张级别的根目录每次扫描会有秒级 IO），网络盘 / NAS 上的变更通知不一定可靠（需手动「重新扫描」）；安卓与 iOS 不监听；回收站只在桌面版（Android 无回收站，仅 `_rejected` 文件夹） | P1-6 |
 | P2 | Android 端 HEIC 缩略图：Rust 侧只有内嵌 JPEG，需经媒体插件接入 `ImageDecoder` / `loadThumbnail` | M8 |
 | P1 | 构图分（倾斜检测已实现，阈值复核见「校准」） | M2 |
+| P2 | 事件层（09 P1-1）余项：事件只有「日期 + 时间段」默认名，没有反向地理编码（离线 GeoNames）与 VLM 短标题，用户也无法在界面里给事件命名（`event.title` / `place` 已预留）；事件按场景切分，一个场景内部的大幅移动（高速行驶中的连拍）不会切开；GPS 位置取平均，跨日期变更线的事件位置不准；事件 id 每次重算都会重新分配（界面选中的事件在分组变化后失效并自动取消）；事件过滤（`event_id`）不能存进智能集合；助手（自然语言筛选）还不认识「事件 / 重复」 | P1-1 |
+| P2 | 重复检测（09 P1-3）余项：完全重复用 `content_key`（头尾各 64 KiB + 长度）判定，未做整文件哈希，仅改动文件中段而长度不变的两个文件会被误判（概率极低，且只标记、不删除）；近似重复只认「至少一张无 EXIF」且 pHash ≤ 4 位、宽高比相同的对，缩小到很小尺寸或轻度裁剪的副本、两张都带 EXIF 的重新编码副本不识别（合成图库的 `missing-lens` 副本带着同一拍摄时间，按连拍堆叠、不标重复：只靠 pHash 分不出它与连拍相邻帧，09 §7 的 36/36 因此只有 exact-duplicate 与 no-exif 两类 24/24 能达成）；一张无 EXIF 副本会把距离 ≤ 4 位的连拍帧一并并入重复组；界面只有角标、智能集合与 `GET /api/photos/{id}/duplicates`，没有「并排比较 / 保留一张」的清理流程；阈值只在合成图（JPEG 质量 50–98 重新编码、半尺寸缩放，见 `analysis/duplicates.rs`）上验证，真实照片（微信压缩、截图）需复核 | P1-3 |
 | P1 | RAW 预览在真实相机文件上验证（目前仅合成样本） | M1 imaging |
 | P2 | HEIC/HEIF 色彩余项：HDR（`nclx` 传递函数 PQ / HLG、iPhone 增益图）不做色调映射，按 SDR 原样显示；WIC 路径的色彩转换未实测（本机无 HEIF 编解码器） | M5 core |
 | P2 | 导出元数据余项：DNG/CR3/HEIC 文件内部的 XMP、PNG/WebP/TIFF 内嵌 XMP/IPTC 不复制（只用 JPEG 内嵌包或 `.xmp` 侧车）；扩展 XMP（>64 KB）丢弃；导出不写入目录库的评分/关键词；RAW 预览色彩空间只看预览 JPEG 自带 ICC / DCF 标记，RAW EXIF 重建仅在合成样本上验证 | M5 core |
@@ -59,9 +62,12 @@
 - NIMA 美学/技术质量模型：权重 Apache-2.0，训练数据 AVA / TID2013 有研究用途条款。
 - 天空分割 `skyseg-u2net`：训练数据未公开。
 - GFPGAN：FFHQ 训练数据有独立条款；Real-ESRGAN ONNX 来自 facefusion 镜像（上游 BSD-3）。
+- 以上条目已在 `registry.yaml` 的 `license_info` 中结构化记录（`usage: unknown`，附训练数据条款与备注），应用内以徽标提示，`docs/07` §5 由注册表生成（P1-17）。`unknown` 只表示尚未确认，**是否可商用仍待许可决定**：NIMA ×2（AVA / TID2013 研究条款）、`skyseg-u2net`（训练数据未公开）、`gfpgan-v1.4`（FFHQ）、`realesrgan-*` ×4（第三方镜像无许可元数据）。其余 20 项仅按权重许可标为 `commercial-ok`，训练数据条款多为 `not-recorded`，发布前审计时需逐项补全。
+- ModelScope 下载源尚无实现（注册表无 `source.modelscope`），选它时按「自动」处理。
 
 ## 已在集成中修复（记录）
 
+- Best Take 同人校验（09 §5.1 P0-2，WP-I）：`POST /api/besttake` 对源脸与底片脸不在同一连拍、不在同一轨迹/人物、或身份嵌入余弦低于 `MIN_IDENTITY_COS`（0.30）时返回 422（`besttake_cross_burst` / `besttake_person_mismatch` / `besttake_low_similarity`），界面显示对应的本地化提示；缺身份嵌入（lite）时只做连拍与轨迹/人物检查；自动路径只在同一轨迹内选脸（`tests_m5.rs`、`ip-server/tests/m5.rs`、`web/src/lib/gen.test.ts`）。契约见 `api-contract-m5.md` C 节
 - 可访问性与交互（09 §5.2 P1-16，WP-O）：①设置 → 语言与外观新增「高对比度」（`data-contrast="high"`，深色 / 浅色均有 AA 色板与 3px 焦点环）和「界面字号」90%–150%（`--font-scale`，rem 化的字号 / 控件，任意像素字号类同步缩放），两项只存本机（`imagepicker.ui`）；②`Ctrl+K` 命令面板（`CommandPalette.tsx`）对键位表动作与页面跳转模糊搜索，键位表仍是唯一来源；③撤销覆盖组拆分 / 合并与人物重命名 / 隐藏 / 合并 / 移动人脸（`lib/structureUndo.ts`，新增只读接口 `GET /api/people/{id}/faces` 供撤销合并）；④`pnpm a11y`（Playwright + axe-core，对 mock 后端）；⑤全局焦点环与输入框聚焦环。余项见「功能缺口」
 - 目录与文件（09 §5.1 P0-7、§5.2 P1-6，WP-F1）：①同目录同主文件名的 RAW+JPEG 导入后是一个网格项（JPEG 显示 / 分析，RAW 为 companion，`pair_id`），评分 / 旗标 / 色标同步到两者及各自的 XMP 侧车，分组与分析只算一次，导出可选 `pair_member`；②`POST /api/import` 支持 `exclude`（通配符 / 子文件夹 / 名字，重新扫描沿用）；③桌面端文件监听，增删文件约 2–3 秒内进网格；④缺失文件显示断链，`POST /api/sessions/{id}/relocate` 按相对路径 + 大小重新定位文件夹；⑤已淘汰照片经确认后可移入回收站（`trash`）或 `_rejected`，目录库跟随，绝不硬删（`tests_files.rs`、`ip-server/tests/files.rs`）
 

@@ -43,6 +43,8 @@ interface Photo {
   face_count: number | null;
   subject_face_count: number | null;
   analyzed: boolean;
+  duplicate_group_id: number | null;  // 重复组（见 C.6）：组内最小照片 id；null = 不是任何照片的重复
+  duplicate_kind?: "exact" | "near";  // 仅在有重复组时出现
 }
 type Issue = "closed_eyes" | "blurry" | "overexposed" | "underexposed" | "noisy" | "tilted";
 type SceneType = "portrait" | "group" | "landscape" | "food" | "architecture" | "night" | "pet" | "other";
@@ -108,6 +110,8 @@ interface Face {
 | `issues_any` | 逗号分隔，含任一 |
 | `burst_best_only` | `1` = 每个连拍组只返回 rank 0（堆栈折叠模式；未分组照片照常返回） |
 | `burst_id` | 只返回该组 |
+| `event_id` | 只返回该事件的照片（事件 id 见 C.6 的 `GET /api/sessions/{id}/timeline`；事件随分组重算，id 会变，客户端以最新的时间线为准）。不可用于智能集合 |
+| `duplicates` | `1` = 只返回有重复的照片，`0` = 只返回没有重复的（C.6）。可用于智能集合 |
 | `scene_type` | 场景类型 |
 | `persons` / `person_mode` / `exclude_persons` / `person_state` / `include_background` / `faces_min` / `faces_max` | 见 [05 §3.2](05-数据与接口设计.md)（`person_state` M2 支持 `eyes_open,smiling,looking,subject`） |
 | `sort` | 新增 `ai`（ai_score 降序，未分析在后） |
@@ -139,6 +143,29 @@ interface Face {
 - 每次分析把每步实际使用的模型写入 `analysis.model_versions`（`{step: model id}`）。standard 档的可补算步骤为 `embed`、`aesthetic`、`iqa`、`scene`（各自只写自己的列；`faces` / `identity` 与人脸行绑定，不在此列）。
 - 安装新模型后，已分析（同档位）照片中**缺某步骤且该步骤已有已安装模型**的，下次分析只补算这些步骤：请求带 `steps:[…]`，结果经 `ingest_partial` 只更新这些列并合并 `model_versions`（嵌入、人脸、人物不变），随后照常分组 / 评分。`status.incremental` 为本次这样补算的照片数；`plan` 的 `incremental_*` 预告同样的内容。
 - worker 报告为 `skipped_steps` 的步骤，以「已安装模型集合的指纹」记入该照片 `model_versions._skipped`；同一指纹下不再重试，安装 / 删除模型改变指纹后才会再试。
+
+### C.6 事件层与重复检测（09 P1-1 / P1-3）
+
+**事件**把一个会话里的场景再切成「行程 / 外出 / 一天」：`事件 → 场景 → 连拍组 → 照片`。相邻两个场景（按拍摄时间）之间满足任一条件就切开：
+
+- 停顿 **> 2 小时**（`EVENT_GAP_MS`，下一场景开始时间 − 此前所有场景的最晚结束时间）；
+- 此前最后一个有 GPS 的位置与下一场景第一个有 GPS 的位置相距 **> 5 公里**（`EVENT_DISTANCE_M`，大圆距离；`0,0` 与越界坐标视为没有 GPS；没有 GPS 的照片不会按距离切开，没有任何 GPS 的会话只按时间切）。
+
+拍摄时间是绝对时间（UTC 毫秒），跨时区拍摄不会被当成停顿；本地日期与时刻由 `taken_at_offset_min` 得出。事件整体包含完整的场景，一个场景不会被切开。事件由 `regroup_session` 在分组之后重算，手动拆分 / 合并连拍组之后也会重算；事件 id 每次重算都会重新分配。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/sessions/{id}/timeline` | `{"events":[{"id","name","title":string\|null,"place":string\|null,"start_at","end_at","offset_min":number\|null,"gps_lat":number\|null,"gps_lon":number\|null,"photo_count","scenes":[{"id","start_at","end_at","event_id","bursts":[{"id","best_photo_id","photo_ids","size","start_at"}]}]}]}`，事件按时间序。`name` = `title`（用户命名，目前没有界面）或本地日期与时间段 `2024-05-03 10:12-14:40`（跨零点 `2024-05-03 22:10-05-04 01:20`）；`place` 预留给地名（目前不自动生成），`gps_*` 是事件内有 GPS 照片的平均位置。会话不存在 → `404`；有场景而没有事件时（旧目录库）按需补建 |
+| GET | `/api/photos/{id}/duplicates` | `{"group_id":number\|null,"photo_ids":number[],"exact_ids":number[]}`：该照片所在重复组的全部成员（整个目录库，跨会话）；`exact_ids` 是有完全相同副本的成员 |
+
+`GET /api/groups` 不变（场景不带 `event_id`）。导出命名的 `{event}` 取照片所属事件的名称（`title`，或日期与时间段去掉冒号：`2024-05-03 1012-1440`）；不在任何事件里的照片（尚未分析）仍用导入（会话）标题。
+
+**重复**在整个目录库里检测（不限于一个会话）：
+
+- **完全重复（`exact`）**：`photo.content_key`（文件头 64 KiB + 尾 64 KiB + 长度的 BLAKE3，与缩略图缓存、编辑存储用的是同一个键）与 `file_size` 都相同的不同文件，可在不同文件夹、不同会话。导入读完元数据后即检测，不需要分析。
+- **近似重复（`near`）**：同一张画面去掉元数据后重新保存（微信 / 网页导出、截图再存）：pHash 汉明距离 ≤ **4**（`DUP_PHASH_MAX_BITS`，共 64 位；无关照片约 32 位）、宽高比相同（相对误差 ≤ 1%），且**两张里至少一张没有拍摄时间（无 EXIF）**。最后一条把连拍的相邻帧（距离常为 0–4 位）排除在外：只有「没有元数据的副本」会和有元数据的照片配成对；因此一张无 EXIF 副本会连带把与它距离 ≤ 2 位的照片并入同一组。需要分析写入 pHash 之后才能发现；分析结束后重新检测。
+- 两种关系传递合并成组，`duplicate_group_id` = 组内最小照片 id；不在组里的照片为 `null`。已读不到元数据（`meta_done=0`）、文件已丢失（`missing`）和 RAW 附属文件不参与。
+- 内置智能集合 `duplicates`（`duplicates=1`）；`GET /api/photos?duplicates=1|0` 筛选。检测结果变化时对受影响的会话发 `groups.updated`，客户端重新拉取列表。
 
 ## D. WebSocket 新增事件
 

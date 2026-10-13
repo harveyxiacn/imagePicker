@@ -10,7 +10,9 @@ import type {
   ExportBody,
   ExportPreset,
   FsList,
+  DuplicatesResponse,
   GroupsResponse,
+  TimelineResponse,
   HardwareInfo,
   ImportBody,
   RelocateReport,
@@ -26,6 +28,8 @@ import type {
   Session,
   Face,
   AutoMode,
+  AutoCropBody,
+  AutoCropResult,
   EditStack,
   EditsPutResponse,
   EditsResponse,
@@ -176,6 +180,8 @@ export function photosQueryString(q: PhotosQuery): string {
   if (q.face_ids?.length) p.set('face_ids', q.face_ids.join(','))
   if (q.face_similarity !== undefined) p.set('face_similarity', String(q.face_similarity))
   if (q.has_edits) p.set('has_edits', '1')
+  if (q.duplicates) p.set('duplicates', '1')
+  if (q.event_id !== undefined) p.set('event_id', String(q.event_id))
   if (q.sort) p.set('sort', q.sort)
   if (q.cursor) p.set('cursor', q.cursor)
   if (q.limit) p.set('limit', String(q.limit))
@@ -198,6 +204,8 @@ export const api = {
     request<{ result: RejectFilesReport }>('POST', '/photos/reject-files', body),
   photos: (q: PhotosQuery) => request<PhotosResponse>('GET', `/photos?${photosQueryString(q)}`),
   photo: (id: number) => request<{ photo: Photo }>('GET', `/photos/${id}`),
+  photoDuplicates: (id: number) => request<DuplicatesResponse>('GET', `/photos/${id}/duplicates`),
+  timeline: (session_id: number) => request<TimelineResponse>('GET', `/sessions/${session_id}/timeline`),
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),
@@ -212,6 +220,8 @@ export const api = {
   removeRuntime: () => request<void>('DELETE', '/runtime'),
   // ---- M2 ----
   hardware: () => request<HardwareInfo>('GET', '/system/hardware'),
+  /** Starts the AI worker if needed so that tier and hardware are current. */
+  hardwareProbe: () => request<HardwareInfo>('GET', '/system/hardware?probe=1'),
   models: () => request<{ models: ModelInfo[] }>('GET', '/models'),
   ensureModels: (ids: string[]) => request<{ task_id: string }>('POST', '/models/ensure', { ids }),
   runAnalysis: (body: { session_id: number; profile: AnalysisProfile; photo_ids?: number[]; fallback_lite?: boolean }) =>
@@ -248,6 +258,7 @@ export const api = {
   putEdits: (id: number, stack: EditStack) => request<EditsPutResponse>('PUT', `/edits/${id}`, { stack }),
   deleteEdits: (id: number) => request<void>('DELETE', `/edits/${id}`),
   autoEdit: (id: number, mode: AutoMode) => request<{ adjust: Adjust }>('POST', `/edits/${id}/auto`, { mode }),
+  autoCrop: (id: number, body: AutoCropBody) => request<AutoCropResult>('POST', `/edits/${id}/auto-crop`, body),
   syncEdits: (body: SyncBody) => request<{ updated: number }>('POST', '/edits/sync', body),
   presets: () => request<{ presets: Preset[] }>('GET', '/presets'),
   savePreset: (name: string, stack: EditStack) => request<{ preset: Preset }>('POST', '/presets', { name, stack }),

@@ -15,6 +15,8 @@ import type {
   PhotoAnalysis,
   Scene,
   SceneType,
+  TimelineEvent,
+  TimelineResponse,
   WorkerState,
 } from '@/api/types'
 import { avatarSvg, AVATAR_STYLES } from './avatar'
@@ -32,24 +34,25 @@ const r2 = (x: number) => Math.round(x * 100) / 100
 // ============================================================================
 
 export const MODELS: ModelInfo[] = [
-  { id: 'yunet', task: ['face_detect'], size_mb: 0.3, license: 'MIT', noncommercial: false, installed: true, required_for: ['fast', 'standard'] },
-  { id: 'mediapipe-face-landmarker', task: ['face_landmarks', 'blendshapes'], size_mb: 4, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: ['fast', 'standard'] },
-  { id: 'auraface-v1', task: ['face_identity'], size_mb: 250, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: ['standard'] },
-  { id: 'siglip2-base', task: ['embed_image', 'zero_shot'], size_mb: 375, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: ['standard'] },
-  { id: 'topiq-nr', task: ['iqa'], size_mb: 120, license: 'Research / NC', noncommercial: true, installed: false, required_for: ['standard'] },
-  { id: 'aesthetic-head', task: ['aesthetic'], size_mb: 4, license: 'MIT', noncommercial: false, installed: false, required_for: ['standard'] },
-  { id: 'scrfd-10g', task: ['face_detect'], size_mb: 17, license: 'insightface NC', noncommercial: true, installed: false, required_for: [] },
+  { id: 'yunet', task: ['face_detect'], size_mb: 0.3, license: 'MIT', noncommercial: false, usage: 'commercial-ok', installed: true, required_for: ['fast', 'standard'] },
+  { id: 'mediapipe-face-landmarker', task: ['face_landmarks', 'blendshapes'], size_mb: 4, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: ['fast', 'standard'] },
+  { id: 'auraface-v1', task: ['face_identity'], size_mb: 250, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: ['standard'] },
+  { id: 'siglip2-base', task: ['embed_image', 'zero_shot'], size_mb: 375, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: ['standard'] },
+  { id: 'topiq-nr', task: ['iqa'], size_mb: 120, license: 'Research / NC', noncommercial: true, usage: 'non-commercial', installed: false, required_for: ['standard'] },
+  { id: 'nima-aesthetic', task: ['aesthetic'], size_mb: 6, license: 'Apache-2.0', noncommercial: false, usage: 'unknown', license_info: { weights: 'Apache-2.0', training_data: 'AVA (photographer-rated aesthetics)', training_data_terms: 'research-only', usage: 'unknown', note: 'Training dataset has research-use terms; licence audit pending.' }, installed: false, required_for: ['standard'] },
+  { id: 'aesthetic-head', task: ['aesthetic'], size_mb: 4, license: 'MIT', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: ['standard'] },
+  { id: 'scrfd-10g', task: ['face_detect'], size_mb: 17, license: 'insightface NC', noncommercial: true, usage: 'non-commercial', installed: false, required_for: [] },
   // M3 AI masks (not part of any analysis profile; fetched on first use of a mask)
-  { id: 'sky-seg', task: ['mask_sky'], size_mb: 28, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
+  { id: 'sky-seg', task: ['mask_sky'], size_mb: 28, license: 'Apache-2.0', noncommercial: false, usage: 'unknown', license_info: { weights: 'Apache-2.0', training_data: null, training_data_terms: 'undisclosed', usage: 'unknown', note: 'Training data not disclosed.' }, installed: false, required_for: [] },
   // M4 portrait geometry (fetched on first use of the beauty panel)
-  { id: 'mediapipe-pose-landmarker', task: ['pose'], size_mb: 9, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
-  { id: 'selfie-multiclass', task: ['mask_skin', 'mask_person'], size_mb: 16, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
-  { id: 'sam2-tiny', task: ['mask_subject', 'mask_person'], size_mb: 156, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
+  { id: 'mediapipe-pose-landmarker', task: ['pose'], size_mb: 9, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: [] },
+  { id: 'selfie-multiclass', task: ['mask_skin', 'mask_person'], size_mb: 16, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: [] },
+  { id: 'sam2-tiny', task: ['mask_subject', 'mask_person'], size_mb: 156, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: [] },
   // M5 generative repair (fetched on first use of inpaint / denoise / face restore / upscale)
-  { id: 'lama', task: ['inpaint'], size_mb: 196, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
-  { id: 'scunet', task: ['denoise'], size_mb: 71, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
-  { id: 'gfpgan-v1.4', task: ['face_restore'], size_mb: 332, license: 'Apache-2.0', noncommercial: false, installed: false, required_for: [] },
-  { id: 'realesrgan-x4', task: ['upscale'], size_mb: 64, license: 'BSD-3-Clause', noncommercial: false, installed: false, required_for: [] },
+  { id: 'lama', task: ['inpaint'], size_mb: 196, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: [] },
+  { id: 'scunet', task: ['denoise'], size_mb: 71, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: [] },
+  { id: 'gfpgan-v1.4', task: ['face_restore'], size_mb: 332, license: 'Apache-2.0', noncommercial: false, usage: 'unknown', license_info: { weights: 'Apache-2.0', training_data: 'FFHQ', training_data_terms: 'separate-terms', usage: 'unknown', note: 'FFHQ has its own terms.' }, installed: false, required_for: [] },
+  { id: 'realesrgan-x4', task: ['upscale'], size_mb: 64, license: 'BSD-3-Clause', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: [] },
 ]
 
 /** Ids from `ids` that are not installed yet (used by the M3 mask endpoint to answer 409 models_missing). */
@@ -60,6 +63,8 @@ export function missingModelIds(ids: string[]): string[] {
 const worker: HardwareInfo['worker'] = {
   state: 'stopped',
   tier: 'T3',
+  tier_detected: 'T3',
+  tier_overridden: false,
   device: 'cuda:0',
   providers: ['CUDAExecutionProvider', 'CPUExecutionProvider'],
   gpu: { name: 'NVIDIA GeForce RTX 4090', vram_mb: 24564 },
@@ -407,6 +412,39 @@ function regroup(sessionId: number): number[] {
 
 function groupsOf(sessionId: number): GroupsResponse {
   return { scenes: sceneStore.get(sessionId) ?? [] }
+}
+
+const MOCK_EVENT_GAP_MS = 2 * 3_600_000
+
+/** Events of a mock session: scenes in time order, cut at pauses of more than 2 h (like the server). */
+function timelineOf(sessionId: number): TimelineResponse {
+  const scenes = [...(sceneStore.get(sessionId) ?? [])].sort((a, b) => a.start_at - b.start_at)
+  const events: TimelineEvent[] = []
+  for (const sc of scenes) {
+    const last = events[events.length - 1]
+    const photos = sc.bursts.reduce((n, b) => n + b.photo_ids.length, 0)
+    if (last && sc.start_at - last.end_at <= MOCK_EVENT_GAP_MS) {
+      last.scenes.push(sc)
+      last.end_at = Math.max(last.end_at, sc.end_at)
+      last.photo_count += photos
+    } else {
+      events.push({
+        id: sc.id,
+        name: '',
+        title: null,
+        place: null,
+        start_at: sc.start_at,
+        end_at: sc.end_at,
+        offset_min: 480,
+        gps_lat: null,
+        gps_lon: null,
+        photo_count: photos,
+        scenes: [sc],
+      })
+    }
+  }
+  for (const e of events) e.name = new Date(e.start_at + 480 * 60_000).toISOString().slice(0, 16).replace('T', ' ')
+  return { events }
 }
 
 function refreshScenes(sessionId: number) {
@@ -843,6 +881,12 @@ export const aiHandlers = [
     const sid = Number(new URL(request.url).searchParams.get('session_id'))
     if (!getSession(sid)) return err(404, 'not_found', 'session not found')
     return HttpResponse.json(groupsOf(sid))
+  }),
+  http.get('/api/sessions/:id/timeline', async ({ params }) => {
+    await lat()
+    const sid = Number(params.id)
+    if (!getSession(sid)) return err(404, 'not_found', 'session not found')
+    return HttpResponse.json(timelineOf(sid))
   }),
   http.post('/api/groups/split', async ({ request }) => {
     await lat()

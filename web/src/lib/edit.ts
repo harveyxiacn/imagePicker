@@ -386,6 +386,19 @@ export function fitAspect(rect: CropOp['rect'], ratio: number, imgAspect: number
   return normalizeCropRect([cx - w / 2, cy - h / 2, w, h])
 }
 
+/**
+ * Largest centred rect of pixel aspect `ratio` inside a w x h image rotated by `angleDeg` (the same
+ * closed form as `ip_render::crop_assist::inscribed_rect`); the mock server uses it.
+ */
+export function inscribedRect(w: number, h: number, angleDeg: number, ratio: number): [number, number, number, number] {
+  const th = (angleDeg * Math.PI) / 180
+  const s = Math.abs(Math.sin(th))
+  const c = Math.abs(Math.cos(th))
+  const k = Math.min(w / 2 / (ratio * c + s), h / 2 / (ratio * s + c))
+  const a = k * ratio
+  return [0.5 - a / w, 0.5 - k / h, (2 * a) / w, (2 * k) / h]
+}
+
 export type CropHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'move'
 
 /**

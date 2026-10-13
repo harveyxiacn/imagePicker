@@ -12,6 +12,7 @@ pub mod m6;
 pub mod m7;
 pub mod remote;
 pub mod routes;
+pub mod timeline;
 pub mod ws;
 
 use std::net::SocketAddr;
@@ -134,6 +135,7 @@ pub fn build_router_auth(
             get(routes::get_session).delete(routes::delete_session),
         )
         .route("/sessions/{id}/devices", get(routes::session_devices))
+        .route("/sessions/{id}/timeline", get(timeline::session_timeline))
         .route(
             "/sessions/{id}/filter-options",
             get(routes::session_filter_options),
@@ -146,6 +148,7 @@ pub fn build_router_auth(
             get(routes::list_photos).patch(routes::patch_photos),
         )
         .route("/photos/{id}", get(routes::get_photo))
+        .route("/photos/{id}/duplicates", get(timeline::photo_duplicates))
         .route("/thumb/{id}", get(routes::thumb))
         .route("/preview/{id}", get(routes::preview))
         .route("/full/{id}", get(routes::full))
@@ -181,6 +184,7 @@ pub fn build_router_auth(
             get(m3::get_edit).put(m3::put_edit).delete(m3::delete_edit),
         )
         .route("/edits/{id}/auto", post(m3::auto_edit))
+        .route("/edits/{id}/auto-crop", post(m3::auto_crop))
         .route("/edits/sync", post(m3::sync_edits))
         .route("/render/preview", post(m3::render_preview))
         .route("/presets", get(m3::list_presets).post(m3::create_preset))

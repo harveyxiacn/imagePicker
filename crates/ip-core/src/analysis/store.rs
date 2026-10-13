@@ -319,7 +319,7 @@ struct GRow {
     emb: Option<Vec<f32>>,
 }
 
-fn blob_phash(b: Option<Vec<u8>>) -> Option<u64> {
+pub(crate) fn blob_phash(b: Option<Vec<u8>>) -> Option<u64> {
     let b = b?;
     let a: [u8; 8] = b.try_into().ok()?;
     Some(u64::from_be_bytes(a))
@@ -517,6 +517,7 @@ pub fn regroup_session(
             )?;
         }
     }
+    super::layers::rebuild_events(&tx, session_id)?;
     let ids = units.iter().map(|u| u.id).collect();
     tx.commit()?;
     Ok(ids)
@@ -1112,6 +1113,45 @@ pub fn get_face(conn: &Connection, id: i64) -> Result<Face> {
         })
 }
 
+/// What the best-take identity check needs to know about one face.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceIdentity {
+    pub face_id: i64,
+    pub photo_id: i64,
+    /// Burst (group) of the face's photo.
+    pub burst_id: Option<i64>,
+    /// Face track within the burst.
+    pub track_id: Option<i64>,
+    pub person_id: Option<i64>,
+    /// Identity embedding; `None` when the profile computes none (lite) or the face has none.
+    pub embedding: Option<Vec<f32>>,
+}
+
+pub fn face_identity(conn: &Connection, id: i64) -> Result<FaceIdentity> {
+    conn.query_row(
+        "SELECT f.photo_id, p.burst_id, f.track_id, f.person_id, f.embedding
+         FROM face f JOIN photo p ON p.id=f.photo_id WHERE f.id=?1",
+        [id],
+        |r| {
+            let blob: Option<Vec<u8>> = r.get(4)?;
+            Ok(FaceIdentity {
+                face_id: id,
+                photo_id: r.get(0)?,
+                burst_id: r.get(1)?,
+                track_id: r.get(2)?,
+                person_id: r.get(3)?,
+                embedding: blob.filter(|b| !b.is_empty()).map(|b| decode_f16(&b)),
+            })
+        },
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => {
+            CoreError::not_found(format!("face {id} not found"))
+        }
+        e => e.into(),
+    })
+}
+
 pub fn faces_of_photo(conn: &Connection, photo_id: i64) -> Result<Vec<Face>> {
     let mut st = conn.prepare(&format!(
         "{FACE_SELECT} WHERE f.photo_id=?1 ORDER BY f.idx, f.id"
@@ -1325,6 +1365,7 @@ pub fn groups_of_session(conn: &Connection, session_id: i64) -> Result<GroupsOut
                 start_at: s,
                 end_at: e,
                 bursts: Vec::new(),
+                event_id: None,
             })
             .bursts
             .push(BurstOut {
@@ -1976,6 +2017,7 @@ pub fn purge_session_groups(conn: &Connection, session_id: i64) -> Result<()> {
     )?;
     conn.execute("DELETE FROM burst WHERE session_id=?1", [session_id])?;
     conn.execute("DELETE FROM scene WHERE session_id=?1", [session_id])?;
+    conn.execute("DELETE FROM event WHERE session_id=?1", [session_id])?;
     Ok(())
 }
 

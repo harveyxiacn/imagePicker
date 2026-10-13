@@ -410,11 +410,22 @@ impl FakeWorker {
             detail: Some(json!({ "models": need })),
         })
     }
+    /// `IMAGEPICKER_TIER` of the options given to `configure` (the fake "detects" T3).
+    fn forced_tier(&self) -> Option<String> {
+        self.last_options
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|o| o.env.iter().find(|(k, _)| k == "IMAGEPICKER_TIER"))
+            .map(|(_, v)| v.clone())
+            .filter(|v| v != "T3")
+    }
     fn set_state(&self, state: WorkerState) {
+        let tier = self.forced_tier().unwrap_or_else(|| "T3".into());
         self.tx.send_modify(|s| {
             s.state = state;
             if state == WorkerState::Ready {
-                s.tier = Some("T3".into());
+                s.tier = Some(tier);
             }
         });
     }
@@ -430,8 +441,10 @@ impl AiWorker for FakeWorker {
     }
     async fn system_info(&self) -> Result<SystemInfo> {
         self.set_state(WorkerState::Ready);
+        // like the real worker: IMAGEPICKER_TIER (from `configure`) replaces the detected T3
+        let forced = self.forced_tier();
         let info = SystemInfo {
-            tier: Some("T3".into()),
+            tier: Some(forced.clone().unwrap_or_else(|| "T3".into())),
             providers: vec![
                 "CUDAExecutionProvider".into(),
                 "CPUExecutionProvider".into(),
@@ -442,9 +455,14 @@ impl AiWorker for FakeWorker {
                     name: "Fake RTX".into(),
                     vram_mb: Some(24564),
                 }],
+                tier_detected: Some("T3".into()),
+                tier_overridden: forced.is_some(),
             },
         };
-        self.tx.send_modify(|s| s.info = Some(info.clone()));
+        self.tx.send_modify(|s| {
+            s.tier = info.tier.clone();
+            s.info = Some(info.clone());
+        });
         Ok(info)
     }
     async fn models_list(&self) -> Result<ModelsListing> {
@@ -460,6 +478,12 @@ impl AiWorker for FakeWorker {
             size_mb: size,
             license: "Apache-2.0".into(),
             noncommercial: false,
+            usage: if id == "siglip2-base" {
+                "unknown".into()
+            } else {
+                "commercial-ok".into()
+            },
+            license_info: Default::default(),
             installed: !missing.iter().any(|x| x == id),
             recommended: true,
             optional: false,
