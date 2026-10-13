@@ -522,6 +522,12 @@ Security notes: enable only on a trusted LAN and use a strong password; failed l
 - If the catalog is damaged so badly that it cannot be opened, the app moves it to `backups/corrupt-….db`, starts with an empty catalog and shows *The catalog cannot be opened* with the available backups; damage found by the start-up check is reported the same way. Pick a backup and click *Restore*; originals are not affected.
 - Restoring replaces the current catalog with the backup (changes made after it are lost); the replaced catalog is kept as `backups/replaced-….db` and the page reloads. You can also restore any backup from *Settings → Catalog backups*.
 
+### Logs, crash records & diagnostics
+
+- The app writes log files to `logs/` in the data directory (`imagepicker-<date>.<n>.log`, UTC). A new file starts every day and after 5 MiB; files older than 14 days are deleted and the folder is kept under 40 MiB.
+- If the app crashes (a Rust panic) or the AI worker dies with an unhandled error or a native fault, a crash record is written to `crashes/` first (time, version, system, thread, message, backtrace; for the worker the last lines of its output). The latest 30 are kept.
+- *Settings → Diagnostics → Export diagnostics* saves a zip for bug reports: versions, an OS and hardware summary, your settings (passwords and tokens removed), the latest logs and crash records (file paths and secrets masked), and catalog statistics (counts, schema version, integrity check, root folder names). It **never** contains photos, thumbnails, face crops or face features, the catalog itself, or the path or name of any photo. Nothing is uploaded; the owner only (guests cannot export). Masking is automatic but best effort: open the zip and look before you share it.
+
 ### Data locations
 
 Default data directory (override with `IMAGEPICKER_DATA_DIR` or `--data-dir`):
@@ -539,7 +545,8 @@ Default data directory (override with `IMAGEPICKER_DATA_DIR` or `--data-dir`):
 | Thumbnail / preview / full-resolution (`cache/full`, at most 1 GB) / AI mask / edit render / generated-result caches | `cache/` (clear in *Settings → Cache*; rebuilt on demand) |
 | Generated patch layers of edits | `edits/` |
 | Imported LUTs | `luts/` |
-| Logs | `logs/` |
+| Logs (rotating, 14 days / 40 MiB) | `logs/` |
+| Crash records | `crashes/` |
 | AI models | default `<platform data dir>/imagePicker/models`, shown in Settings (`IMAGEPICKER_MODELS_DIR` overrides) |
 
 Backup tip: the app backs `catalog.db` up to `backups/` every day (see above); for a full backup copy `backups/` (or `catalog.db` while the app is closed) and `edits/`; caches and models can be rebuilt.
@@ -571,6 +578,7 @@ Open with the gear icon on Home or in the top bar.
 | **Faces & privacy** | Face recognition switch, face recognition consent (show explanation / withdraw), clear all face data, allow network |
 | **Cache** | Usage per cache kind, clear, cache limit (default 20 GB; least recently used is evicted) |
 | **Catalog backups** | Integrity state, latest backup, *Back up now*, the backups with *Restore* (see section 16) |
+| **Diagnostics** | *Export diagnostics*: a zip for bug reports without photos, face data or photo paths (see section 16) |
 | **Task history** | Recent best take, removal, enhancement, export and analysis tasks with their outcome (the last 200 are kept); running ones can be cancelled; tasks still running when the app exited are marked *Interrupted*. *Tasks* in the library status bar opens it too |
 | **Rendering** | Render backend: Auto / GPU / CPU |
 | **LAN / WebUI** | See section 15; also *Allowed folders* (import, export and folder browsing are limited to these roots) |
