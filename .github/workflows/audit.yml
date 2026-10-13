@@ -49,8 +49,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+      # No dependency cache: `pnpm audit` reads the lockfile and never creates a pnpm store, so the
+      # cache's post-job save fails with a path validation error.
       - run: pnpm audit --prod --audit-level high
 
   pip-audit:
