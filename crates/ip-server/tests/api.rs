@@ -712,3 +712,205 @@ async fn devices_endpoint_and_filter() {
         );
     }
 }
+
+#[tokio::test]
+async fn filters_complete_query_parsing_and_options() {
+    let e = env();
+    make_photos(e.src.path(), 4); // img_000..003, 2023-11-14 22:13:20 UTC + i minutes, lens 50mm
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/import",
+        Some(json!({"path": e.src.path().to_string_lossy()})),
+    )
+    .await;
+    let sid = r.json()["session"]["id"].as_i64().unwrap();
+    e.core
+        .wait_session_ready(sid, Duration::from_secs(30))
+        .await
+        .unwrap();
+    let ids: Vec<i64> = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos?session_id={sid}&sort=name"),
+        None,
+    )
+    .await
+    .json()["photos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_i64().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 4);
+    for (i, tag) in [(0, "kyoto"), (1, "kyoto"), (1, "a,b"), (2, "food")] {
+        let r = call(
+            &e.app,
+            Method::POST,
+            "/api/photos/tags",
+            Some(json!({"ids": [ids[i]], "add": [tag]})),
+        )
+        .await;
+        assert_eq!(
+            r.status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&r.body)
+        );
+    }
+
+    let list = |q: &str| {
+        let app = e.app.clone();
+        let uri = format!("/api/photos?session_id={sid}&{q}");
+        async move { call(&app, Method::GET, &uri, None).await }
+    };
+    let total = |q: &'static str| {
+        let l = list(q);
+        async move {
+            let r = l.await;
+            assert_eq!(
+                r.status,
+                StatusCode::OK,
+                "{q}: {}",
+                String::from_utf8_lossy(&r.body)
+            );
+            r.json()["total"].as_i64().unwrap()
+        }
+    };
+    // lens: exact name, comma separated, `\,` is a comma inside a name
+    assert_eq!(total("lens=50mm").await, 4);
+    assert_eq!(total("lens=nope,50mm").await, 4);
+    assert_eq!(total("lens=nope").await, 0);
+    assert_eq!(total("lens=a%5C,b").await, 0);
+    assert_eq!(total("lens=").await, 4);
+    // time range: dates cover whole days (UTC wall clock), numbers are ms
+    assert_eq!(total("taken_from=2023-11-14&taken_to=2023-11-14").await, 4);
+    assert_eq!(total("taken_from=2023-11-15").await, 0);
+    assert_eq!(total("taken_to=2023-11-13").await, 0);
+    assert_eq!(
+        total("taken_from=1700000060000&taken_to=1700000120000").await,
+        2
+    );
+    assert_eq!(
+        total("taken_from=2023-11-14&taken_to=1700000060000").await,
+        2
+    );
+    // tags
+    assert_eq!(total("tags=kyoto").await, 2);
+    assert_eq!(total("tags=kyoto,food").await, 3);
+    assert_eq!(total("tags=kyoto,food&tag_mode=all").await, 0);
+    assert_eq!(total("tags=a%5C,b&tag_mode=all").await, 1);
+    assert_eq!(
+        total("tags=kyoto&tag_mode=any&lens=50mm&sort=-taken_at").await,
+        2
+    );
+    // sharpness state (nothing analysed here)
+    assert_eq!(total("sharp=unknown").await, 4);
+    assert_eq!(total("sharp=sharp").await, 0);
+    assert_eq!(total("sharp=blurry").await, 0);
+    // pagination keeps the filter
+    let v = list("tags=kyoto,food&limit=2&sort=name").await.json();
+    assert_eq!(v["total"], 3);
+    assert_eq!(v["photos"].as_array().unwrap().len(), 2);
+    let cursor = v["next_cursor"].as_str().unwrap().to_string();
+    let v = list(&format!(
+        "tags=kyoto,food&limit=2&sort=name&cursor={cursor}"
+    ))
+    .await
+    .json();
+    assert_eq!(v["photos"].as_array().unwrap().len(), 1);
+    assert!(v["next_cursor"].is_null());
+
+    // validation errors
+    for bad in [
+        "taken_from=yesterday",
+        "taken_from=2023-13-01",
+        "taken_to=2023-02-30",
+        "taken_from=2023-1-1",
+        "taken_from=2023-11-15&taken_to=2023-11-14",
+        "tag_mode=some",
+        "sharp=crisp",
+        "face_ids=abc",
+        "face_ids=1,x",
+        "face_ids=999999",
+        "face_similarity=2",
+        "face_similarity=-0.1",
+        "face_similarity=high",
+    ] {
+        let r = list(bad).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
+        assert_eq!(r.json()["error"]["code"], "bad_request", "{bad}");
+    }
+    let too_many: Vec<String> = (1..=51).map(|i| i.to_string()).collect();
+    assert_eq!(
+        list(&format!("face_ids={}", too_many.join(",")))
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+
+    // filter options for the pickers
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/sessions/{sid}/filter-options"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let o = r.json();
+    assert_eq!(o["lenses"], json!([{"lens": "50mm", "photo_count": 4}]));
+    assert_eq!(
+        o["tags"],
+        json!([
+            {"tag": "kyoto", "photo_count": 2},
+            {"tag": "a,b", "photo_count": 1},
+            {"tag": "food", "photo_count": 1}
+        ])
+    );
+    assert_eq!(o["taken_min"], 1_700_000_000_000_i64);
+    assert_eq!(o["taken_max"], 1_700_000_180_000_i64);
+    let r = call(
+        &e.app,
+        Method::GET,
+        "/api/sessions/9999/filter-options",
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+
+    // smart collections accept the new keys and validate them
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/collections",
+        Some(json!({"name": "kyoto, sharp", "query": "tags=kyoto&sharp=sharp&lens=50mm&taken_from=2023-11-14"})),
+    )
+    .await;
+    assert_eq!(
+        r.status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&r.body)
+    );
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/collections",
+        Some(json!({"name": "bad", "query": "sharp=crisp"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+
+    // face search: the similarity floor is validated before anything else
+    for bad in [json!(2.0), json!(-0.5)] {
+        let r = call(
+            &e.app,
+            Method::POST,
+            "/api/faces/search",
+            Some(json!({"face_id": 1, "min_similarity": bad})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    }
+}
