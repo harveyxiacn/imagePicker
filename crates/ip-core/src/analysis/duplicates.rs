@@ -307,7 +307,14 @@ mod tests {
 
     #[test]
     fn near_threshold_is_inclusive_and_tight() {
-        for (bits, dup) in [(0, true), (1, true), (2, true), (4, true), (5, false), (8, false)] {
+        for (bits, dup) in [
+            (0, true),
+            (1, true),
+            (2, true),
+            (4, true),
+            (5, false),
+            (8, false),
+        ] {
             let items = vec![shot(1, H), stripped(2, flip(H, bits))];
             assert_eq!(
                 !find_duplicates(&items, &p()).is_empty(),
