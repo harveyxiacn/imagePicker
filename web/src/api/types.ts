@@ -218,6 +218,30 @@ export interface ExportBody {
   strip_metadata?: boolean
   /** centre crop to this aspect ratio `[w, h]`, then `long_edge` */
   aspect?: [number, number] | null
+  /** F9.4: text or logo blended into every output (copies of originals are re-encoded) */
+  watermark?: WatermarkBody
+}
+
+export type WatermarkPosition = 'top-left' | 'top' | 'top-right' | 'left' | 'center' | 'right' | 'bottom-left' | 'bottom' | 'bottom-right'
+
+/** `watermark` of `POST /api/export` (docs/api-contract-m5.md F). Text marks carry `text`, `font_path`,
+ *  `font_size_pct`, `color`, `shadow`; image marks `image_path` and `size_pct`. */
+export interface WatermarkBody {
+  kind: 'text' | 'image'
+  text?: string
+  image_path?: string
+  font_path?: string
+  position: WatermarkPosition
+  /** distance from the edges, percent of the long edge (0..40) */
+  margin_pct: number
+  /** logo width, percent of the long edge (1..100) */
+  size_pct?: number
+  /** font size, percent of the long edge (0.5..50) */
+  font_size_pct?: number
+  /** 0..1 */
+  opacity: number
+  color?: string
+  shadow?: boolean
 }
 
 /** Output container of an export: `original` copies unchanged photos as they are and writes
@@ -239,6 +263,8 @@ export interface FsList {
   parent: string | null
   dirs: string[]
   image_count: number
+  /** files with the extensions asked for with `?ext=` (full paths) */
+  files?: string[]
 }
 
 // ---- WebSocket events (server -> client) ----

@@ -326,8 +326,10 @@ export const api = {
   remoteDevices: () => request<{ devices: RemoteDevice[] }>('GET', '/remote/devices'),
   remoteRevoke: (id: string) => request<void>('DELETE', `/remote/devices/${encodeURIComponent(id)}`),
   fsRoots: () => request<{ roots: string[] }>('GET', '/fs/roots'),
-  fsList: (path?: string) =>
-    request<FsList>('GET', `/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  fsList: (path?: string, ext?: string[]) => {
+    const q = [path ? `path=${encodeURIComponent(path)}` : '', ext?.length ? `ext=${encodeURIComponent(ext.join(','))}` : ''].filter(Boolean).join('&')
+    return request<FsList>('GET', `/fs/list${q ? `?${q}` : ''}`)
+  },
 }
 
 /** Page size used when pulling a whole session (contract: max 5000). */

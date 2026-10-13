@@ -350,12 +350,17 @@ export const handlers = [
     await lat()
     const path = new URL(request.url).searchParams.get('path') || 'C:\\Users\\demo'
     const dirs = FS[path] ?? []
+    // `?ext=png,ttf`: a couple of sample files (watermark logo / font picker)
+    const ext = (new URL(request.url).searchParams.get('ext') ?? '').split(',').filter(Boolean)
+    const sep = path.includes('/') ? '/' : '\\'
+    const files = ext.map((e) => `${path.replace(/[\\/]$/, '')}${sep}sample.${e}`)
     if (!FS[path] && !/^[A-Z]:/.test(path)) return err(404, 'not_found', 'no such directory')
     return HttpResponse.json({
       path,
       parent: parentOf(path),
       dirs,
       image_count: hashString(path) % 3 === 0 ? 0 : 120 + (hashString(path) % 2400),
+      ...(files.length ? { files } : {}),
     })
   }),
 ]
