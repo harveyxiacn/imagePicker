@@ -1,0 +1,64 @@
+# Dependabot version updates. Security advisories are also raised by the weekly
+# audit workflow in .github/workflows/audit.yml.
+#
+# Note on uv: Dependabot's "pip" ecosystem reads pyproject.toml (and requirements files)
+# but does NOT regenerate uv.lock. Python dependency bumps therefore need to be applied
+# by hand with `uv lock --upgrade-package <name>` in ai-worker/ until uv is supported.
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /apps/desktop
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      desktop-npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Reads ai-worker/pyproject.toml only; ai-worker/uv.lock is not updated (see note above).
+  - package-ecosystem: pip
+    directory: /ai-worker
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      pip-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      github-actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch

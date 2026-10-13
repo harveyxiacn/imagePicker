@@ -318,6 +318,9 @@ pub struct ModelInfo {
     pub size_mb: f64,
     pub license: String,
     pub noncommercial: bool,
+    /// `commercial-ok` | `research-only` | `non-commercial` | `unknown` (never empty)
+    pub usage: String,
+    pub license_info: ip_worker_client::LicenseInfo,
     pub installed: bool,
     pub required_for: Vec<String>,
 }
@@ -331,7 +334,11 @@ pub struct GpuOut {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerOut {
     pub state: String,
+    /// The tier in effect (the manual override, if any).
     pub tier: Option<String>,
+    /// What detection found; `None` until the worker has reported.
+    pub tier_detected: Option<String>,
+    pub tier_overridden: bool,
     pub device: Option<String>,
     pub providers: Vec<String>,
     pub gpu: Option<GpuOut>,

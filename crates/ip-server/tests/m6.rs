@@ -131,6 +131,39 @@ async fn session(e: &Env) -> i64 {
 }
 
 #[tokio::test]
+async fn tier_override_setting_over_http() {
+    let e = env();
+    let s = call(&e.app, Method::GET, "/api/settings", None)
+        .await
+        .json();
+    assert_eq!(s["models"]["tier_override"], "auto");
+    let bad = call(
+        &e.app,
+        Method::PATCH,
+        "/api/settings",
+        Some(json!({"models":{"tier_override":"T9"}})),
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::UNPROCESSABLE_ENTITY);
+    let r = call(
+        &e.app,
+        Method::PATCH,
+        "/api/settings",
+        Some(json!({"models":{"tier_override":"T2"}})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["models"]["tier_override"], "T2");
+    let hw = call(&e.app, Method::GET, "/api/system/hardware?probe=1", None).await;
+    let w = &hw.json()["worker"];
+    assert_eq!(w["tier"], "T2");
+    assert_eq!(w["tier_detected"], "T3");
+    assert_eq!(w["tier_overridden"], true);
+    let opts = e.worker.last_options.lock().unwrap().clone().unwrap();
+    assert!(opts.env.contains(&("IMAGEPICKER_TIER".into(), "T2".into())));
+}
+
+#[tokio::test]
 async fn settings_get_patch_and_security_store() {
     let e = env();
     let r = call(&e.app, Method::GET, "/api/settings", None).await;

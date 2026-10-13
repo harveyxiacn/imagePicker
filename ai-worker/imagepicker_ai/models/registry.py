@@ -11,6 +11,18 @@ import yaml
 DEFAULT_REGISTRY = Path(__file__).with_name("registry.yaml")
 BACKENDS = {"onnx", "torch", "mediapipe", "opencv", "tflite"}
 TIERS = ("T0", "T1", "T2", "T3")
+# Licence facts per model (`license_info` in registry.yaml); docs/07 section 5 is generated from them.
+#   usage                the recorded standing for commercial use; `unknown` = not established
+#   training_data_terms  what is on record about the terms of the training data
+USAGES = ("commercial-ok", "research-only", "non-commercial", "unknown")
+TRAINING_DATA_TERMS = (
+    "permissive",
+    "research-only",
+    "non-commercial",
+    "undisclosed",
+    "separate-terms",
+    "not-recorded",
+)
 
 
 class RegistryError(ValueError):
@@ -42,6 +54,10 @@ class ModelSpec:
     size_mb: float = 0.0
     license: str | None = None
     noncommercial: bool = False
+    usage: str = "unknown"
+    training_data: str | None = None
+    training_data_terms: str = "not-recorded"
+    license_note: str | None = None
     resident: bool = False
     exclusive_group: str | None = None
     optional: bool = False
@@ -65,6 +81,14 @@ class ModelSpec:
             "size_mb": self.size_mb,
             "license": self.license,
             "noncommercial": self.noncommercial,
+            "usage": self.usage,
+            "license_info": {
+                "weights": self.license,
+                "training_data": self.training_data,
+                "training_data_terms": self.training_data_terms,
+                "usage": self.usage,
+                "note": self.license_note,
+            },
             "resident": self.resident,
             "optional": self.optional,
             "required_for": list(self.required_for),
@@ -134,8 +158,24 @@ def _parse_entry(e: Any, idx: int) -> ModelSpec:
         if t not in TIERS:
             raise RegistryError(f"{where}: unknown tier {t!r}")
 
+    info = e.get("license_info") or {}
+    if not isinstance(info, dict):
+        raise RegistryError(f"{where}: license_info must be a mapping")
+    unknown_info = set(info) - {"training_data", "training_data_terms", "usage", "note"}
+    if unknown_info:
+        raise RegistryError(f"{where}: unknown license_info keys {sorted(unknown_info)}")
+    usage = info.get("usage", "unknown")
+    if usage not in USAGES:
+        raise RegistryError(f"{where}: license_info.usage must be one of {list(USAGES)}")
+    terms = info.get("training_data_terms", "not-recorded")
+    if terms not in TRAINING_DATA_TERMS:
+        raise RegistryError(
+            f"{where}: license_info.training_data_terms must be one of {list(TRAINING_DATA_TERMS)}"
+        )
+
     known = {
         "id",
+        "license_info",
         "task",
         "source",
         "files",
@@ -170,6 +210,10 @@ def _parse_entry(e: Any, idx: int) -> ModelSpec:
         size_mb=float(e.get("size_mb") or 0),
         license=e.get("license"),
         noncommercial=bool(e.get("noncommercial", False)),
+        usage=usage,
+        training_data=info.get("training_data"),
+        training_data_terms=terms,
+        license_note=info.get("note"),
         resident=bool(e.get("resident", False)),
         exclusive_group=e.get("exclusive_group"),
         optional=bool(e.get("optional", False)),

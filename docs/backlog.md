@@ -11,6 +11,7 @@
 |---|---|---|
 | P0 | 评分阈值校准（真实照片复核） | 2026-10-09 已在 1000 张合成图库（`bench/data/qwen-photo-library`，`bench/eval-library.py`）上校准问题标签：过曝/欠曝要求细节丢失（白底人像、霓虹夜景不再误报），噪点阈值 0.60→0.22，连拍内清晰度 < 0.8× 最清晰帧标「模糊」。lite 档位：过曝精确率 0.52→0.92，欠曝 0.56→0.77，噪点召回 0→0.83，模糊精确率 0.28→0.37 / 召回 0.35→0.52。仍待：真实照片复核；背景虚化人像的模糊误报（需人脸区域清晰度）；美学/IQA 换算、分组松紧、星级映射 |
 | P1 | 倾斜检测阈值（真实照片复核） | 2026-10-09 实现（03 §3.1.1，所有档位同一算法）。只在合成图库的旋转集上标定：置信度 ≥ 0.2 且 2°–10° 时精确率 0.91，但召回低（\|角\| ≥ 3° 时 0.14，有直线的照片 0.21）；原图库 2.4% 被标（部分生成图本身就斜）。仍待：真实照片复核；仰拍建筑（竖线会聚）、车窗/桌面等单侧透视的误报；广角畸变的弯线不计入 |
+| P1 | 自动拉直 / 智能裁剪（真实照片复核） | 2026-10-13 实现（P1-11，03 §3.1.1 / §6.6）。拉直沿用存储的 `tilt_deg`，合成倾斜样本最大残余 0.14°（≤ 0.5° 验收，见 03 §6.6）；智能裁剪的三分法/缩放常量（`MIN_SCALE`、`SUBJECT_FILL`、`CENTRE_SHARE`）与显著性代理只在合成图上验证。仍待：真实照片人工盲评；无脸时的显著性代理对杂乱画面较弱；尚无 Android 编辑页入口；尚不考虑裁剪后的主体姿态/视线方向 |
 | P1 | 自适应同步参数 | `edit/sync.rs` 的 `K_PER_LN`、`T_PER_LN` 在 FakeRenderer 上调参，需在真实渲染器上复核 |
 | P1 | 美颜强度 | 形变/美颜强度在合成人像上标定，真实人脸效果需人工盲评 |
 
@@ -60,9 +61,12 @@
 - NIMA 美学/技术质量模型：权重 Apache-2.0，训练数据 AVA / TID2013 有研究用途条款。
 - 天空分割 `skyseg-u2net`：训练数据未公开。
 - GFPGAN：FFHQ 训练数据有独立条款；Real-ESRGAN ONNX 来自 facefusion 镜像（上游 BSD-3）。
+- 以上条目已在 `registry.yaml` 的 `license_info` 中结构化记录（`usage: unknown`，附训练数据条款与备注），应用内以徽标提示，`docs/07` §5 由注册表生成（P1-17）。`unknown` 只表示尚未确认，**是否可商用仍待许可决定**：NIMA ×2（AVA / TID2013 研究条款）、`skyseg-u2net`（训练数据未公开）、`gfpgan-v1.4`（FFHQ）、`realesrgan-*` ×4（第三方镜像无许可元数据）。其余 20 项仅按权重许可标为 `commercial-ok`，训练数据条款多为 `not-recorded`，发布前审计时需逐项补全。
+- ModelScope 下载源尚无实现（注册表无 `source.modelscope`），选它时按「自动」处理。
 
 ## 已在集成中修复（记录）
 
+- Best Take 同人校验（09 §5.1 P0-2，WP-I）：`POST /api/besttake` 对源脸与底片脸不在同一连拍、不在同一轨迹/人物、或身份嵌入余弦低于 `MIN_IDENTITY_COS`（0.30）时返回 422（`besttake_cross_burst` / `besttake_person_mismatch` / `besttake_low_similarity`），界面显示对应的本地化提示；缺身份嵌入（lite）时只做连拍与轨迹/人物检查；自动路径只在同一轨迹内选脸（`tests_m5.rs`、`ip-server/tests/m5.rs`、`web/src/lib/gen.test.ts`）。契约见 `api-contract-m5.md` C 节
 - 目录与文件（09 §5.1 P0-7、§5.2 P1-6，WP-F1）：①同目录同主文件名的 RAW+JPEG 导入后是一个网格项（JPEG 显示 / 分析，RAW 为 companion，`pair_id`），评分 / 旗标 / 色标同步到两者及各自的 XMP 侧车，分组与分析只算一次，导出可选 `pair_member`；②`POST /api/import` 支持 `exclude`（通配符 / 子文件夹 / 名字，重新扫描沿用）；③桌面端文件监听，增删文件约 2–3 秒内进网格；④缺失文件显示断链，`POST /api/sessions/{id}/relocate` 按相对路径 + 大小重新定位文件夹；⑤已淘汰照片经确认后可移入回收站（`trash`）或 `_rejected`，目录库跟随，绝不硬删（`tests_files.rs`、`ip-server/tests/files.rs`）
 
 - 数据安全 P0（09 §5.1 P0-1 / P0-3 / P0-4）：①原图只读成为硬约束——「侧车 + 内嵌」改为需二次确认的高级模式「修改原图（写入内嵌 XMP）」（`xmp_mode = modify_originals`，服务端要求 `confirm_modify_originals`，旧值降为 `sidecar`），其余模式下导入、分析、评分 / XMP 同步、编辑、导出后原图 SHA-256 不变（`tests_safety.rs`）；②目录库启动后后台 `quick_check`、每日 `VACUUM INTO` 备份留 7 份、打不开时移到 `backups/corrupt-*.db` 并以空目录库启动、可从备份恢复（`GET/POST /api/catalog*`，界面在启动弹窗与「设置 → 目录库备份」）；③人脸识别首次说明与同意（`faces.consented`），同意前不检测人脸、不计算人脸特征（lite 档同样），拒绝即 `faces.enabled = false`。同意文案待产品确认（09 §5.4 / P0-4）

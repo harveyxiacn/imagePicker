@@ -209,6 +209,11 @@ impl Core {
         Ok(WorkerOut {
             state: st.state.as_str().to_string(),
             tier: st.tier.clone(),
+            tier_detected: info
+                .as_ref()
+                .and_then(|i| i.hardware.tier_detected.clone())
+                .or_else(|| st.tier.clone()),
+            tier_overridden: info.as_ref().is_some_and(|i| i.hardware.tier_overridden),
             device: info
                 .as_ref()
                 .map(|i| i.hardware.device.clone())
@@ -260,6 +265,12 @@ impl Core {
                     size_mb: m.size_mb,
                     license: m.license.clone(),
                     noncommercial: m.noncommercial,
+                    usage: if m.usage.is_empty() {
+                        "unknown".to_string()
+                    } else {
+                        m.usage.clone()
+                    },
+                    license_info: m.license_info.clone(),
                     installed: m.installed,
                     required_for: req,
                 }

@@ -216,6 +216,8 @@ async fn hardware_and_models() {
     let r = call(&e.app, Method::GET, "/api/system/hardware?probe=1", None).await;
     let w = &r.json()["worker"];
     assert_eq!(w["tier"], "T3");
+    assert_eq!(w["tier_detected"], "T3");
+    assert_eq!(w["tier_overridden"], false);
     assert_eq!(w["device"], "cuda");
     assert_eq!(w["gpu"]["vram_mb"], 24564);
     assert_eq!(w["state"], "ready");
@@ -227,6 +229,10 @@ async fn hardware_and_models() {
     assert_eq!(sig["installed"], false);
     assert_eq!(sig["required_for"], json!(["standard"]));
     assert_eq!(sig["noncommercial"], false);
+    assert_eq!(sig["usage"], "unknown", "licence usage flag is exposed");
+    assert!(sig["license_info"].is_object());
+    let yu = m.iter().find(|x| x["id"] == "yunet").unwrap();
+    assert_eq!(yu["usage"], "commercial-ok");
     assert!(sig["size_mb"].as_f64().unwrap() > 100.0);
     assert!(sig["task"].is_array() && sig["license"].is_string());
 

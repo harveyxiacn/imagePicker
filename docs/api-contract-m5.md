@@ -40,6 +40,13 @@
 | POST | `/api/photos/{id}/enhance` | `{"op":"denoise"\|"face_restore","strength":0..1}` | `202 {"task_id"}`；追加/替换同类补丁 |
 | GET | `/api/assets/{photo_id}/{asset}` | — | `image/png`（调试/前端预览补丁用） |
 
+- **`POST /api/besttake`（及 `besttake/auto`）的同人校验**：每个选择中，源脸（`source_face_id`）必须与被替换的底片脸（`base_face_id`）是同一个人，否则整个请求 `422`，不启动任务、不改任何编辑栈。错误体 `{"error":{"code","message"}}`，`code` 为：
+  - `besttake_cross_burst`：源照片与底片不在同一连拍/分组（`photo.burst_id` 不同或为空）；
+  - `besttake_person_mismatch`：两张脸不在同一条人脸轨迹（`face.track_id`）；任一方没有轨迹时，改为要求同一个非空 `person_id`；
+  - `besttake_low_similarity`：两张脸都有身份嵌入，但余弦相似度低于 `MIN_IDENTITY_COS = 0.30`（`ip-core/src/generate.rs`，取自聚类的连拍内轨迹延续阈值 `TRACK_COS`；AuraFace 同一人约 0.43-0.66、不同人 < 0.2，0.30 落在两者之间，又容许连拍帧之间姿态与表情的变化）。
+  - 校验顺序：先 `besttake_cross_burst`，再 `besttake_person_mismatch`，最后 `besttake_low_similarity`。原有的 422（`unprocessable`：脸不在所给照片、源照片即底片、同一底片脸重复出现）不变。
+  - **身份嵌入缺失**（lite 档位不计算身份嵌入，或该脸没有嵌入）：跳过相似度检查，只做连拍与轨迹/人物检查；此时同一轨迹内被聚类误并的人无法被拦截。
+  - 自动路径（`besttake/auto`、计划里的 `best_photo_id`）只在同一轨迹内选脸，因此永远通过这些检查；`tests_m5.rs` 有断言。
 - 所有生成任务：模型缺失 → `409 models_missing`；worker 不可用 → `503`；进度走 `task.progress`（`kind`: `besttake`/`inpaint`/`enhance`）。生成任务可取消并留有记录，见 F 节。
 - `/api/export` 新增 `"upscale"?: 2 | 4`：渲染后经 `enhance.run upscale` 放大再编码。
 - 重编码的导出（应用编辑 / `long_edge` / `upscale` / 裁切适配）的元数据：像素为 sRGB（带非 sRGB ICC 或 DCF Adobe RGB 标记的来源在解码时已转换），嵌入 sRGB ICC；EXIF 取自原文件（JPEG/HEIF/RAF 原样；TIFF 类 RAW、TIFF、CR3 由 IFD0/Exif/GPS 重建，不含 MakerNote；都没有时按目录元数据合成），去掉朝向与 IFD1 缩略图并改写像素尺寸；XMP 取 JPEG 内嵌包，否则取 `.xmp` 侧车，去掉 `tiff:Orientation`/尺寸、`crs:*`、darktable 历史、`xmp:Thumbnails`、人脸区域、动态照片/景深/增益图与扩展 XMP 引用；IPTC 只保留 APP13 中的 IPTC 记录（0x0404/0x0425）。`"strip_gps": true` 删除 EXIF GPS IFD 与 XMP 中所有 `GPS*` 属性。原样复制的导出不改动文件（P0-8 起 `strip_gps` / `strip_metadata` 时改为清理，见 F 节）。

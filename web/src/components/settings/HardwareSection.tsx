@@ -4,10 +4,12 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useAssistantStatus, useHardware, useModels } from '@/api/queries'
-import type { ModelInfo, ModelSource } from '@/api/types'
+import type { ModelInfo, ModelSource, TierOverride } from '@/api/types'
 import { formatBytes } from '@/lib/format'
+import { licenceBadge, licenceWarnings } from '@/lib/licence'
 import { offerRuntimeInstall } from '@/lib/runtime'
 import { useToasts } from '@/stores/toasts'
+import { LicenseBadge } from '../LicenseBadge'
 import { RuntimeCard } from './RuntimeCard'
 import { Card, ConfirmDialog, Row, Select } from './controls'
 import { useSetting } from './useSetting'
@@ -15,6 +17,7 @@ import { useSetting } from './useSetting'
 const mb = (n: number) => (n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : n >= 10 ? `${Math.round(n)} MB` : `${n} MB`)
 const SOURCES: ModelSource[] = ['auto', 'hf', 'hf-mirror', 'modelscope']
 const ENGINES = ['auto', 'rules', 'llm'] as const
+const TIERS: TierOverride[] = ['auto', 'T0', 'T1', 'T2', 'T3']
 
 /** 硬件与模型: worker status / tier, assistant engine, model source, models table (download / delete). */
 export function HardwareSection() {
@@ -78,6 +81,24 @@ export function HardwareSection() {
             {w?.tier ?? '—'}
           </span>
         </Row>
+        <Row
+          label={t('settings.hardware.tierOverride')}
+          hint={t(w?.tier_overridden ? 'settings.hardware.tierOverrideActive' : 'settings.hardware.tierOverrideHint', { detected: w?.tier_detected ?? w?.tier ?? '—' })}
+        >
+          {s && (
+            <Select
+              label={t('settings.hardware.tierOverride')}
+              testId="setting-tier-override"
+              value={s.models.tier_override}
+              options={TIERS.map((v) => ({ value: v, label: v === 'auto' ? t('settings.hardware.tier_auto') : v }))}
+              onChange={(v) => {
+                set('models.tier_override', v)
+                // the idle worker restarts with the new tier; probe so the table below follows
+                setTimeout(() => void api.hardwareProbe().then(() => qc.invalidateQueries({ queryKey: ['hardware'] })).catch(() => undefined), 800)
+              }}
+            />
+          )}
+        </Row>
         <Row label={t('settings.hardware.device')} hint={w?.providers.join(', ')}>
           <span className="text-right">{w?.gpu ? `${w.gpu.name} · ${(w.gpu.vram_mb / 1024).toFixed(0)} GB` : (w?.device ?? 'CPU')}</span>
         </Row>
@@ -117,6 +138,12 @@ export function HardwareSection() {
             {t('settings.models.offline')}
           </div>
         )}
+        {licenceWarnings(models.data ?? []).length > 0 && (
+          <div className="flex items-start gap-2 bg-warning/10 px-4 py-2 text-xs text-warning" data-testid="licence-hint">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            {t('settings.models.licenceHint')}
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-left" data-testid="models-table">
             <thead className="text-xs text-muted">
@@ -148,15 +175,7 @@ export function HardwareSection() {
                     </td>
                     <td className="tnum px-2 py-2 whitespace-nowrap text-muted">{mb(m.size_mb)}</td>
                     <td className="px-2 py-2">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${m.noncommercial ? 'bg-warning/20 font-semibold text-warning' : 'bg-bg text-muted'}`}
-                        title={m.noncommercial ? t('models.ncHint') : m.license}
-                        data-nc={m.noncommercial}
-                      >
-                        {m.noncommercial && <AlertTriangle size={11} />}
-                        {m.license}
-                        {m.noncommercial && ` · ${t('models.nc')}`}
-                      </span>
+                      <LicenseBadge model={m} size={11} plainClass="bg-bg text-muted" />
                     </td>
                     <td className="px-2 py-2 whitespace-nowrap">
                       {busy ? (
@@ -186,7 +205,7 @@ export function HardwareSection() {
                         <button
                           className="btn"
                           disabled={busy || offline}
-                          onClick={() => (m.noncommercial ? setAskDownload(m) : void download(m))}
+                          onClick={() => (licenceBadge(m).needsAck ? setAskDownload(m) : void download(m))}
                           title={offline ? t('settings.models.offline') : undefined}
                           data-testid="model-download"
                         >
@@ -207,7 +226,7 @@ export function HardwareSection() {
         open={askDownload !== null}
         onOpenChange={(o) => !o && setAskDownload(null)}
         title={t('settings.models.ncTitle', { id: askDownload?.id })}
-        description={t('models.ncWarning')}
+        description={t(`models.warn_${askDownload ? licenceBadge(askDownload).usage : 'non-commercial'}`)}
         confirmLabel={t('settings.models.download')}
         onConfirm={() => {
           const m = askDownload

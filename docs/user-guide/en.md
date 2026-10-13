@@ -146,8 +146,8 @@ The first time an AI feature needs models, the *AI models required* dialog lists
 ![Model consent](../images/model-consent.png)
 
 - *Download and continue* starts the download; *Move to background* keeps working meanwhile;
-- Models marked "non-commercial" are for personal use only;
-- Sources: Auto (falls back to a mirror) / Hugging Face / HF mirror / ModelScope, chosen in *Settings → Hardware & models*;
+- Models marked "non-commercial" or "research only" are not for commercial use, and models marked "licence unknown" have no established commercial-use standing yet (for example undisclosed training data): the badge next to the licence says so, and hovering it shows the training data and notes. Personal use is fine; check the terms before any commercial use;
+- Sources: Auto (falls back to a mirror) / Hugging Face / HF mirror / ModelScope, chosen in *Settings → Hardware & models*. The source you pick is tried first (with the HF mirror selected, the first request already goes to the mirror), the others are fallbacks;
 - Models are stored locally; afterwards no network is needed. You can delete models in Settings to free space.
 
 ## 4. Importing photos
@@ -374,12 +374,21 @@ Press `D` in Grid/Loupe (or right-click → *Edit*) to open the edit page. Every
 | **Curves** | Click to add a point, drag to adjust, double-click or right-click to delete |
 | **HSL** | Hue, saturation, luminance for 8 bands (red, orange, yellow, green, aqua, blue, purple, magenta) |
 | **Colour grading** | Shadows / midtones / highlights wheels + balance |
-| **Crop & straighten** (`R`) | Aspect (original / free / …), angle |
+| **Crop & straighten** (`R`) | Aspect (original / free / …), angle; *Auto straighten* and *Auto crop* (see below) |
 | **Presets** | Built-in presets (Natural, Japanese clean, Cinematic, Classic B&W, Soft portrait, Landscape pop, Warm / Cool film, Vivid, Matte, High-contrast B&W, Teal & orange, Golden hour…); *Save as preset* |
 | **LUT** | Built-in LUTs; import your own `.cube` (type the file path, must be inside an allowed folder), with an amount slider |
 | **Output sharpen** | Sharpening applied on output |
 
 Each section has *Reset section*; *Reset all* is at the top; *History* lists every step.
+
+#### Auto straighten and Auto crop
+
+In *Crop & straighten*, pick an aspect, then:
+
+- **Auto straighten** levels the horizon (or the building verticals) in one click. It uses the tilt measured when the photo was analysed (or measures it on the spot if the photo has not been analysed), sets the angle, and takes the largest crop of the chosen aspect that stays inside the rotated photo. Photos that are already level are left alone ("Already level"); if there is no clear horizon or vertical line you are told so and can use the angle slider.
+- **Auto crop** suggests a rule-of-thirds crop for the chosen aspect (*Free* keeps the photo's own shape): it keeps every detected face inside the frame and places them on a third line, or, without faces, the most eye-catching region. A subject that is large in the frame is centred instead.
+
+Both only change the crop in the edit stack (one undo step, the original is never touched); fine-tune with the crop tool (`R`) or the angle slider afterwards.
 
 ### Local adjustments & masks
 
@@ -581,7 +590,7 @@ Open with the gear icon on Home or in the top bar.
 
 | Section | Contents |
 |---|---|
-| **Hardware & models** | AI worker state, tier, compute device, assistant engine; model download source, models directory, model table (size / licence / status; download and delete) |
+| **Hardware & models** | AI worker state, tier (with a manual override: Auto or T0–T3; the AI worker restarts when idle to apply it), compute device, assistant engine; model download source, models directory, model table (size / licence / status; download and delete) |
 | **Analysis** | Default profile, analyse after import, burst-grouping strictness |
 | **Faces & privacy** | Face recognition switch, face recognition consent (show explanation / withdraw), clear all face data, allow network |
 | **Cache** | Usage per cache kind, clear, cache limit (default 20 GB; least recently used is evicted) |

@@ -120,6 +120,10 @@ pub struct GpuInfo {
 pub struct HardwareJson {
     pub device: String,
     pub gpus: Vec<GpuInfo>,
+    /// Tier hardware detection came up with; differs from `SystemInfo::tier` only when the user
+    /// forced one (`IMAGEPICKER_TIER`, Settings -> Hardware & models).
+    pub tier_detected: Option<String>,
+    pub tier_overridden: bool,
 }
 
 /// `system.info` (subset).
@@ -131,6 +135,20 @@ pub struct SystemInfo {
     pub hardware: HardwareJson,
 }
 
+/// Structured licence facts of a registry entry (`license_info` of `models.list`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct LicenseInfo {
+    pub weights: Option<String>,
+    pub training_data: Option<String>,
+    /// `permissive` | `research-only` | `non-commercial` | `undisclosed` | `separate-terms` |
+    /// `not-recorded`
+    pub training_data_terms: String,
+    /// `commercial-ok` | `research-only` | `non-commercial` | `unknown`
+    pub usage: String,
+    pub note: Option<String>,
+}
+
 /// An entry of `models.list`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -140,6 +158,10 @@ pub struct WorkerModel {
     pub size_mb: f64,
     pub license: String,
     pub noncommercial: bool,
+    /// `commercial-ok` | `research-only` | `non-commercial` | `unknown` (empty for workers that
+    /// predate the licence fields).
+    pub usage: String,
+    pub license_info: LicenseInfo,
     pub installed: bool,
     pub recommended: bool,
     pub optional: bool,

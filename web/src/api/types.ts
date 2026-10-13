@@ -293,12 +293,28 @@ export type AnalysisStage = 'analyzing' | 'grouping' | 'scoring' | 'clustering'
 export interface HardwareInfo {
   worker: {
     state: WorkerState
+    /** The tier in effect (the manual override, if one is set). */
     tier: 'T0' | 'T1' | 'T2' | 'T3' | null
+    /** What hardware detection found; differs from `tier` only with an override. */
+    tier_detected?: 'T0' | 'T1' | 'T2' | 'T3' | null
+    tier_overridden?: boolean
     device: string | null
     providers: string[]
     gpu: { name: string; vram_mb: number } | null
     error: string | null
   }
+}
+
+/** Recorded standing for commercial use (registry `license_info.usage`); `unknown` = not established, not "forbidden". */
+export type ModelUsage = 'commercial-ok' | 'research-only' | 'non-commercial' | 'unknown'
+export type TrainingDataTerms = 'permissive' | 'research-only' | 'non-commercial' | 'undisclosed' | 'separate-terms' | 'not-recorded'
+
+export interface ModelLicenseInfo {
+  weights: string | null
+  training_data: string | null
+  training_data_terms: TrainingDataTerms
+  usage: ModelUsage
+  note: string | null
 }
 
 export interface ModelInfo {
@@ -307,6 +323,8 @@ export interface ModelInfo {
   size_mb: number
   license: string
   noncommercial: boolean
+  usage: ModelUsage
+  license_info?: ModelLicenseInfo
   installed: boolean
   required_for: AnalysisProfile[]
 }
@@ -877,6 +895,27 @@ export interface EditsPutResponse {
 
 export type AutoMode = 'auto' | 'portrait' | 'landscape'
 
+/** `POST /edits/{id}/auto-crop` (nothing is saved): `straighten` levels the horizon, `compose` suggests a thirds crop. */
+export type AutoCropKind = 'straighten' | 'compose'
+export interface AutoCropBody {
+  kind: AutoCropKind
+  /** wanted pixel aspect (w/h); omitted = free */
+  ratio?: number
+  /** the current crop, if any */
+  rect?: [number, number, number, number]
+  angle?: number
+}
+export interface AutoCropResult {
+  /** null when nothing confident was found (`source` = "none") */
+  crop: { rect: [number, number, number, number]; angle: number } | null
+  /** "stored" | "estimated" (tilt) | "faces" | "saliency" (subject) | "none" */
+  source: 'stored' | 'estimated' | 'faces' | 'saliency' | 'none'
+  tilt_deg: number | null
+  confidence: number | null
+  /** straighten: |tilt| is inside the dead zone, the photo counts as level */
+  level: boolean
+}
+
 export interface SyncBody {
   from_id: number
   to_ids: number[]
@@ -996,6 +1035,8 @@ export interface EditSuggestion {
 /** `modify_originals` = sidecar + the XMP inside original JPEGs (the only mode that rewrites originals). */
 export type XmpMode = 'off' | 'sidecar' | 'modify_originals'
 export type ModelSource = 'auto' | 'hf' | 'hf-mirror' | 'modelscope'
+/** Hardware tier override: `auto` keeps detection. */
+export type TierOverride = 'auto' | 'T0' | 'T1' | 'T2' | 'T3'
 export type GroupStrictness = 'loose' | 'normal' | 'strict'
 export type RenderBackend = 'auto' | 'gpu' | 'cpu'
 
@@ -1006,7 +1047,7 @@ export interface Settings {
   /** `consented`: the purpose explanation was accepted; no face is detected or recognised before that. */
   faces: { enabled: boolean; consented: boolean }
   privacy: { allow_network: boolean }
-  models: { dir: string; source: ModelSource }
+  models: { dir: string; source: ModelSource; tier_override: TierOverride }
   cache: { max_gb: number }
   render: { backend: RenderBackend }
   xmp_mode: XmpMode
