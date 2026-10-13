@@ -45,6 +45,7 @@
 | P1 | Release 的 Android APK 任务（签名 keystore、`apksigner` 校验、产物路径）未在 CI 实跑；需配置 `ANDROID_KEYSTORE_*` 四个 secrets 后验证 | M8 release |
 | P2 | lite 档位的 `faces` 步骤不输出关键点 / 闭眼 / 表情（需 MediaPipe 或 ONNX 关键点模型） | M8.1 infer |
 | P2 | 分析任务健壮性余项（09 WP-B）：①按步骤增量只覆盖 `embed` / `aesthetic` / `iqa` / `scene`，`faces` / `identity` 与人脸行绑定，装了人脸模型后要整批重新分析（`force`）；②暂停只在批次之间生效（每批最多 32 张，远程 AI 的一批可能要数十秒）；③续跑的真实进程强杀只在测试里用「丢弃运行时」模拟，未在 Windows / macOS / Linux 上做真正的 kill -9 实机验证；④桌面「改用快速分析」不会清掉已有的 fast / standard 结果，混合档位的会话在评分上按各自的分项计算，未做跨档位校准 | M2 / 09 WP-B |
+| P2 | 可访问性余项（09 WP-O）：①撤销合并人物时按人脸重建人物，原人物 ID 与已保存的美颜档案不会恢复，撤销「并入分组」假定两组在时间上相连；②字体缩放上限 150%（09 验收口径写的是 200%），个别写死像素尺寸的控件（缩略图、手机端 44px 触控目标）不随字号变化；③axe 冒烟脚本只覆盖桌面视口的 mock 数据，未检查手机布局、屏幕阅读器实际朗读与 Tauri 窗口；未接入 CI；④高对比度 / 字号只存本机，不随服务端设置同步到其他设备 | P1-16 |
 
 ## 助手
 
@@ -60,6 +61,7 @@
 
 ## 已在集成中修复（记录）
 
+- 可访问性与交互（09 §5.2 P1-16，WP-O）：①设置 → 语言与外观新增「高对比度」（`data-contrast="high"`，深色 / 浅色均有 AA 色板与 3px 焦点环）和「界面字号」90%–150%（`--font-scale`，rem 化的字号 / 控件，任意像素字号类同步缩放），两项只存本机（`imagepicker.ui`）；②`Ctrl+K` 命令面板（`CommandPalette.tsx`）对键位表动作与页面跳转模糊搜索，键位表仍是唯一来源；③撤销覆盖组拆分 / 合并与人物重命名 / 隐藏 / 合并 / 移动人脸（`lib/structureUndo.ts`，新增只读接口 `GET /api/people/{id}/faces` 供撤销合并）；④`pnpm a11y`（Playwright + axe-core，对 mock 后端）；⑤全局焦点环与输入框聚焦环。余项见「功能缺口」
 - 目录与文件（09 §5.1 P0-7、§5.2 P1-6，WP-F1）：①同目录同主文件名的 RAW+JPEG 导入后是一个网格项（JPEG 显示 / 分析，RAW 为 companion，`pair_id`），评分 / 旗标 / 色标同步到两者及各自的 XMP 侧车，分组与分析只算一次，导出可选 `pair_member`；②`POST /api/import` 支持 `exclude`（通配符 / 子文件夹 / 名字，重新扫描沿用）；③桌面端文件监听，增删文件约 2–3 秒内进网格；④缺失文件显示断链，`POST /api/sessions/{id}/relocate` 按相对路径 + 大小重新定位文件夹；⑤已淘汰照片经确认后可移入回收站（`trash`）或 `_rejected`，目录库跟随，绝不硬删（`tests_files.rs`、`ip-server/tests/files.rs`）
 
 - 数据安全 P0（09 §5.1 P0-1 / P0-3 / P0-4）：①原图只读成为硬约束——「侧车 + 内嵌」改为需二次确认的高级模式「修改原图（写入内嵌 XMP）」（`xmp_mode = modify_originals`，服务端要求 `confirm_modify_originals`，旧值降为 `sidecar`），其余模式下导入、分析、评分 / XMP 同步、编辑、导出后原图 SHA-256 不变（`tests_safety.rs`）；②目录库启动后后台 `quick_check`、每日 `VACUUM INTO` 备份留 7 份、打不开时移到 `backups/corrupt-*.db` 并以空目录库启动、可从备份恢复（`GET/POST /api/catalog*`，界面在启动弹窗与「设置 → 目录库备份」）；③人脸识别首次说明与同意（`faces.consented`），同意前不检测人脸、不计算人脸特征（lite 档同样），拒绝即 `faces.enabled = false`。同意文案待产品确认（09 §5.4 / P0-4）
