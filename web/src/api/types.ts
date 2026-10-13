@@ -17,6 +17,15 @@ export interface Device {
   photo_count: number
 }
 
+/** `GET /api/sessions/:id/filter-options`: values the lens / keyword / date pickers offer. */
+export interface FilterOptions {
+  lenses: Array<{ lens: string; photo_count: number }>
+  tags: Array<{ tag: string; photo_count: number }>
+  /** Earliest / latest capture time (ms, wall clock as UTC); null = no photo has one */
+  taken_min: number | null
+  taken_max: number | null
+}
+
 export interface Photo {
   id: number
   session_id: number
@@ -125,6 +134,9 @@ export type SortKey = 'taken_at' | '-taken_at' | 'name' | 'rating' | 'ai'
 export type PersonState = 'eyes_open' | 'smiling' | 'looking' | 'subject'
 export type PersonMode = 'all' | 'any'
 
+export type SharpState = 'sharp' | 'blurry' | 'unknown'
+export const SHARP_STATES: SharpState[] = ['sharp', 'blurry', 'unknown']
+
 export interface PhotosQuery {
   session_id: number
   rating_gte?: number
@@ -152,6 +164,18 @@ export interface PhotosQuery {
   duplicates?: boolean
   /** Only photos of one event of `GET /sessions/{id}/timeline` */
   event_id?: number
+  /** Exact EXIF lens names (OR-ed) */
+  lens?: string[]
+  /** Capture-time range, `YYYY-MM-DD` (whole days, wall clock) or ms; both ends inclusive */
+  taken_from?: string
+  taken_to?: string
+  /** Keywords: any of them, or all with `tag_mode: 'all'` */
+  tags?: string[]
+  tag_mode?: 'all'
+  sharp?: SharpState
+  /** Photos with a face similar to one of these faces (cosine >= `face_similarity`, default 0.38) */
+  face_ids?: number[]
+  face_similarity?: number
   cursor?: string
   limit?: number
 }

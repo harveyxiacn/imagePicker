@@ -1,13 +1,14 @@
 import { ChevronsUpDown, FolderPlus, Layers, Star, X } from 'lucide-react'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDevices, usePeople, useSession } from '@/api/queries'
 import { ISSUES, SCENE_TYPES, type FlagFilter, type Issue, type SceneType, type SortKey } from '@/api/types'
 import { personLabel } from '@/lib/ai'
-import { facesPreset, isFilterActive, setPersonTri, type FilterState } from '@/lib/filter'
+import { clampFaceSimilarity, DEFAULT_FACE_SIMILARITY, facesPreset, FACE_SIMILARITY_MAX, FACE_SIMILARITY_MIN, isFilterActive, setPersonTri, type FilterState } from '@/lib/filter'
 import { useUi } from '@/stores/ui'
 import { COLOR_NAMES, colorVar } from '@/lib/colors'
 import { DeviceFilterButton } from './DeviceFilterPopover'
+import { DateFilterButton, LensFilterButton, SharpFilter, TagFilterButton } from './FilterPopovers'
 import { PersonFilterButton } from './PersonFilterPopover'
 
 const FLAGS: ('all' | FlagFilter)[] = ['all', 'picked', 'not_rejected', 'unflagged', 'rejected']
@@ -49,6 +50,37 @@ function Pill({ children, onRemove, label, tone }: { children: React.ReactNode; 
   )
 }
 
+/** Similarity threshold of the similar-faces filter; the query only changes when the slider is released. */
+function FaceSimilaritySlider({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
+  const { t } = useTranslation()
+  const [live, setLive] = useState<number | null>(null)
+  const shown = clampFaceSimilarity(live ?? value)
+  const commit = () => {
+    if (live !== null && live !== clampFaceSimilarity(value)) onCommit(live)
+    setLive(null)
+  }
+  return (
+    <>
+      <input
+        type="range"
+        className="w-20"
+        min={FACE_SIMILARITY_MIN}
+        max={FACE_SIMILARITY_MAX}
+        step={0.02}
+        value={shown}
+        onChange={(e) => setLive(clampFaceSimilarity(Number(e.target.value)))}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
+        aria-label={t('filter.faceSimilarity')}
+        title={t('filter.faceSimilarityHint')}
+        data-testid="face-similarity"
+      />
+      <span className="tnum">{Math.round(shown * 100)}%</span>
+    </>
+  )
+}
+
 export function FilterBar({ sessionId, shown, total, showSize }: Props) {
   const { t, i18n } = useTranslation()
   const filter = useUi((s) => s.filter)
@@ -80,7 +112,7 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
 
   const personPill = p.include.length > 0
   const preset = facesPreset(p)
-  const showPills = personPill || p.exclude.length > 0 || preset !== 'any' || filter.issueMode !== 'all' || filter.sceneType !== null || filter.device.length > 0 || filter.bestOnly || filter.edited
+  const showPills = personPill || p.exclude.length > 0 || preset !== 'any' || filter.issueMode !== 'all' || filter.sceneType !== null || filter.device.length > 0 || filter.lens.length > 0 || filter.tags.length > 0 || filter.takenFrom !== null || filter.takenTo !== null || filter.sharp !== null || filter.faceIds.length > 0 || filter.bestOnly || filter.edited
 
   return (
     <div className="shrink-0 border-b border-line">
@@ -152,6 +184,10 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
 
         <PersonFilterButton sessionId={sessionId} resultCount={shown} />
         <DeviceFilterButton sessionId={sessionId} />
+        <LensFilterButton sessionId={sessionId} />
+        <TagFilterButton sessionId={sessionId} />
+        <DateFilterButton sessionId={sessionId} />
+        <SharpFilter />
 
         <label className="flex items-center gap-1.5">
           <span className="text-muted">{t('filter.issues')}</span>
@@ -311,6 +347,40 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
               <span>
                 {t('device.filter')}: {filter.device.map((d) => (d === 'none' ? t('device.none') : devNames.get(d) ?? `#${d}`)).join(' | ')}
               </span>
+            </Pill>
+          )}
+          {filter.lens.length > 0 && (
+            <Pill label={t('filter.lens')} onRemove={() => setFilter({ lens: [] })}>
+              <span className="max-w-[320px] truncate">
+                {t('filter.lens')}: {filter.lens.join(' | ')}
+              </span>
+            </Pill>
+          )}
+          {filter.tags.length > 0 && (
+            <Pill label={t('filter.tags')} onRemove={() => setFilter({ tags: [] })}>
+              <span className="max-w-[320px] truncate">
+                {t('filter.tags')}: {filter.tags.join(filter.tagMode === 'all' ? ' + ' : ' | ')}
+              </span>
+            </Pill>
+          )}
+          {(filter.takenFrom !== null || filter.takenTo !== null) && (
+            <Pill label={t('filter.date')} onRemove={() => setFilter({ takenFrom: null, takenTo: null })}>
+              <span className="tnum">
+                {t('filter.date')}: {filter.takenFrom ?? '…'} – {filter.takenTo ?? '…'}
+              </span>
+            </Pill>
+          )}
+          {filter.sharp && (
+            <Pill label={t('filter.sharp')} onRemove={() => setFilter({ sharp: null })}>
+              <span>
+                {t('filter.sharp')}: {t(`filter.sharp_${filter.sharp}`)}
+              </span>
+            </Pill>
+          )}
+          {filter.faceIds.length > 0 && (
+            <Pill tone="ai" label={t('filter.faces')} onRemove={() => setFilter({ faceIds: [], faceSimilarity: null })}>
+              <span>{t('filter.facesN', { n: filter.faceIds.length })}</span>
+              <FaceSimilaritySlider value={filter.faceSimilarity ?? DEFAULT_FACE_SIMILARITY} onCommit={(v) => setFilter({ faceSimilarity: v })} />
             </Pill>
           )}
           {filter.sceneType && (

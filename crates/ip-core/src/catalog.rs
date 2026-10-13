@@ -681,6 +681,7 @@ pub fn query_photos_cached(
         args.push(Value::Text(c.clone()));
     }
     push_m2_filters(q, &mut wheres, &mut args);
+    push_complete_filters(conn, q, &mut wheres, &mut args)?;
     if !q.devices.is_empty() || q.device_none {
         let mut parts = Vec::new();
         if !q.devices.is_empty() {
@@ -914,6 +915,186 @@ fn push_m2_filters(q: &PhotoQuery, wheres: &mut Vec<String>, args: &mut Vec<Valu
         wheres.push(format!(
             "p.subject_face_count IS NOT NULL AND p.subject_face_count <= {n}"
         ));
+    }
+}
+
+/// Filters completed in "filters complete": lens, capture time range, keywords, sharpness state
+/// and similar faces. Text values bind parameters; ids/thresholds are inlined.
+fn push_complete_filters(
+    conn: &Connection,
+    q: &PhotoQuery,
+    wheres: &mut Vec<String>,
+    args: &mut Vec<Value>,
+) -> Result<()> {
+    if !q.lenses.is_empty() {
+        let marks = vec!["?"; q.lenses.len()].join(",");
+        wheres.push(format!("p.lens IN ({marks})"));
+        args.extend(q.lenses.iter().map(|l| Value::Text(l.clone())));
+    }
+    if let (Some(a), Some(b)) = (q.taken_from, q.taken_to) {
+        if a > b {
+            return Err(CoreError::bad_request("taken_from is after taken_to"));
+        }
+    }
+    if let Some(a) = q.taken_from {
+        wheres.push("p.taken_at >= ?".into());
+        args.push(Value::Integer(a));
+    }
+    if let Some(b) = q.taken_to {
+        wheres.push("p.taken_at <= ?".into());
+        args.push(Value::Integer(b));
+    }
+    let tags = crate::xmp::normalize_tags(q.tags.iter().cloned());
+    if !tags.is_empty() {
+        let marks = vec!["?"; tags.len()].join(",");
+        let having = if q.tags_all {
+            format!(
+                " GROUP BY photo_id HAVING COUNT(DISTINCT tag) = {}",
+                tags.len()
+            )
+        } else {
+            String::new()
+        };
+        wheres.push(format!(
+            "p.id IN (SELECT photo_id FROM photo_tag WHERE tag IN ({marks}){having})"
+        ));
+        args.extend(tags.into_iter().map(Value::Text));
+    }
+    if let Some(s) = q.sharp {
+        let below = crate::analysis::scoring::BLURRY_BELOW;
+        let blurry_bit = crate::analysis::scoring::Issue::Blurry.bit();
+        let has_measure =
+            "EXISTS (SELECT 1 FROM analysis a WHERE a.photo_id = p.id AND a.sharpness IS NOT NULL";
+        wheres.push(match s {
+            SharpState::Sharp => format!(
+                "{has_measure} AND a.sharpness >= {below}) AND (COALESCE(p.issues,0) & {blurry_bit}) = 0"
+            ),
+            SharpState::Blurry => format!(
+                "((COALESCE(p.issues,0) & {blurry_bit}) <> 0 OR {has_measure} AND a.sharpness < {below}))"
+            ),
+            SharpState::Unknown => format!(
+                "NOT {has_measure}) AND (COALESCE(p.issues,0) & {blurry_bit}) = 0"
+            ),
+        });
+    }
+    if !q.face_ids.is_empty() {
+        let hits = similar_face_photos(conn, q)?;
+        wheres.push("p.id IN (SELECT value FROM json_each(?))".into());
+        args.push(Value::Text(serde_json::to_string(&hits)?));
+    }
+    Ok(())
+}
+
+/// Photos of the session that show a face whose identity embedding is at least
+/// `face_similarity` (cosine) close to one of `q.face_ids` (sorted, unique).
+fn similar_face_photos(conn: &Connection, q: &PhotoQuery) -> Result<Vec<i64>> {
+    use crate::analysis::vecs::{cosine, decode_f16};
+    let sim = q.face_similarity.unwrap_or(DEFAULT_FACE_SIMILARITY);
+    if !(0.0..=1.0).contains(&sim) {
+        return Err(CoreError::bad_request("face_similarity must be 0..1"));
+    }
+    let mut ids = q.face_ids.clone();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut queries: Vec<Vec<f32>> = Vec::new();
+    for id in &ids {
+        let emb: Option<Option<Vec<u8>>> = conn
+            .query_row("SELECT embedding FROM face WHERE id=?1", [id], |r| r.get(0))
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                e => Err(e),
+            })?;
+        let v = match emb {
+            None => return Err(CoreError::bad_request(format!("face {id} not found"))),
+            Some(b) => b.map(|b| decode_f16(&b)).filter(|v| !v.is_empty()),
+        };
+        queries.push(v.ok_or_else(|| {
+            CoreError::Conflict(format!(
+                "face {id} has no identity embedding; run a standard analysis first"
+            ))
+        })?);
+    }
+    let mut st = conn.prepare_cached(
+        "SELECT f.photo_id, f.embedding FROM face f
+         JOIN session_photo sp ON sp.photo_id = f.photo_id AND sp.session_id = ?1
+         WHERE f.embedding IS NOT NULL",
+    )?;
+    let rows = st.query_map([q.session_id], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?))
+    })?;
+    let mut hits = std::collections::BTreeSet::new();
+    for row in rows {
+        let (photo_id, emb) = row?;
+        if hits.contains(&photo_id) {
+            continue;
+        }
+        let e = decode_f16(&emb);
+        if queries.iter().any(|qv| cosine(qv, &e) as f64 >= sim) {
+            hits.insert(photo_id);
+        }
+    }
+    Ok(hits.into_iter().collect())
+}
+
+/// Lenses, keywords and the capture time span of a session, for the filter pickers.
+pub fn session_filter_options(conn: &Connection, session_id: i64) -> Result<FilterOptions> {
+    get_session_exists(conn, session_id)?;
+    let lenses = conn
+        .prepare_cached(
+            "SELECT p.lens, COUNT(*) AS n
+             FROM session_photo sp
+             CROSS JOIN photo p ON p.id=sp.photo_id AND COALESCE(p.missing,0)=0
+             WHERE sp.session_id=?1 AND p.lens IS NOT NULL AND p.lens <> ''
+             GROUP BY p.lens
+             ORDER BY n DESC, p.lens COLLATE NOCASE, p.lens",
+        )?
+        .query_map([session_id], |r| {
+            Ok(LensCount {
+                lens: r.get(0)?,
+                photo_count: r.get(1)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let tags = conn
+        .prepare_cached(
+            "SELECT t.tag, COUNT(*) AS n
+             FROM session_photo sp
+             CROSS JOIN photo p ON p.id=sp.photo_id AND COALESCE(p.missing,0)=0
+             CROSS JOIN photo_tag t ON t.photo_id=p.id
+             WHERE sp.session_id=?1
+             GROUP BY t.tag
+             ORDER BY n DESC, t.tag COLLATE NOCASE, t.tag
+             LIMIT 500",
+        )?
+        .query_map([session_id], |r| {
+            Ok(TagCount {
+                tag: r.get(0)?,
+                photo_count: r.get(1)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let (taken_min, taken_max) = conn.query_row(
+        "SELECT MIN(p.taken_at), MAX(p.taken_at)
+         FROM session_photo sp CROSS JOIN photo p ON p.id=sp.photo_id AND COALESCE(p.missing,0)=0
+         WHERE sp.session_id=?1",
+        [session_id],
+        |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?)),
+    )?;
+    Ok(FilterOptions {
+        lenses,
+        tags,
+        taken_min,
+        taken_max,
+    })
+}
+
+impl crate::Core {
+    /// `GET /api/sessions/{id}/filter-options` (404 for an unknown session).
+    pub async fn filter_options(&self, session_id: i64) -> Result<FilterOptions> {
+        self.db
+            .call(move |c| session_filter_options(c, session_id))
+            .await
     }
 }
 

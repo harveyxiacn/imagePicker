@@ -1,4 +1,4 @@
-import type { ColorName, FlagFilter, Issue, PersonMode, PersonState, PhotosQuery, SceneType, SortKey } from '@/api/types'
+import type { ColorName, FlagFilter, Issue, PersonMode, PersonState, PhotosQuery, SceneType, SharpState, SortKey } from '@/api/types'
 
 /** Person filter (doc 04 3.6.1). Tri-state per person: absent = off, include, exclude. */
 export interface PersonFilter {
@@ -22,6 +22,11 @@ export const DEFAULT_PERSON_FILTER: PersonFilter = {
   includeBackground: false,
 }
 
+/** Similarity (cosine) of the "similar faces" filter when none is chosen; the server's clustering threshold. */
+export const DEFAULT_FACE_SIMILARITY = 0.38
+export const FACE_SIMILARITY_MIN = 0.2
+export const FACE_SIMILARITY_MAX = 0.8
+
 export interface FilterState {
   /** Minimum user rating (0 = no rating filter). */
   ratingGte: number
@@ -36,6 +41,19 @@ export interface FilterState {
   person: PersonFilter
   /** Camera / phone device ids, or 'none' for photos without EXIF camera. */
   device: Array<number | 'none'>
+  /** Exact lens names (any of them) */
+  lens: string[]
+  /** Capture date range, `YYYY-MM-DD` (inclusive, wall clock); null = open */
+  takenFrom: string | null
+  takenTo: string | null
+  /** Keywords; `tagMode`: any of them, or all of them */
+  tags: string[]
+  tagMode: 'any' | 'all'
+  /** Sharpness state from the analysis; null = off */
+  sharp: SharpState | null
+  /** Photos with a face similar to one of these faces; `faceSimilarity` null = default threshold */
+  faceIds: number[]
+  faceSimilarity: number | null
   /** M4: only the best shot of every burst (built-in collection "each group's best") */
   bestOnly: boolean
   /** M4: only photos that carry saved edits */
@@ -57,6 +75,14 @@ export const DEFAULT_FILTER: FilterState = {
   sceneType: null,
   person: DEFAULT_PERSON_FILTER,
   device: [],
+  lens: [],
+  takenFrom: null,
+  takenTo: null,
+  tags: [],
+  tagMode: 'any',
+  sharp: null,
+  faceIds: [],
+  faceSimilarity: null,
   bestOnly: false,
   edited: false,
   duplicates: false,
@@ -83,6 +109,18 @@ export function buildPhotosQuery(sessionId: number, f: FilterState): PhotosListQ
   if (f.duplicates) q.duplicates = true
   if (typeof f.eventId === 'number') q.event_id = f.eventId
   if (f.device.length) q.device = [...f.device]
+  if (f.lens.length) q.lens = [...f.lens]
+  if (f.takenFrom) q.taken_from = f.takenFrom
+  if (f.takenTo) q.taken_to = f.takenTo
+  if (f.tags.length) {
+    q.tags = [...f.tags]
+    if (f.tagMode === 'all') q.tag_mode = 'all'
+  }
+  if (f.sharp) q.sharp = f.sharp
+  if (f.faceIds.length) {
+    q.face_ids = [...f.faceIds]
+    if (f.faceSimilarity !== null) q.face_similarity = f.faceSimilarity
+  }
   const p = f.person
   if (p.include.length) {
     q.persons = [...p.include]
@@ -114,6 +152,12 @@ export function isFilterActive(f: FilterState): boolean {
     f.duplicates ||
     typeof f.eventId === 'number' ||
     f.device.length > 0 ||
+    f.lens.length > 0 ||
+    f.takenFrom !== null ||
+    f.takenTo !== null ||
+    f.tags.length > 0 ||
+    f.sharp !== null ||
+    f.faceIds.length > 0 ||
     isPersonFilterActive(f.person)
   )
 }
@@ -180,3 +224,40 @@ export function applyFacesPreset(p: PersonFilter, preset: FacesPreset, manyMin =
 export function toggleDevice(sel: Array<number | 'none'>, id: number | 'none'): Array<number | 'none'> {
   return sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]
 }
+
+/** Toggle one value (lens name, keyword) in a multi-select. */
+export function toggleValue<T>(sel: readonly T[], v: T): T[] {
+  return sel.includes(v) ? sel.filter((x) => x !== v) : [...sel, v]
+}
+
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+/** Is this a real calendar date written `YYYY-MM-DD`? */
+export function isIsoDate(v: string | null | undefined): v is string {
+  const m = v ? DATE_RE.exec(v) : null
+  if (!m) return false
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const t = new Date(Date.UTC(y, mo - 1, d))
+  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d
+}
+
+/** `taken_at` (ms, wall clock as UTC) -> `YYYY-MM-DD`. */
+export function msToDate(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10)
+}
+
+/** Sets one end of the date range; an invalid or inverted entry is rejected (returns the old range). */
+export function setDateRange(f: Pick<FilterState, 'takenFrom' | 'takenTo'>, end: 'from' | 'to', value: string): Pick<FilterState, 'takenFrom' | 'takenTo'> {
+  const v = value === '' ? null : value
+  if (v !== null && !isIsoDate(v)) return { takenFrom: f.takenFrom, takenTo: f.takenTo }
+  const next = { takenFrom: end === 'from' ? v : f.takenFrom, takenTo: end === 'to' ? v : f.takenTo }
+  // keep from <= to: moving one end past the other drags the other along
+  if (next.takenFrom && next.takenTo && next.takenFrom > next.takenTo) {
+    if (end === 'from') next.takenTo = next.takenFrom
+    else next.takenFrom = next.takenTo
+  }
+  return next
+}
+
+/** Similarity clamped to the slider range. */
+export const clampFaceSimilarity = (v: number): number => Math.round(Math.min(FACE_SIMILARITY_MAX, Math.max(FACE_SIMILARITY_MIN, v)) * 100) / 100

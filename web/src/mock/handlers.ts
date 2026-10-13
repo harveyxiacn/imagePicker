@@ -14,7 +14,7 @@ import {
   newThumbVersion,
 } from './db'
 import { aiHandlers, missingModelIds } from './ai'
-import { deviceList, filterPhotos } from './query'
+import { deviceList, filterOptions, filterPhotos } from './query'
 import { m6Gate, m6Handlers } from './m6'
 import { m8Handlers } from './m8'
 import { editHandlers, renderEdited } from './edits'
@@ -228,6 +228,12 @@ export const handlers = [
     const s = getSession(Number(params.id))
     if (!s) return err(404, 'not_found', 'session not found')
     return HttpResponse.json({ devices: deviceList(s.photos) })
+  }),
+  http.get('/api/sessions/:id/filter-options', async ({ params }) => {
+    await lat()
+    const s = getSession(Number(params.id))
+    if (!s) return err(404, 'not_found', 'session not found')
+    return HttpResponse.json(filterOptions(s.photos))
   }),
   http.get('/api/photos', async ({ request }) => {
     await lat()

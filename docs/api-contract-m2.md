@@ -115,6 +115,7 @@ interface Face {
 | `scene_type` | 场景类型 |
 | `persons` / `person_mode` / `exclude_persons` / `person_state` / `include_background` / `faces_min` / `faces_max` | 见 [05 §3.2](05-数据与接口设计.md)（`person_state` M2 支持 `eyes_open,smiling,looking,subject`） |
 | `sort` | 新增 `ai`（ai_score 降序，未分析在后） |
+| `face_ids` / `face_similarity` | 按脸找照片的阈值与语义见 [api-contract-m1 「筛选补全」](api-contract-m1.md)（另有 `lens` / `taken_from` / `taken_to` / `tags` / `tag_mode` / `sharp`） |
 
 ### C.5 暂停 / 继续、续跑、lite 兜底、按步骤增量
 

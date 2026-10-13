@@ -24,6 +24,7 @@ export type FaceSearchEvent =
   | { type: 'pickFace'; faceId: number; photoId: number }
   | { type: 'result'; resp: FaceSearchResponse }
   | { type: 'selectFace'; index: number }
+  | { type: 'research' }
   | { type: 'toggleChosen'; faceId: number }
   | { type: 'fail'; message: string }
   | { type: 'reset' }
@@ -36,6 +37,11 @@ export function initFaceSearch(face: { id: number; photo_id: number } | null): F
 }
 
 const queryOf = (s: FaceSearchState): FaceQuery | null => (s.status === 'idle' ? null : s.query)
+
+/** Default similarity floor of the server's face search (the slider's left value). */
+export const DEFAULT_SEARCH_SIMILARITY = 0.25
+export const SEARCH_SIMILARITY_MIN = 0.1
+export const SEARCH_SIMILARITY_MAX = 0.8
 
 /** Similar faces at least this close are preselected for "this is a new person". */
 export const PRESELECT_SIMILARITY = 0.45
@@ -92,6 +98,10 @@ export function faceSearchReducer(s: FaceSearchState, e: FaceSearchEvent): FaceS
     case 'selectFace':
       if (s.status !== 'results' || s.query.kind !== 'image' || e.index === s.faceIndex || e.index < 0 || e.index >= s.resp.faces_detected.length) return s
       return { status: 'searching', query: s.query, faceIndex: e.index, faces: s.resp.faces_detected }
+    case 'research':
+      // same query and face with another similarity floor
+      if (s.status !== 'results') return s
+      return { status: 'searching', query: s.query, faceIndex: s.query.kind === 'image' ? s.faceIndex : null, faces: s.resp.faces_detected }
     case 'toggleChosen': {
       if (s.status !== 'results') return s
       const chosen = toggleChosen(s.chosen, s.resp.similar_faces, e.faceId, s.query)

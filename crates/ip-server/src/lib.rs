@@ -136,6 +136,10 @@ pub fn build_router_auth(
         )
         .route("/sessions/{id}/devices", get(routes::session_devices))
         .route("/sessions/{id}/timeline", get(timeline::session_timeline))
+        .route(
+            "/sessions/{id}/filter-options",
+            get(routes::session_filter_options),
+        )
         .route("/sessions/{id}/rescan", post(files::rescan))
         .route("/sessions/{id}/relocate", post(files::relocate))
         .route("/photos/reject-files", post(files::reject_files))

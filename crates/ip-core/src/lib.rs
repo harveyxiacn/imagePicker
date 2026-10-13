@@ -436,6 +436,8 @@ mod tests;
 #[cfg(test)]
 mod tests_files;
 #[cfg(test)]
+mod tests_filters;
+#[cfg(test)]
 mod tests_full;
 #[cfg(test)]
 mod tests_lite;

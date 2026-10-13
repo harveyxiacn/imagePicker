@@ -24,6 +24,7 @@ export const qk = {
   mask: (photoId: number, target: string, personId?: number) => ['mask', photoId, target, personId ?? null] as const,
   burstFaces: (burstId: number) => ['burstFaces', burstId] as const,
   devices: (sid: number) => ['devices', sid] as const,
+  filterOptions: (sid: number) => ['filterOptions', sid] as const,
   peopleAll: ['people'] as const,
   people: (sid: number | undefined) => ['people', sid ?? 'all'] as const,
   photoPeople: (photoId: number) => ['photoPeople', photoId] as const,

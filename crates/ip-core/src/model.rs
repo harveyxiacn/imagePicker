@@ -393,6 +393,71 @@ pub struct PhotoQuery {
     // ---- events
     /// Only photos of the scenes of this event (`GET /api/sessions/{id}/timeline`).
     pub event_id: Option<i64>,
+    // ---- filters complete (docs/api-contract-m1.md "筛选补全")
+    /// Only photos shot with one of these lenses (exact EXIF lens names, OR-ed); empty = off.
+    pub lenses: Vec<String>,
+    /// Capture time range in `taken_at` units (ms, device offset applied), both ends inclusive.
+    pub taken_from: Option<i64>,
+    pub taken_to: Option<i64>,
+    /// Keywords (`photo_tag`): any of them, or all of them with `tags_all`.
+    pub tags: Vec<String>,
+    pub tags_all: bool,
+    /// Sharpness state from the analysis.
+    pub sharp: Option<SharpState>,
+    /// Photos that show a face similar to one of these faces (cosine of the identity embeddings
+    /// at least `face_similarity`, default [`DEFAULT_FACE_SIMILARITY`]); the given faces' own
+    /// photos match too.
+    pub face_ids: Vec<i64>,
+    pub face_similarity: Option<f64>,
+}
+
+/// Sharpness state of a photo (`sharp` filter). `Blurry` = the analysis' sharpness is below
+/// [`crate::analysis::scoring::BLURRY_BELOW`] or the photo carries the `blurry` issue (which
+/// includes "much less sharp than its burst"); `Unknown` = not analysed / no measure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SharpState {
+    Sharp,
+    Blurry,
+    Unknown,
+}
+
+impl SharpState {
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "sharp" => Self::Sharp,
+            "blurry" => Self::Blurry,
+            "unknown" => Self::Unknown,
+            _ => return None,
+        })
+    }
+}
+
+/// Default similarity (cosine) of the `face_ids` filter: the clustering threshold, i.e. what the
+/// app already treats as "the same person".
+pub const DEFAULT_FACE_SIMILARITY: f64 = crate::analysis::cluster::PERSON_COS as f64;
+
+/// One lens present in a session (`GET /api/sessions/{id}/filter-options`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LensCount {
+    pub lens: String,
+    pub photo_count: i64,
+}
+
+/// One keyword present in a session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TagCount {
+    pub tag: String,
+    pub photo_count: i64,
+}
+
+/// Values the filter pickers offer for a session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FilterOptions {
+    pub lenses: Vec<LensCount>,
+    pub tags: Vec<TagCount>,
+    /// Earliest / latest `taken_at` (ms); `None` when no photo has a capture time.
+    pub taken_min: Option<i64>,
+    pub taken_max: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

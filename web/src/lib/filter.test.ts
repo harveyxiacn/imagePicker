@@ -3,15 +3,21 @@ import { photosQueryString } from '@/api/client'
 import {
   applyFacesPreset,
   buildPhotosQuery,
+  clampFaceSimilarity,
   cyclePerson,
+  DEFAULT_FACE_SIMILARITY,
   DEFAULT_FILTER,
   DEFAULT_PERSON_FILTER,
   facesPreset,
   isFilterActive,
+  isIsoDate,
+  msToDate,
   personTri,
+  setDateRange,
   setPersonTri,
   toggleDevice,
   toggleState,
+  toggleValue,
   type FilterState,
 } from './filter'
 
@@ -189,5 +195,91 @@ describe('device filter', () => {
     expect(isFilterActive({ ...DEFAULT_FILTER, device: ['none'] })).toBe(true)
     expect(toggleDevice([], 3)).toEqual([3])
     expect(toggleDevice([3, 'none'], 3)).toEqual(['none'])
+  })
+})
+
+describe('lens / date / keyword / sharpness / similar-faces filters', () => {
+  it('sends nothing by default', () => {
+    const q = buildPhotosQuery(1, DEFAULT_FILTER)
+    for (const k of ['lens', 'taken_from', 'taken_to', 'tags', 'tag_mode', 'sharp', 'face_ids', 'face_similarity'])
+      expect(q).not.toHaveProperty(k)
+  })
+
+  it('maps each control to its param', () => {
+    const q = buildPhotosQuery(
+      3,
+      { ...DEFAULT_FILTER, lens: ['50mm', 'RF 24-70mm F2.8, L'], takenFrom: '2024-05-01', takenTo: '2024-05-31', tags: ['kyoto', 'a\\b'], tagMode: 'all', sharp: 'blurry', faceIds: [4, 9], faceSimilarity: 0.5 },
+    )
+    expect(q).toEqual({
+      session_id: 3,
+      lens: ['50mm', 'RF 24-70mm F2.8, L'],
+      taken_from: '2024-05-01',
+      taken_to: '2024-05-31',
+      tags: ['kyoto', 'a\\b'],
+      tag_mode: 'all',
+      sharp: 'blurry',
+      face_ids: [4, 9],
+      face_similarity: 0.5,
+    })
+  })
+
+  it('omits the tag mode for "any" and the similarity for the default threshold', () => {
+    const q = buildPhotosQuery(1, { ...DEFAULT_FILTER, tags: ['x'], faceIds: [1] })
+    expect(q.tag_mode).toBeUndefined()
+    expect(q.face_similarity).toBeUndefined()
+    expect(buildPhotosQuery(1, { ...DEFAULT_FILTER, tagMode: 'all' }).tag_mode).toBeUndefined()
+    expect(buildPhotosQuery(1, { ...DEFAULT_FILTER, faceSimilarity: 0.6 }).face_similarity).toBeUndefined()
+  })
+
+  it('serialises to the query string with commas inside names escaped', () => {
+    const qs = photosQueryString(buildPhotosQuery(1, { ...DEFAULT_FILTER, lens: ['a,b', 'c'], tags: ['x\\y'], takenFrom: '2024-01-02', sharp: 'sharp', faceIds: [2, 3], faceSimilarity: 0.42 }))
+    const p = new URLSearchParams(qs)
+    expect(p.get('lens')).toBe('a\\,b,c')
+    expect(p.get('tags')).toBe('x\\\\y')
+    expect(p.get('taken_from')).toBe('2024-01-02')
+    expect(p.get('taken_to')).toBeNull()
+    expect(p.get('sharp')).toBe('sharp')
+    expect(p.get('face_ids')).toBe('2,3')
+    expect(p.get('face_similarity')).toBe('0.42')
+  })
+
+  it('counts as an active filter', () => {
+    for (const patch of [{ lens: ['x'] }, { takenFrom: '2024-01-01' }, { takenTo: '2024-01-01' }, { tags: ['x'] }, { sharp: 'unknown' as const }, { faceIds: [1] }])
+      expect(isFilterActive({ ...DEFAULT_FILTER, ...patch })).toBe(true)
+    expect(isFilterActive({ ...DEFAULT_FILTER, tagMode: 'all', faceSimilarity: 0.6 })).toBe(false)
+  })
+
+  it('toggles values', () => {
+    expect(toggleValue([], 'a')).toEqual(['a'])
+    expect(toggleValue(['a', 'b'], 'a')).toEqual(['b'])
+  })
+
+  it('validates dates', () => {
+    expect(isIsoDate('2024-02-29')).toBe(true)
+    expect(isIsoDate('2023-02-29')).toBe(false)
+    expect(isIsoDate('2024-13-01')).toBe(false)
+    expect(isIsoDate('2024-1-1')).toBe(false)
+    expect(isIsoDate('')).toBe(false)
+    expect(isIsoDate(null)).toBe(false)
+    expect(msToDate(1_700_000_000_000)).toBe('2023-11-14')
+  })
+
+  it('keeps the date range ordered', () => {
+    const none = { takenFrom: null, takenTo: null }
+    expect(setDateRange(none, 'from', '2024-05-10')).toEqual({ takenFrom: '2024-05-10', takenTo: null })
+    expect(setDateRange({ takenFrom: '2024-05-10', takenTo: null }, 'to', '2024-05-20')).toEqual({ takenFrom: '2024-05-10', takenTo: '2024-05-20' })
+    // moving one end past the other drags the other along
+    expect(setDateRange({ takenFrom: '2024-05-10', takenTo: '2024-05-20' }, 'from', '2024-06-01')).toEqual({ takenFrom: '2024-06-01', takenTo: '2024-06-01' })
+    expect(setDateRange({ takenFrom: '2024-05-10', takenTo: '2024-05-20' }, 'to', '2024-05-01')).toEqual({ takenFrom: '2024-05-01', takenTo: '2024-05-01' })
+    // clearing one end, and ignoring garbage
+    expect(setDateRange({ takenFrom: '2024-05-10', takenTo: '2024-05-20' }, 'from', '')).toEqual({ takenFrom: null, takenTo: '2024-05-20' })
+    expect(setDateRange({ takenFrom: '2024-05-10', takenTo: null }, 'to', '2024-99-99')).toEqual({ takenFrom: '2024-05-10', takenTo: null })
+  })
+
+  it('clamps the face similarity to the slider range', () => {
+    expect(DEFAULT_FACE_SIMILARITY).toBe(0.38)
+    expect(clampFaceSimilarity(0.05)).toBe(0.2)
+    expect(clampFaceSimilarity(0.9)).toBe(0.8)
+    expect(clampFaceSimilarity(0.4567)).toBe(0.46)
   })
 })
