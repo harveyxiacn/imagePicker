@@ -47,8 +47,8 @@ use std::time::Duration;
 
 pub use analysis::types::*;
 pub use edit::{
-    AutoRequest, CheckedStack, EditDoc, EditPut, LutOut, PresetCreate, PresetOut, Preview,
-    PreviewRequest, RenderService, SyncRequest,
+    AutoCropKind, AutoCropOut, AutoCropRequest, AutoRequest, CheckedStack, EditDoc, EditPut,
+    LutOut, PresetCreate, PresetOut, Preview, PreviewRequest, RenderService, SyncRequest,
 };
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};
@@ -433,6 +433,8 @@ impl Core {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_crop;
 #[cfg(test)]
 mod tests_files;
 #[cfg(test)]

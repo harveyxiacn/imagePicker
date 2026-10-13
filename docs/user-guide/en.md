@@ -359,12 +359,21 @@ Press `D` in Grid/Loupe (or right-click → *Edit*) to open the edit page. Every
 | **Curves** | Click to add a point, drag to adjust, double-click or right-click to delete |
 | **HSL** | Hue, saturation, luminance for 8 bands (red, orange, yellow, green, aqua, blue, purple, magenta) |
 | **Colour grading** | Shadows / midtones / highlights wheels + balance |
-| **Crop & straighten** (`R`) | Aspect (original / free / …), angle |
+| **Crop & straighten** (`R`) | Aspect (original / free / …), angle; *Auto straighten* and *Auto crop* (see below) |
 | **Presets** | Built-in presets (Natural, Japanese clean, Cinematic, Classic B&W, Soft portrait, Landscape pop, Warm / Cool film, Vivid, Matte, High-contrast B&W, Teal & orange, Golden hour…); *Save as preset* |
 | **LUT** | Built-in LUTs; import your own `.cube` (type the file path, must be inside an allowed folder), with an amount slider |
 | **Output sharpen** | Sharpening applied on output |
 
 Each section has *Reset section*; *Reset all* is at the top; *History* lists every step.
+
+#### Auto straighten and Auto crop
+
+In *Crop & straighten*, pick an aspect, then:
+
+- **Auto straighten** levels the horizon (or the building verticals) in one click. It uses the tilt measured when the photo was analysed (or measures it on the spot if the photo has not been analysed), sets the angle, and takes the largest crop of the chosen aspect that stays inside the rotated photo. Photos that are already level are left alone ("Already level"); if there is no clear horizon or vertical line you are told so and can use the angle slider.
+- **Auto crop** suggests a rule-of-thirds crop for the chosen aspect (*Free* keeps the photo's own shape): it keeps every detected face inside the frame and places them on a third line, or, without faces, the most eye-catching region. A subject that is large in the frame is centred instead.
+
+Both only change the crop in the edit stack (one undo step, the original is never touched); fine-tune with the crop tool (`R`) or the angle slider afterwards.
 
 ### Local adjustments & masks
 

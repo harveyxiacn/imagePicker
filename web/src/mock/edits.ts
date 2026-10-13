@@ -1,7 +1,7 @@
 import { delay, http, HttpResponse } from 'msw'
-import type { Adjust, AutoMode, EditSection, EditStack, MaskTarget, Photo, Preset, SyncBody } from '@/api/types'
+import type { Adjust, AutoCropBody, AutoCropResult, AutoMode, EditSection, EditStack, MaskTarget, Photo, Preset, SyncBody } from '@/api/types'
 import { MASK_TARGETS } from '@/api/types'
-import { applySections, emptyStack, isEmptyStack, normalizeStack, stackKey } from '@/lib/edit'
+import { applySections, emptyStack, inscribedRect, isEmptyStack, normalizeStack, stackKey } from '@/lib/edit'
 import { missingModelIds } from './ai'
 import { emit } from './bus'
 import { findPhoto, hashString } from './db'
@@ -163,6 +163,43 @@ export const editHandlers = [
     const { mode } = (await request.json()) as { mode: AutoMode }
     if (!['auto', 'portrait', 'landscape'].includes(mode)) return err(400, 'bad_request', 'bad mode')
     return HttpResponse.json({ adjust: autoAdjust(p, mode) })
+  }),
+
+  http.post('/api/edits/:id/auto-crop', async ({ params, request }) => {
+    await delay(90 + Math.random() * 80)
+    const p = findPhoto(Number(params.id))
+    if (!p) return err(404, 'not_found', 'photo not found')
+    const body = (await request.json()) as AutoCropBody
+    if (body.kind !== 'straighten' && body.kind !== 'compose') return err(400, 'bad_request', 'bad kind')
+    const w = p.width ?? 3
+    const h = p.height ?? 2
+    const ratio = body.ratio ?? (body.rect ? (body.rect[2] * w) / (body.rect[3] * h) : w / h)
+    if (body.kind === 'compose') {
+      const angle = body.angle ?? 0
+      const full = inscribedRect(w, h, angle, ratio)
+      const f = 0.8
+      const [cw, ch] = [full[2] * f, full[3] * f]
+      // subject on the upper-right third intersection of the crop, kept inside the image
+      const x = Math.min(Math.max(0.55 - cw * 0.66, full[0]), full[0] + full[2] - cw)
+      const y = Math.min(Math.max(0.4 - ch * 0.33, full[1]), full[1] + full[3] - ch)
+      const out: AutoCropResult = { crop: { rect: [x, y, cw, ch], angle }, source: 'saliency', tilt_deg: null, confidence: null, level: false }
+      return HttpResponse.json(out)
+    }
+    // deterministic per-photo tilt: some photos level, some without a confident horizon
+    const hsh = hashString(`tilt:${p.id}`)
+    const slot = hsh % 7
+    if (slot === 6) return HttpResponse.json({ crop: null, source: 'none', tilt_deg: null, confidence: null, level: false } satisfies AutoCropResult)
+    const tilt = slot === 0 ? 0.04 : Math.round((slot - 3) * 1.3 * 10) / 10 || 1.2
+    const level = Math.abs(tilt) < 0.15
+    const angle = level ? 0 : tilt
+    const out: AutoCropResult = {
+      crop: { rect: inscribedRect(w, h, angle, ratio), angle },
+      source: 'stored',
+      tilt_deg: tilt,
+      confidence: 0.7,
+      level,
+    }
+    return HttpResponse.json(out)
   }),
 
   http.post('/api/edits/sync', async ({ request }) => {
