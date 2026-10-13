@@ -119,7 +119,10 @@ async fn env() -> Env {
         .call(move |c| {
             let id = |i: usize| ids2[i];
             for i in 0..3 {
-                c.execute("UPDATE photo SET lens=?1 WHERE id=?2", rusqlite::params![ZOOM, id(i)])?;
+                c.execute(
+                    "UPDATE photo SET lens=?1 WHERE id=?2",
+                    rusqlite::params![ZOOM, id(i)],
+                )?;
             }
             for i in 3..5 {
                 c.execute("UPDATE photo SET lens='85mm' WHERE id=?1", [id(i)])?;
@@ -193,9 +196,17 @@ async fn lens_filter() {
         lenses: lenses.iter().map(|s| s.to_string()).collect(),
         ..e.q()
     };
-    assert_eq!(e.idx(q(&[ZOOM])).await, [0, 1, 2], "a name with a comma is one lens");
+    assert_eq!(
+        e.idx(q(&[ZOOM])).await,
+        [0, 1, 2],
+        "a name with a comma is one lens"
+    );
     assert_eq!(e.idx(q(&["85mm"])).await, [3, 4]);
-    assert_eq!(e.idx(q(&["85mm", ZOOM])).await, [0, 1, 2, 3, 4], "lenses are OR-ed");
+    assert_eq!(
+        e.idx(q(&["85mm", ZOOM])).await,
+        [0, 1, 2, 3, 4],
+        "lenses are OR-ed"
+    );
     assert_eq!(e.idx(q(&["50mm"])).await, [5, 6, 7, 8, 9]);
     assert!(e.idx(q(&["unknown lens"])).await.is_empty());
     assert_eq!(e.idx(e.q()).await.len(), 10, "empty list = no filter");
@@ -231,10 +242,15 @@ async fn taken_range_filter() {
     };
     // both ends are inclusive
     assert_eq!(
-        e.idx(range(Some(BASE + 2 * MIN), Some(BASE + 4 * MIN))).await,
+        e.idx(range(Some(BASE + 2 * MIN), Some(BASE + 4 * MIN)))
+            .await,
         [2, 3, 4]
     );
-    assert_eq!(e.idx(range(Some(BASE + 7 * MIN), None)).await, [7, 8], "no capture time = out");
+    assert_eq!(
+        e.idx(range(Some(BASE + 7 * MIN), None)).await,
+        [7, 8],
+        "no capture time = out"
+    );
     assert_eq!(e.idx(range(None, Some(BASE + MIN))).await, [0, 1]);
     assert!(e.idx(range(Some(BASE + 99 * MIN), None)).await.is_empty());
     assert_eq!(e.idx(range(None, None)).await.len(), 10);
@@ -271,12 +287,31 @@ async fn tags_filter() {
         ..e.q()
     };
     assert_eq!(e.idx(q(&["travel"], false)).await, [0, 1, 7]);
-    assert_eq!(e.idx(q(&["food", "travel"], false)).await, [0, 1, 2, 7], "any of them");
-    assert_eq!(e.idx(q(&["travel", "kyoto"], true)).await, [0, 7], "all of them");
-    assert_eq!(e.idx(q(&["travel", "food"], true)).await, Vec::<usize>::new());
-    assert_eq!(e.idx(q(&["  travel ", "travel"], true)).await, [0, 1, 7], "trimmed, de-duplicated");
+    assert_eq!(
+        e.idx(q(&["food", "travel"], false)).await,
+        [0, 1, 2, 7],
+        "any of them"
+    );
+    assert_eq!(
+        e.idx(q(&["travel", "kyoto"], true)).await,
+        [0, 7],
+        "all of them"
+    );
+    assert_eq!(
+        e.idx(q(&["travel", "food"], true)).await,
+        Vec::<usize>::new()
+    );
+    assert_eq!(
+        e.idx(q(&["  travel ", "travel"], true)).await,
+        [0, 1, 7],
+        "trimmed, de-duplicated"
+    );
     assert!(e.idx(q(&["nothing"], false)).await.is_empty());
-    assert_eq!(e.idx(q(&[], true)).await.len(), 10, "empty list = no filter");
+    assert_eq!(
+        e.idx(q(&[], true)).await.len(),
+        10,
+        "empty list = no filter"
+    );
     // existing filter + small pages
     e.core
         .patch_photos(PatchRequest {
@@ -298,7 +333,10 @@ async fn tags_filter() {
         ..q(&["travel", "kyoto", "food"], false)
     };
     let got = e.idx(paged).await;
-    assert_eq!(got.iter().copied().collect::<HashSet<_>>(), HashSet::from([0, 1, 2, 7]));
+    assert_eq!(
+        got.iter().copied().collect::<HashSet<_>>(),
+        HashSet::from([0, 1, 2, 7])
+    );
     assert_eq!(got.len(), 4, "no photo twice across pages");
 }
 
@@ -389,7 +427,10 @@ async fn similar_faces_filter() {
         face_ids: vec![9_999_999],
         ..e.q()
     };
-    assert!(matches!(e.core.photos(missing).await, Err(CoreError::BadRequest(_))));
+    assert!(matches!(
+        e.core.photos(missing).await,
+        Err(CoreError::BadRequest(_))
+    ));
     assert!(matches!(
         e.core.photos(q(&["e"], None)).await,
         Err(CoreError::Conflict(_))
@@ -454,19 +495,39 @@ async fn similar_faces_stay_inside_the_session() {
         face_similarity: Some(0.95),
         ..e.q()
     };
-    assert_eq!(e.idx(q).await, [0, 5], "the other session's photo is not listed");
+    assert_eq!(
+        e.idx(q).await,
+        [0, 5],
+        "the other session's photo is not listed"
+    );
 }
 
 #[tokio::test]
 async fn filter_options_list_session_values() {
     let e = env().await;
     let o = e.core.filter_options(e.sid).await.unwrap();
-    let lenses: Vec<(&str, i64)> = o.lenses.iter().map(|l| (l.lens.as_str(), l.photo_count)).collect();
-    assert_eq!(lenses, [("50mm", 5), (ZOOM, 3), ("85mm", 2)], "most photos first");
-    let tags: Vec<(&str, i64)> = o.tags.iter().map(|t| (t.tag.as_str(), t.photo_count)).collect();
+    let lenses: Vec<(&str, i64)> = o
+        .lenses
+        .iter()
+        .map(|l| (l.lens.as_str(), l.photo_count))
+        .collect();
+    assert_eq!(
+        lenses,
+        [("50mm", 5), (ZOOM, 3), ("85mm", 2)],
+        "most photos first"
+    );
+    let tags: Vec<(&str, i64)> = o
+        .tags
+        .iter()
+        .map(|t| (t.tag.as_str(), t.photo_count))
+        .collect();
     assert_eq!(tags, [("kyoto", 3), ("travel", 3), ("food", 1)]);
     assert_eq!(o.taken_min, Some(BASE));
-    assert_eq!(o.taken_max, Some(BASE + 8 * MIN), "the photo without a capture time is ignored");
+    assert_eq!(
+        o.taken_max,
+        Some(BASE + 8 * MIN),
+        "the photo without a capture time is ignored"
+    );
     assert!(matches!(
         e.core.filter_options(9_999).await,
         Err(CoreError::NotFound(_))
@@ -478,17 +539,36 @@ async fn face_search_floor_is_adjustable() {
     let e = env().await;
     let a = e.face("a");
     let hits = |out: &crate::analysis::faces::FaceSearchOut| {
-        out.similar_faces.iter().map(|f| f.photo_id).collect::<Vec<_>>()
+        out.similar_faces
+            .iter()
+            .map(|f| f.photo_id)
+            .collect::<Vec<_>>()
     };
     let p = |i: usize| e.ids[i];
     // default floor 0.25: b (.9), c (.5) and the identical face on photo 5
     let out = e.core.faces_search_face(a, None).await.unwrap();
     assert_eq!(hits(&out), [p(5), p(1), p(2)]);
-    let strict = e.core.faces_search_face_min(a, None, Some(0.8)).await.unwrap();
+    let strict = e
+        .core
+        .faces_search_face_min(a, None, Some(0.8))
+        .await
+        .unwrap();
     assert_eq!(hits(&strict), [p(5), p(1)]);
-    let loose = e.core.faces_search_face_min(a, None, Some(0.0)).await.unwrap();
-    assert_eq!(hits(&loose).len(), 5, "everything with an embedding but the query face");
-    let exact = e.core.faces_search_face_min(a, None, Some(1.0)).await.unwrap();
+    let loose = e
+        .core
+        .faces_search_face_min(a, None, Some(0.0))
+        .await
+        .unwrap();
+    assert_eq!(
+        hits(&loose).len(),
+        5,
+        "everything with an embedding but the query face"
+    );
+    let exact = e
+        .core
+        .faces_search_face_min(a, None, Some(1.0))
+        .await
+        .unwrap();
     assert_eq!(hits(&exact), [p(5)]);
     for bad in [-0.5, 1.01] {
         assert!(matches!(

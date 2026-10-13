@@ -160,9 +160,10 @@ pub async fn faces_search(State(st): State<AppState>, req: Request) -> ApiResult
             "min_similarity" => {
                 let t = field.text().await.map_err(multipart_err)?;
                 if !t.trim().is_empty() {
-                    min_similarity = Some(t.trim().parse::<f64>().map_err(|_| {
-                        ApiError::bad_request("min_similarity must be a number")
-                    })?);
+                    min_similarity =
+                        Some(t.trim().parse::<f64>().map_err(|_| {
+                            ApiError::bad_request("min_similarity must be a number")
+                        })?);
                 }
             }
             _ => {}

@@ -425,7 +425,9 @@ impl Core {
             self.next_task_seq()
         ));
         std::fs::write(&path, &bytes)?;
-        let result = self.embed_and_rank(&path, session_id, face_index, floor).await;
+        let result = self
+            .embed_and_rank(&path, session_id, face_index, floor)
+            .await;
         let _ = std::fs::remove_file(&path);
         result
     }

@@ -933,7 +933,10 @@ fn push_complete_filters(
     if !tags.is_empty() {
         let marks = vec!["?"; tags.len()].join(",");
         let having = if q.tags_all {
-            format!(" GROUP BY photo_id HAVING COUNT(DISTINCT tag) = {}", tags.len())
+            format!(
+                " GROUP BY photo_id HAVING COUNT(DISTINCT tag) = {}",
+                tags.len()
+            )
         } else {
             String::new()
         };
@@ -945,7 +948,8 @@ fn push_complete_filters(
     if let Some(s) = q.sharp {
         let below = crate::analysis::scoring::BLURRY_BELOW;
         let blurry_bit = crate::analysis::scoring::Issue::Blurry.bit();
-        let has_measure = "EXISTS (SELECT 1 FROM analysis a WHERE a.photo_id = p.id AND a.sharpness IS NOT NULL";
+        let has_measure =
+            "EXISTS (SELECT 1 FROM analysis a WHERE a.photo_id = p.id AND a.sharpness IS NOT NULL";
         wheres.push(match s {
             SharpState::Sharp => format!(
                 "{has_measure} AND a.sharpness >= {below}) AND (COALESCE(p.issues,0) & {blurry_bit}) = 0"
