@@ -38,7 +38,7 @@
 | P2 | SDXL 增强包未用真实权重测试；OpenCV 构建无 AKAZE，仅 ORB 对齐 | M5 worker |
 | P2 | 取消生成任务时 worker 立即以 `-32800` 结束请求，但 `inpaint.run` / `enhance.run` / `besttake.compose` 在线程池里的计算不会中断，跑完才释放（紧接着的生成请求会排在它后面）；需在推理循环里检查取消标志 | M5 worker |
 | P1 | 网格 60fps 需在真实 GPU 浏览器上复测（无头软件光栅下仅 4× 降频 CPU 快速滚动时掉帧） | M7 perf |
-| P2 | 单会话 10 万张时每页约 10ms、`-taken_at` 约 28ms（需会话排序键表）；`GET /api/sessions` 10 万行约 13ms（需计数缓存） | M7 perf |
+| P2 | 单会话 10 万张的分页与会话列表已达标（迁移 v14：`session_photo.sk_*` 排序键 + 索引、`session_stat` 计数；每页 2.8–3.3ms、`GET /api/sessions` 0.23ms，见 `bench/large-sessions-2026-10-13.md`）。遗留：写入代价约 +17µs/行（10 万行种子 1.3s → 3.0s）；带筛选（评分 / 旗标 / 人物）的页仍需顺排序索引扫描会话，选择性很高的筛选在 10 万张时 4–7ms | M7 perf |
 | P1 | macOS / Linux 安装后的 AI 组件安装流程未实测；国内镜像对 `uv sync --frozen` 可能无效 | M7 runtime |
 | P1 | 应用内自动更新（tauri-plugin-updater + 签名密钥） | M7 release |
 | P2 | AUR PKGBUILD 未在 Arch 上 makepkg 实测 | M7 release |

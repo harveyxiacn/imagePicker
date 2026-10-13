@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ip_imaging::{ImageFormat, Metadata};
 use rusqlite::types::Value;
-use rusqlite::{params, params_from_iter, Connection, Row, TransactionBehavior};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
@@ -99,12 +99,57 @@ pub fn settle_stale_sessions(conn: &Connection) -> Result<()> {
 const SESSION_SELECT: &str =
     "SELECT s.id, COALESCE(s.title,''), COALESCE(r.path,''), COALESCE(s.created_at,0),
         s.cover_photo_id, s.import_state,
-        COUNT(p.id), COALESCE(SUM(p.flag=1),0), COALESCE(SUM(p.flag=-1),0),
-        COALESCE(SUM(p.user_rating IS NOT NULL),0)
+        COALESCE(t.photo_count,0), COALESCE(t.picked_count,0), COALESCE(t.rejected_count,0),
+        COALESCE(t.rated_count,0)
  FROM session s
  LEFT JOIN root_folder r ON r.id=s.root_id
- LEFT JOIN session_photo sp ON sp.session_id=s.id
- LEFT JOIN photo p ON p.id=sp.photo_id";
+ LEFT JOIN session_stat t ON t.session_id=s.id";
+
+/// Bump when the definition of `session_stat` / `session_photo.sk_*` changes: the next open
+/// recomputes them ([`ensure_session_derived`]).
+pub const SESSION_DERIVED_EPOCH: &str = "1";
+
+/// Recomputes the derived per-session data from the source tables: the counters of
+/// `session_stat` (photos that are grid items = `session_photo` rows, so RAW companions are
+/// not counted) and the sort keys copied into `session_photo`. One transaction.
+pub fn rebuild_session_derived(conn: &Connection) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
+        "DELETE FROM session_stat;
+         INSERT INTO session_stat(session_id, photo_count, picked_count, rejected_count, rated_count)
+           SELECT s.id, COUNT(p.id), COALESCE(SUM(p.flag=1),0), COALESCE(SUM(p.flag=-1),0),
+                  COALESCE(SUM(p.user_rating IS NOT NULL),0)
+           FROM session s LEFT JOIN session_photo sp ON sp.session_id=s.id
+                LEFT JOIN photo p ON p.id=sp.photo_id
+           GROUP BY s.id;
+         UPDATE session_photo SET (sk_taken, sk_name, sk_rating, sk_ai) =
+           (SELECT p.taken_at, p.file_name, p.user_rating, p.ai_score FROM photo p
+            WHERE p.id=session_photo.photo_id);",
+    )?;
+    tx.execute(
+        "INSERT INTO catalog_meta(key, value) VALUES('session_derived_epoch', ?1)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [SESSION_DERIVED_EPOCH],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Repair path, run when the catalog is opened: recomputes the derived session data when the
+/// stored epoch is not [`SESSION_DERIVED_EPOCH`] (or was removed to force a repair).
+pub fn ensure_session_derived(conn: &Connection) -> Result<()> {
+    let have: Option<String> = conn
+        .query_row(
+            "SELECT value FROM catalog_meta WHERE key='session_derived_epoch'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if have.as_deref() != Some(SESSION_DERIVED_EPOCH) {
+        rebuild_session_derived(conn)?;
+    }
+    Ok(())
+}
 
 fn session_row(r: &Row) -> rusqlite::Result<Session> {
     Ok(Session {
@@ -122,7 +167,7 @@ fn session_row(r: &Row) -> rusqlite::Result<Session> {
 }
 
 pub fn get_session(conn: &Connection, id: i64) -> Result<Session> {
-    let sql = format!("{SESSION_SELECT} WHERE s.id=?1 GROUP BY s.id");
+    let sql = format!("{SESSION_SELECT} WHERE s.id=?1");
     conn.query_row(&sql, [id], session_row)
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
@@ -133,7 +178,7 @@ pub fn get_session(conn: &Connection, id: i64) -> Result<Session> {
 }
 
 pub fn list_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let sql = format!("{SESSION_SELECT} GROUP BY s.id ORDER BY s.created_at DESC, s.id DESC");
+    let sql = format!("{SESSION_SELECT} ORDER BY s.created_at DESC, s.id DESC");
     let mut st = conn.prepare(&sql)?;
     let rows = st
         .query_map([], session_row)?
@@ -651,13 +696,16 @@ pub fn query_photos_cached(
     // The session must exist.
     get_session_exists(conn, q.session_id)?;
 
+    // The sort keys are read from `session_photo.sk_*` with the exact expressions of the
+    // `idx_sp_*` indexes (db.rs v14), so the members come out of the index already in page
+    // order and `LIMIT` stops the scan after one page.
     let (key_expr, desc, text_key) = match q.sort {
-        SortKey::TakenAt => ("COALESCE(p.taken_at, 9223372036854775807)", false, false),
-        SortKey::TakenAtDesc => ("COALESCE(p.taken_at, -9223372036854775807)", true, false),
-        SortKey::Name => ("p.file_name COLLATE NOCASE", false, true),
-        SortKey::Rating => ("COALESCE(p.user_rating, -1)", true, false),
+        SortKey::TakenAt => ("COALESCE(sp.sk_taken, 9223372036854775807)", false, false),
+        SortKey::TakenAtDesc => ("COALESCE(sp.sk_taken, -9223372036854775807)", true, false),
+        SortKey::Name => ("sp.sk_name COLLATE NOCASE", false, true),
+        SortKey::Rating => ("COALESCE(sp.sk_rating, -1)", true, false),
         SortKey::Ai => (
-            "CAST(COALESCE(p.ai_score, -0.001) * 1000000 AS INTEGER)",
+            "CAST(COALESCE(sp.sk_ai, -0.001) * 1000000 AS INTEGER)",
             true,
             false,
         ),
@@ -725,8 +773,11 @@ pub fn query_photos_cached(
             }
             _ => return Err(CoreError::bad_request("invalid cursor")),
         };
-        let cmp = if desc { "<" } else { ">" };
-        cursor_sql = format!(" AND ({key_expr} {cmp} ? OR ({key_expr} = ? AND p.id > ?))");
+        // `key >= ?` is the range the index can seek to; the second term drops the rows of the
+        // boundary key that were already served (ties are ordered by photo id).
+        let (strict, loose) = if desc { ("<", "<=") } else { (">", ">=") };
+        cursor_sql =
+            format!(" AND {key_expr} {loose} ? AND ({key_expr} {strict} ? OR sp.photo_id > ?)");
         page_args.push(kval.clone());
         page_args.push(kval);
         page_args.push(Value::Integer(cur.id));
@@ -739,7 +790,7 @@ pub fn query_photos_cached(
     let sql = format!(
         "SELECT {PHOTO_COLS}, pg.sid, pg.k
          FROM (SELECT p.id AS id, sp.session_id AS sid, {key_expr} AS k {members}{cursor_sql}
-               ORDER BY {key_expr} {dir}, p.id ASC LIMIT {limit1}) pg
+               ORDER BY {key_expr} {dir}, sp.photo_id ASC LIMIT {limit1}) pg
          CROSS JOIN photo p ON p.id=pg.id
          CROSS JOIN root_folder r ON r.id=p.root_id
          ORDER BY pg.k{collate} {dir}, pg.id ASC",
@@ -764,7 +815,7 @@ pub fn query_photos_cached(
         rows.len() as i64
     } else {
         let count_sql = if wheres.is_empty() {
-            "SELECT COUNT(*) FROM session_photo WHERE session_id=?".to_string()
+            "SELECT photo_count FROM session_stat WHERE session_id=?".to_string()
         } else {
             format!("SELECT COUNT(*) {members}")
         };
