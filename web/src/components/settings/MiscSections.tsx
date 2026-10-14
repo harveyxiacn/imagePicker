@@ -1,49 +1,10 @@
 import { useTranslation } from 'react-i18next'
 import { FONT_SCALE_DEFAULT, FONT_SCALE_MAX, FONT_SCALE_MIN, FONT_SCALE_STEP } from '@/lib/appearance'
-import { helpGroups } from '@/lib/keymap'
 import { useUi, type Lang, type Theme } from '@/stores/ui'
 import { Card, Row, Select, Toggle } from './controls'
 import { useSetting } from './useSetting'
 
-const GROUPS = helpGroups()
-
-/** 快捷键: read-only table generated from the keymap registry. */
-export function ShortcutsSection() {
-  const { t } = useTranslation()
-  return (
-    <div className="flex flex-col gap-4" data-testid="settings-keys">
-      <p className="text-xs text-muted">{t('settings.keys.hint')}</p>
-      {GROUPS.map((g) => (
-        <Card key={g.group} title={t(`keyGroup.${g.group}`)}>
-          <table className="w-full">
-            <tbody>
-              {g.items.map((it) => (
-                <tr key={it.desc + it.scopes.join()} className="border-b border-line last:border-0">
-                  <td className="px-4 py-1.5">
-                    {t(`keys.${it.desc}`)}
-                    {it.scopes.length === 1 && <span className="ml-1.5 text-xs text-faint">({t(`scope.${it.scopes[0]}`)})</span>}
-                  </td>
-                  <td className="px-4 py-1.5 text-right">
-                    <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
-                      {it.keys.map((combo, i) => (
-                        <span key={i} className="flex items-center gap-0.5">
-                          {i > 0 && <span className="px-0.5 text-faint">/</span>}
-                          {combo.map((k, j) => (
-                            <kbd key={j}>{k}</kbd>
-                          ))}
-                        </span>
-                      ))}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      ))}
-    </div>
-  )
-}
+export { ShortcutsSection } from './ShortcutsSection'
 
 /** 语言与外观: language + theme (local preference, mirrored to the server settings). */
 export function AppearanceSection() {

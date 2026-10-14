@@ -3,7 +3,7 @@
  * (`BINDINGS`, the same registry the help overlay and the settings table are generated from)
  * and a few navigation targets. Pure functions; the UI lives in `components/CommandPalette.tsx`.
  */
-import { BINDINGS, formatSpec, type Binding, type Scope } from './keymap'
+import { BINDINGS, formatSpec, getBindings, type Binding, type Scope } from './keymap'
 
 export interface PaletteItem {
   id: string
@@ -87,7 +87,7 @@ export interface ActionItemOptions {
 const SKIP = new Set(['palette.toggle'])
 
 /** One palette entry per action id of the keymap that is active in `scope` and runnable right now. */
-export function actionItems({ scope, t, available, bindings = BINDINGS }: ActionItemOptions): PaletteItem[] {
+export function actionItems({ scope, t, available, bindings = getBindings() }: ActionItemOptions): PaletteItem[] {
   const byId = new Map<string, PaletteItem>()
   for (const b of bindings) {
     if (b.hold || SKIP.has(b.id) || !b.scopes.includes(scope) || !available(b.id)) continue

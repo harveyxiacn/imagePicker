@@ -16,7 +16,7 @@ import { alreadyBest, autoChoices, baseWhy, buildPlanView, choiceFor, frameNumbe
 import { changeStack, flushSaves } from '@/lib/editActions'
 import { runGen } from '@/lib/gen'
 import { useHistory } from '@/lib/history'
-import { dispatchKey, isTextEntryTarget, type Handlers } from '@/lib/keymap'
+import { dispatchKey, eventToSpec, findBinding, isTextEntryTarget, type Handlers } from '@/lib/keymap'
 import { removeBestTake } from '@/lib/patches'
 import { useEdit } from '@/stores/edit'
 import { useGen } from '@/stores/gen'
@@ -178,7 +178,7 @@ export function BestTake() {
     const onKey = (e: KeyboardEvent) => {
       if (isTextEntryTarget(e.target)) return
       if (document.querySelector('[role="dialog"]') && e.key !== '?') return
-      if (e.repeat && e.key.toLowerCase() !== 'z' && e.key.toLowerCase() !== 'y') return
+      if (e.repeat && !['edit.undo', 'edit.redo'].includes(findBinding(eventToSpec(e), 'edit')?.id ?? '')) return
       if (dispatchKey(e, 'edit', handlers)) e.preventDefault()
     }
     window.addEventListener('keydown', onKey)

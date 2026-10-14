@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { dispatchKey, isTextEntryTarget, type Handlers } from '@/lib/keymap'
+import { dispatchKey, eventToSpec, findBinding, isTextEntryTarget, type Handlers } from '@/lib/keymap'
 import { registerPaletteHost } from '@/lib/paletteHost'
 import { useEdit } from '@/stores/edit'
 import { useRepair } from '@/stores/repair'
@@ -45,7 +45,7 @@ export function useEditShortcuts(actions: EditActions) {
       const dialogOpen = !!document.querySelector('[role="dialog"]')
       if (dialogOpen && e.key !== '?') return
       // one-shot actions ignore OS key repeat; undo / redo may repeat
-      if (e.repeat && e.key.toLowerCase() !== 'z' && e.key.toLowerCase() !== 'y') return
+      if (e.repeat && !['edit.undo', 'edit.redo'].includes(findBinding(eventToSpec(e), 'edit')?.id ?? '')) return
       if (dispatchKey(e, 'edit', handlers)) e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
