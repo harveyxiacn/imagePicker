@@ -214,7 +214,7 @@ pub fn fit_target(aspect: (u32, u32), long_edge: Option<u32>) -> (u32, u32) {
 }
 
 /// Scales `img` down so that no side exceeds `max` (the WebP limit).
-fn cap_side(img: RgbImage, max: Option<u32>) -> RgbImage {
+pub(crate) fn cap_side(img: RgbImage, max: Option<u32>) -> RgbImage {
     let Some(max) = max else { return img };
     let long = img.width.max(img.height);
     if long <= max {
@@ -369,7 +369,7 @@ fn render_name(template: &str, r: &PhotoRef, seq: usize, info: Option<&NameInfo>
 }
 
 /// Values of the watermark text tokens of one photo.
-fn watermark_tokens(r: &PhotoRef, info: Option<&NameInfo>) -> WatermarkTokens {
+pub(crate) fn watermark_tokens(r: &PhotoRef, info: Option<&NameInfo>) -> WatermarkTokens {
     let (date, year) = match r.taken_at.or(r.mtime_ms) {
         Some(ms) => {
             let (y, m, d) = civil_from_days(ms.div_euclid(86_400_000));
@@ -458,7 +458,7 @@ pub fn plan_names_with(
 }
 
 /// The catalog values of the name tokens of `ids` (see [`NameInfo`]).
-fn name_info(c: &rusqlite::Connection, ids: &[i64]) -> Result<HashMap<i64, NameInfo>> {
+pub(crate) fn name_info(c: &rusqlite::Connection, ids: &[i64]) -> Result<HashMap<i64, NameInfo>> {
     let mut out = HashMap::new();
     for chunk in ids.chunks(500) {
         let ph = vec!["?"; chunk.len()].join(",");
@@ -510,7 +510,7 @@ fn name_info(c: &rusqlite::Connection, ids: &[i64]) -> Result<HashMap<i64, NameI
 /// Writes a new file and never touches an existing one: fails when `path` exists (even when it
 /// appeared after the names were planned). Only a file this call created is removed again when
 /// filling it fails.
-fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     fill_new(path, |f| f.write_all(bytes))
 }
 
@@ -982,36 +982,7 @@ impl Core {
             }),
         };
         let edits = if req.apply_edits {
-            let with_edits: Vec<i64> = refs
-                .iter()
-                .filter(|r| r.edit_hash.is_some())
-                .map(|r| r.id)
-                .collect();
-            let stacks = self
-                .db
-                .call(move |c| {
-                    let mut m = HashMap::new();
-                    for id in with_edits {
-                        if let Some(cur) = store::current(c, id)? {
-                            if cur.has_edits {
-                                let st: EditStack =
-                                    serde_json::from_value(cur.stack).map_err(|e| {
-                                        CoreError::Internal(anyhow::anyhow!(
-                                            "stored edit stack of photo {id} is invalid: {e}"
-                                        ))
-                                    })?;
-                                m.insert(id, st);
-                            }
-                        }
-                    }
-                    Ok(m)
-                })
-                .await?;
-            Some(EditedExport {
-                svc: self.render.clone(),
-                handle: Handle::current(),
-                stacks,
-            })
+            self.edited_export(&refs).await?
         } else {
             None
         };
@@ -1084,6 +1055,45 @@ impl Core {
             core.events.emit(ev(done, state, error));
         });
         Ok(task_id)
+    }
+}
+
+impl Core {
+    /// The saved edit stacks of those of `refs` that have edits, with the render context to
+    /// apply them; `None` when none has any.
+    pub(crate) async fn edited_export(
+        self: &Arc<Self>,
+        refs: &[PhotoRef],
+    ) -> Result<Option<EditedExport>> {
+        let with_edits: Vec<i64> = refs
+            .iter()
+            .filter(|r| r.edit_hash.is_some())
+            .map(|r| r.id)
+            .collect();
+        let stacks = self
+            .db
+            .call(move |c| {
+                let mut m = HashMap::new();
+                for id in with_edits {
+                    if let Some(cur) = store::current(c, id)? {
+                        if cur.has_edits {
+                            let st: EditStack = serde_json::from_value(cur.stack).map_err(|e| {
+                                CoreError::Internal(anyhow::anyhow!(
+                                    "stored edit stack of photo {id} is invalid: {e}"
+                                ))
+                            })?;
+                            m.insert(id, st);
+                        }
+                    }
+                }
+                Ok(m)
+            })
+            .await?;
+        Ok(Some(EditedExport {
+            svc: self.render.clone(),
+            handle: Handle::current(),
+            stacks,
+        }))
     }
 }
 

@@ -8,10 +8,12 @@ import { FilePicker } from './FilePicker'
 interface Props {
   value: WatermarkForm
   onChange: (patch: Partial<WatermarkForm>) => void
+  /** collage mode: the mark goes on the finished collage, nothing is copied as it is */
+  collage?: boolean
 }
 
 /** The "Watermark" section of the export dialog (PRD F9.4). */
-export function ExportWatermark({ value: w, onChange }: Props) {
+export function ExportWatermark({ value: w, onChange, collage }: Props) {
   const { t } = useTranslation()
   const [picking, setPicking] = useState<'image' | 'font' | null>(null)
   const range = (id: string, label: string, v: number, min: number, max: number, step: number, unit: string, key: keyof WatermarkForm) => (
@@ -34,10 +36,12 @@ export function ExportWatermark({ value: w, onChange }: Props) {
       </label>
       {w.enabled && (
         <div className="flex flex-col gap-2 rounded-control border border-line p-2">
-          <div className="flex items-start gap-1.5 rounded-control bg-panel p-2 text-xs text-muted" data-testid="export-watermark-hint">
-            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-            <span>{t('export.wmReencode')}</span>
-          </div>
+          {!collage && (
+            <div className="flex items-start gap-1.5 rounded-control bg-panel p-2 text-xs text-muted" data-testid="export-watermark-hint">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>{t('export.wmReencode')}</span>
+            </div>
+          )}
           <div className="flex gap-1.5" role="group" aria-label={t('export.wm')}>
             <button className="chip" aria-pressed={w.kind === 'text'} onClick={() => onChange({ kind: 'text' })} data-testid="export-watermark-kind-text">
               <Type size={13} /> {t('export.wmText')}
