@@ -92,6 +92,9 @@ pub struct Metadata {
     pub iso: Option<u32>,
     pub gps_lat: Option<f64>,
     pub gps_lon: Option<f64>,
+    /// UTC time of the GPS fix in ms since Unix epoch (EXIF GPSDateStamp + GPSTimeStamp): the
+    /// reference for correcting a camera clock (docs/09 P1-2). `None` when the file has none.
+    pub gps_time_ms: Option<i64>,
 }
 
 /// Read EXIF/container metadata without decoding pixels.

@@ -182,6 +182,8 @@ fn full_exif_tiff(le: bool) -> Vec<u8> {
             (0x0002, V::Rat(vec![(31, 1), (30, 1), (0, 1)])),
             (0x0003, V::Ascii("W".into())),
             (0x0004, V::Rat(vec![(121, 1), (0, 1), (36, 1)])),
+            (0x0007, V::Rat(vec![(8, 1), (20, 1), (31, 1)])),
+            (0x001D, V::Ascii("2024:03:05".into())),
         ],
         next: None,
     };
@@ -386,6 +388,11 @@ fn metadata_full_exif_both_endians() {
         assert_eq!(md.taken_at_ms, Some(1_709_634_030_450 - 2 * 3_600_000));
         assert!((md.gps_lat.unwrap() - 31.5).abs() < 1e-9);
         assert!((md.gps_lon.unwrap() + 121.01).abs() < 1e-9);
+        // GPSDateStamp 2024:03:05 + GPSTimeStamp 08:20:31 (UTC)
+        assert_eq!(
+            md.gps_time_ms,
+            Some(1_709_634_030_000 - 2 * 3_600_000 + 1_000)
+        );
     }
 }
 

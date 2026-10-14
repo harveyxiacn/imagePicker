@@ -130,7 +130,28 @@ pub fn fill_exif(md: &mut Metadata, t: &Tiff, ifd: &Ifd) {
     }
 }
 
+/// UTC time of the GPS fix: GPSDateStamp (`YYYY:MM:DD`) + GPSTimeStamp (hour, minute, second).
+fn gps_time(t: &Tiff, ifd: &Ifd) -> Option<i64> {
+    let date = get_str(t, ifd, 0x001D)?;
+    let b = date.trim().as_bytes();
+    if b.len() < 10 {
+        return None;
+    }
+    let (y, mo, d) = (num(&b[0..4])?, num(&b[5..7])?, num(&b[8..10])?);
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || y < 1971 {
+        return None;
+    }
+    let e = ifd.get(0x0007)?;
+    let (h, mi, s) = (t.rational(e, 0)?, t.rational(e, 1)?, t.rational(e, 2)?);
+    if !(0.0..24.0).contains(&h) || !(0.0..60.0).contains(&mi) || !(0.0..61.0).contains(&s) {
+        return None;
+    }
+    let secs = days_from_civil(y, mo, d) * 86_400;
+    Some(secs * 1000 + ((h * 3600.0 + mi * 60.0 + s) * 1000.0).round() as i64)
+}
+
 pub fn fill_gps(md: &mut Metadata, t: &Tiff, ifd: &Ifd) {
+    set_if_none(&mut md.gps_time_ms, gps_time(t, ifd));
     if md.gps_lat.is_some() {
         return;
     }
