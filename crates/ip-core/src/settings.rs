@@ -1,6 +1,7 @@
 //! Persisted settings (`docs/api-contract-m6.md` section D): defaults, validation, atomic
 //! persistence in the data directory and the live effects of a change.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -157,6 +158,169 @@ pub struct RemoteAiSettings {
     pub host_url: String,
 }
 
+/// Action ids whose key binding the user may change (`web/src/lib/keymap.ts`, entries without `fixed` /
+/// `hold`). Escape, help, the palette and the hold-to-zoom key are fixed. A web test keeps this list
+/// in sync with the key map.
+pub const SHORTCUT_ACTIONS: &[&str] = &[
+    "rate.0",
+    "rate.1",
+    "rate.2",
+    "rate.3",
+    "rate.4",
+    "rate.5",
+    "rateNext.0",
+    "rateNext.1",
+    "rateNext.2",
+    "rateNext.3",
+    "rateNext.4",
+    "rateNext.5",
+    "flag.pick",
+    "flag.reject",
+    "flag.none",
+    "color.red",
+    "color.yellow",
+    "color.green",
+    "color.blue",
+    "nav.prev",
+    "nav.next",
+    "nav.up",
+    "nav.down",
+    "nav.first",
+    "nav.last",
+    "nav.open",
+    "view.grid",
+    "view.loupe",
+    "view.compare",
+    "view.group",
+    "view.fullscreen",
+    "view.sidebar",
+    "compare.swap",
+    "compare.sync",
+    "zoom.toggle",
+    "edit.undo",
+    "edit.redo",
+    "edit.open",
+    "edit.before",
+    "edit.mask",
+    "edit.crop",
+    "edit.brush",
+    "edit.copy",
+    "edit.paste",
+    "select.all",
+    "ai.accept",
+    "ai.acceptAll",
+    "stacks.toggle",
+    "stacks.toggleAll",
+    "group.prev",
+    "group.next",
+    "group.pick",
+    "group.pickNext",
+    "faces.toggle",
+    "personFilter.open",
+    "assistant.toggle",
+    "export.open",
+];
+
+const CHORD_NAMED_KEYS: &[&str] = &[
+    "arrowleft",
+    "arrowright",
+    "arrowup",
+    "arrowdown",
+    "space",
+    "escape",
+    "enter",
+    "tab",
+    "home",
+    "end",
+    "pageup",
+    "pagedown",
+    "backspace",
+    "delete",
+];
+
+/// Chords nobody may take: Escape closes / cancels, Shift+arrows extend the grid selection.
+const RESERVED_CHORDS: &[&str] = &[
+    "escape",
+    "shift+arrowleft",
+    "shift+arrowright",
+    "shift+arrowup",
+    "shift+arrowdown",
+];
+
+/// Canonical form of a chord (`mod+alt+shift+key`, lower case) or `None` when it is not valid; mirrors
+/// `normalizeChord` in `web/src/lib/keymap.ts` (shift is implied for printable symbols).
+fn normalize_chord(spec: &str) -> Option<String> {
+    let lower = spec.trim().to_lowercase();
+    let mut parts: Vec<&str> = lower.split('+').collect();
+    let base = parts.pop()?;
+    let mut chars = base.chars();
+    let single = match (chars.next(), chars.next()) {
+        (Some(c), None) => Some(c),
+        _ => None,
+    };
+    let is_symbol = single.is_some_and(|c| c.is_ascii_graphic() && !c.is_ascii_alphanumeric());
+    let is_f_key = base
+        .strip_prefix('f')
+        .and_then(|n| n.parse::<u8>().ok())
+        .is_some_and(|n| (1..=12).contains(&n));
+    let base_ok = CHORD_NAMED_KEYS.contains(&base)
+        || is_f_key
+        || is_symbol
+        || single.is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    if !base_ok {
+        return None;
+    }
+    let (mut modk, mut alt, mut shift) = (false, false, false);
+    for m in parts {
+        let slot = match m {
+            "mod" => &mut modk,
+            "alt" => &mut alt,
+            "shift" => &mut shift,
+            _ => return None,
+        };
+        if *slot {
+            return None;
+        }
+        *slot = true;
+    }
+    let mut out = String::new();
+    if modk {
+        out.push_str("mod+");
+    }
+    if alt {
+        out.push_str("alt+");
+    }
+    if shift && !is_symbol {
+        out.push_str("shift+");
+    }
+    out.push_str(base);
+    Some(out)
+}
+
+fn validate_shortcuts(map: &BTreeMap<String, String>) -> Result<()> {
+    if map.len() > SHORTCUT_ACTIONS.len() {
+        return Err(CoreError::Unprocessable(
+            "shortcuts has too many entries".into(),
+        ));
+    }
+    for (id, chord) in map {
+        if !SHORTCUT_ACTIONS.contains(&id.as_str()) {
+            return Err(CoreError::Unprocessable(format!(
+                "shortcuts: unknown or fixed action \"{id}\""
+            )));
+        }
+        match normalize_chord(chord) {
+            Some(c) if c == *chord && !RESERVED_CHORDS.contains(&c.as_str()) => {}
+            _ => {
+                return Err(CoreError::Unprocessable(format!(
+                    "shortcuts.{id}: \"{chord}\" is not a valid chord (e.g. mod+shift+z, shift+3, arrowleft)"
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
@@ -174,6 +338,9 @@ pub struct Settings {
     pub xmp_mode: String,
     pub assistant: AssistantSettings,
     pub remote_ai: RemoteAiSettings,
+    /// Custom key bindings, action id -> chord (only differences from the defaults; see
+    /// [`SHORTCUT_ACTIONS`]). Validated here; conflicts between actions are resolved by the UI.
+    pub shortcuts: BTreeMap<String, String>,
 }
 
 impl Default for Settings {
@@ -190,6 +357,7 @@ impl Default for Settings {
             xmp_mode: "off".into(),
             assistant: AssistantSettings::default(),
             remote_ai: RemoteAiSettings::default(),
+            shortcuts: BTreeMap::new(),
         }
     }
 }
@@ -258,6 +426,7 @@ impl Settings {
                 ));
             }
         }
+        validate_shortcuts(&self.shortcuts)?;
         if self.models.dir.contains('\0') || self.models.dir.len() > 1024 {
             return Err(CoreError::Unprocessable(
                 "models.dir is not a valid path".into(),
@@ -751,5 +920,62 @@ mod tests {
             GroupParams::for_strictness("strict"),
         );
         assert!(l.theta_burst < n.theta_burst && n.theta_burst < s.theta_burst);
+    }
+
+    #[test]
+    fn shortcuts_are_validated_and_persisted() {
+        let (dir, st) = store();
+        assert!(st.get().shortcuts.is_empty());
+        st.patch(
+            &json!({"shortcuts": {"flag.pick": "mod+shift+p", "rate.1": "shift+1", "nav.up": "k"}}),
+        )
+        .unwrap();
+        // merge patch: a chord replaces, null resets one action
+        st.patch(&json!({"shortcuts": {"nav.up": "arrowup", "rate.1": null}}))
+            .unwrap();
+        let cur = st.get();
+        assert_eq!(cur.shortcuts.len(), 2);
+        assert_eq!(cur.shortcuts["flag.pick"], "mod+shift+p");
+        assert_eq!(cur.shortcuts["nav.up"], "arrowup");
+        let reloaded = SettingsStore::load(dir.path());
+        assert_eq!(reloaded.get().shortcuts, cur.shortcuts);
+
+        for bad in [
+            json!({"nope.action": "a"}),             // unknown action
+            json!({"help.toggle": "h"}),             // fixed action
+            json!({"nav.back": "b"}),                // fixed action
+            json!({"flag.pick": "Mod+P"}),           // not canonical
+            json!({"flag.pick": "shift+mod+p"}),     // modifier order
+            json!({"flag.pick": "mod+mod+p"}),       // duplicate modifier
+            json!({"flag.pick": "mod+"}),            // no key
+            json!({"flag.pick": ""}),                // empty
+            json!({"flag.pick": "ab"}),              // two characters
+            json!({"flag.pick": "shift+?"}),         // shift is implied for symbols
+            json!({"flag.pick": "escape"}),          // reserved
+            json!({"flag.pick": "shift+arrowleft"}), // reserved
+            json!({"flag.pick": "f13"}),
+        ] {
+            let err = st.patch(&json!({ "shortcuts": bad.clone() })).unwrap_err();
+            assert!(matches!(err, CoreError::Unprocessable(_)), "{bad}: {err}");
+        }
+        // nothing invalid was stored
+        assert_eq!(st.get().shortcuts, cur.shortcuts);
+    }
+
+    #[test]
+    fn chords_normalise_like_the_web_key_map() {
+        assert_eq!(
+            normalize_chord("mod+shift+z").as_deref(),
+            Some("mod+shift+z")
+        );
+        assert_eq!(
+            normalize_chord("Shift+Alt+Mod+Z").as_deref(),
+            Some("mod+alt+shift+z")
+        );
+        assert_eq!(normalize_chord("shift+/").as_deref(), Some("/"));
+        assert_eq!(normalize_chord("f12").as_deref(), Some("f12"));
+        assert_eq!(normalize_chord("+"), None);
+        assert_eq!(normalize_chord("mod+"), None);
+        assert!(SHORTCUT_ACTIONS.iter().all(|a| !a.is_empty()));
     }
 }
