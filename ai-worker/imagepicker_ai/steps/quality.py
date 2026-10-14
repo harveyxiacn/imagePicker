@@ -28,6 +28,10 @@ Tilt (steps/tilt.py)
   tilt_deg        = deviation of the dominant straight lines (horizon, verticals) from level,
                     degrees, > 0 = content rotated clockwise; 0 when there are none
   tilt_confidence = 0..1, how much straight, agreeing structure backs tilt_deg
+Saliency (steps/composition.py)
+  saliency        = [x, y, w, h] normalised box of the visual subject (centre-weighted colour
+                    contrast), None for a flat image; the composition score anchors on it when
+                    there is no subject face
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from .composition import saliency_box
 from .tilt import estimate_tilt
 
 REF_LONG_EDGE = 1024
@@ -182,4 +187,8 @@ def analyze_quality(
         "tilt_deg": tilt_deg,
         "tilt_confidence": tilt_conf,
     }
-    return {k: (None if v is None else round(float(v), 5)) for k, v in out.items()}
+    res: dict[str, float | list[float] | None] = {
+        k: (None if v is None else round(float(v), 5)) for k, v in out.items()
+    }
+    res["saliency"] = saliency_box(rgb)
+    return res  # type: ignore[return-value]

@@ -8,7 +8,11 @@ Per face the result carries
   camera-space convention, magnitude is what the scorer uses)
   gaze      0-1 "looking at the camera": iris position inside the eye socket (MediaPipe iris
             landmarks vs eye corners / lids) combined with head yaw / pitch, see `gaze_score`
+  mouth_open  jawOpen blendshape (0 closed ... 1 wide open)
+  bad_expression  None, "talking" or "half_blink", see `expression_flag`
   sharpness (0-1, see quality.face_sharpness), blendshapes {52 coefficients}
+  artificial  0-1 confidence that the face is on a statue / poster / screen / print (steps/liveness.py)
+  likely_artificial  artificial >= liveness.ARTIFICIAL_AT; such faces never become bystanders
 If mediapipe is not installed (or no landmarks were found for a face) the landmark-derived
 fields are null and `landmarks` is false.
 """
@@ -24,6 +28,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from .liveness import ARTIFICIAL_AT, face_artificial, image_saturation
 from .quality import face_sharpness
 
 # MediaPipe Face Landmarker topology (468 face points + 10 iris points)
@@ -36,6 +41,11 @@ GAZE_SIGMA_H = 0.11  # iris offset along the eye axis, in eye widths (0 = centre
 GAZE_SIGMA_V = 0.10  # iris offset across the eye axis, in eye widths
 GAZE_SIGMA_YAW = 25.0  # degrees
 GAZE_SIGMA_PITCH = 20.0
+
+# "Expression not great" (docs/03 §3.3), a tag only: a subject mid-word or caught half-blinking.
+MOUTH_OPEN_TALKING = 0.25  # jawOpen at or above this ...
+EXPR_SMILE_BELOW = 0.35  # ... without a smile is "talking" (a laugh or a smile is fine)
+HALF_BLINK = (0.45, 0.65)  # eyes_open in [lo, hi) is half shut; below lo is the closed_eyes tag
 
 log = logging.getLogger(__name__)
 
@@ -115,6 +125,24 @@ def gaze_score(
         t = min(1.0, max(0.0, (eyes_open - 0.25) / 0.35))
         lids = t * t * (3 - 2 * t)
     return float(min(1.0, max(0.0, pose * eye * lids)))
+
+
+def expression_flag(
+    eyes_open: float | None, smile: float | None, mouth_open: float | None
+) -> str | None:
+    """`"talking"`, `"half_blink"` or None. Mirrors `scoring::bad_expression` in ip-core.
+
+    talking     mouth_open >= 0.25 and smile < 0.35
+    half_blink  0.45 <= eyes_open < 0.65 and smile < 0.35
+    Needs the landmarker (all inputs None without it -> None).
+    """
+    if smile is None or smile >= EXPR_SMILE_BELOW:
+        return None
+    if mouth_open is not None and mouth_open >= MOUTH_OPEN_TALKING:
+        return "talking"
+    if eyes_open is not None and HALF_BLINK[0] <= eyes_open < HALF_BLINK[1]:
+        return "half_blink"
+    return None
 
 
 class FaceAnalyzer:
@@ -205,14 +233,19 @@ class FaceAnalyzer:
 
     def analyze(self, rgb: np.ndarray) -> list[dict[str, Any]]:
         faces = self.detect(rgb)
+        image_sat = image_saturation(rgb) if faces else None
         for f in faces:
             f["sharpness"] = _r(face_sharpness(rgb, tuple(f["bbox"])))  # type: ignore[arg-type]
+            art = face_artificial(rgb, tuple(f["bbox"]), image_sat)  # type: ignore[arg-type]
+            f["artificial"] = _r(art)
+            f["likely_artificial"] = art is not None and art >= ARTIFICIAL_AT
             f.update(_NULL_LANDMARK_FIELDS)
             if self._landmarker_ok:
                 try:
                     f.update(self._landmark(rgb, f["bbox"]))
                 except Exception as e:  # noqa: BLE001
                     log.debug("landmarker failed: %s", e)
+            f["bad_expression"] = expression_flag(f["eyes_open"], f["smile"], f["mouth_open"])
         return faces
 
     def _landmark(self, rgb: np.ndarray, bbox: list[float]) -> dict[str, Any]:
@@ -237,6 +270,7 @@ class FaceAnalyzer:
             "landmarks": True,
             "eyes_open": _r(1.0 - max(bs.get("eyeBlinkLeft", 0.0), bs.get("eyeBlinkRight", 0.0))),
             "smile": _r((bs.get("mouthSmileLeft", 0.0) + bs.get("mouthSmileRight", 0.0)) / 2),
+            "mouth_open": _r(bs.get("jawOpen", 0.0)),
             "blendshapes": {k: round(v, 4) for k, v in bs.items() if k != "_neutral"},
         }
         if res.facial_transformation_matrixes:
@@ -258,6 +292,7 @@ _NULL_LANDMARK_FIELDS: dict[str, Any] = {
     "landmarks": False,
     "eyes_open": None,
     "smile": None,
+    "mouth_open": None,
     "yaw": None,
     "pitch": None,
     "roll": None,
