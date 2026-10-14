@@ -80,7 +80,7 @@ fn filter_schema() -> Value {
             "sort": {"type":"string","enum":["taken_at","-taken_at","name","rating","ai"]},
             "ai_rating_gte": {"type":"number","minimum":0,"maximum":5},
             "issues_none": {"type":"boolean"},
-            "issues_any": {"type":"array","items":{"type":"string","enum":["closed_eyes","blurry","overexposed","underexposed","noisy","tilted"]}},
+            "issues_any": {"type":"array","items":{"type":"string","enum":["closed_eyes","blurry","overexposed","underexposed","noisy","tilted","bystander","bad_expression"]}},
             "burst_best_only": {"type":"boolean"},
             "burst_id": {"type":"integer"},
             "scene_type": {"type":"string","description":"portrait|group|landscape|food|architecture|night|pet|other"},

@@ -52,6 +52,11 @@ pub struct AnalyzeFace {
     /// Row of the photo's `identity_file` belonging to this face.
     pub identity_index: Option<usize>,
     pub blendshapes: Option<Value>,
+    /// 0-1 confidence that the face is on a statue / poster / screen / print
+    /// (`steps/liveness.py`); absent from older workers and from the lite profile.
+    pub artificial: Option<f64>,
+    /// jawOpen blendshape, 0 closed ... 1 wide open (the `bad_expression` tag).
+    pub mouth_open: Option<f64>,
 }
 
 /// Sub-metrics of the `quality` step.
@@ -69,6 +74,9 @@ pub struct QualityInfo {
     pub tilt_deg: Option<f64>,
     /// 0..1 confidence of `tilt_deg`.
     pub tilt_confidence: Option<f64>,
+    /// Normalised `[x, y, w, h]` of the visual subject (`steps/composition.py`), absent for a flat
+    /// image or an older worker.
+    pub saliency: Option<[f64; 4]>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

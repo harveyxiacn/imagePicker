@@ -109,9 +109,9 @@ export interface RejectFilesReport {
   errors: string[]
 }
 
-export type Issue = 'closed_eyes' | 'blurry' | 'overexposed' | 'underexposed' | 'noisy' | 'tilted'
+export type Issue = 'closed_eyes' | 'blurry' | 'overexposed' | 'underexposed' | 'noisy' | 'tilted' | 'bystander' | 'bad_expression'
 export type SceneType = 'portrait' | 'group' | 'landscape' | 'food' | 'architecture' | 'night' | 'pet' | 'other'
-export const ISSUES: Issue[] = ['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted']
+export const ISSUES: Issue[] = ['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted', 'bystander', 'bad_expression']
 export const SCENE_TYPES: SceneType[] = ['portrait', 'group', 'landscape', 'food', 'architecture', 'night', 'pet', 'other']
 
 export type ImportState = 'scanning' | 'thumbnailing' | 'ready'
@@ -503,6 +503,9 @@ export interface Face {
   sharpness: number | null
   expression_score: number | null
   is_subject: boolean
+  /** 0..1 confidence that the face is on a statue / poster / screen / print (never a bystander) */
+  artificial?: number | null
+  likely_artificial?: boolean
 }
 
 export interface PhotoAnalysis {
@@ -563,6 +566,47 @@ export interface TimelineEvent {
 }
 export interface TimelineResponse {
   events: TimelineEvent[]
+}
+
+/** Library timeline (api-contract-m2 C.6, `GET /api/timeline`): photos bucketed by local capture date. */
+export type TimelineGranularity = 'year' | 'month' | 'day'
+export interface TimelineBucket {
+  /** `2024`, `2024-05` or `2024-05-03` */
+  key: string
+  /** first / last local day of the bucket, `YYYY-MM-DD`: the `taken_from` / `taken_to` of its photos */
+  from: string
+  to: string
+  count: number
+  /** best photos first (not rejected, rating, AI score) */
+  photo_ids: number[]
+}
+export interface TimelineEventRef {
+  id: number
+  session_id: number
+  name: string
+  title: string | null
+  start_at: number
+  end_at: number
+  offset_min: number | null
+  photo_count: number
+}
+export interface LibraryTimeline {
+  granularity: TimelineGranularity
+  from: string | null
+  to: string | null
+  total: number
+  buckets: TimelineBucket[]
+  /** photos without a capture time */
+  undated: { count: number; photo_ids: number[] }
+  /** events touching a bounded month / day window */
+  events: TimelineEventRef[]
+}
+/** `GET /api/timeline` parameters: the photo-list filters plus level, window and optional session. */
+export type TimelineQuery = Omit<PhotosQuery, 'session_id' | 'cursor' | 'limit' | 'sort' | 'event_id'> & {
+  granularity?: TimelineGranularity
+  from?: string
+  to?: string
+  session_id?: number
 }
 export interface DuplicatesResponse {
   group_id: number | null

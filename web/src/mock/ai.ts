@@ -283,12 +283,25 @@ function genPhotoAi(p: Photo, profile: AnalysisProfile): PhotoAi {
   score = clamp01(score)
   contributions.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
 
+  // rule-of-thirds proximity of the subjects' eye line (the real score also weighs headroom / horizon / cut-off)
+  const composition = subjects.length
+    ? (() => {
+        const cx = subjects.reduce((n, f) => n + f.bbox[0] + f.bbox[2] / 2, 0) / subjects.length
+        const cy = subjects.reduce((n, f) => n + f.bbox[1] + 0.4 * f.bbox[3], 0) / subjects.length
+        const d = Math.hypot(Math.min(Math.abs(cx - 1 / 3), Math.abs(cx - 2 / 3)), Math.min(Math.abs(cy - 1 / 3), Math.abs(cy - 2 / 3)))
+        return clamp01(1 - 2.2 * d)
+      })()
+    : null
+
   const issues: Issue[] = []
   if (closed.length) issues.push('closed_eyes')
   if (sharp < 0.35) issues.push('blurry')
   if (over) issues.push('overexposed')
   if (under) issues.push('underexposed')
   if (noise > 0.55) issues.push('noisy')
+  // P1-8 tags: a sharp, sizeable non-subject face; a subject caught mid-word
+  if (faces.some((f) => !f.is_subject && (f.sharpness ?? 0) >= 0.35 && f.bbox[2] * f.bbox[3] >= 0.003)) issues.push('bystander')
+  if (subjects.some((f) => (f.smile ?? 0) < 0.35 && (f.eyes_open ?? 1) >= 0.45 && (f.eyes_open ?? 1) < 0.65)) issues.push('bad_expression')
 
   const reasons: PhotoAnalysis['reasons'] = []
   for (const f of closed) {
@@ -312,7 +325,7 @@ function genPhotoAi(p: Photo, profile: AnalysisProfile): PhotoAi {
       iqa: r2(iqa),
       aesthetic: aesthetic === null ? null : r2(aesthetic),
       face: faceScore === null ? null : r2(faceScore),
-      composition: null,
+      composition: composition === null ? null : r2(composition),
     },
     contributions,
     reasons,

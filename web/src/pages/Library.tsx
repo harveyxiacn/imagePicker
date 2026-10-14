@@ -26,6 +26,7 @@ import { ModelConsentDialog } from '@/components/ModelConsentDialog'
 import { usePhotoMenu } from '@/components/PhotoMenu'
 import { SaveCollectionDialog } from '@/components/SaveCollectionDialog'
 import { StatusBar } from '@/components/StatusBar'
+import { TimelinePanel } from '@/components/TimelinePanel'
 import { TopBar } from '@/components/TopBar'
 import { acceptAiRatings, editPhotos } from '@/lib/actions'
 import { canAccept } from '@/lib/ai'
@@ -62,6 +63,7 @@ export function Library() {
   const inspectorOpen = useUi((s) => s.inspectorOpen)
   const showFaces = useUi((s) => s.showFaces)
   const sidebarOpen = useUi((s) => s.sidebarOpen)
+  const timelineOpen = useUi((s) => s.timelineOpen)
   const photoMenu = usePhotoMenu(sessionId)
   const exportOpen = useUi((s) => s.exportOpen)
   const grouped = useUi((s) => s.grouped)
@@ -172,6 +174,7 @@ export function Library() {
       )}
 
       <MissingBanner sessionId={sessionId} photos={photos} />
+      {timelineOpen && <TimelinePanel sessionId={sessionId} />}
 
       <div className="relative flex min-h-0 flex-1">
         {sidebarOpen && !isMobile && (

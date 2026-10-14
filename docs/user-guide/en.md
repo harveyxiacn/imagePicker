@@ -288,9 +288,9 @@ After analysis every photo gets an AI suggested rating (0–5, half stars possib
 | Sharpness / Exposure / Low noise | Technical metrics |
 | Quality / Aesthetic | Model estimates |
 | Face | Eyes open, smile, looking at camera |
-| Composition | (not active yet, see below) |
+| Composition | Rule of thirds, headroom, level horizon, subject not cut off by the frame edge (a small weight in the score; shown only when the photo has a face or a clear subject) |
 
-Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted. *Tilted* means the horizon or the building verticals are 2–10° off level (the reason shows the angle, e.g. "Horizon is tilted by 3.5°"); it is only judged when the photo has clear straight lines, so many tilted photos without them are not tagged, and it never lowers the rating: fix it with *Crop & straighten* (`R`) in the editor.
+Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted, bystander, expression not great. *Bystander* means a sharp, reasonably large face that is not one of the photo's subjects; faces on statues, posters, screens and printed matter are recognised by their flat, colourless look and are not counted (a heavily retouched or black-and-white photo, or a colourful smooth poster, can still fool this), and "Remove bystanders" skips them (you can still remove such a face by hand). *Expression not great* marks a subject caught mid-word (mouth open without a smile) or half-blinking; smiling or laughing is never tagged, and it needs the face landmarks (not in the Lite profile). Neither tag changes the rating. *Tilted* means the horizon or the building verticals are 2–10° off level (the reason shows the angle, e.g. "Horizon is tilted by 3.5°"); it is only judged when the photo has clear straight lines, so many tilted photos without them are not tagged, and it never lowers the rating: fix it with *Crop & straighten* (`R`) in the editor.
 
 - Click *Accept* in the inspector, or press `A`, to write the AI rating into **your** rating; `Ctrl+Shift+A` accepts in bulk.
 - The *AI rating* filter filters by suggested stars.
@@ -337,6 +337,17 @@ Select a photo inside a stack and press `B`:
 ### Events
 
 Analysis also gathers scenes into **events**: a new event starts when two neighbouring scenes are more than 2 hours apart, or (when the photos carry GPS) more than 5 km apart. The *Events* list in the left sidebar shows the open session's events (only when it has at least two): the first line is the date, the second the time span of that day and the position (coordinates when there is GPS), and the count sits on the right. Click an event to browse only its photos; click it again (or *All photos*) to clear. Events are recomputed after you split or merge groups. The `{event}` token of the export name template is this event name (for example `2024-05-03 1012-1440`).
+
+### Timeline
+
+*Timeline* in the left sidebar opens a strip above the grid with the photos of the library by **capture date**, newest tiles on the right. Each tile shows a thumbnail of the best photo of that period (not rejected, highest rating, highest AI score), a bar for how many photos it holds and the count.
+
+- The strip starts with years. Click a tile to filter the grid to that period (the same capture-date range as in the filter bar); click it again to clear. The small magnifier on a tile (or double-click, or `+`) zooms in: year → months → days. The breadcrumb and the *Zoom out* button (or `-`) go back up.
+- *All sessions / This session* switches between counting every session and only the open one. The strip takes the other filters of the grid into account (rating, flag, colour, people, …), so you can see, for example, where your 4-star photos were taken.
+- Dates are the **local** capture dates (the UTC offset stored with the photo is applied); a photo near midnight in another time zone lands on the day it was taken. Photos without a capture time are listed as a count under the strip and cannot be filtered by date.
+- When a month or a day is shown, the **events** of that period appear as buttons under the tiles; click one to browse its photos (an event of another session opens that session).
+- Keyboard: `Tab` into the strip, arrow keys / `Home` / `End` move between tiles, `Enter` or `Space` filters, `+` / `↓` zooms in, `-` / `↑` / `Backspace` zooms out.
+- Photos taken at a different UTC offset than the one used for the filter can differ by a few photos from the tile count near the edge of a period, because the grid's date filter compares the stored capture time. The map half of F1.9 is not part of this release.
 
 ### Duplicates
 
@@ -470,7 +481,7 @@ The **Repair** panel on the edit page:
 
 Generative tasks show progress and a *Cancel* button (in the Repair panel, the library status bar and the best-take editor's footer); a cancelled task leaves the photo untouched and stops the AI work in progress. Failures offer a retry. Every generative task is listed under *Settings → Task history*. Upscaling is chosen at [export](#13-export--presets).
 
-> Known limitations: large removals (holes over 512 px) come out blurry or with ghosting; faces on statues or posters can be taken for bystanders, which is why you confirm before erasing.
+> Known limitations: large removals (holes over 512 px) come out blurry or with ghosting; faces on statues, posters or screens are mostly skipped when finding bystanders (a flat, colourless look gives them away), but a colourful smooth poster or a black-and-white photo can still fool this, which is why you confirm before erasing.
 
 ## 13. Export & presets
 

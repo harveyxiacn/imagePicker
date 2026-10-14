@@ -480,7 +480,7 @@ async fn full_flow_over_http() {
     let d = r.json();
     assert_eq!(d["analyzed"], true);
     assert_eq!(d["profile"], "standard");
-    assert!(d["scores"]["sharpness"].is_number() && d["scores"]["composition"].is_null());
+    assert!(d["scores"]["sharpness"].is_number() && d["scores"]["composition"].is_number());
     assert!(d["contributions"]
         .as_array()
         .unwrap()

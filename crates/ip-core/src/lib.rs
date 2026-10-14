@@ -23,6 +23,7 @@ pub mod import;
 pub mod jpegmeta;
 pub mod jsonfix;
 pub mod lazy_renderer;
+pub mod library_timeline;
 pub mod lite;
 pub mod logging;
 pub mod model;
@@ -524,6 +525,8 @@ mod tests_m5;
 #[cfg(test)]
 mod tests_m6;
 #[cfg(test)]
+mod tests_p18;
+#[cfg(test)]
 mod tests_p1c;
 #[cfg(test)]
 mod tests_portable;
@@ -535,6 +538,8 @@ mod tests_scale;
 mod tests_search;
 #[cfg(test)]
 mod tests_tasks;
+#[cfg(test)]
+mod tests_timeline;
 #[cfg(test)]
 mod tests_watermark;
 

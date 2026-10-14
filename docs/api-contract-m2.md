@@ -82,7 +82,7 @@ type SceneType = "portrait" | "group" | "landscape" | "food" | "architecture" | 
   "photo_id": 12,
   "analyzed": true,
   "profile": "standard",
-  "scores": { "sharpness": 0.82, "exposure": 0.74, "noise": 0.12, "iqa": 0.71, "aesthetic": 0.64, "face": 0.58, "composition": null },
+  "scores": { "sharpness": 0.82, "exposure": 0.74, "noise": 0.12, "iqa": 0.71, "aesthetic": 0.64, "face": 0.58, "composition": 0.71 },
   "ai_score": 0.68, "ai_rating": 4.0,
   "contributions": [ { "key": "face", "label_key": "score.face", "delta": -0.12 } ],  // 对综合分的贡献（可正可负）
   "reasons": [ { "key": "closed_eyes", "params": { "person": "小红" } } ],          // 前端按 key 本地化；tilted 带 { "deg": 3.5 }（|倾角|，0.1°）
@@ -167,7 +167,39 @@ interface Face {
 - 两种关系传递合并成组，`duplicate_group_id` = 组内最小照片 id；不在组里的照片为 `null`。已读不到元数据（`meta_done=0`）、文件已丢失（`missing`）和 RAW 附属文件不参与。
 - 内置智能集合 `duplicates`（`duplicates=1`）；`GET /api/photos?duplicates=1|0` 筛选。检测结果变化时对受影响的会话发 `groups.updated`，客户端重新拉取列表。
 
-### C.7 自然语言搜索（F2.9，09 P1-4）
+### C.7 资料库时间线（F1.9，只含时间线，地图未做）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/timeline` | 全部会话（或 `session_id` 指定的一个）的照片按**本地拍摄日期**分桶 |
+
+查询参数：
+
+| 参数 | 说明 |
+|---|---|
+| `granularity` | `year` \| `month` \| `day`，缺省 `month`；其它值 → `400` |
+| `from`、`to` | 本地日期窗口 `YYYY-MM-DD`（含两端，可只给一端）；非日期、`from` 晚于 `to` → `400`。带窗口时没有拍摄时间的照片不在其中 |
+| `session_id` | 只统计这个会话；会话不存在 → `404`；缺省 = 整个图库 |
+| 其余 | 与 `GET /api/photos` 相同的筛选（`rating_gte`、`flag`、`color_label`、`ai_rating_gte`、`issues_*`、`scene_type`、`persons`…、`device`、`lens`、`taken_from` / `taken_to`、`tags`、`sharp`、`face_ids`、`has_edits`、`duplicates` 等，校验同 C.4，错误同样 `400`），与分桶取交集。`sort`、`cursor`、`limit` 忽略；`event_id` 仅对 `session_id` 指定的会话有意义 |
+
+响应：
+
+```json
+{"granularity":"month","from":null,"to":null,"total":4,
+ "buckets":[{"key":"2023-11","from":"2023-11-01","to":"2023-11-30","count":3,"photo_ids":[7,3,5]}],
+ "undated":{"count":0,"photo_ids":[]},
+ "events":[{"id","session_id","name","title":string|null,"start_at","end_at","offset_min":number|null,"photo_count"}]}
+```
+
+- `buckets` 按时间升序，只含有照片的桶；`key` 为 `2023` / `2023-11` / `2023-11-14`；`from` / `to` 是该桶第一天 / 最后一天，可直接用作 `GET /api/photos` 的 `taken_from` / `taken_to`。`photo_ids` 至多 4 张代表照片，顺序为：未被拒绝 → 用户星级高 → AI 分高 → id 小。
+- **本地日期** = `taken_at` + `taken_at_offset_min`（分钟，未知按 0；固定偏移，不查夏令时表——照片记录的偏移本身已含夏令时）。没有 `taken_at` 的照片只出现在 `undated`（带 `from` / `to` 窗口时为空）。
+- 同一张照片属于多个会话时只计一次；RAW 伴随文件（`pair_id`）不计。缺失文件（`missing`）与网格一致，照常计入。
+- `events`：仅当 `granularity` 为 `month` 或 `day` 且 `from`、`to` 都给出时返回，是本地日期与窗口相交的事件（C.6，名称规则同 `GET /api/sessions/{id}/timeline`，至多 500 个，按开始时间排序）；`session_id` 告诉客户端该事件属于哪个会话（`event_id` 筛选要在那个会话里使用）。
+- 访客可读；与 `GET /api/photos` 一样，访客带人物相关筛选 → `403`。
+- **与网格筛选的差别**：`taken_from` / `taken_to` 按 `taken_at` 本身（有偏移的照片是 UTC）比较，而桶按本地日期划分，所以带非零偏移的照片在边界附近点击桶后，网格张数可能与桶的张数差几张。
+- 性能：单次扫描 `photo`（不走会话排序索引），按 `taken_at` 的窗口范围可用 `idx_photo_taken`；分桶在 Rust 里完成。10 万张的实测见 PR 描述与 docs/05 §1.3。未新增索引 / 迁移。
+
+### C.8 自然语言搜索（F2.9，09 P1-4）
 
 `GET /api/search`：按描述找照片（中文或英文），在标准分析写下的 SigLIP2 图像嵌入（`analysis.embedding`）上做精确余弦检索，查询向量由 worker 的 SigLIP2 文本塔（`siglip2-base-text`）给出。
 

@@ -31,6 +31,10 @@ pub struct FakeFace {
     pub yaw: Option<f64>,
     pub pitch: Option<f64>,
     pub sharpness: Option<f64>,
+    /// `face.artificial` (statue / poster / screen confidence).
+    pub artificial: Option<f64>,
+    /// jawOpen blendshape.
+    pub mouth_open: Option<f64>,
 }
 
 impl FakeFace {
@@ -44,6 +48,8 @@ impl FakeFace {
             yaw: Some(2.0),
             pitch: Some(1.0),
             sharpness: Some(0.85),
+            artificial: None,
+            mouth_open: Some(0.05),
         }
     }
     pub fn eyes(mut self, v: f64) -> Self {
@@ -52,6 +58,14 @@ impl FakeFace {
     }
     pub fn smile(mut self, v: f64) -> Self {
         self.smile = Some(v);
+        self
+    }
+    pub fn artificial(mut self, v: f64) -> Self {
+        self.artificial = Some(v);
+        self
+    }
+    pub fn mouth(mut self, v: f64) -> Self {
+        self.mouth_open = Some(v);
         self
     }
 }
@@ -716,6 +730,8 @@ impl AiWorker for FakeWorker {
                         roll: Some(0.0),
                         identity_index: standard.then_some(i),
                         blendshapes: None,
+                        artificial: f.artificial,
+                        mouth_open: f.mouth_open,
                     })
                     .collect(),
                 ..Default::default()

@@ -39,6 +39,28 @@ pub const TILTED_MIN_CONFIDENCE: f64 = 0.2;
 /// (motion blur on the subject barely moves the whole-frame measure, so a fixed threshold misses it).
 pub const BLURRY_IN_BURST_RATIO: f64 = 0.80;
 
+/// `bystander` tag (docs/03 §3.3): the photo has a non-subject face that is sharp enough to be
+/// recognised (face sharpness at least [`BLURRY_BELOW`]) and sizeable (at least this share of the
+/// frame, about 5.5% x 5.5%), and that is not on a statue, poster or screen. Smaller or blurrier
+/// strangers are background, not something to retouch. A tag only, it never lowers the score.
+pub const BYSTANDER_MIN_AREA: f64 = 0.003;
+pub const BYSTANDER_MIN_SHARPNESS: f64 = BLURRY_BELOW;
+/// `face.artificial` (the worker's `steps/liveness.py`, its `ARTIFICIAL_AT`) at or above this
+/// means the face is on a statue / poster / screen / print: never a subject or a bystander.
+pub const ARTIFICIAL_AT: f64 = 0.55;
+/// `bad_expression` tag (mirrors the worker's `steps/faces.py::expression_flag`): a subject whose
+/// mouth is open (jawOpen at least this) without a smile is mid-word, ...
+pub const TALKING_MOUTH_OPEN: f64 = 0.25;
+/// ... and one whose eyes are half shut (`eyes_open` in `[HALF_BLINK_MIN, HALF_BLINK_MAX)`;
+/// below it is `closed_eyes`) without a smile was caught blinking. A smile (at or above
+/// [`EXPR_SMILE_BELOW`]) excuses both: laughing eyes and open-mouthed grins are fine.
+pub const EXPR_SMILE_BELOW: f64 = 0.35;
+pub const HALF_BLINK_MIN: f64 = EYES_CLOSED_BELOW;
+pub const HALF_BLINK_MAX: f64 = 0.65;
+/// Weight of the composition score in the portrait / group / night / other mixes; landscapes and
+/// architecture weigh it 0.20 (renormalised with the other available components).
+pub const COMPOSITION_WEIGHT: f64 = 0.08;
+
 pub const PENALTY_CLOSED_EYES: f64 = 0.25;
 pub const PENALTY_SEVERE_BLUR: f64 = 0.30;
 pub const PENALTY_SEVERE_EXPOSURE: f64 = 0.20;
@@ -58,16 +80,22 @@ pub enum Issue {
     Underexposed,
     Noisy,
     Tilted,
+    /// A sharp, sizeable non-subject face that is a living person ([`is_tag_bystander`]).
+    Bystander,
+    /// A subject mid-word or half-blinking ([`bad_expression`]).
+    BadExpression,
 }
 
 impl Issue {
-    pub const ALL: [Issue; 6] = [
+    pub const ALL: [Issue; 8] = [
         Issue::ClosedEyes,
         Issue::Blurry,
         Issue::Overexposed,
         Issue::Underexposed,
         Issue::Noisy,
         Issue::Tilted,
+        Issue::Bystander,
+        Issue::BadExpression,
     ];
 
     pub fn key(self) -> &'static str {
@@ -78,11 +106,13 @@ impl Issue {
             Self::Underexposed => "underexposed",
             Self::Noisy => "noisy",
             Self::Tilted => "tilted",
+            Self::Bystander => "bystander",
+            Self::BadExpression => "bad_expression",
         }
     }
 
     /// Bit in `photo.issues` (docs/05: 1 closed eyes, 2 blur, 4 over, 8 under, 16 tilt, 32 bystander;
-    /// 64 = noisy is an extension).
+    /// 64 = noisy and 128 = bad expression are extensions).
     pub fn bit(self) -> i64 {
         match self {
             Self::ClosedEyes => 1,
@@ -91,6 +121,8 @@ impl Issue {
             Self::Underexposed => 8,
             Self::Tilted => 16,
             Self::Noisy => 64,
+            Self::Bystander => 32,
+            Self::BadExpression => 128,
         }
     }
 
@@ -123,6 +155,16 @@ pub struct FaceFeat {
     pub pitch: Option<f64>,
     pub sharpness: Option<f64>,
     pub is_subject: bool,
+    /// 0-1 confidence that the face is on a statue / poster / screen / print (`face.artificial`).
+    pub artificial: Option<f64>,
+    /// jawOpen blendshape, 0 closed ... 1 wide open.
+    pub mouth_open: Option<f64>,
+}
+
+impl FaceFeat {
+    pub fn likely_artificial(&self) -> bool {
+        self.artificial.is_some_and(|a| a >= ARTIFICIAL_AT)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -139,6 +181,10 @@ pub struct PhotoFeat {
     /// Horizon tilt in degrees (> 0 = clockwise) and its 0..1 confidence.
     pub tilt_deg: Option<f64>,
     pub tilt_confidence: Option<f64>,
+    /// `[x, y, w, h]` of the visual subject (worker saliency), the anchor without subject faces.
+    pub saliency: Option<[f64; 4]>,
+    /// Composition score 0-1 (`composition::composition_score`), filled in by the caller.
+    pub composition: Option<f64>,
     pub scene_type: Option<String>,
     pub faces: Vec<FaceFeat>,
 }
@@ -259,6 +305,57 @@ pub fn subject_flags(faces: &[(FaceFeat, bool /* person named */)]) -> Vec<bool>
     subject
 }
 
+/// [`subject_flags`] over the living faces only: a face on a statue, poster or screen
+/// ([`FaceFeat::likely_artificial`]) is never a subject and does not take part in the
+/// competition, so a big poster cannot demote the people standing in front of it.
+pub fn subject_flags_live(faces: &[(FaceFeat, bool)]) -> Vec<bool> {
+    let live: Vec<(FaceFeat, bool)> = faces
+        .iter()
+        .filter(|(f, _)| !f.likely_artificial())
+        .cloned()
+        .collect();
+    let mut flags = subject_flags(&live).into_iter();
+    faces
+        .iter()
+        .map(|(f, _)| !f.likely_artificial() && flags.next().unwrap_or(false))
+        .collect()
+}
+
+/// A sharp, sizeable, living non-subject face (the `bystander` tag, see
+/// [`BYSTANDER_MIN_AREA`]); the same test picks the faces "remove bystanders" suggests.
+pub fn is_tag_bystander(f: &FaceFeat) -> bool {
+    !f.is_subject
+        && !f.likely_artificial()
+        && f.bbox[2].max(0.0) * f.bbox[3].max(0.0) >= BYSTANDER_MIN_AREA
+        && f.sharpness.unwrap_or(0.0) >= BYSTANDER_MIN_SHARPNESS
+}
+
+pub fn bystander_count(faces: &[FaceFeat]) -> usize {
+    faces.iter().filter(|f| is_tag_bystander(f)).count()
+}
+
+/// Why a subject's expression is "not great", `None` when it is fine or unknown (no landmarks).
+/// `"talking"`: mouth open at least [`TALKING_MOUTH_OPEN`]; `"half_blink"`: eyes between
+/// [`HALF_BLINK_MIN`] and [`HALF_BLINK_MAX`]; both only without a smile ([`EXPR_SMILE_BELOW`]).
+pub fn bad_expression(f: &FaceFeat) -> Option<&'static str> {
+    if !f.is_subject || f.likely_artificial() {
+        return None;
+    }
+    let smile = f.smile?;
+    if smile >= EXPR_SMILE_BELOW {
+        return None;
+    }
+    if f.mouth_open.is_some_and(|m| m >= TALKING_MOUTH_OPEN) {
+        return Some("talking");
+    }
+    if f.eyes_open
+        .is_some_and(|e| (HALF_BLINK_MIN..HALF_BLINK_MAX).contains(&e))
+    {
+        return Some("half_blink");
+    }
+    None
+}
+
 // ------------------------------------------------------------------ per-photo score
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Contribution {
@@ -318,6 +415,7 @@ fn weights(scene: &str) -> &'static [(&'static str, f64)] {
             ("sharpness", 0.25),
             ("aesthetic", 0.20),
             ("exposure", 0.15),
+            ("composition", COMPOSITION_WEIGHT),
         ],
         "landscape" | "architecture" => &[
             ("aesthetic", 0.40),
@@ -330,12 +428,14 @@ fn weights(scene: &str) -> &'static [(&'static str, f64)] {
             ("sharpness", 0.35),
             ("technical", 0.20),
             ("exposure", 0.15),
+            ("composition", COMPOSITION_WEIGHT),
         ],
         _ => &[
             ("aesthetic", 0.30),
             ("sharpness", 0.30),
             ("technical", 0.25),
             ("exposure", 0.15),
+            ("composition", COMPOSITION_WEIGHT),
         ],
     }
 }
@@ -405,6 +505,12 @@ pub fn detect_issues(feat: &PhotoFeat, scene: &str) -> (Vec<Issue>, Vec<Issue>) 
     if tilted_by(feat).is_some() {
         issues.push(Issue::Tilted);
     }
+    if bystander_count(&feat.faces) > 0 {
+        issues.push(Issue::Bystander);
+    }
+    if feat.faces.iter().any(|f| bad_expression(f).is_some()) {
+        issues.push(Issue::BadExpression);
+    }
     (issues, hard)
 }
 
@@ -436,7 +542,8 @@ pub fn score_photo(feat: &PhotoFeat) -> PhotoScore {
             "aesthetic" => feat.aesthetic,
             "exposure" => feat.exposure,
             "technical" => technical,
-            _ => None, // composition: not measured in M2
+            "composition" => feat.composition,
+            _ => None,
         }
         .map(clamp01)
     };
@@ -491,6 +598,12 @@ pub fn score_photo(feat: &PhotoFeat) -> PhotoScore {
             json!({"count": ids.len(), "person_id": first})
         } else if let (Issue::Tilted, Some(deg)) = (i, tilted_by(feat)) {
             json!({"deg": (deg.abs() * 10.0).round() / 10.0})
+        } else if *i == Issue::Bystander {
+            json!({"count": bystander_count(&feat.faces)})
+        } else if *i == Issue::BadExpression {
+            let kinds: Vec<&str> = feat.faces.iter().filter_map(bad_expression).collect();
+            let first = kinds.first().copied().unwrap_or("talking");
+            json!({"count": kinds.len(), "kind": first})
         } else {
             json!({})
         };
@@ -1103,5 +1216,255 @@ mod tests {
         }]);
         assert_eq!(r[0].ai_rating, base_stars(q));
         assert!(r[0].reasons.iter().all(|x| x.key != "best_in_group"));
+    }
+
+    // ---------------------------------------------------------------- P1-8: tags and composition
+    fn stranger(sharp: f64, w: f64, h: f64) -> FaceFeat {
+        FaceFeat {
+            bbox: [0.75, 0.5, w, h],
+            sharpness: Some(sharp),
+            is_subject: false,
+            ..Default::default()
+        }
+    }
+
+    fn with_faces(faces: Vec<FaceFeat>) -> PhotoFeat {
+        let mut f = good(1);
+        f.scene_type = Some("portrait".into());
+        f.faces = faces;
+        f
+    }
+
+    #[test]
+    fn bystander_tag_needs_a_sharp_sizeable_living_non_subject() {
+        let tags = |f: &PhotoFeat| score_photo(f).issues;
+        let main = face(0.9, true);
+        // sharp and big enough: tagged, no penalty, count in the reason
+        let f = with_faces(vec![main.clone(), stranger(0.8, 0.07, 0.1)]);
+        let s = score_photo(&f);
+        assert_eq!(s.issues, vec![Issue::Bystander]);
+        assert!(!s.hard_issue);
+        assert_eq!(
+            s.reasons
+                .iter()
+                .find(|r| r.key == "bystander")
+                .unwrap()
+                .params,
+            json!({"count": 1})
+        );
+        // too small, too blurry: background, not a bystander
+        assert!(tags(&with_faces(vec![main.clone(), stranger(0.8, 0.04, 0.06)])).is_empty());
+        assert!(tags(&with_faces(vec![main.clone(), stranger(0.2, 0.07, 0.1)])).is_empty());
+        // a subject is no bystander; no faces, no tag
+        assert!(tags(&with_faces(vec![main.clone(), face(0.9, true)])).is_empty());
+        assert!(tags(&good(1)).is_empty());
+        // the tag does not move the score
+        let plain = with_faces(vec![main.clone()]);
+        assert_eq!(score_photo(&plain).q, s.q);
+    }
+
+    #[test]
+    fn bystander_tag_skips_faces_on_statues_and_posters() {
+        let mut statue = stranger(0.8, 0.07, 0.1);
+        statue.artificial = Some(0.9);
+        let f = with_faces(vec![face(0.9, true), statue.clone()]);
+        assert!(!score_photo(&f).issues.contains(&Issue::Bystander));
+        // below the threshold it is a person again
+        statue.artificial = Some(ARTIFICIAL_AT - 0.01);
+        let f = with_faces(vec![face(0.9, true), statue.clone()]);
+        assert!(score_photo(&f).issues.contains(&Issue::Bystander));
+        // one living and one artificial stranger: counted once
+        let mut poster = stranger(0.8, 0.09, 0.12);
+        poster.artificial = Some(1.0);
+        let f = with_faces(vec![face(0.9, true), statue, poster]);
+        let s = score_photo(&f);
+        assert_eq!(
+            s.reasons
+                .iter()
+                .find(|r| r.key == "bystander")
+                .unwrap()
+                .params["count"],
+            1
+        );
+    }
+
+    #[test]
+    fn artificial_faces_take_no_part_in_the_subject_competition() {
+        let mk = |x, y, w, h, art: Option<f64>| {
+            (
+                FaceFeat {
+                    bbox: [x, y, w, h],
+                    sharpness: Some(0.8),
+                    artificial: art,
+                    ..Default::default()
+                },
+                false,
+            )
+        };
+        // a huge centred poster face next to two smaller living people
+        let faces = [
+            mk(0.3, 0.1, 0.4, 0.6, Some(0.9)),
+            mk(0.05, 0.4, 0.12, 0.18, None),
+            mk(0.8, 0.4, 0.12, 0.18, None),
+        ];
+        // plain subject_flags lets the poster demote everyone else ...
+        assert_eq!(subject_flags(&faces), vec![true, false, false]);
+        // ... the live variant does not
+        assert_eq!(subject_flags_live(&faces), vec![false, true, true]);
+        // identical to subject_flags when nothing is artificial
+        let live = [
+            mk(0.4, 0.3, 0.2, 0.3, None),
+            mk(0.9, 0.9, 0.02, 0.03, Some(0.1)),
+        ];
+        assert_eq!(subject_flags_live(&live), subject_flags(&live));
+    }
+
+    fn talking(smile: f64, mouth: f64, eyes: f64) -> FaceFeat {
+        FaceFeat {
+            smile: Some(smile),
+            mouth_open: Some(mouth),
+            eyes_open: Some(eyes),
+            ..face(eyes, true)
+        }
+    }
+
+    #[test]
+    fn bad_expression_tag_mapping() {
+        let kind = bad_expression;
+        assert_eq!(kind(&talking(0.05, 0.4, 0.9)), Some("talking"));
+        assert_eq!(
+            kind(&talking(0.05, TALKING_MOUTH_OPEN, 0.9)),
+            Some("talking")
+        );
+        assert_eq!(kind(&talking(0.05, TALKING_MOUTH_OPEN - 0.01, 0.9)), None);
+        assert_eq!(kind(&talking(0.8, 0.6, 0.9)), None, "laughing is fine");
+        assert_eq!(kind(&talking(EXPR_SMILE_BELOW, 0.6, 0.9)), None);
+        assert_eq!(kind(&talking(0.1, 0.0, 0.55)), Some("half_blink"));
+        assert_eq!(kind(&talking(0.1, 0.0, HALF_BLINK_MIN)), Some("half_blink"));
+        assert_eq!(
+            kind(&talking(0.1, 0.0, HALF_BLINK_MIN - 0.01)),
+            None,
+            "closed_eyes instead"
+        );
+        assert_eq!(kind(&talking(0.1, 0.0, HALF_BLINK_MAX)), None);
+        assert_eq!(kind(&talking(0.8, 0.0, 0.55)), None, "smiling eyes");
+        // no landmarks, not a subject, statue: no verdict
+        assert_eq!(
+            kind(&FaceFeat {
+                is_subject: true,
+                ..Default::default()
+            }),
+            None
+        );
+        let mut other = talking(0.05, 0.5, 0.9);
+        other.is_subject = false;
+        assert_eq!(kind(&other), None);
+        let mut art = talking(0.05, 0.5, 0.9);
+        art.artificial = Some(0.9);
+        assert_eq!(kind(&art), None);
+    }
+
+    #[test]
+    fn bad_expression_is_a_tag_not_a_penalty() {
+        let ok = with_faces(vec![talking(0.6, 0.0, 0.9)]);
+        let bad = with_faces(vec![talking(0.05, 0.5, 0.9)]);
+        let (a, b) = (score_photo(&ok), score_photo(&bad));
+        assert!(!a.issues.contains(&Issue::BadExpression));
+        assert_eq!(b.issues, vec![Issue::BadExpression]);
+        assert!(!b.hard_issue);
+        let r = b
+            .reasons
+            .iter()
+            .find(|r| r.key == "bad_expression")
+            .unwrap();
+        assert_eq!(r.params, json!({"count": 1, "kind": "talking"}));
+        // eyes closed AND mid-talk on two subjects: both tags, closed eyes first
+        let both = with_faces(vec![talking(0.05, 0.5, 0.9), talking(0.6, 0.0, 0.1)]);
+        assert_eq!(
+            score_photo(&both).issues,
+            vec![Issue::ClosedEyes, Issue::BadExpression]
+        );
+    }
+
+    #[test]
+    fn issue_bits_and_keys_round_trip() {
+        assert_eq!(Issue::Bystander.bit(), 32);
+        assert_eq!(Issue::BadExpression.bit(), 128);
+        let all = Issue::ALL.to_vec();
+        assert_eq!(Issue::from_mask(Issue::to_mask(&all)), all);
+        let bits: std::collections::HashSet<i64> = all.iter().map(|i| i.bit()).collect();
+        assert_eq!(bits.len(), all.len(), "bits are distinct");
+        for i in all {
+            assert_eq!(Issue::parse(i.key()), Some(i));
+        }
+    }
+
+    #[test]
+    fn composition_enters_the_score_with_a_modest_weight() {
+        // without a composition value nothing changes (calibration of existing photos)
+        let mut f = good(1);
+        f.scene_type = Some("other".into());
+        let base = score_photo(&f);
+        assert!(base.components.iter().all(|c| c.0 != "composition"));
+        // with one, its normalised weight is COMPOSITION_WEIGHT / (1.0 + COMPOSITION_WEIGHT)
+        f.composition = Some(0.9);
+        let s = score_photo(&f);
+        let c = s.components.iter().find(|c| c.0 == "composition").unwrap();
+        assert!((c.2 - COMPOSITION_WEIGHT / (1.0 + COMPOSITION_WEIGHT)).abs() < 1e-9);
+        assert!(c.2 < 0.10);
+        assert!(s.contributions.iter().any(|c| c.key == "composition"));
+        // the swing between a bad and a good composition stays small
+        let (mut lo, mut hi) = (f.clone(), f.clone());
+        lo.composition = Some(0.1);
+        hi.composition = Some(0.9);
+        let swing = score_photo(&hi).q - score_photo(&lo).q;
+        assert!(swing > 0.03 && swing < 0.07, "{swing}");
+    }
+
+    #[test]
+    fn composition_changes_the_ranking_only_where_it_differs() {
+        let mut a = good(1);
+        let mut b = good(2);
+        a.scene_type = Some("other".into());
+        b.scene_type = Some("other".into());
+        // b is a hair better technically, so it wins when the compositions are equal ...
+        b.sharpness = Some(0.91);
+        a.sharpness = Some(0.90);
+        let order = |a: &PhotoFeat, b: &PhotoFeat| {
+            let emb = |v: f32| vec![v, 1.0 - v];
+            let (ea, eb) = (emb(1.0), emb(0.0));
+            rank_burst(vec![
+                BurstMember {
+                    score: score_photo(a),
+                    taken_at: Some(1),
+                    emb: Some(&ea),
+                },
+                BurstMember {
+                    score: score_photo(b),
+                    taken_at: Some(2),
+                    emb: Some(&eb),
+                },
+            ])
+            .iter()
+            .map(|r| r.photo_id)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(order(&a, &b), vec![2, 1]);
+        a.composition = Some(0.5);
+        b.composition = Some(0.5);
+        assert_eq!(
+            order(&a, &b),
+            vec![2, 1],
+            "equal compositions keep the order"
+        );
+        // ... and loses when a is clearly better framed
+        a.composition = Some(0.95);
+        b.composition = Some(0.15);
+        assert_eq!(order(&a, &b), vec![1, 2]);
+        // a composition on only one photo is renormalised, not punished as a zero
+        a.composition = None;
+        b.composition = Some(0.9);
+        let (sa, sb) = (score_photo(&a), score_photo(&b));
+        assert!(sb.q > sa.q - 0.01);
     }
 }

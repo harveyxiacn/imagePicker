@@ -354,7 +354,7 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
         .map(|s| {
             Issue::parse(s).ok_or_else(|| {
                 ApiError::bad_request(
-                    "issues_any must list closed_eyes|blurry|overexposed|underexposed|noisy|tilted",
+                    "issues_any must list closed_eyes|blurry|overexposed|underexposed|noisy|tilted|bystander|bad_expression",
                 )
             })
         })
@@ -475,6 +475,17 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
         },
         event_id: p.event_id,
     })
+}
+
+/// Photo filters of `GET /api/timeline`: the parameters of `/api/photos` minus the session, paging
+/// and sort (unknown keys such as `granularity` are ignored here and read by the handler).
+pub(crate) fn timeline_filters(raw: &str) -> Result<PhotoQuery, ApiError> {
+    let mut p: PhotosParams = serde_urlencoded::from_str(raw)
+        .map_err(|e| ApiError::bad_request(format!("invalid query: {e}")))?;
+    p.session_id = Some(0); // placeholder: the timeline scopes by its own `session_id`
+    p.cursor = None;
+    p.limit = None;
+    photo_query(p)
 }
 
 pub async fn list_photos(

@@ -6,8 +6,8 @@ import { qk, type PhotosData } from '@/lib/cache'
 import { isLive } from '@/lib/tasks'
 import { mergeSettings } from '@/lib/settingsForm'
 import { useToasts } from '@/stores/toasts'
-import type { AnalysisProfile, SearchMeta, Settings, SettingsPatch } from './types'
-import { api, fetchAllPhotos, fetchSearchPhotos } from './client'
+import type { AnalysisProfile, SearchMeta, Settings, SettingsPatch, TimelineQuery } from './types'
+import { api, fetchAllPhotos, fetchSearchPhotos, timelineQueryString } from './client'
 
 
 /**
@@ -138,6 +138,18 @@ export function useGroups(sessionId: number) {
     queryFn: () => api.groups(sessionId),
     select: (d) => d.scenes,
     staleTime: 30_000,
+  })
+}
+
+/** Library timeline buckets (`GET /timeline`); `enabled` false = not asked for yet. */
+export function useLibraryTimeline(q: TimelineQuery, enabled = true) {
+  const qs = timelineQueryString(q)
+  return useQuery({
+    queryKey: qk.libTimeline(qs),
+    queryFn: () => api.libraryTimeline(q),
+    enabled,
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
   })
 }
 

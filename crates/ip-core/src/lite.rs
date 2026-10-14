@@ -196,6 +196,7 @@ fn analyze_one_with(
             noise_sigma: Some(q.noise_sigma),
             tilt_deg: Some(q.tilt_deg),
             tilt_confidence: Some(q.tilt_confidence),
+            saliency: None,
         }),
         faces: faces.unwrap_or_default(),
         ..Default::default()
