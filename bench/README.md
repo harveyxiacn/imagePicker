@@ -16,6 +16,7 @@ live in [`REPORT.md`](REPORT.md); raw numbers in `results/*.json`.
 | `web/scripts/e2e-real.mjs` | Real-server end-to-end test, see [`CI-E2E.md`](CI-E2E.md). |
 | `bench/eval-library.py`, `bench/eval-standard.py` | Score an analysed catalog of the synthetic photo library (`bench/data/qwen-photo-library`, labels in its `manifest.json`): issue tags incl. closed eyes, bursts and best frame; `eval-standard.py` adds people clustering vs the actor ids, expression signals, subject / bystander split, scenes, stars and GPU use. Results: [`standard-eval-2026-10-09.md`](standard-eval-2026-10-09.md). |
 | `scripts/comfy-photo-library.py`, `scripts/comfy-photo-library-audit.py`, `scripts/test_comfy_photo_library.py` | Generator of the synthetic photo library with a local ComfyUI (Qwen-Image; plan, resumable run, EXIF, audit with pHash burst distances and a contact sheet; the test runs without ComfyUI). Plan, categories and quality limits: [`photo-library-2026-10-08.md`](photo-library-2026-10-08.md). The images stay in the git-ignored `bench/data/`. |
+| `bench/eval-search.py` | Scores natural-language search (`GET /api/search`, docs/api-contract-m2.md C.7) on the same library: 20 concepts asked in English and in Chinese (40 queries), relevance from the manifest prompts and tags, precision / recall@20 per query and per language. Needs a running server, the library imported and analysed with `standard`, and the `siglip2-base-text` model (GPU PC); `--dry-run` only lists the queries and their relevant-photo counts. See "Search evaluation" below. |
 | `bench/api-features.py` | Drives the AI features of a running `imagepicker serve` end to end (masks, best take, inpaint, denoise, face restore, upscale on export, portrait retouch, assistant plan / execute / undo, describe, face search, XMP round trip) and saves before / after images with numeric checks. |
 | `bench/worker-rpc.py`, `bench/besttake-align.py` | Call the AI worker's JSON-RPC methods directly (`system.info`, `models.ensure`, ...); global-alignment statistics of the library's bursts as Best Take computes them (`--legacy` = the pre-2026-10-09 exclusion zone). |
 
@@ -31,6 +32,22 @@ These score the analysis itself rather than speed; inputs are the generated phot
 | `bench/make-tilt-set.py [LIBRARY] [OUT]` | Rotates 247 library photos by 0, +-1, +-2, +-3, +-5, +-8 degrees (border-free centre crop) into `bench/data/tilt-set` with the true angles in its manifest (Pillow). |
 | `bench/eval-time-align.py DATA_DIR [--session ID] [--trials N] [--offsets LIST]` | Multi-device time alignment (docs/03 section 2.4): opens an analysed catalog with photos of two or more devices read-only, shifts one device's capture times by known offsets (seconds to hours, in memory) and reports how often the estimator finds the shift again within 5 s, the median / p95 / max error, trials without an estimate and the real clock differences of the library. A numpy port of `analysis/time_align.rs`; run it on the GPU PC next to a real library, it is not part of CI. |
 | `bench/eval-tilt.py TILT_SET DATA_DIR [--library LIBRARY DATA_DIR]` | Tilt estimate error, `tilted` flag precision / recall per angle, false positives on the 0-degree copies and the library, and a threshold sweep (docs/03 section 3.1.1). |
+
+## Search evaluation (`eval-search.py`)
+
+```sh
+# 1. import bench/data/qwen-photo-library/jpeg as one session and run the *standard* analysis on it
+#    (the app or: imagepicker serve ... then POST /api/import and /api/analysis/run), install siglip2-base-text
+# 2. with the server still running:
+python bench/eval-search.py bench/data/qwen-photo-library --session-id <id> --base http://127.0.0.1:7911 \
+    --k 20 --json bench/results/search-eval.json
+python bench/eval-search.py bench/data/qwen-photo-library --dry-run      # no server: queries + relevant counts
+```
+
+* 20 concepts (beach, snow, cat, dog, noodles, birthday cake, neon street, group photo, ...), each as an English and a Chinese query. A photo is relevant when the English prompt that generated it mentions the concept (regular expression over the scene text, style preamble cut) or its tags say so; prompts are intentions, not verified truth, so absolute recall is underestimated. The numbers compare zh with en and one model / threshold with another.
+* Per query: relevant photos, hits in the top K, precision@K, recall@K (hits / relevant) and *capped* recall@K (hits / min(K, relevant); 1.0 = the best possible top K, the figure to compare with the 09 P1-4 target of 0.8). The summary averages each over the en and zh queries. `--min-score` defaults to 0 so the ranking is measured; use `0.05` for what a user sees.
+* Exit status: 0 when it ran, 2 when the text model is missing (HTTP 409), 1 on other errors. Standard library only.
+* Not run in the Oracle development session that added it (no models, no GPU there): the first numbers are still to be recorded here by whoever runs it on the GPU PC.
 
 ## Reproduce
 

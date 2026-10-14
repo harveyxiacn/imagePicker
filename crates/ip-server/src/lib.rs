@@ -13,6 +13,7 @@ pub mod m6;
 pub mod m7;
 pub mod remote;
 pub mod routes;
+pub mod search;
 pub mod time_align;
 pub mod timeline;
 pub mod ws;
@@ -146,6 +147,7 @@ pub fn build_router_auth(
             get(time_align::get_offsets).put(time_align::put_offsets),
         )
         .route("/sessions/{id}/timeline", get(timeline::session_timeline))
+        .route("/timeline", get(timeline::library_timeline))
         .route(
             "/sessions/{id}/filter-options",
             get(routes::session_filter_options),
@@ -212,6 +214,7 @@ pub fn build_router_auth(
         )
         .route("/edits/apply-profiles", post(m4::apply_profiles))
         .route("/people/best", get(m4::people_best))
+        .route("/search", get(search::search))
         .route(
             "/faces/search",
             post(m4::faces_search).layer(DefaultBodyLimit::max(m4::SEARCH_BODY_LIMIT)),

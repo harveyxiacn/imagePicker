@@ -15,6 +15,8 @@ import type {
   DuplicatesResponse,
   GroupsResponse,
   TimelineResponse,
+  LibraryTimeline,
+  TimelineQuery,
   HardwareInfo,
   ImportBody,
   RelocateReport,
@@ -69,8 +71,11 @@ import type {
   RuntimeInfo,
   Settings,
   SettingsPatch,
+  SearchMeta,
+  SearchResponse,
   TaskRecord, CardImportBody, ImportSources } from './types'
 import { joinCsvText } from '@/lib/csvText'
+import { orderByHits, SEARCH_LIMIT } from '@/lib/search'
 import type { OffsetsAction } from '@/lib/timeAlign'
 import { diagnosticsFilename } from '@/lib/diagnostics'
 
@@ -189,12 +194,42 @@ export function photosQueryString(q: PhotosQuery): string {
   if (q.sharp) p.set('sharp', q.sharp)
   if (q.face_ids?.length) p.set('face_ids', q.face_ids.join(','))
   if (q.face_similarity !== undefined) p.set('face_similarity', String(q.face_similarity))
+  if (q.ids) p.set('ids', q.ids.join(','))
   if (q.has_edits) p.set('has_edits', '1')
   if (q.duplicates) p.set('duplicates', '1')
   if (q.event_id !== undefined) p.set('event_id', String(q.event_id))
   if (q.sort) p.set('sort', q.sort)
   if (q.cursor) p.set('cursor', q.cursor)
   if (q.limit) p.set('limit', String(q.limit))
+  return p.toString()
+}
+
+/**
+ * Query string of GET /api/search: the photo filters of `q` (not its sort, paging, ids or search text) plus the
+ * query text `text` and the number of hits wanted.
+ */
+export function searchQueryString(q: PhotosQuery, text: string, limit: number): string {
+  const filters: PhotosQuery = { ...q }
+  delete filters.sort
+  delete filters.cursor
+  delete filters.limit
+  delete filters.ids
+  delete filters.search
+  const p = new URLSearchParams(photosQueryString(filters))
+  p.set('q', text)
+  p.set('limit', String(limit))
+  return p.toString()
+}
+
+/** Query string of GET /api/timeline: the photo filters of `photosQueryString` without a session, plus level / window. */
+export function timelineQueryString(q: TimelineQuery): string {
+  const { granularity, from, to, session_id, ...filters } = q
+  const p = new URLSearchParams(photosQueryString({ ...filters, session_id: 0 }))
+  p.delete('session_id')
+  if (session_id !== undefined) p.set('session_id', String(session_id))
+  if (granularity) p.set('granularity', granularity)
+  if (from) p.set('from', from)
+  if (to) p.set('to', to)
   return p.toString()
 }
 
@@ -217,9 +252,12 @@ export const api = {
   rejectFiles: (body: { session_id: number; ids?: number[]; mode: RejectMode; confirm: boolean }) =>
     request<{ result: RejectFilesReport }>('POST', '/photos/reject-files', body),
   photos: (q: PhotosQuery) => request<PhotosResponse>('GET', `/photos?${photosQueryString(q)}`),
+  search: (q: PhotosQuery, text: string, limit = SEARCH_LIMIT) =>
+    request<SearchResponse>('GET', `/search?${searchQueryString(q, text, limit)}`),
   photo: (id: number) => request<{ photo: Photo }>('GET', `/photos/${id}`),
   photoDuplicates: (id: number) => request<DuplicatesResponse>('GET', `/photos/${id}/duplicates`),
   timeline: (session_id: number) => request<TimelineResponse>('GET', `/sessions/${session_id}/timeline`),
+  libraryTimeline: (q: TimelineQuery) => request<LibraryTimeline>('GET', `/timeline?${timelineQueryString(q)}`),
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),
@@ -362,6 +400,22 @@ export const api = {
 /** Page size used when pulling a whole session (contract: max 5000). */
 export const PAGE_SIZE = 5000
 
+/**
+ * The photos of a natural-language search, best first: GET /api/search (with the query's filters) ranks the photos,
+ * then GET /api/photos fetches them by id.
+ */
+export async function fetchSearchPhotos(
+  q: Omit<PhotosQuery, 'cursor' | 'limit'>,
+): Promise<{ photos: Photo[]; total: number; search: SearchMeta }> {
+  const text = q.search ?? ''
+  const res = await api.search(q, text)
+  const search: SearchMeta = { total_matched: res.total_matched, searched: res.searched, unindexed: res.unindexed }
+  if (!res.hits.length) return { photos: [], total: 0, search }
+  const { photos } = await fetchAllPhotos({ session_id: q.session_id, ids: res.hits.map((h) => h.photo_id) })
+  const ordered = orderByHits(photos, res.hits)
+  return { photos: ordered, total: ordered.length, search }
+}
+
 /** Pulls every page of a photos query (client virtualizes up to ~20k items). */
 export async function fetchAllPhotos(
   q: Omit<PhotosQuery, 'cursor' | 'limit'>,
@@ -378,6 +432,8 @@ export async function fetchAllPhotos(
 
 // ---- Binary URLs ----
 
+/** Thumbnail by id only (the `v` cache key is optional): timeline tiles know just the photo ids. */
+export const thumbUrlById = (id: number, s: 256 | 512 = 256) => `${BASE}/thumb/${id}?s=${s}`
 export const thumbUrl = (p: Pick<Photo, 'id' | 'thumb_version'>, s: 256 | 512 = 256) =>
   `${BASE}/thumb/${p.id}?s=${s}&v=${encodeURIComponent(p.thumb_version)}`
 /** `v` (thumb_version) busts the cache when edits change the rendered preview. */

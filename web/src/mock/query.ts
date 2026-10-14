@@ -29,7 +29,9 @@ export function filterPhotos(photos: Photo[], q: URLSearchParams): Photo[] {
   const sharp = q.get('sharp')
   // the mock has no keywords or face embeddings: a keyword filter matches nothing, face_ids is ignored
   const tags = splitCsvText(q.get('tags'))
+  const only = q.has('ids') ? new Set((q.get('ids') ?? '').split(',').filter(Boolean).map(Number)) : null
   let out = photos.filter((p) => {
+    if (only && !only.has(p.id)) return false
     if (rating && Number(rating) > 0 && (p.user_rating ?? -1) < Number(rating)) return false
     if (flag === 'picked' && p.flag !== 1) return false
     if (flag === 'rejected' && p.flag !== -1) return false

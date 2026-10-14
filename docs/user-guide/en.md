@@ -50,7 +50,7 @@ Home: drop a folder (desktop) or click *Choose folder* to import; *Recent* lists
 | Right inspector | Score breakdown, AI suggestion (with *Accept*), flag, colour, faces, EXIF (`Tab` hides / shows it) |
 | Status bar | Thumbnail progress, selection count, picked / rejected / rated totals, connection state |
 
-> The search box in the top bar (natural-language search) is a greyed-out placeholder for now; to find photos use the filter bar, the `Ctrl+K` command palette or the assistant's filter commands. Narrow screens (width < 768 px, e.g. phones) switch to a mobile layout automatically, see [section 20](#20-mobile--remote-ai-experimental).
+> The search box in the top bar finds photos by description (see section 6, *Search by description*). Narrow screens (width < 768 px, e.g. phones) switch to a mobile layout automatically, see [section 20](#20-mobile--remote-ai-experimental).
 
 ## 2. Installation
 
@@ -303,6 +303,17 @@ Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best o
 
 > **Honest note:** the issue thresholds were tuned on a 1000-image synthetic test library, not yet on a large set of real photos. Bright or dark frames that keep their detail (white backdrops, paper, neon streets at night) are no longer tagged over- or underexposed; inside a burst, a frame clearly softer than the sharpest one is tagged "blurry". Soft-background portraits can still be tagged blurry. Treat AI stars as suggestions.
 
+### Search by description
+
+Type what is in the photo into the top-bar search box, **in Chinese or English**: "sunset at the beach", "a cat on the sofa", "海边日落". The search runs about 0.4 s after you stop typing; press Enter to run it at once, `Esc` or the × in the box to clear it.
+
+- Results are ranked **best match first**. A "Search: …" pill appears in the filter bar; click its × to remove it. Search combines with the other filters (for example "3 stars and up + search: sunset").
+- At most the 300 best matches are shown; when nothing reaches the match threshold you see "No photos match …".
+- **Requirements**: (1) the photos went through the **standard analysis** (search uses the image features that analysis stores; photos that were only analysed with the fast profile, or not at all, cannot be found, and the app tells you how many); (2) the **search model** (`siglip2-base-text`, about 550 MB, one-time download, offline afterwards) is installed. Without it the box is greyed out and an *Install search model* button sits next to it.
+- Guests on the LAN can search too.
+
+> **Honest note:** search understands the overall content of a picture (scene, objects, colours, mood). It is not text recognition and does not count things; use the people filter for people. The model is multilingual but trained mostly on English, so **Chinese is usually less accurate than English**: if a Chinese query misses, try English or a simpler description. Recall has not been measured on a large set of real photos yet (the evaluation script is `bench/eval-search.py`).
+
 ## 7. Groups & stacks
 
 Analysis splits photos into **scenes** (minutes apart, same place/theme) and **bursts** (seconds apart, near-identical frames). In the grid:
@@ -328,6 +339,17 @@ Select a photo inside a stack and press `B`:
 ### Events
 
 Analysis also gathers scenes into **events**: a new event starts when two neighbouring scenes are more than 2 hours apart, or (when the photos carry GPS) more than 5 km apart. The *Events* list in the left sidebar shows the open session's events (only when it has at least two): the first line is the date, the second the time span of that day and the position (coordinates when there is GPS), and the count sits on the right. Click an event to browse only its photos; click it again (or *All photos*) to clear. Events are recomputed after you split or merge groups. The `{event}` token of the export name template is this event name (for example `2024-05-03 1012-1440`).
+
+### Timeline
+
+*Timeline* in the left sidebar opens a strip above the grid with the photos of the library by **capture date**, newest tiles on the right. Each tile shows a thumbnail of the best photo of that period (not rejected, highest rating, highest AI score), a bar for how many photos it holds and the count.
+
+- The strip starts with years. Click a tile to filter the grid to that period (the same capture-date range as in the filter bar); click it again to clear. The small magnifier on a tile (or double-click, or `+`) zooms in: year → months → days. The breadcrumb and the *Zoom out* button (or `-`) go back up.
+- *All sessions / This session* switches between counting every session and only the open one. The strip takes the other filters of the grid into account (rating, flag, colour, people, …), so you can see, for example, where your 4-star photos were taken.
+- Dates are the **local** capture dates (the UTC offset stored with the photo is applied); a photo near midnight in another time zone lands on the day it was taken. Photos without a capture time are listed as a count under the strip and cannot be filtered by date.
+- When a month or a day is shown, the **events** of that period appear as buttons under the tiles; click one to browse its photos (an event of another session opens that session).
+- Keyboard: `Tab` into the strip, arrow keys / `Home` / `End` move between tiles, `Enter` or `Space` filters, `+` / `↓` zooms in, `-` / `↑` / `Backspace` zooms out.
+- Photos taken at a different UTC offset than the one used for the filter can differ by a few photos from the tile count near the edge of a period, because the grid's date filter compares the stored capture time. The map half of F1.9 is not part of this release.
 
 ### Duplicates
 
@@ -687,7 +709,7 @@ Open with the gear icon on Home or in the top bar.
 - **Can I use it without a GPU?** Yes: fast analysis, basic editing and culling work; standard analysis, upscaling etc. are slower. Without the AI components you can still group and score basically with *Quick (on device)*.
 - **Which camera RAW formats?** Common brands (see section 4); RAW is shown from its embedded preview.
 - **Android?** Experimental: there is an app shell, a mobile UI, on-device quick analysis and remote-AI pairing, and CI builds a debug APK, but it has **not been verified on a real device** and there is no released installer. See [section 20](#20-mobile--remote-ai-experimental) and the [design document](../08-Android版本设计.md) (Chinese).
-- **Natural-language search?** The search box is not active yet; use the assistant's filter commands (e.g. "only show Alice's photos") or the `Ctrl+K` command palette meanwhile.
+- **Natural-language search?** The top-bar search box works: describe the photo in Chinese or English. It needs the standard analysis and the search model (section 6, *Search by description*). A photo that cannot be found has most likely not been through the standard analysis.
 
 More known issues: [backlog](../backlog.md) (Chinese). Please report problems via GitHub Issues and **never attach personal photos**.
 

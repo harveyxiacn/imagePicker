@@ -17,6 +17,8 @@ export const qk = {
   analysis: (photoId: number) => ['analysis', 'photo', photoId] as const,
   groups: (sid: number) => ['groups', sid] as const,
   timeline: (sid: number) => ['timeline', sid] as const,
+  /** library timeline buckets; `qs` = the request's query string */
+  libTimeline: (qs: string) => ['libTimeline', qs] as const,
   editsAll: ['edits'] as const,
   edits: (photoId: number) => ['edits', photoId] as const,
   presets: ['presets'] as const,
@@ -305,6 +307,7 @@ export function applyEvents(
     void qc.invalidateQueries({ queryKey: qk.groups(sid) })
     void qc.invalidateQueries({ queryKey: qk.timeline(sid) })
     void qc.invalidateQueries({ queryKey: qk.deviceOffsets(sid) })
+    void qc.invalidateQueries({ queryKey: ['libTimeline'] })
     void qc.invalidateQueries({ queryKey: ['burstFaces'] })
     scheduleListRefetch(qc, sid)
   }

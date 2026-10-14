@@ -22,7 +22,7 @@
 **预发布（开发中；各处版本号仍为 0.1.0，尚无正式发布版）**：桌面端核心功能（导入、分析、分组、评分、人物、最佳表情、编辑、人像美化、修复、导出、AI 助手、局域网 WebUI、XMP 互通、设置）已实现，主要由 mock 与合成图库验证。已知限制（详见 [待办与已知问题](docs/backlog.md) 与 [完成度评审](docs/09-完成度评审与收尾计划.md)）：
 
 - 评分阈值尚未在大规模真实照片上校准；标准档尚未在全部真实模型上端到端评测。
-- **未提供**：自然语言搜索（顶栏搜索框目前是禁用的占位）、「匹配参考图」（编辑面板按钮禁用）、虚拟副本、HTTPS（局域网与远程 AI 使用明文 HTTP，仅限可信局域网）。
+- **未提供**：「匹配参考图」（编辑面板按钮禁用）、虚拟副本、HTTPS（局域网与远程 AI 使用明文 HTTP，仅限可信局域网）。
 - **Android 版**：已有应用外壳、移动端界面（手势挑片、快速挑片、底部抽屉编辑）、本机「快速」分析（仅清晰度/曝光/噪点/连拍分组，没有闭眼与人物）和远程 AI 配对，CI 能构建 debug APK；但**从未在真机或模拟器上运行过**，release 包也很可能无法加载界面（见 [08](docs/08-Android版本设计.md)）。
 - HEIC/HEIF 依赖系统解码器、AI 组件自带的 libheif 或文件内嵌 JPEG，未在真实 iPhone/安卓样张上实测。
 - 安装包与 AI 组件安装器已就绪，但发布链路还没有完整跑过；首个正式版发布前请参考下文「从源码运行」。
@@ -125,7 +125,7 @@ Thousands of shots from a trip, party or wedding? Drop the folder in and hit Ana
 **Pre-release (in development; the version is still 0.1.0 everywhere and no official release exists yet).** The desktop feature set (import, analysis, grouping, scoring, people, best take, editing, portrait retouching, repair, export, AI assistant, LAN WebUI, XMP interop, settings) is implemented and verified mostly against a mock backend and a synthetic library. Known limitations (see the [backlog](docs/backlog.md) and the [completeness review](docs/09-完成度评审与收尾计划.md), both in Chinese):
 
 - Score thresholds are not yet calibrated on a large real-photo set; the Standard profile has not been evaluated end to end with all real models.
-- **Not available:** natural-language search (the search box in the top bar is a disabled placeholder), "Match reference…" (the button in the edit panel is disabled), virtual copies, HTTPS (LAN and remote AI use plain HTTP; trusted networks only).
+- **Not available:** "Match reference…" (the button in the edit panel is disabled), virtual copies, HTTPS (LAN and remote AI use plain HTTP; trusted networks only).
 - **Android:** there is an app shell, a mobile UI (gesture culling, quick cull, bottom-sheet editing), on-device "Fast (on this device)" analysis (sharpness / exposure / noise / burst grouping only; no closed-eye or people detection) and remote-AI pairing, and CI builds a debug APK. It has **never been run on a real device or emulator**, and the release APK probably cannot load its UI (see [08](docs/08-Android版本设计.md), Chinese).
 - HEIC/HEIF relies on the OS decoder, the libheif bundled with the AI components, or the JPEG embedded in the file; it has not been tested on real iPhone/Android samples.
 - Installers and the built-in AI component setup are ready, but the release pipeline has not been run end to end; until the first release is published, see "Run from source" below.

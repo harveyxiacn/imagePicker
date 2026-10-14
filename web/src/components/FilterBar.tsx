@@ -1,4 +1,4 @@
-import { ChevronsUpDown, FolderPlus, Layers, Star, X } from 'lucide-react'
+import { ChevronsUpDown, FolderPlus, Layers, Search, Star, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDevices, usePeople, useSession } from '@/api/queries'
@@ -112,7 +112,7 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
 
   const personPill = p.include.length > 0
   const preset = facesPreset(p)
-  const showPills = personPill || p.exclude.length > 0 || preset !== 'any' || filter.issueMode !== 'all' || filter.sceneType !== null || filter.device.length > 0 || filter.lens.length > 0 || filter.tags.length > 0 || filter.takenFrom !== null || filter.takenTo !== null || filter.sharp !== null || filter.faceIds.length > 0 || filter.bestOnly || filter.edited
+  const showPills = personPill || p.exclude.length > 0 || preset !== 'any' || filter.issueMode !== 'all' || filter.sceneType !== null || filter.device.length > 0 || filter.lens.length > 0 || filter.tags.length > 0 || filter.takenFrom !== null || filter.takenTo !== null || filter.sharp !== null || filter.faceIds.length > 0 || filter.bestOnly || filter.edited || filter.search !== ''
 
   return (
     <div className="shrink-0 border-b border-line">
@@ -298,6 +298,14 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
 
       {showPills && (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-line/60 px-3 py-1.5" data-testid="filter-pills">
+          {filter.search !== '' && (
+            <Pill tone="ai" label={t('search.pill')} onRemove={() => setFilter({ search: '' })}>
+              <Search size={11} />
+              <span className="max-w-[320px] truncate" data-testid="search-pill">
+                {t('search.pill')}: {filter.search}
+              </span>
+            </Pill>
+          )}
           {personPill && (
             <Pill
               tone="ai"

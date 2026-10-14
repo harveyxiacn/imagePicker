@@ -44,6 +44,9 @@ interface UiState {
   faceSearchFace: { id: number; photo_id: number } | null
   /** Library left sidebar (smart collections) */
   sidebarOpen: boolean
+  /** Timeline scrubber above the grid (year -> month -> day) */
+  timelineOpen: boolean
+  setTimelineOpen: (b: boolean) => void
   /** Mobile cull: one photo at a time, or quick cull (AI top-3 cards per group). */
   cullMode: 'single' | 'quick'
   connection: ConnectionStatus
@@ -135,6 +138,7 @@ export const useUi = create<UiState>()(
       faceSearchOpen: false,
       faceSearchFace: null,
       sidebarOpen: !narrow,
+      timelineOpen: false,
       cullMode: 'single',
       connection: 'connecting',
       zoomToggle: 0,
@@ -172,6 +176,7 @@ export const useUi = create<UiState>()(
       setFaceSearchOpen: (faceSearchOpen) => set({ faceSearchOpen, faceSearchFace: null }),
       openFaceSearch: (face) => set({ faceSearchOpen: true, faceSearchFace: { id: face.id, photo_id: face.photo_id } }),
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
+      setTimelineOpen: (timelineOpen) => set({ timelineOpen }),
       setCullMode: (cullMode) => set({ cullMode }),
       setConnection: (connection) => set({ connection }),
       toggleZoom: () => set((s) => ({ zoomToggle: s.zoomToggle + 1 })),

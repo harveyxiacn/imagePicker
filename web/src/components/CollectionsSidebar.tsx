@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CalendarRange, FolderHeart, HeartHandshake, Library, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { CalendarDays, CalendarRange, FolderHeart, HeartHandshake, Library, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
@@ -188,6 +188,8 @@ export function CollectionsSidebar({ sessionId }: { sessionId: number }) {
   const filter = useUi((s) => s.filter)
   const resetFilter = useUi((s) => s.resetFilter)
   const setSidebarOpen = useUi((s) => s.setSidebarOpen)
+  const timelineOpen = useUi((s) => s.timelineOpen)
+  const setTimelineOpen = useUi((s) => s.setTimelineOpen)
   const list = q.data ?? []
   const anyActive = list.some((c) => collectionActive(c.query, filter))
 
@@ -228,6 +230,16 @@ export function CollectionsSidebar({ sessionId }: { sessionId: number }) {
         >
           <Plus size={13} />
           {t('collections.save')}
+        </button>
+        <button
+          className="btn w-full justify-start"
+          style={timelineOpen ? { background: 'color-mix(in srgb, var(--accent) 16%, transparent)' } : undefined}
+          aria-pressed={timelineOpen}
+          onClick={() => setTimelineOpen(!timelineOpen)}
+          data-testid="timeline-toggle"
+        >
+          <CalendarDays size={13} />
+          {t('timelineView.title')}
         </button>
         <Link to="/taste" className="btn btn-ghost w-full justify-start" data-testid="taste-link">
           <HeartHandshake size={13} />

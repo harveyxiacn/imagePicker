@@ -209,8 +209,44 @@ export interface PhotosQuery {
   /** Photos with a face similar to one of these faces (cosine >= `face_similarity`, default 0.38) */
   face_ids?: number[]
   face_similarity?: number
+  /** Only these photos (the hits of a search); `[]` = none */
+  ids?: number[]
+  /**
+   * UI only, never sent to GET /api/photos: natural-language query. The photo list resolves it through
+   * GET /api/search (see `fetchSearchPhotos`); it is part of the query key so each search caches on its own.
+   */
+  search?: string
   cursor?: string
   limit?: number
+}
+
+/** One photo of a search result (`GET /api/search`), best first. */
+export interface SearchHit {
+  photo_id: number
+  /** SigLIP probability 0..1 (what `min_score` applies to) */
+  score: number
+  /** cosine of the query and the photo */
+  similarity: number
+}
+
+export interface SearchResponse {
+  query: string
+  model: string
+  min_score: number
+  hits: SearchHit[]
+  /** photos at or above `min_score` before the `limit` cut the list */
+  total_matched: number
+  /** photos of the scope that have an embedding and were compared */
+  searched: number
+  /** photos of the scope without an embedding: they can never match (analyse them first) */
+  unindexed: number
+}
+
+/** What a search added to the photo list result. */
+export interface SearchMeta {
+  total_matched: number
+  searched: number
+  unindexed: number
 }
 
 export interface PhotosResponse {
@@ -563,6 +599,47 @@ export interface TimelineEvent {
 }
 export interface TimelineResponse {
   events: TimelineEvent[]
+}
+
+/** Library timeline (api-contract-m2 C.6, `GET /api/timeline`): photos bucketed by local capture date. */
+export type TimelineGranularity = 'year' | 'month' | 'day'
+export interface TimelineBucket {
+  /** `2024`, `2024-05` or `2024-05-03` */
+  key: string
+  /** first / last local day of the bucket, `YYYY-MM-DD`: the `taken_from` / `taken_to` of its photos */
+  from: string
+  to: string
+  count: number
+  /** best photos first (not rejected, rating, AI score) */
+  photo_ids: number[]
+}
+export interface TimelineEventRef {
+  id: number
+  session_id: number
+  name: string
+  title: string | null
+  start_at: number
+  end_at: number
+  offset_min: number | null
+  photo_count: number
+}
+export interface LibraryTimeline {
+  granularity: TimelineGranularity
+  from: string | null
+  to: string | null
+  total: number
+  buckets: TimelineBucket[]
+  /** photos without a capture time */
+  undated: { count: number; photo_ids: number[] }
+  /** events touching a bounded month / day window */
+  events: TimelineEventRef[]
+}
+/** `GET /api/timeline` parameters: the photo-list filters plus level, window and optional session. */
+export type TimelineQuery = Omit<PhotosQuery, 'session_id' | 'cursor' | 'limit' | 'sort' | 'event_id'> & {
+  granularity?: TimelineGranularity
+  from?: string
+  to?: string
+  session_id?: number
 }
 export interface DuplicatesResponse {
   group_id: number | null
