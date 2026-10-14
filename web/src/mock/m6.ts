@@ -639,7 +639,7 @@ export const m6Handlers = [
 
   http.get('/api/cache', async () => {
     await lat()
-    return json({ bytes: Object.values(cacheBytes).reduce((a, b) => a + b, 0), items: { ...cacheBytes } })
+    return json({ bytes: Object.values(cacheBytes).reduce((a, b) => a + b, 0), items: { ...cacheBytes }, data_dir: 'C:\\Users\\demo\\AppData\\Roaming\\imagePicker', portable: false })
   }),
   http.post('/api/cache/clear', async ({ request }) => {
     await lat()

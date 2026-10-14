@@ -6,6 +6,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, thumbUrl } from '@/api/client'
 import { useMe, useSessions } from '@/api/queries'
 import type { Session } from '@/api/types'
+import { CardImportSection } from '@/components/CardImport'
 import { FolderBrowser } from '@/components/FolderBrowser'
 import { AlbumPicker } from '@/components/mobile/AlbumPicker'
 import { HeaderControls } from '@/components/HeaderControls'
@@ -91,6 +92,8 @@ export function Home() {
 
       <main className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto flex max-w-5xl flex-col gap-8 p-4 sm:p-8">
+          {can(role, 'edit') && <CardImportSection excludes={excludes} />}
+
           {can(role, 'edit') && <section
             onDragOver={(e) => {
               e.preventDefault()
@@ -116,11 +119,6 @@ export function Home() {
                 {importMut.isPending ? <Loader2 size={15} className="animate-spin" /> : <FolderOpen size={15} />}
                 {t('home.chooseFolder')}
               </button>
-              {!mobilePlatform.listAlbums && (
-                <button className="btn !h-9" disabled title={t('common.soon')}>
-                  {t('home.importDevice')}
-                </button>
-              )}
             </div>
             <button type="button" className="text-xs text-muted underline" aria-expanded={optionsOpen} onClick={() => setOptionsOpen((o) => !o)} data-testid="import-options-toggle">
               {t('files.excludeToggle')}
