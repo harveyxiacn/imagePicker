@@ -1331,6 +1331,10 @@ impl Core {
             bursts = burst_ids.len(),
             "grouped"
         );
+        // the estimates of the clock offsets were made from the previous analysis
+        self.db
+            .call(move |c| super::time_align::clear_estimates(c, sid))
+            .await?;
 
         stage("clustering");
         // cluster before scoring so closed-eye issues name the right people and subjects are final

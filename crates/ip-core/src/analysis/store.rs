@@ -351,14 +351,16 @@ pub fn regroup_session(
 ) -> Result<Vec<i64>> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let rows: Vec<GRow> = {
-        let mut st = tx.prepare(
-            "SELECT p.id, COALESCE(p.taken_at, p.mtime), p.file_name, p.burst_id,
+        // capture times are corrected by the clock offset of the device (docs/09 P1-2)
+        let mut st = tx.prepare(&format!(
+            "SELECT p.id, {}, p.file_name, p.burst_id,
                     COALESCE(b.manual,0) AND b.session_id=?1, a.phash, a.embedding, p.device_id
              FROM photo p
              JOIN session_photo sp ON sp.photo_id=p.id AND sp.session_id=?1
              JOIN analysis a ON a.photo_id=p.id
              LEFT JOIN burst b ON b.id=p.burst_id",
-        )?;
+            super::time_align::corrected_time_sql("p", "?1")
+        ))?;
         let v = st
             .query_map([session_id], |r| {
                 Ok(GRow {
@@ -1451,11 +1453,15 @@ pub fn burst_faces(conn: &Connection, burst_id: i64) -> Result<BurstFacesOut> {
 
 // ====================================================================== manual group edits
 
+/// Session of burst `?1` as an SQL expression, for the corrected capture time.
+const BURST_SESSION: &str = "(SELECT session_id FROM burst WHERE id=?1)";
+
 fn burst_photos_by_time(conn: &Connection, burst_id: i64) -> Result<Vec<(i64, i64)>> {
-    let mut st = conn.prepare(
-        "SELECT id, COALESCE(taken_at, mtime, 0) FROM photo WHERE burst_id=?1
-         ORDER BY COALESCE(taken_at, mtime, 0), lower(file_name), id",
-    )?;
+    let t = super::time_align::corrected_time_sql("p", BURST_SESSION);
+    let mut st = conn.prepare(&format!(
+        "SELECT p.id, COALESCE({t}, 0) FROM photo p WHERE p.burst_id=?1
+         ORDER BY COALESCE({t}, 0), lower(p.file_name), p.id"
+    ))?;
     let v = st
         .query_map([burst_id], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1463,12 +1469,15 @@ fn burst_photos_by_time(conn: &Connection, burst_id: i64) -> Result<Vec<(i64, i6
 }
 
 fn refresh_burst_stats(conn: &Connection, burst_id: i64) -> Result<()> {
+    let t = super::time_align::corrected_time_sql("p", BURST_SESSION);
     conn.execute(
-        "UPDATE burst SET
-           size=(SELECT COUNT(*) FROM photo WHERE burst_id=?1),
-           start_at=(SELECT MIN(COALESCE(taken_at, mtime, 0)) FROM photo WHERE burst_id=?1),
-           end_at=(SELECT MAX(COALESCE(taken_at, mtime, 0)) FROM photo WHERE burst_id=?1)
-         WHERE id=?1",
+        &format!(
+            "UPDATE burst SET
+               size=(SELECT COUNT(*) FROM photo WHERE burst_id=?1),
+               start_at=(SELECT MIN(COALESCE({t}, 0)) FROM photo p WHERE p.burst_id=?1),
+               end_at=(SELECT MAX(COALESCE({t}, 0)) FROM photo p WHERE p.burst_id=?1)
+             WHERE id=?1"
+        ),
         [burst_id],
     )?;
     Ok(())

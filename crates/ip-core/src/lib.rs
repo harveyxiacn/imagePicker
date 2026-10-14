@@ -529,6 +529,8 @@ mod tests_scale;
 #[cfg(test)]
 mod tests_tasks;
 #[cfg(test)]
+mod tests_timealign;
+#[cfg(test)]
 mod tests_watermark;
 
 impl Drop for Core {

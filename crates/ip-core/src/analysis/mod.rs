@@ -9,6 +9,7 @@ pub mod incremental;
 pub mod layers;
 pub mod scoring;
 pub mod store;
+pub mod time_align;
 pub mod timeline;
 pub mod types;
 pub mod vecs;
