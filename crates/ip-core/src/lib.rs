@@ -21,6 +21,7 @@ pub mod import;
 pub mod jpegmeta;
 pub mod jsonfix;
 pub mod lazy_renderer;
+pub mod library_timeline;
 pub mod lite;
 pub mod logging;
 pub mod model;
@@ -481,6 +482,8 @@ mod tests_safety;
 mod tests_scale;
 #[cfg(test)]
 mod tests_tasks;
+#[cfg(test)]
+mod tests_timeline;
 #[cfg(test)]
 mod tests_watermark;
 
