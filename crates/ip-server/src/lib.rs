@@ -141,6 +141,7 @@ pub fn build_router_auth(
         )
         .route("/sessions/{id}/devices", get(routes::session_devices))
         .route("/sessions/{id}/timeline", get(timeline::session_timeline))
+        .route("/timeline", get(timeline::library_timeline))
         .route(
             "/sessions/{id}/filter-options",
             get(routes::session_filter_options),

@@ -327,6 +327,17 @@ Select a photo inside a stack and press `B`:
 
 Analysis also gathers scenes into **events**: a new event starts when two neighbouring scenes are more than 2 hours apart, or (when the photos carry GPS) more than 5 km apart. The *Events* list in the left sidebar shows the open session's events (only when it has at least two): the first line is the date, the second the time span of that day and the position (coordinates when there is GPS), and the count sits on the right. Click an event to browse only its photos; click it again (or *All photos*) to clear. Events are recomputed after you split or merge groups. The `{event}` token of the export name template is this event name (for example `2024-05-03 1012-1440`).
 
+### Timeline
+
+*Timeline* in the left sidebar opens a strip above the grid with the photos of the library by **capture date**, newest tiles on the right. Each tile shows a thumbnail of the best photo of that period (not rejected, highest rating, highest AI score), a bar for how many photos it holds and the count.
+
+- The strip starts with years. Click a tile to filter the grid to that period (the same capture-date range as in the filter bar); click it again to clear. The small magnifier on a tile (or double-click, or `+`) zooms in: year → months → days. The breadcrumb and the *Zoom out* button (or `-`) go back up.
+- *All sessions / This session* switches between counting every session and only the open one. The strip takes the other filters of the grid into account (rating, flag, colour, people, …), so you can see, for example, where your 4-star photos were taken.
+- Dates are the **local** capture dates (the UTC offset stored with the photo is applied); a photo near midnight in another time zone lands on the day it was taken. Photos without a capture time are listed as a count under the strip and cannot be filtered by date.
+- When a month or a day is shown, the **events** of that period appear as buttons under the tiles; click one to browse its photos (an event of another session opens that session).
+- Keyboard: `Tab` into the strip, arrow keys / `Home` / `End` move between tiles, `Enter` or `Space` filters, `+` / `↓` zooms in, `-` / `↑` / `Backspace` zooms out.
+- Photos taken at a different UTC offset than the one used for the filter can differ by a few photos from the tile count near the edge of a period, because the grid's date filter compares the stored capture time. The map half of F1.9 is not part of this release.
+
 ### Duplicates
 
 Duplicate photos anywhere in the library (including other sessions) carry a ⧉ badge in the top-left corner of the grid cell:

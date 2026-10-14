@@ -715,36 +715,9 @@ pub fn query_photos_cached(
         ),
     };
 
-    let mut wheres: Vec<String> = Vec::new();
+    let (wheres, filter_args) = photo_filters(conn, q)?;
     let mut args: Vec<Value> = vec![Value::Integer(q.session_id)];
-    if let Some(n) = q.rating_gte.filter(|n| *n > 0) {
-        wheres.push("p.user_rating >= ?".into());
-        args.push(Value::Integer(n));
-    }
-    match q.flag {
-        FlagFilter::Any => {}
-        FlagFilter::Picked => wheres.push("p.flag = 1".into()),
-        FlagFilter::Rejected => wheres.push("p.flag = -1".into()),
-        FlagFilter::Unflagged => wheres.push("p.flag = 0".into()),
-        FlagFilter::NotRejected => wheres.push("p.flag >= 0".into()),
-    }
-    if let Some(c) = &q.color_label {
-        wheres.push("p.color_label = ?".into());
-        args.push(Value::Text(c.clone()));
-    }
-    push_m2_filters(q, &mut wheres, &mut args);
-    push_complete_filters(conn, q, &mut wheres, &mut args)?;
-    if !q.devices.is_empty() || q.device_none {
-        let mut parts = Vec::new();
-        if !q.devices.is_empty() {
-            let ids: Vec<String> = q.devices.iter().map(i64::to_string).collect();
-            parts.push(format!("p.device_id IN ({})", ids.join(",")));
-        }
-        if q.device_none {
-            parts.push("p.device_id IS NULL".into());
-        }
-        wheres.push(format!("({})", parts.join(" OR ")));
-    }
+    args.extend(filter_args);
     let base_where = if wheres.is_empty() {
         String::new()
     } else {
@@ -862,6 +835,45 @@ pub fn query_photos_cached(
         total,
         next_cursor,
     })
+}
+
+/// The `WHERE` terms (on `p` = photo, `?` placeholders in order) and their bound values of every
+/// photo-list filter in `q`, without any session scoping. Shared by the grid and the timeline.
+pub(crate) fn photo_filters(
+    conn: &Connection,
+    q: &PhotoQuery,
+) -> Result<(Vec<String>, Vec<Value>)> {
+    let mut wheres: Vec<String> = Vec::new();
+    let mut args: Vec<Value> = Vec::new();
+    if let Some(n) = q.rating_gte.filter(|n| *n > 0) {
+        wheres.push("p.user_rating >= ?".into());
+        args.push(Value::Integer(n));
+    }
+    match q.flag {
+        FlagFilter::Any => {}
+        FlagFilter::Picked => wheres.push("p.flag = 1".into()),
+        FlagFilter::Rejected => wheres.push("p.flag = -1".into()),
+        FlagFilter::Unflagged => wheres.push("p.flag = 0".into()),
+        FlagFilter::NotRejected => wheres.push("p.flag >= 0".into()),
+    }
+    if let Some(c) = &q.color_label {
+        wheres.push("p.color_label = ?".into());
+        args.push(Value::Text(c.clone()));
+    }
+    push_m2_filters(q, &mut wheres, &mut args);
+    push_complete_filters(conn, q, &mut wheres, &mut args)?;
+    if !q.devices.is_empty() || q.device_none {
+        let mut parts = Vec::new();
+        if !q.devices.is_empty() {
+            let ids: Vec<String> = q.devices.iter().map(i64::to_string).collect();
+            parts.push(format!("p.device_id IN ({})", ids.join(",")));
+        }
+        if q.device_none {
+            parts.push("p.device_id IS NULL".into());
+        }
+        wheres.push(format!("({})", parts.join(" OR ")));
+    }
+    Ok((wheres, args))
 }
 
 /// M2 filters (docs/api-contract-m2.md C.4, docs/03 section 4.4). Ids and thresholds are inlined
@@ -1184,7 +1196,7 @@ pub fn session_devices(conn: &Connection, session_id: i64) -> Result<Vec<Session
     Ok(rows)
 }
 
-fn get_session_exists(conn: &Connection, id: i64) -> Result<()> {
+pub(crate) fn get_session_exists(conn: &Connection, id: i64) -> Result<()> {
     let n: i64 = conn.query_row("SELECT COUNT(*) FROM session WHERE id=?1", [id], |r| {
         r.get(0)
     })?;
