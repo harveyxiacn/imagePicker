@@ -22,7 +22,7 @@
 **预发布（开发中；各处版本号仍为 0.1.0，尚无正式发布版）**：桌面端核心功能（导入、分析、分组、评分、人物、最佳表情、编辑、人像美化、修复、导出、AI 助手、局域网 WebUI、XMP 互通、设置）已实现，主要由 mock 与合成图库验证。已知限制（详见 [待办与已知问题](docs/backlog.md) 与 [完成度评审](docs/09-完成度评审与收尾计划.md)）：
 
 - 评分阈值尚未在大规模真实照片上校准；标准档尚未在全部真实模型上端到端评测。
-- **未提供**：自然语言搜索（顶栏搜索框目前是禁用的占位）、「匹配参考图」（编辑面板按钮禁用）、虚拟副本、便携模式、HTTPS（局域网与远程 AI 使用明文 HTTP，仅限可信局域网）。
+- **未提供**：自然语言搜索（顶栏搜索框目前是禁用的占位）、「匹配参考图」（编辑面板按钮禁用）、虚拟副本、HTTPS（局域网与远程 AI 使用明文 HTTP，仅限可信局域网）。
 - **Android 版**：已有应用外壳、移动端界面（手势挑片、快速挑片、底部抽屉编辑）、本机「快速」分析（仅清晰度/曝光/噪点/连拍分组，没有闭眼与人物）和远程 AI 配对，CI 能构建 debug APK；但**从未在真机或模拟器上运行过**，release 包也很可能无法加载界面（见 [08](docs/08-Android版本设计.md)）。
 - HEIC/HEIF 依赖系统解码器、AI 组件自带的 libheif 或文件内嵌 JPEG，未在真实 iPhone/安卓样张上实测。
 - 安装包与 AI 组件安装器已就绪，但发布链路还没有完整跑过；首个正式版发布前请参考下文「从源码运行」。
@@ -31,7 +31,7 @@
 
 | | |
 |---|---|
-| ⚡ 极速载入 | Rust 原生缩略图流水线（优先提取内嵌预览，支持 HEIC/HEIF 与 RAW 内嵌预览、RAW+JPEG 配对），万张级虚拟化网格；监听已导入文件夹的变化 |
+| ⚡ 极速载入 | Rust 原生缩略图流水线（优先提取内嵌预览，支持 HEIC/HEIF 与 RAW 内嵌预览、RAW+JPEG 配对），万张级虚拟化网格；监听已导入文件夹的变化；可从存储卡复制导入；支持便携模式（数据放在程序旁） |
 | 🧠 一键智能分析 | 连拍/场景/事件分组、重复照片检测、可解释的多维评分映射为 0–5 星，闭眼、模糊、过曝、欠曝、噪点、倾斜等问题标签；没有 AI 组件时仍可用本机「快速」分析 |
 | 📚 堆栈与组视图 | 连拍折叠成堆栈；组视图 A/B 对比、同步缩放、一键「保留最佳，淘汰其余」 |
 | 👥 人物 | 本地人脸聚类，按人物筛选（包含/排除、睁眼、笑容、看镜头）、每人最佳、按人物导出、以脸搜脸 |
@@ -43,7 +43,7 @@
 | 🌐 局域网 WebUI | 手机/平板用浏览器访问；所有者与只读访客两种角色，扫码访问 |
 | 🔁 XMP 互通 | 与 Lightroom / darktable 共享星级、旗标、色标、关键词 |
 | 🎛️ 硬件自适应 | 纯 CPU 到 RTX 4090 四档（T0–T3），可手动覆盖；模型按需下载，可选 HF 镜像（设置里的 ModelScope 选项目前等同「自动」，尚无模型托管在那里） |
-| 📤 导出 | JPEG / PNG / TIFF / WebP，可去 GPS / 去全部 EXIF，文字水印，按事件/场景/相机/星级命名，导出时可超分 |
+| 📤 导出 | JPEG / PNG / TIFF / WebP，可去 GPS / 去全部 EXIF，文字水印，拼图 / 联系表，按事件/场景/相机/星级命名，导出时可超分 |
 | 📱 移动端与远程 AI（实验） | 窄屏自动切换移动布局（手势挑片、快速挑片、底部抽屉编辑）；手机可把重计算交给已配对的家中电脑（远程 AI）。Android 版尚未在真机上验证 |
 
 ### 截图
@@ -125,7 +125,7 @@ Thousands of shots from a trip, party or wedding? Drop the folder in and hit Ana
 **Pre-release (in development; the version is still 0.1.0 everywhere and no official release exists yet).** The desktop feature set (import, analysis, grouping, scoring, people, best take, editing, portrait retouching, repair, export, AI assistant, LAN WebUI, XMP interop, settings) is implemented and verified mostly against a mock backend and a synthetic library. Known limitations (see the [backlog](docs/backlog.md) and the [completeness review](docs/09-完成度评审与收尾计划.md), both in Chinese):
 
 - Score thresholds are not yet calibrated on a large real-photo set; the Standard profile has not been evaluated end to end with all real models.
-- **Not available:** natural-language search (the search box in the top bar is a disabled placeholder), "Match reference…" (the button in the edit panel is disabled), virtual copies, portable mode, HTTPS (LAN and remote AI use plain HTTP; trusted networks only).
+- **Not available:** natural-language search (the search box in the top bar is a disabled placeholder), "Match reference…" (the button in the edit panel is disabled), virtual copies, HTTPS (LAN and remote AI use plain HTTP; trusted networks only).
 - **Android:** there is an app shell, a mobile UI (gesture culling, quick cull, bottom-sheet editing), on-device "Fast (on this device)" analysis (sharpness / exposure / noise / burst grouping only; no closed-eye or people detection) and remote-AI pairing, and CI builds a debug APK. It has **never been run on a real device or emulator**, and the release APK probably cannot load its UI (see [08](docs/08-Android版本设计.md), Chinese).
 - HEIC/HEIF relies on the OS decoder, the libheif bundled with the AI components, or the JPEG embedded in the file; it has not been tested on real iPhone/Android samples.
 - Installers and the built-in AI component setup are ready, but the release pipeline has not been run end to end; until the first release is published, see "Run from source" below.
@@ -134,7 +134,7 @@ Thousands of shots from a trip, party or wedding? Drop the folder in and hit Ana
 
 | | |
 |---|---|
-| ⚡ Fast | Native Rust thumbnail pipeline (embedded previews first; HEIC/HEIF, RAW embedded previews, RAW+JPEG pairing), virtualised grid for 10k+ photos; imported folders are watched for changes |
+| ⚡ Fast | Native Rust thumbnail pipeline (embedded previews first; HEIC/HEIF, RAW embedded previews, RAW+JPEG pairing), virtualised grid for 10k+ photos; imported folders are watched for changes; copy-import from memory cards; portable mode (data kept next to the program) |
 | 🧠 One-click analysis | Burst / scene / event grouping, duplicate detection, explainable multi-factor score mapped to 0–5 stars, issue tags (closed eyes, blur, over/underexposure, noise, tilt); works without the AI components via the on-device "Fast" analysis |
 | 📚 Stacks & group view | Bursts collapse into stacks; A/B compare with synced zoom, "keep best, reject the rest" |
 | 👥 People | On-device face clustering; filter by person (include / exclude, eyes open, smiling, looking), best-per-person, export per person, search by face |
@@ -146,7 +146,7 @@ Thousands of shots from a trip, party or wedding? Drop the folder in and hit Ana
 | 🌐 LAN WebUI | Phone / tablet in the browser; owner and read-only guest roles, QR code |
 | 🔁 XMP interop | Shares ratings, flags, colour labels and keywords with Lightroom / darktable |
 | 🎛️ Hardware tiers | CPU-only to RTX 4090 (T0–T3) with a manual override; models are downloaded on demand, HF mirror supported (the ModelScope option in Settings currently behaves like "Auto": no model is hosted there yet) |
-| 📤 Export | JPEG / PNG / TIFF / WebP, strip GPS or all EXIF, text watermark, naming by event / scene / camera / rating, optional upscaling |
+| 📤 Export | JPEG / PNG / TIFF / WebP, strip GPS or all EXIF, text watermark, collage / contact sheet, naming by event / scene / camera / rating, optional upscaling |
 | 📱 Mobile & remote AI (experimental) | Narrow screens switch to a mobile layout (gesture culling, quick cull, bottom-sheet editing); a phone can hand heavy work to a paired computer at home (remote AI). The Android app is not verified on real devices |
 
 ### Screenshots

@@ -555,6 +555,8 @@ From the command line: `imagepicker ask --session <id> "only show 4 stars and ab
 
 ## 15. LAN WebUI & guest access
 
+> **Trusted LAN only:** the LAN WebUI and remote AI currently use **plain HTTP** (no HTTPS/TLS; TLS is planned for 1.x). Passwords, session cookies and photo content are not encrypted on the network and could be sniffed by other devices on it. Enable them only on your own home or office network; never expose the port to the internet, forward it through your router, or use it on untrusted Wi-Fi.
+
 Let phones and tablets on the same network use your library in a browser (e.g. a 4090 desktop serves, a laptop or tablet browses).
 
 1. *Settings → LAN / WebUI*: set the **owner password** first (first-time setup only from this computer; at least 8 characters). Optionally set a **guest password** (must differ from the owner's) and tick *Allow read-only guests*;
@@ -688,6 +690,8 @@ Open with the gear icon on Home or in the top bar.
 More known issues: [backlog](../backlog.md) (Chinese). Please report problems via GitHub Issues and **never attach personal photos**.
 
 ## 20. Mobile & remote AI (experimental)
+
+> **Trusted LAN only:** the LAN WebUI and remote AI currently use **plain HTTP** (no HTTPS/TLS; TLS is planned for 1.x). Passwords, session cookies and photo content are not encrypted on the network and could be sniffed by other devices on it. Enable them only on your own home or office network; never expose the port to the internet, forward it through your router, or use it on untrusted Wi-Fi.
 
 > **Status:** the mobile UI already works in a narrow browser window (a phone using the WebUI of your computer at home, see section 15); an Android app shell exists too, but it is **not verified on real devices and there is no released installer**. What follows describes what the code does; how the Android app behaves in practice is to be confirmed in a later release.
 
