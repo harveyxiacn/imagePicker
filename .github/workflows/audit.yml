@@ -62,7 +62,7 @@ jobs:
         working-directory: ai-worker
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       # --no-emit-project keeps the project's own editable line out of the requirements file.
       - run: uv export --frozen --no-hashes --no-emit-project --format requirements-txt > req.txt
       # Audit the pinned versions as written. Without --disable-pip, pip-audit pip-installs the list
