@@ -540,7 +540,7 @@ fn guest_allows(method: &Method, path: &str, query: Option<&str>) -> bool {
     if segs.get(2).is_some_and(|s| DENIED_SUB.contains(s)) {
         return false;
     }
-    if first == "photos" || first == "groups" {
+    if first == "photos" || first == "groups" || first == "timeline" {
         if let Some(q) = query {
             if let Ok(pairs) = serde_urlencoded::from_str::<Vec<(String, String)>>(q) {
                 const PERSON_KEYS: [&str; 5] = [
@@ -954,6 +954,10 @@ mod tests {
             "/api/photos",
             Some("session_id=1&persons=")
         ));
+        // the library timeline is read-only and takes the photo filters: person data stays hidden
+        assert!(g(&Method::GET, "/api/timeline", Some("granularity=day")));
+        assert!(!g(&Method::GET, "/api/timeline", Some("persons=2")));
+        assert!(!g(&Method::POST, "/api/timeline", None));
     }
 
     #[test]
