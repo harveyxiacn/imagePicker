@@ -1,4 +1,4 @@
-import { ChevronLeft, Columns2, Download, GalleryHorizontal, HelpCircle, LayoutGrid, PanelLeft, PanelRight, Search, Settings as SettingsIcon, Square, Users } from 'lucide-react'
+import { ChevronLeft, Columns2, Download, GalleryHorizontal, HelpCircle, LayoutGrid, PanelLeft, PanelRight, Settings as SettingsIcon, Square, Users } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { useMe } from '@/api/queries'
@@ -8,6 +8,7 @@ import { useUi, type View } from '@/stores/ui'
 import { AnalyzeControl, WorkerChip } from './AnalyzeControl'
 import { AssistantButton } from './assistant/AssistantDrawer'
 import { HeaderControls } from './HeaderControls'
+import { SearchBox } from './SearchBox'
 import { UserMenu } from './UserMenu'
 
 const VIEWS: { v: View; icon: typeof LayoutGrid; key: string }[] = [
@@ -69,10 +70,7 @@ export function TopBar({ sessionId, session, onView }: Props) {
         ))}
       </div>
 
-      <div className="relative ml-1 hidden min-w-0 max-w-72 flex-1 lg:block">
-        <Search size={14} className="absolute top-1/2 left-2 -translate-y-1/2 text-faint" />
-        <input className="field w-full !pl-7" disabled placeholder={t('top.searchPlaceholder')} aria-label={t('top.search')} title={t('common.soon')} />
-      </div>
+      <SearchBox sessionId={sessionId} />
 
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
         <WorkerChip />

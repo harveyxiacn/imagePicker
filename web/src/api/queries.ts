@@ -2,12 +2,12 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useMemo } from 'react'
 import { queryToFilter } from '@/lib/collections'
 import { buildPhotosQuery, type FilterState } from '@/lib/filter'
-import { qk } from '@/lib/cache'
+import { qk, type PhotosData } from '@/lib/cache'
 import { isLive } from '@/lib/tasks'
 import { mergeSettings } from '@/lib/settingsForm'
 import { useToasts } from '@/stores/toasts'
-import type { AnalysisProfile, Settings, SettingsPatch, TimelineQuery } from './types'
-import { api, fetchAllPhotos, timelineQueryString } from './client'
+import type { AnalysisProfile, SearchMeta, Settings, SettingsPatch, TimelineQuery } from './types'
+import { api, fetchAllPhotos, fetchSearchPhotos, timelineQueryString } from './client'
 
 
 /**
@@ -35,7 +35,8 @@ export function usePhotos(sessionId: number, filter: FilterState) {
   const query = useMemo(() => buildPhotosQuery(sessionId, filter), [sessionId, filter])
   return useQuery({
     queryKey: qk.photos(sessionId, query),
-    queryFn: () => fetchAllPhotos(query),
+    // a natural-language search is ranked by the server first (best match first); everything else pages the list
+    queryFn: (): Promise<PhotosData & { search?: SearchMeta }> => (query.search ? fetchSearchPhotos(query) : fetchAllPhotos(query)),
     placeholderData: keepPreviousData,
   })
 }

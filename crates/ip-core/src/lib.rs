@@ -32,6 +32,7 @@ pub mod portable;
 pub mod remote;
 pub mod roots;
 pub mod runtime;
+pub mod search;
 pub mod settings;
 pub mod tasks;
 pub mod taste;
@@ -533,6 +534,8 @@ mod tests_portable;
 mod tests_safety;
 #[cfg(test)]
 mod tests_scale;
+#[cfg(test)]
+mod tests_search;
 #[cfg(test)]
 mod tests_tasks;
 #[cfg(test)]

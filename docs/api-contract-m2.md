@@ -199,6 +199,32 @@ interface Face {
 - **与网格筛选的差别**：`taken_from` / `taken_to` 按 `taken_at` 本身（有偏移的照片是 UTC）比较，而桶按本地日期划分，所以带非零偏移的照片在边界附近点击桶后，网格张数可能与桶的张数差几张。
 - 性能：单次扫描 `photo`（不走会话排序索引），按 `taken_at` 的窗口范围可用 `idx_photo_taken`；分桶在 Rust 里完成。10 万张的实测见 PR 描述与 docs/05 §1.3。未新增索引 / 迁移。
 
+### C.8 自然语言搜索（F2.9，09 P1-4）
+
+`GET /api/search`：按描述找照片（中文或英文），在标准分析写下的 SigLIP2 图像嵌入（`analysis.embedding`）上做精确余弦检索，查询向量由 worker 的 SigLIP2 文本塔（`siglip2-base-text`）给出。
+
+| 参数 | 说明 |
+|---|---|
+| `q` | 必填，查询文本，去掉首尾空白并折叠空白后 1–256 个字符（按字符数，不是字节） |
+| `session_id` | 省略 = 搜整个目录库（不含已标记 `missing` 的照片）；给出 = 只搜该会话，并可同时带 `GET /api/photos` 的所有筛选参数（评分、旗标、人物、设备、标签……，语义相同）。`sort` / `cursor` / `ids` 无效（结果按匹配度排序）；没有 `session_id` 时带筛选参数 → `400`（筛选以会话为范围） |
+| `limit` | 最多返回多少条，1–5000，默认 200 |
+| `min_score` | 分数下限 0..1，默认 `0.05`（余弦约 0.12）；`0` = 不设阈值，只按名次返回 |
+
+```jsonc
+// 200
+{ "query": "海边 日落", "model": "siglip2-base-text", "min_score": 0.05,
+  "hits": [ { "photo_id": 812, "score": 0.9931, "similarity": 0.2514 }, … ],   // 按余弦从高到低（相同按照片 id）；强匹配的 score 都会饱和成 1.0，名次以余弦为准
+  "total_matched": 57,   // 分数 ≥ min_score 的照片数（limit 截断之前）
+  "searched": 980,       // 参与比较的照片数（有嵌入的）
+  "unindexed": 20 }      // 范围内没有嵌入的照片数：它们永远搜不到（先做标准分析）
+```
+
+- **分数**：`score = sigmoid(112.67 × cos + b)`，SigLIP 的 sigmoid 损失使它与其他照片无关；`similarity` 是查询与照片的余弦。`112.67` 是 `siglip2-base-patch16-224` 学到的 `exp(logit_scale)`（与零样本场景分类同一常数）；偏置 `b = -16.5` 是 SigLIP 系列的公开取值，导出的 ONNX 里没有它，**未在本机读回校准**，所以它只决定概率刻度与默认阈值，不影响排名；用 `bench/eval-search.py` 复核。
+- 嵌入只在标准档位的 `embed` 步骤写入；未分析、`fast` / `lite` 分析过的照片计入 `unindexed`。
+- 错误：`400`（`q` 为空 / 过长、`min_score` 或 `limit` 越界、参数格式错误）、`404`（会话不存在）、`409 models_missing`（文本模型未安装，`models` 列出 `siglip2-base-text`，与其他接口一致，界面据此提供「安装搜索模型」）、`503 worker_unavailable`、`504 worker_timeout`。访客可以搜索（只返回他们本来就能看到的照片）。
+- `GET /api/photos` 新增 `ids`（逗号分隔，最多 5000 个）：只返回这些照片（`ids=` 空值 = 没有照片）。界面先调 `/api/search` 得到名次，再用 `ids` 取照片；不可用于智能集合。
+- Worker：`text.embed`（`{texts: string[1..16], allow_download?}` → `{model, dim, logit_scale, vectors: float[][], cached: bool[]}`，向量已 L2 归一化；缺模型 → `-32010 model_unavailable`，`data.detail.models` 为 `["siglip2-base-text"]`）。worker 内有 256 条的 LRU（键为折叠空白并转小写的查询），重复查询不再跑文本塔。远程 AI 主机的白名单同样包含 `text.embed`。
+
 ## D. WebSocket 新增事件
 
 ```jsonc

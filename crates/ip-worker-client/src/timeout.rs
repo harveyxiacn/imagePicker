@@ -32,6 +32,7 @@ impl Default for WorkerTimeouts {
             ("mask.generate", secs(120)),
             ("beauty.prepare", secs(120)),
             ("faces.embed", secs(60)),
+            ("text.embed", secs(120)),
             ("besttake.compose", secs(120)),
             ("inpaint.run", secs(300)),
             ("enhance.run", secs(300)),
@@ -196,6 +197,9 @@ impl AiWorker for TimeoutWorker {
     async fn faces_embed(&self, req: &FacesEmbedRequest) -> Result<FacesEmbedResponse> {
         self.limited("faces.embed", self.inner.faces_embed(req))
             .await
+    }
+    async fn text_embed(&self, req: &TextEmbedRequest) -> Result<TextEmbedResponse> {
+        self.limited("text.embed", self.inner.text_embed(req)).await
     }
     async fn besttake_compose(
         &self,

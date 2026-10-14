@@ -29,6 +29,7 @@ from .rpc import Ctx, RpcServer
 from .runtime import GenRuntime
 from .steps import PROFILES, STEPS
 from .steps.face_search import faces_embed
+from .steps.text_search import TextSearch, text_embed
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class WorkerService:
         self.inpaint = Inpainter(self.gen)
         self.enhance = Enhancer(self.gen, self.masks)
         self.assistant = Assistant(self.manager, self.hw)
+        self.text_search = TextSearch(self.analyzer.embedder.embed_text)
         self.io_pool = ThreadPoolExecutor(2, thread_name_prefix="io")
         self.idle_unload_s = idle_unload_s
         self.started_at = time.time()
@@ -77,6 +79,7 @@ class WorkerService:
             "mask.generate": self.mask_generate,
             "beauty.prepare": self.beauty_prepare,
             "faces.embed": self.faces_embed,
+            "text.embed": self.text_embed,
             "besttake.compose": self.besttake_compose,
             "inpaint.run": self.inpaint_run,
             "enhance.run": self.enhance_run,
@@ -273,6 +276,9 @@ class WorkerService:
 
     async def faces_embed(self, params: Any, _ctx: Ctx) -> dict[str, Any]:
         return await faces_embed(self.analyzer, params, self.analyzer.decode_pool)
+
+    async def text_embed(self, params: Any, _ctx: Ctx) -> dict[str, Any]:
+        return await text_embed(self.text_search, self.manager, params, self.io_pool)
 
 
 def _model_ids(params: Any) -> list[str]:

@@ -35,7 +35,8 @@ use ip_worker_client::remote::{
 };
 use ip_worker_client::{
     AiWorker, AnalyzeRequest, BeautyPrepareRequest, BestTakeComposeRequest, CancelToken,
-    EnhanceRequest, FacesEmbedRequest, InpaintRequest, MaskRequest, PairError, WorkerError,
+    EnhanceRequest, FacesEmbedRequest, InpaintRequest, MaskRequest, PairError, TextEmbedRequest,
+    WorkerError,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -576,6 +577,11 @@ async fn dispatch(
             let r: EnhanceRequest =
                 serde_json::from_value(params).map_err(|e| bad_params(method, e))?;
             out(w.enhance_run(&r).await, method)
+        }
+        "text.embed" => {
+            let r: TextEmbedRequest =
+                serde_json::from_value(params).map_err(|e| bad_params(method, e))?;
+            out(w.text_embed(&r).await, method)
         }
         "faces.embed" => {
             let r: FacesEmbedRequest =

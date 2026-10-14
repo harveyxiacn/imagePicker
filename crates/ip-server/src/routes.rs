@@ -142,9 +142,20 @@ pub struct PhotosParams {
     sharp: Option<String>,
     face_ids: Option<String>,
     face_similarity: Option<f64>,
+    // ---- natural-language search: restrict to these photos (`GET /api/search` hits)
+    ids: Option<String>,
 }
 
 impl PhotosParams {
+    /// `GET /api/search` takes the photo filters but ranks the result: no sort, cursor or page
+    /// size of the photo list, and no id restriction.
+    pub(crate) fn clear_paging(&mut self) {
+        self.sort = None;
+        self.cursor = None;
+        self.limit = None;
+        self.ids = None;
+    }
+
     /// Parameters of a smart collection's `query` string (no session/paging keys allowed).
     pub(crate) fn from_collection_query(q: &str) -> Result<Self, ApiError> {
         const KEYS: &[&str] = &[
@@ -408,6 +419,16 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
     if p.face_similarity.is_some_and(|v| !(0.0..=1.0).contains(&v)) {
         return Err(ApiError::bad_request("face_similarity must be 0..1"));
     }
+    let only_ids = match p.ids.as_deref() {
+        None => None,
+        Some(_) => {
+            let ids = csv_ids("ids", &p.ids)?;
+            if ids.len() > 5000 {
+                return Err(ApiError::bad_request("ids takes at most 5000 photos"));
+            }
+            Some(ids)
+        }
+    };
     let face_ids = csv_ids("face_ids", &p.face_ids)?;
     if face_ids.len() > 50 {
         return Err(ApiError::bad_request("face_ids takes at most 50 faces"));
@@ -424,6 +445,7 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
         sharp,
         face_ids,
         face_similarity: p.face_similarity,
+        only_ids,
         rating_gte: p.rating_gte,
         flag,
         color_label,

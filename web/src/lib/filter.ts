@@ -1,3 +1,4 @@
+import { normalizeSearch } from './search'
 import { ISSUES, type ColorName, type FlagFilter, type Issue, type PersonMode, type PersonState, type PhotosQuery, type SceneType, type SharpState, type SortKey } from '@/api/types'
 
 /** Person filter (doc 04 3.6.1). Tri-state per person: absent = off, include, exclude. */
@@ -62,6 +63,8 @@ export interface FilterState {
   duplicates: boolean
   /** Only the photos of one event of the session timeline; session specific, never saved in a collection */
   eventId: number | null
+  /** Natural-language search text (GET /api/search); '' = off. Never saved in a collection. */
+  search: string
   sort: SortKey
 }
 
@@ -87,6 +90,7 @@ export const DEFAULT_FILTER: FilterState = {
   edited: false,
   duplicates: false,
   eventId: null,
+  search: '',
   sort: 'taken_at',
 }
 
@@ -131,6 +135,8 @@ export function buildPhotosQuery(sessionId: number, f: FilterState): PhotosListQ
   if (p.includeBackground && (p.include.length || p.exclude.length)) q.include_background = true
   if (p.facesMin !== null) q.faces_min = p.facesMin
   if (p.facesMax !== null) q.faces_max = p.facesMax
+  const search = normalizeSearch(f.search)
+  if (search) q.search = search
   if (f.sort !== DEFAULT_FILTER.sort) q.sort = f.sort
   return q
 }
@@ -158,6 +164,7 @@ export function isFilterActive(f: FilterState): boolean {
     f.tags.length > 0 ||
     f.sharp !== null ||
     f.faceIds.length > 0 ||
+    normalizeSearch(f.search) !== '' ||
     isPersonFilterActive(f.person)
   )
 }

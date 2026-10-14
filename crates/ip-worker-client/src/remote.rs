@@ -25,7 +25,7 @@ use crate::error::{Result, WorkerError, CODE_MODEL_UNAVAILABLE};
 use crate::*;
 
 /// Worker RPCs a paired device may call (`POST /api/remote/rpc`).
-pub const REMOTE_METHODS: [&str; 9] = [
+pub const REMOTE_METHODS: [&str; 10] = [
     "system.info",
     "models.list",
     "analyze.batch",
@@ -35,6 +35,7 @@ pub const REMOTE_METHODS: [&str; 9] = [
     "inpaint.run",
     "enhance.run",
     "faces.embed",
+    "text.embed",
 ];
 
 pub const RPC_PATH: &str = "/api/remote/rpc";
@@ -1002,6 +1003,11 @@ impl AiWorker for RemoteWorker {
         jset(&mut p, "/path", json!("file:f0"));
         jset(&mut p, "/orientation", json!(1));
         self.typed("faces.embed", p, &[up], None).await
+    }
+
+    async fn text_embed(&self, req: &TextEmbedRequest) -> Result<TextEmbedResponse> {
+        // no image to upload: the host embeds the query text itself
+        self.typed("text.embed", to_params(req)?, &[], None).await
     }
 
     async fn besttake_compose(

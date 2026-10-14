@@ -541,7 +541,7 @@ fn guest_allows(method: &Method, path: &str, query: Option<&str>) -> bool {
     if segs.get(2).is_some_and(|s| DENIED_SUB.contains(s)) {
         return false;
     }
-    if first == "photos" || first == "groups" || first == "timeline" {
+    if first == "photos" || first == "groups" || first == "search" || first == "timeline" {
         if let Some(q) = query {
             if let Ok(pairs) = serde_urlencoded::from_str::<Vec<(String, String)>>(q) {
                 const PERSON_KEYS: [&str; 5] = [

@@ -92,6 +92,20 @@ export const en: Messages = {
   },
   view: { label: 'View', grid: 'Grid', loupe: 'Loupe', compare: 'Compare', group: 'Group' },
   library: { loading: 'Loading photos…', notFound: 'Session not found' },
+  // natural-language photo search (PRD F2.9)
+  search: {
+    placeholder: 'Search "sunset at the beach"…',
+    label: 'Search photos by description',
+    hint: 'Describe what is in the photo, in Chinese or English (Enter searches, Esc clears)',
+    needsModel: 'Search needs the text model (about 550 MB). Install it to search by description.',
+    install: 'Install search model',
+    clear: 'Clear search',
+    pill: 'Search',
+    empty: 'No photos match "{{q}}"',
+    emptyHint: 'Try other words, or describe the scene more simply. Only analysed photos can be found.',
+    notAnalysed: '{{n}} photos in this view have not been analysed yet, so they cannot be searched. Run the standard analysis first.',
+    someNotAnalysed: '{{n}} photos have not been analysed and cannot be found.',
+  },
   grid: { label: 'Photo grid', empty: 'No photos match the current filters' },
   filter: {
     aiRating: 'AI rating',

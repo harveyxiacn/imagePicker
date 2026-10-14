@@ -13,6 +13,7 @@ pub mod protocol;
 mod protocol_m4;
 mod protocol_m5;
 mod protocol_m6;
+mod protocol_search;
 pub mod remote;
 pub mod timeout;
 pub mod unavailable;
@@ -31,6 +32,7 @@ pub use protocol::*;
 pub use protocol_m4::*;
 pub use protocol_m5::*;
 pub use protocol_m6::*;
+pub use protocol_search::*;
 pub use remote::{
     normalize_host_url, pair, HostPing, PairError, PairOutcome, RemoteConfig, RemoteWorker,
     REMOTE_METHODS,
@@ -121,6 +123,13 @@ pub trait AiWorker: Send + Sync {
     async fn faces_embed(&self, _req: &FacesEmbedRequest) -> Result<FacesEmbedResponse> {
         Err(WorkerError::Unavailable(
             "this AI worker does not support faces.embed".into(),
+        ))
+    }
+    /// Embeds search queries with the SigLIP2 text tower (`text.embed`), for natural-language
+    /// photo search.
+    async fn text_embed(&self, _req: &TextEmbedRequest) -> Result<TextEmbedResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support text.embed".into(),
         ))
     }
     /// Composites one person's face from another frame (`besttake.compose`). Workers that predate

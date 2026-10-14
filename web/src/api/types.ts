@@ -176,8 +176,44 @@ export interface PhotosQuery {
   /** Photos with a face similar to one of these faces (cosine >= `face_similarity`, default 0.38) */
   face_ids?: number[]
   face_similarity?: number
+  /** Only these photos (the hits of a search); `[]` = none */
+  ids?: number[]
+  /**
+   * UI only, never sent to GET /api/photos: natural-language query. The photo list resolves it through
+   * GET /api/search (see `fetchSearchPhotos`); it is part of the query key so each search caches on its own.
+   */
+  search?: string
   cursor?: string
   limit?: number
+}
+
+/** One photo of a search result (`GET /api/search`), best first. */
+export interface SearchHit {
+  photo_id: number
+  /** SigLIP probability 0..1 (what `min_score` applies to) */
+  score: number
+  /** cosine of the query and the photo */
+  similarity: number
+}
+
+export interface SearchResponse {
+  query: string
+  model: string
+  min_score: number
+  hits: SearchHit[]
+  /** photos at or above `min_score` before the `limit` cut the list */
+  total_matched: number
+  /** photos of the scope that have an embedding and were compared */
+  searched: number
+  /** photos of the scope without an embedding: they can never match (analyse them first) */
+  unindexed: number
+}
+
+/** What a search added to the photo list result. */
+export interface SearchMeta {
+  total_matched: number
+  searched: number
+  unindexed: number
 }
 
 export interface PhotosResponse {

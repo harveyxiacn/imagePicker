@@ -18,6 +18,7 @@ import { deviceList, filterOptions, filterPhotos } from './query'
 import { libraryTimelineHandlers } from './libraryTimeline'
 import { m6Gate, m6Handlers } from './m6'
 import { m8Handlers } from './m8'
+import { searchHandlers } from './search'
 import { editHandlers, renderEdited } from './edits'
 import { m4Handlers, recordTasteLabels } from './m4'
 import { m5Handlers } from './m5'
@@ -200,6 +201,7 @@ export const handlers = [
   ...m4Handlers,
   ...m6Handlers,
   ...m8Handlers,
+  ...searchHandlers,
   ...m5Handlers,
   ...libraryTimelineHandlers,
   ...taskHandlers,

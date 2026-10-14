@@ -6,7 +6,7 @@ use tokio::sync::watch;
 
 use crate::{
     AiWorker, AnalyzeRequest, AnalyzeResponse, CancelToken, ModelsListing, ProgressTx, Result,
-    SystemInfo, WorkerError, WorkerState, WorkerStatus,
+    SystemInfo, TextEmbedRequest, TextEmbedResponse, WorkerError, WorkerState, WorkerStatus,
 };
 
 /// Environment switch that forces [`UnavailableWorker`] on any platform.
@@ -68,6 +68,9 @@ impl AiWorker for UnavailableWorker {
         _progress: Option<ProgressTx>,
         _cancel: &CancelToken,
     ) -> Result<AnalyzeResponse> {
+        self.err()
+    }
+    async fn text_embed(&self, _req: &TextEmbedRequest) -> Result<TextEmbedResponse> {
         self.err()
     }
     async fn shutdown(&self) {}

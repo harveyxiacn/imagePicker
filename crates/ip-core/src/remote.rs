@@ -137,6 +137,12 @@ impl AiWorker for SwitchWorker {
     ) -> ip_worker_client::Result<FacesEmbedResponse> {
         self.pick().faces_embed(req).await
     }
+    async fn text_embed(
+        &self,
+        req: &TextEmbedRequest,
+    ) -> ip_worker_client::Result<TextEmbedResponse> {
+        self.pick().text_embed(req).await
+    }
     async fn besttake_compose(
         &self,
         req: &BestTakeComposeRequest,
