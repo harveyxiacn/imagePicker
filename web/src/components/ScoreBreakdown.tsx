@@ -2,15 +2,16 @@ import { AlertTriangle, Eye, EyeOff, Smile, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { faceCropUrl } from '@/api/client'
 import type { Face, PhotoAnalysis } from '@/api/types'
+import { reasonKey } from '@/lib/ai'
 import { useFaceMenu } from './FaceMenu'
 
 const BAR_KEYS = ['sharpness', 'exposure', 'noise', 'iqa', 'aesthetic', 'face', 'composition'] as const
-const NEGATIVE_REASONS = new Set(['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted'])
+const NEGATIVE_REASONS = new Set(['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted', 'bystander', 'bad_expression'])
 
 /** Localised reason text; unknown keys fall back to the raw key so newer backends never show blanks. */
 export function ReasonText({ r }: { r: PhotoAnalysis['reasons'][number] }) {
   const { t } = useTranslation()
-  return <>{t(`reason.${r.key}`, { ...(r.params ?? {}), defaultValue: r.key })}</>
+  return <>{t(reasonKey(r), { ...(r.params ?? {}), defaultValue: r.key })}</>
 }
 
 function Bar({ k, value, delta }: { k: (typeof BAR_KEYS)[number]; value: number; delta: number | undefined }) {
@@ -78,6 +79,7 @@ export function FaceChip({ face, size = 44, onMenu }: { face: Face; size?: numbe
     `${t('face.eyes')} ${face.eyes_open?.toFixed(2) ?? '–'}`,
     `${t('face.smile')} ${face.smile?.toFixed(2) ?? '–'}`,
     face.gaze !== null ? `${t('face.gaze')} ${face.gaze.toFixed(2)}` : null,
+    face.likely_artificial ? t('face.artificial') : null,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -96,7 +98,7 @@ export function FaceChip({ face, size = 44, onMenu }: { face: Face; size?: numbe
         alt=""
         draggable={false}
         className="rounded-control bg-bg object-cover"
-        style={{ width: size, height: size, outline: eyesOpen ? 'none' : '2px solid var(--danger)', outlineOffset: -1 }}
+        style={{ width: size, height: size, outline: eyesOpen ? 'none' : '2px solid var(--danger)', outlineOffset: -1, opacity: face.likely_artificial ? 0.55 : 1 }}
       />
       <span className="flex items-center gap-1">
         {eyesOpen ? <Eye size={12} className="text-success" /> : <EyeOff size={12} className="text-danger" />}

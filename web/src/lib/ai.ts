@@ -18,16 +18,27 @@ const BADGES: Record<Issue, IssueBadge> = {
   underexposed: { issue: 'underexposed', glyph: '🌑', label: 'underexposed', tone: 'text-white' },
   noisy: { issue: 'noisy', glyph: '▒', label: 'noisy', tone: 'text-white' },
   tilted: { issue: 'tilted', glyph: '⟋', label: 'tilted', tone: 'text-white' },
+  bystander: { issue: 'bystander', glyph: '👤', label: 'bystander', tone: 'text-white' },
+  bad_expression: { issue: 'bad_expression', glyph: '😮', label: 'bad_expression', tone: 'text-warning' },
 }
 
 /** Display order: the most actionable problem first. */
-const ORDER: Issue[] = ['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted']
+const ORDER: Issue[] = ['closed_eyes', 'bad_expression', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted', 'bystander']
 
 /** Map issue tags to ordered thumbnail badges; unknown tags (newer backend) are dropped. */
 export function issueBadges(issues: readonly Issue[] | undefined): IssueBadge[] {
   if (!issues?.length) return []
   const set = new Set(issues)
   return ORDER.filter((i) => set.has(i)).map((i) => BADGES[i])
+}
+
+/**
+ * i18n key of an analysis reason. `bad_expression` carries the kind the scorer found
+ * (`talking` | `half_blink`) and has one sentence per kind; anything else is `reason.<key>`.
+ */
+export function reasonKey(r: { key: string; params?: Record<string, string | number> }): string {
+  if (r.key === 'bad_expression') return `reason.bad_expression_${r.params?.kind === 'half_blink' ? 'half_blink' : 'talking'}`
+  return `reason.${r.key}`
 }
 
 /** `user_rating = round(ai_rating)` (contract C.2); half stars round up like Rust's f64::round. */
