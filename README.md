@@ -19,14 +19,20 @@
 
 ### 状态
 
-**预发布（v0.1，开发中）**：核心功能（导入、分析、分组、评分、人物、最佳表情、编辑、人像美化、修复、导出、AI 助手、局域网 WebUI、XMP 互通、设置）已实现并通过 mock 与合成数据验证。已知限制见 [待办与已知问题](docs/backlog.md)：评分阈值尚未在大规模真实照片上校准；搜索框（自然语言搜索）、Android 版尚未提供；HEIC/HEIF 依赖系统或 AI 组件中的解码器，未在真实 iPhone/安卓样张上实测。安装包与 AI 组件安装器已就绪，首个正式版发布前请参考下文「从源码运行」。
+**预发布（开发中；各处版本号仍为 0.1.0，尚无正式发布版）**：桌面端核心功能（导入、分析、分组、评分、人物、最佳表情、编辑、人像美化、修复、导出、AI 助手、局域网 WebUI、XMP 互通、设置）已实现，主要由 mock 与合成图库验证。已知限制（详见 [待办与已知问题](docs/backlog.md) 与 [完成度评审](docs/09-完成度评审与收尾计划.md)）：
+
+- 评分阈值尚未在大规模真实照片上校准；标准档尚未在全部真实模型上端到端评测。
+- **未提供**：自然语言搜索（顶栏搜索框目前是禁用的占位）、「匹配参考图」（编辑面板按钮禁用）、虚拟副本、便携模式、HTTPS（局域网与远程 AI 使用明文 HTTP，仅限可信局域网）。
+- **Android 版**：已有应用外壳、移动端界面（手势挑片、快速挑片、底部抽屉编辑）、本机「快速」分析（仅清晰度/曝光/噪点/连拍分组，没有闭眼与人物）和远程 AI 配对，CI 能构建 debug APK；但**从未在真机或模拟器上运行过**，release 包也很可能无法加载界面（见 [08](docs/08-Android版本设计.md)）。
+- HEIC/HEIF 依赖系统解码器、AI 组件自带的 libheif 或文件内嵌 JPEG，未在真实 iPhone/安卓样张上实测。
+- 安装包与 AI 组件安装器已就绪，但发布链路还没有完整跑过；首个正式版发布前请参考下文「从源码运行」。
 
 ### 功能亮点
 
 | | |
 |---|---|
-| ⚡ 极速载入 | Rust 原生缩略图流水线（优先提取内嵌预览），万张级虚拟化网格 |
-| 🧠 一键智能分析 | 连拍/场景分组、可解释的多维评分映射为 0–5 星，闭眼、模糊、过曝等问题标签 |
+| ⚡ 极速载入 | Rust 原生缩略图流水线（优先提取内嵌预览，支持 HEIC/HEIF 与 RAW 内嵌预览、RAW+JPEG 配对），万张级虚拟化网格；监听已导入文件夹的变化 |
+| 🧠 一键智能分析 | 连拍/场景/事件分组、重复照片检测、可解释的多维评分映射为 0–5 星，闭眼、模糊、过曝、欠曝、噪点、倾斜等问题标签；没有 AI 组件时仍可用本机「快速」分析 |
 | 📚 堆栈与组视图 | 连拍折叠成堆栈；组视图 A/B 对比、同步缩放、一键「保留最佳，淘汰其余」 |
 | 👥 人物 | 本地人脸聚类，按人物筛选（包含/排除、睁眼、笑容、看镜头）、每人最佳、按人物导出、以脸搜脸 |
 | 😀 最佳表情 | 人物 × 帧的表情矩阵；每个人选最佳表情，合成到同一张底片 |
@@ -36,7 +42,9 @@
 | 🤖 AI 助手 | 中英文自然语言指令 → 先出计划，确认后执行，可一步撤销 |
 | 🌐 局域网 WebUI | 手机/平板用浏览器访问；所有者与只读访客两种角色，扫码访问 |
 | 🔁 XMP 互通 | 与 Lightroom / darktable 共享星级、旗标、色标、关键词 |
-| 🎛️ 硬件自适应 | 纯 CPU 到 RTX 4090 四档（T0–T3）；模型按需下载，可选镜像 / ModelScope |
+| 🎛️ 硬件自适应 | 纯 CPU 到 RTX 4090 四档（T0–T3），可手动覆盖；模型按需下载，可选 HF 镜像（设置里的 ModelScope 选项目前等同「自动」，尚无模型托管在那里） |
+| 📤 导出 | JPEG / PNG / TIFF / WebP，可去 GPS / 去全部 EXIF，文字水印，按事件/场景/相机/星级命名，导出时可超分 |
+| 📱 移动端与远程 AI（实验） | 窄屏自动切换移动布局（手势挑片、快速挑片、底部抽屉编辑）；手机可把重计算交给已配对的家中电脑（远程 AI）。Android 版尚未在真机上验证 |
 
 ### 截图
 
@@ -54,7 +62,7 @@
 
 ### 硬件档位
 
-首次启动时自动检测，可在「设置 → 硬件与模型」查看。档位只决定默认启用哪些模型，核心功能在 CPU 上都能工作，只是更慢；本地 AI 助手模型与扩散修补等增强包需要 T2 及以上（助手在此之下使用离线规则引擎）。
+首次启动时自动检测，可在「设置 → 硬件与模型」查看。档位只决定默认启用哪些模型，核心功能在 CPU 上都能工作，只是更慢；本地 AI 助手模型需要 T2 及以上（T1 且有 GPU 时可用规划模型；再低使用离线规则引擎），扩散修补（SDXL）需要 T3。
 
 | 档位 | 典型硬件 | 体验 |
 |---|---|---|
@@ -87,14 +95,14 @@ cargo run -p ip-cli -- serve --web-dir web/dist     # http://127.0.0.1:7878
 
 **AI 组件**：安装包内置安装器——首次启动在欢迎卡片或「设置 → 硬件与模型」点「安装 AI 组件」即可（私有 Python 环境，NVIDIA 显卡自动用 CUDA 版，约 2.3 GB）。从源码开发时则在 `ai-worker/` 运行 `uv sync --extra cuda --extra mediapipe`（仅 CPU 用 `--extra cpu`），并先执行 `bash apps/desktop/scripts/fetch-uv.sh`。
 
-**5 步上手**：① 拖入文件夹导入 → ② 点「一键分析」（首次会提示下载模型）→ ③ 用数字键 1–5 打星、`P` 精选、`X` 淘汰，`S` 展开堆栈、`B` 进组视图 → ④ `D` 进入编辑 → ⑤ `Ctrl+E` 导出。完整流程见 [用户指南](docs/user-guide/zh-CN.md)。
+**5 步上手**：① 拖入文件夹导入 → ② 点「一键分析」（首次会提示下载模型；不想下载可选「快速（本机）」）→ ③ 用数字键 1–5 打星、`P` 精选、`X` 淘汰，`S` 展开堆栈、`B` 进组视图 → ④ `D` 进入编辑 → ⑤ `Ctrl+E` 导出。`Ctrl+K` 打开命令面板，`?` 查看全部快捷键。完整流程见 [用户指南](docs/user-guide/zh-CN.md)。
 
 ### 隐私
 
 - 照片、人脸特征、评分、编辑都只保存在本机（目录库 `catalog.db` 与缓存）。
-- 联网只用于**按需下载模型**（Hugging Face / 镜像 / ModelScope），下载前会展示模型清单与大小；在「设置 → 人脸与隐私」关闭「允许联网」后完全离线运行。
-- 人脸识别可整体关闭，也可一键清除全部人脸数据。
-- 局域网访问默认关闭；开启必须先设置所有者密码，访客只读且看不到人物。
+- 联网只用于**按需下载模型**（Hugging Face / hf-mirror 镜像），下载前会展示模型清单与大小；在「设置 → 人脸与隐私」关闭「允许联网」后完全离线运行。
+- 人脸识别需要你首次同意（同意前不提取人脸特征），可整体关闭，也可一键清除全部人脸数据。
+- 局域网访问默认关闭；开启必须先设置所有者密码，访客只读且看不到人物。局域网与远程 AI 目前是明文 HTTP，请只在可信网络中使用。
 
 详见 [用户指南 · 隐私与数据位置](docs/user-guide/zh-CN.md#16-隐私与数据位置)。
 
@@ -104,7 +112,7 @@ cargo run -p ip-cli -- serve --web-dir web/dist     # http://127.0.0.1:7878
 
 ### 文档
 
-[用户指南（中文）](docs/user-guide/zh-CN.md) · [User Guide (English)](docs/user-guide/en.md) · [设计文档总览](docs/README.md) · [待办与已知问题](docs/backlog.md) · [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md)
+[用户指南（中文）](docs/user-guide/zh-CN.md) · [User Guide (English)](docs/user-guide/en.md) · [设计文档总览](docs/README.md) · [完成度评审与收尾计划](docs/09-完成度评审与收尾计划.md) · [待办与已知问题](docs/backlog.md) · [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md)
 
 ---
 
@@ -114,14 +122,20 @@ Thousands of shots from a trip, party or wedding? Drop the folder in and hit Ana
 
 ### Status
 
-**Pre-release (v0.1, in development).** The core feature set (import, analysis, grouping, scoring, people, best take, editing, portrait retouching, repair, export, AI assistant, LAN WebUI, XMP interop, settings) is implemented and verified against a mock backend and synthetic data. See [backlog](docs/backlog.md) for known limitations: score thresholds are not yet calibrated on a large real-photo set; the search box (natural-language search) and the Android app are not available yet; HEIC/HEIF relies on the OS or AI-component decoder and has not been tested on real iPhone/Android samples. Installers and the built-in AI component setup are ready; until the first release is published, see "Run from source" below.
+**Pre-release (in development; the version is still 0.1.0 everywhere and no official release exists yet).** The desktop feature set (import, analysis, grouping, scoring, people, best take, editing, portrait retouching, repair, export, AI assistant, LAN WebUI, XMP interop, settings) is implemented and verified mostly against a mock backend and a synthetic library. Known limitations (see the [backlog](docs/backlog.md) and the [completeness review](docs/09-完成度评审与收尾计划.md), both in Chinese):
+
+- Score thresholds are not yet calibrated on a large real-photo set; the Standard profile has not been evaluated end to end with all real models.
+- **Not available:** natural-language search (the search box in the top bar is a disabled placeholder), "Match reference…" (the button in the edit panel is disabled), virtual copies, portable mode, HTTPS (LAN and remote AI use plain HTTP; trusted networks only).
+- **Android:** there is an app shell, a mobile UI (gesture culling, quick cull, bottom-sheet editing), on-device "Fast (on this device)" analysis (sharpness / exposure / noise / burst grouping only; no closed-eye or people detection) and remote-AI pairing, and CI builds a debug APK. It has **never been run on a real device or emulator**, and the release APK probably cannot load its UI (see [08](docs/08-Android版本设计.md), Chinese).
+- HEIC/HEIF relies on the OS decoder, the libheif bundled with the AI components, or the JPEG embedded in the file; it has not been tested on real iPhone/Android samples.
+- Installers and the built-in AI component setup are ready, but the release pipeline has not been run end to end; until the first release is published, see "Run from source" below.
 
 ### Highlights
 
 | | |
 |---|---|
-| ⚡ Fast | Native Rust thumbnail pipeline (embedded previews first), virtualised grid for 10k+ photos |
-| 🧠 One-click analysis | Burst / scene grouping, explainable multi-factor score mapped to 0–5 stars, issue tags (closed eyes, blur, over/underexposure…) |
+| ⚡ Fast | Native Rust thumbnail pipeline (embedded previews first; HEIC/HEIF, RAW embedded previews, RAW+JPEG pairing), virtualised grid for 10k+ photos; imported folders are watched for changes |
+| 🧠 One-click analysis | Burst / scene / event grouping, duplicate detection, explainable multi-factor score mapped to 0–5 stars, issue tags (closed eyes, blur, over/underexposure, noise, tilt); works without the AI components via the on-device "Fast" analysis |
 | 📚 Stacks & group view | Bursts collapse into stacks; A/B compare with synced zoom, "keep best, reject the rest" |
 | 👥 People | On-device face clustering; filter by person (include / exclude, eyes open, smiling, looking), best-per-person, export per person, search by face |
 | 😀 Best take | Person × frame expression matrix; pick each person's best expression and composite onto one base frame |
@@ -131,7 +145,9 @@ Thousands of shots from a trip, party or wedding? Drop the folder in and hit Ana
 | 🤖 AI assistant | Natural-language commands (zh / en): shows a plan first, runs it after you confirm, undo in one step |
 | 🌐 LAN WebUI | Phone / tablet in the browser; owner and read-only guest roles, QR code |
 | 🔁 XMP interop | Shares ratings, flags, colour labels and keywords with Lightroom / darktable |
-| 🎛️ Hardware tiers | CPU-only to RTX 4090 (T0–T3); models are downloaded on demand, mirrors / ModelScope supported |
+| 🎛️ Hardware tiers | CPU-only to RTX 4090 (T0–T3) with a manual override; models are downloaded on demand, HF mirror supported (the ModelScope option in Settings currently behaves like "Auto": no model is hosted there yet) |
+| 📤 Export | JPEG / PNG / TIFF / WebP, strip GPS or all EXIF, text watermark, naming by event / scene / camera / rating, optional upscaling |
+| 📱 Mobile & remote AI (experimental) | Narrow screens switch to a mobile layout (gesture culling, quick cull, bottom-sheet editing); a phone can hand heavy work to a paired computer at home (remote AI). The Android app is not verified on real devices |
 
 ### Screenshots
 
@@ -149,7 +165,7 @@ Thousands of shots from a trip, party or wedding? Drop the folder in and hit Ana
 
 ### Hardware tiers
 
-Detected on first start and shown in *Settings → Hardware & models*. The tier only decides which models are enabled by default. Core features work on CPU, just slower; the local assistant models and diffusion inpainting need T2 or higher (below that the assistant uses its offline rules engine).
+Detected on first start and shown in *Settings → Hardware & models*. The tier only decides which models are enabled by default. Core features work on CPU, just slower; the local assistant models need T2 or higher (T1 with a GPU can run the planning model; below that the assistant uses its offline rules engine) and diffusion inpainting (SDXL) needs T3.
 
 | Tier | Typical hardware | What to expect |
 |---|---|---|
@@ -182,14 +198,14 @@ cargo run -p ip-cli -- serve --web-dir web/dist     # http://127.0.0.1:7878
 
 **AI components:** the installers include a built-in setup — click *Install AI components* on the welcome card or in *Settings → Hardware & models* (private Python environment, CUDA build picked automatically on NVIDIA GPUs, about 2.3 GB). When developing from source, run `uv sync --extra cuda --extra mediapipe` in `ai-worker/` (CPU only: `--extra cpu`) and `bash apps/desktop/scripts/fetch-uv.sh` once first.
 
-**Five steps:** ① drop a folder to import → ② click *Analyze* (the first run asks to download models) → ③ rate with `1`–`5`, `P` pick, `X` reject, `S` expand a stack, `B` group view → ④ `D` to edit → ⑤ `Ctrl+E` to export. Full walkthrough in the [User Guide](docs/user-guide/en.md).
+**Five steps:** ① drop a folder to import → ② click *Analyze* (the first run asks to download models; pick "Fast (on this device)" to skip that) → ③ rate with `1`–`5`, `P` pick, `X` reject, `S` expand a stack, `B` group view → ④ `D` to edit → ⑤ `Ctrl+E` to export. `Ctrl+K` opens the command palette, `?` lists all shortcuts. Full walkthrough in the [User Guide](docs/user-guide/en.md).
 
 ### Privacy
 
 - Photos, face data, ratings and edits stay on your machine (catalog `catalog.db` plus caches).
-- The network is only used to **download models on demand** (Hugging Face / mirror / ModelScope), after showing the model list and sizes. Turn off *Allow network* in *Settings → Faces & privacy* to run fully offline.
-- Face recognition can be switched off entirely, and all face data can be wiped in one click.
-- LAN access is off by default; enabling it requires an owner password first. Guests are read-only and cannot see people.
+- The network is only used to **download models on demand** (Hugging Face / hf-mirror), after showing the model list and sizes. Turn off *Allow network* in *Settings → Faces & privacy* to run fully offline.
+- Face recognition asks for your consent first (no face features are extracted before you agree); it can be switched off entirely, and all face data can be wiped in one click.
+- LAN access is off by default; enabling it requires an owner password first. Guests are read-only and cannot see people. LAN and remote AI currently use plain HTTP: use them on trusted networks only.
 
 See [User Guide · Privacy & data locations](docs/user-guide/en.md#16-privacy--data-locations).
 
@@ -199,4 +215,4 @@ Code is licensed under [Apache-2.0](LICENSE). AI model weights are **not** distr
 
 ### Docs
 
-[User Guide (中文)](docs/user-guide/zh-CN.md) · [User Guide (English)](docs/user-guide/en.md) · [Design docs](docs/README.md) · [Backlog](docs/backlog.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[User Guide (中文)](docs/user-guide/zh-CN.md) · [User Guide (English)](docs/user-guide/en.md) · [Design docs](docs/README.md) · [Completeness review](docs/09-完成度评审与收尾计划.md) · [Backlog](docs/backlog.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)

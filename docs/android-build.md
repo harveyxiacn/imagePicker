@@ -1,7 +1,7 @@
 # Android 交叉编译（Rust 核心）
 
 Rust 核心（`ip-core` / `ip-imaging` / `ip-render` / `ip-server`、`ip-cli`）可交叉编译到
-`aarch64-linux-android`（真机）与 `x86_64-linux-android`（模拟器）。Tauri Android 外壳另见 `apps/`。
+`aarch64-linux-android`（真机）与 `x86_64-linux-android`（模拟器）。Tauri Android 外壳另见 `apps/desktop/src-tauri/gen/android/` 与 `apps/desktop/plugins/imagepicker-media/`。
 
 ## 准备
 
@@ -21,8 +21,8 @@ cargo build -p ip-cli --release --target x86_64-linux-android
 scripts/cargo-android.sh build -p ip-server --target aarch64-linux-android
 ```
 
-`ANDROID_API`（默认 24）可覆盖 clang 的 API 级别。CI（`.github/workflows/ci.yml` 的 `android` 任务）在
-ubuntu 运行器上对两个目标执行 `cargo check -p ip-server -p ip-cli`。
+`ANDROID_API`（默认 24）可覆盖 clang 的 API 级别。CI（`.github/workflows/ci.yml` 的 `android-check` 任务，矩阵为两个目标）在
+ubuntu 运行器上执行 `cargo check -p ip-server -p ip-cli`；另有 `android` 任务（显示名「Android (debug APK)」）构建 x86_64 debug APK 并运行 Kotlin 单测。两者都只验证能编译 / 打包，**从未在真机或模拟器上运行**。
 
 ## 平台差异（均已按 `cfg(target_os = "android")` / 运行时能力处理）
 
