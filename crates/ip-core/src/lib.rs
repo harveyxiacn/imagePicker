@@ -5,6 +5,7 @@ pub mod analysis;
 pub mod assistant;
 pub mod auth;
 pub mod backup;
+pub mod card;
 pub mod catalog;
 pub mod collections;
 pub mod db;
@@ -26,6 +27,7 @@ pub mod lite;
 pub mod logging;
 pub mod model;
 pub mod paths;
+pub mod portable;
 pub mod remote;
 pub mod roots;
 pub mod runtime;
@@ -50,6 +52,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use analysis::types::*;
+pub use card::{CardImportRequest, CardReport, CardSource};
 pub use edit::{
     AutoCropKind, AutoCropOut, AutoCropRequest, AutoRequest, CheckedStack, EditDoc, EditPut,
     LutOut, PresetCreate, PresetOut, Preview, PreviewRequest, RenderService, SyncRequest,
@@ -71,7 +74,7 @@ use ip_worker_client::{
     AiWorker, ManagedWorker, TimeoutHandle, TimeoutWorker, UnavailableWorker, WorkerConfig,
     WorkerTimeouts,
 };
-use paths::DataDirs;
+use paths::{DataDirSource, DataDirs};
 use settings::SettingsStore;
 use thumbs::Thumbs;
 
@@ -110,6 +113,8 @@ pub struct Core {
     pub events: EventBus,
     pub thumbs: Thumbs,
     pub dirs: DataDirs,
+    /// Why [`Core::dirs`] is where it is (`--data-dir`, environment, portable mode, OS profile).
+    pub data_dir_source: DataDirSource,
     /// The AI worker, behind per-call timeouts ([`Core::worker_timeouts`]).
     pub worker: Arc<dyn AiWorker>,
     /// The on-device `lite` analysis backend (always available, see [`lite::LiteWorker`]).
@@ -143,16 +148,55 @@ pub struct Core {
 
 impl Core {
     pub fn open(cfg: CoreConfig) -> Result<Arc<Core>> {
+        Self::open_with(
+            cfg,
+            std::env::var_os(paths::ENV_DATA_DIR),
+            paths::current_exe_dir(),
+        )
+    }
+
+    /// [`Core::open`] with the environment variable and the executable folder injected
+    /// (portable mode looks for its marker there).
+    pub(crate) fn open_with(
+        cfg: CoreConfig,
+        env_dir: Option<std::ffi::OsString>,
+        exe_dir: Option<PathBuf>,
+    ) -> Result<Arc<Core>> {
         if !paths::data_dir_resolvable(cfg.data_dir.as_deref()) {
             return Err(CoreError::Internal(anyhow::anyhow!(
                 "no data directory: on Android the shell must pass CoreConfig::data_dir \
                  (or set IMAGEPICKER_DATA_DIR)"
             )));
         }
-        let dirs = DataDirs::new(paths::resolve_data_dir(cfg.data_dir.as_deref()));
+        let choice = paths::resolve_data_dir_with(
+            cfg.data_dir.as_deref(),
+            env_dir.as_deref(),
+            exe_dir.as_deref(),
+            paths::platform_data_dir,
+        );
+        let data_dir_source = choice.source;
+        let dirs = DataDirs::new(choice.dir);
         dirs.create()?;
         // an unreadable catalog is moved aside (state "recovery"), see `backup`
         let (db, catalog_guard) = backup::open_catalog(&dirs)?;
+        // portable mode: roots on the app's own drive follow its drive letter
+        let app_drive = (data_dir_source == DataDirSource::Portable)
+            .then(|| {
+                exe_dir
+                    .as_deref()
+                    .and_then(|d| portable::drive_of(&d.to_string_lossy()))
+            })
+            .flatten();
+        portable::set_app_drive(app_drive.clone());
+        if let Some(drive) = app_drive {
+            match db.with(|c| portable::rebase_roots(c, &drive)) {
+                Ok(r) if r.moved + r.adopted + r.conflicts > 0 => {
+                    tracing::info!(drive = %drive, moved = r.moved, adopted = r.adopted, conflicts = r.conflicts, "portable roots follow the app drive")
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "cannot rebase portable roots"),
+            }
+        }
         db.with(|c| catalog::settle_stale_sessions(c))?;
         // catalogs from before RAW+JPEG pairing: pair what is already imported
         db.with(files::pair_all)?;
@@ -257,6 +301,7 @@ impl Core {
             events,
             thumbs,
             dirs,
+            data_dir_source,
             worker,
             lite,
             worker_timeouts,
@@ -476,6 +521,8 @@ mod tests_m5;
 mod tests_m6;
 #[cfg(test)]
 mod tests_p1c;
+#[cfg(test)]
+mod tests_portable;
 #[cfg(test)]
 mod tests_safety;
 #[cfg(test)]

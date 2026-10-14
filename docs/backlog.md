@@ -20,6 +20,7 @@
 
 | 优先级 | 项 | 来源 |
 |---|---|---|
+| P2 | 从存储卡导入（F1.8，2026-10-13 实现，见 `api-contract-m1.md`「从存储卡导入」）余项：Android 走媒体接口，未接入；相机的 MTP/PTP 设备（没有盘符/挂载点）不会被列出，需先在系统里作为存储卡挂载；Windows 卷标/容量/盘类型的系统调用未在真实存储卡上手工验证；「导入后弹出」未做；跳过判断只依据目录库（会话删除后其照片不再算已导入，但目标文件夹里同内容的文件会被识别并直接复用）；会话根取副本所在的最深公共文件夹，跨年导入时会话会包含该文件夹内原有的照片 | 09 §5.3 |
 | P1 | HEIC/HEIF 解码路径的实机验证：本机只验证了 libheif（AI 组件自带）与内嵌 JPEG 两层；Windows WIC + HEIF/HEVC 扩展、macOS ImageIO 未实测；真实 iPhone / 安卓样张（网格、HDR、`imir`）与 AVIF 未测 | M1 imaging |
 | P1 | RAW+JPEG 配对（09 P0-7）已实现并在合成文件上测试；仍待：真实相机的 RAW+JPEG 样张（Canon CR3、Sony ARW、Nikon NEF、Fuji RAF）验证；配对只认同目录同主文件名，不认相机的 `_DSC1234` / `DSC1234` 变体命名；JPEG 在别处被删除后 RAW 仍作为它的 companion（显示为缺失，不会自动升格为网格项）；多个 JPEG 与同一 RAW 同名时 RAW 只跟第一张 | P0-7 |
 | P1 | 文件监听（09 P1-6）：整个根目录变化后全量重新扫描（10 万张级别的根目录每次扫描会有秒级 IO），网络盘 / NAS 上的变更通知不一定可靠（需手动「重新扫描」）；安卓与 iOS 不监听；回收站只在桌面版（Android 无回收站，仅 `_rejected` 文件夹） | P1-6 |
@@ -50,6 +51,7 @@
 | P1 | `ip-infer`（`infer` 特性）尚未在 Android 上链接 ONNX Runtime（NNAPI/XNNPACK）；端侧 YuNet 目前仅桌面可用，检测器为单实例互斥（分析线程间串行） | M8.1 infer |
 | P1 | Release 的 Android APK 任务（签名 keystore、`apksigner` 校验、产物路径）未在 CI 实跑；需配置 `ANDROID_KEYSTORE_*` 四个 secrets 后验证 | M8 release |
 | P2 | 运维余项（09 P1-13）：①Windows 原生异常（SEH）与 Rust `abort` 不经过 panic 钩子，Rust 侧的原生崩溃不留记录（Python 侧由 `faulthandler` 覆盖）；②日志与崩溃记录的路径 / 密钥遮盖是正则、尽力而为（带空格的 Windows 路径只保证遮盖到图片文件名），分享前仍应让用户检查；③Android 仍只写控制台日志（数据目录在 Tauri `setup` 才确定）；④诊断包的硬件概况没有内存 / 显存之外的系统信息（无 `sysinfo` 依赖），操作系统只有系统名与架构，没有版本号 | P1-13 |
+| P2 | 便携模式（09 §5.3）余项：①窗口位置 / 大小由 `tauri-plugin-window-state` 写在 Windows 用户配置里，不随程序走；②AI 组件的 Python 虚拟环境含绝对路径，盘符变化后可能需要在「设置 → AI 组件」重新安装（模型不受影响）；③只有与程序同盘的根文件夹跟随盘符，别的移动盘上的照片盘符变了要靠「重新定位文件夹」；④盘符改写只认 `E:\` 形式（含 `\\?\` 前缀），UNC 共享与 macOS / Linux 的挂载点不处理；⑤便携标记在 macOS `.app` 包内的 `Contents/MacOS` 旁，未实测；⑥没有「创建便携标记」按钮（刻意，见 02 §7），`make-portable.ps1` 与便携 zip 未纳入 Release 工作流，也未实机验证 | P2 便携模式 |
 | P2 | lite 档位的 `faces` 步骤不输出关键点 / 闭眼 / 表情（需 MediaPipe 或 ONNX 关键点模型） | M8.1 infer |
 | P2 | 分析任务健壮性余项（09 WP-B）：①按步骤增量只覆盖 `embed` / `aesthetic` / `iqa` / `scene`，`faces` / `identity` 与人脸行绑定，装了人脸模型后要整批重新分析（`force`）；②暂停只在批次之间生效（每批最多 32 张，远程 AI 的一批可能要数十秒）；③续跑的真实进程强杀只在测试里用「丢弃运行时」模拟，未在 Windows / macOS / Linux 上做真正的 kill -9 实机验证；④桌面「改用快速分析」不会清掉已有的 fast / standard 结果，混合档位的会话在评分上按各自的分项计算，未做跨档位校准 | M2 / 09 WP-B |
 | P2 | 筛选补全余项（09 P1-5）：①`lens` 按 EXIF 原始字符串精确匹配，同一支镜头的不同写法（`RF24-70` / `RF 24-70`）是不同选项，没有镜头名规范化（设备名有，镜头没有）；②`face_ids` 每次查询线性扫描会话内所有有身份特征的人脸（没有向量索引，耗时与人脸数成正比，大会话上未测量；列表总数缓存在目录库无写入期间有效）；③`sharp=unknown` 表示没有清晰度度量（未分析，或该步骤没有输出），界面上叫“未分析”；④`pnpm dev:mock` 的模拟后端没有关键词和人脸特征（关键词筛选恒为空，`face_ids` 被忽略）；⑤自然语言搜索（P1-4）不在此范围 | P1-5 |

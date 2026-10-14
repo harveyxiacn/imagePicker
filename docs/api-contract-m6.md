@@ -94,7 +94,7 @@
 }
 ```
 
-- `GET /api/cache` → `{"bytes", "items": {"thumbs", "previews", "masks", "edits", "gen"}}`；`POST /api/cache/clear {"kinds": [...]}`。
+- `GET /api/cache` → `{"bytes", "items": {"thumbs", "previews", "masks", "edits", "gen"}, "data_dir", "data_dir_source", "portable"}`（`data_dir` 为数据目录绝对路径，`portable` 为便携模式，`data_dir_source` ∈ `explicit` / `env` / `portable` / `platform`）；`POST /api/cache/clear {"kinds": [...]}`。
 - `DELETE /api/models/{id}` 删除已下载模型。
 - `GET /api/onboarding` → `{"first_run": bool, "hardware": {...}, "recommended_tier", "recommended_download_mb"}`；`POST /api/onboarding/done`。
 

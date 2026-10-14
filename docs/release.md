@@ -52,6 +52,26 @@ no workflow edit needed.
 | macOS notarisation | `APPLE_ID`, `APPLE_PASSWORD` (app-specific password), `APPLE_TEAM_ID` | Only used when the signing secrets above also exist. |
 | Updater | `TAURI_SIGNING_PRIVATE_KEY` (+ `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) | Generate with `pnpm tauri signer generate -w ~/.tauri/imagepicker.key`. Also needed in the repo (not yet done): set `bundle.createUpdaterArtifacts: true`, add `tauri-plugin-updater`, put the public key and the `latest.json` endpoint (`.../releases/latest/download/latest.json`) in `plugins.updater`. `.sig` files are already collected into the Release. |
 
+## Portable zip (Windows)
+
+The app is portable when a file named `imagepicker.portable` (or a `data/` folder) sits next to the executable: the catalog,
+caches, settings, logs, crash records, models and the AI runtime then live in `data/` beside the app instead of
+`%APPDATA%\imagePicker` (`--data-dir` and `IMAGEPICKER_DATA_DIR` still win, see docs/02 section 7). A portable build is
+just an app folder plus that marker; it is not produced by the release workflow and not signed.
+
+```powershell
+# 1. Get an app folder that contains imagePicker.exe, uv.exe, web\ and ai-worker\ (resources):
+#    install the NSIS setup once and use its folder (default %LOCALAPPDATA%\imagePicker), or take the
+#    folder of a local `pnpm tauri build --no-bundle` (target\release) if it has all four.
+# 2. Assemble the zip (no build is run):
+pwsh scripts/make-portable.ps1 -AppDir "$env:LOCALAPPDATA\imagePicker" -Version 0.2.0
+#    -> imagePicker_0.2.0_x64-portable.zip and .sha256 in the current directory
+```
+
+The script copies the folder (without uninstallers and `.pdb` files), adds the marker and a short `PORTABLE.txt`, zips it and
+writes the SHA256. To test: unzip on a removable drive, start `imagePicker.exe`, check *Settings > Cache* shows
+"Portable mode: on", then plug the drive in again under another letter and confirm the folders are still there.
+
 ## Android APK
 
 The `android` job in `release.yml` builds a **release** APK for arm64 (`aarch64`) with

@@ -46,6 +46,7 @@ export const qk = {
   remoteStatus: ['remote', 'status'] as const,
   remoteDevices: ['remote', 'devices'] as const,
   tasks: ['tasks'] as const,
+  importSources: ['import', 'sources'] as const,
 }
 
 /** Photo fields owned by the analysis pipeline (never user-editable, safe to overwrite from the server). */

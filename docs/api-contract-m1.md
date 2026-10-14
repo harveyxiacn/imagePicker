@@ -196,6 +196,22 @@ interface RejectFilesReport {
 }
 ```
 
+## 从存储卡导入（F1.8）
+
+服务端只**列出**存储卡，从不自动导入；复制由客户端发起。原则：只复制（不移动、不修改卡）、复制后校验、永不覆盖。
+
+`GET /api/import/sources` → `200 {"sources": CardSource[], "default_pattern": "{yyyy}/{yyyy-mm-dd}"}`（访客 403）。`CardSource`：`{label, path, kind, total_bytes|null, free_bytes|null, photo_estimate, estimate_truncated}`。候选 = 含 `DCIM` 文件夹（不分大小写）的可移动卷：Windows 用 `GetDriveTypeW`（可移动盘；固定盘、网络盘、光驱不列出），macOS `/Volumes/*`，Linux `/media/*`、`/media/<用户>/*`、`/run/media/<用户>/*`；Android 不在范围内（返回空数组）。`photo_estimate` 把同名 RAW+JPEG 算一张，遍历超过 10 万项时 `estimate_truncated = true`。
+
+`POST /api/import/card` `{"source": string, "dest": string, "pattern"?: string, "title"?: string, "exclude"?: string[]}` → `202 {"task_id"}`（任务类型 `card_import`，进度走 `task.progress`，可用 `POST /api/tasks/{id}/cancel` 取消，与导出相同）。
+
+- `source`：必须是刚列出的某张卡，或位于允许根目录内且含 `DCIM` 的文件夹；否则 403 `forbidden_path` / 400。`dest` 必须在允许根目录内（403 `forbidden_path`），且不能位于卡上（400）。
+- `pattern`：`dest` 下的相对文件夹模式，`/` 分隔，可用 `{yyyy}` `{mm}` `{dd}` `{yyyy-mm-dd}` `{yyyymmdd}`，默认 `{yyyy}/{yyyy-mm-dd}`，空串 = 直接放进 `dest`。不允许 `..`、绝对路径、`\`、非法字符、Windows 保留名（400）。日期取拍摄时间（EXIF，无则文件修改时间）；RAW+JPEG 配对取同一日期、同一文件夹。
+- `exclude`：与 `POST /api/import` 相同，作用于卡上的文件（#12）。
+- 流程：扫描 `DCIM` → 跳过目录库已有的文件（文件名 + 大小 + 修改时间（±2 秒），或内容键相同）→ 逐个复制到 `.<名>.<n>.ipcopy` 临时文件，边读边算 blake3，复制后重读校验（大小 + 哈希）→ 以 `create_new` 占住最终名后改名到位（**从不覆盖**：重名且内容不同则加 `_1`、`_2`…，RAW+JPEG 配对共用同一个后缀）；目标已有同内容文件则不重复写入，直接纳入导入；保留卡上文件的修改时间 → 把已校验的副本作为一个会话导入（会话根 = 副本所在的最深公共文件夹，标题默认为卡名；RAW+JPEG 照常配对）。
+- 单个文件读不出来 / 复制后校验失败：该文件记入 `failed`，继续下一个；目标端出错（磁盘满、文件夹不可写、目标文件夹经符号链接指到允许范围之外）：停止，其余记入 `not_attempted`。取消、失败、中途停止都会把**已校验的副本**照常导入。
+- 结果在任务记录 `GET /api/tasks` 的 `params.report`：`{found, skipped_existing, copied, reused, bytes, failed_count, failed[{path,error}] (最多 100 条), not_attempted, cancelled, aborted|null, session_id|null}`。任务状态：`done`（全部成功，或部分失败时 `error` 里写明数量，如 `1 of 6 failed; first: …`）、`failed`（一个都没有导入）、`cancelled`。
+- `task.progress` 的 `done/total` 以文件为单位（`total` 在扫描完成前为 0）。
+
 ## 行为澄清（实现后补充）
 
 - `user_rating`：`null` = 未评分，`0` = 明确评为 0 星（与 null 不同）。`PATCH` 中字段缺省 = 不修改，显式 `null` = 清除；没有任何可修改字段时返回 400；未知 id 忽略。

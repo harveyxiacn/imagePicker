@@ -170,6 +170,13 @@ export function CacheSection() {
           <div className="h-full bg-accent transition-[width] duration-300" style={{ width: `${Math.round(cacheFraction(cache.data?.bytes ?? 0, max) * 100)}%` }} />
         </div>
       </div>
+      {cache.data?.data_dir ? (
+        <Row label={t('settings.cache.location')} hint={t(cache.data.portable ? 'settings.cache.portableOn' : 'settings.cache.portableOff')} testId="data-dir">
+          <span className="max-w-[28rem] truncate font-mono text-xs text-muted" title={cache.data.data_dir} data-testid="data-dir-path">
+            {cache.data.data_dir}
+          </span>
+        </Row>
+      ) : null}
       {CACHE_KINDS.map((k) => {
         const bytes = cache.data?.items[k] ?? 0
         return (

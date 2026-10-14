@@ -416,7 +416,13 @@ impl SettingsStore {
 
     fn save(&self, s: &Settings) -> Result<()> {
         let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(s)?)?;
+        // the default models folder is stored as "empty" so a moved data folder (portable mode,
+        // another drive letter) keeps pointing at its own `models/`
+        let mut v = serde_json::to_value(s)?;
+        if s.models.dir == self.default_models_dir {
+            v["models"]["dir"] = Value::String(String::new());
+        }
+        std::fs::write(&tmp, serde_json::to_vec_pretty(&v)?)?;
         std::fs::rename(&tmp, &self.path)?;
         Ok(())
     }
