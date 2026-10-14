@@ -21,7 +21,8 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-ISSUE_BITS = {"closed_eyes": 1, "blurry": 2, "overexposed": 4, "underexposed": 8, "tilted": 16, "noisy": 64}
+ISSUE_BITS = {"closed_eyes": 1, "blurry": 2, "overexposed": 4, "underexposed": 8, "tilted": 16, "bystander": 32,
+              "noisy": 64, "bad_expression": 128}
 # manifest tag(s) that mean "this photo should carry the issue"
 TRUTH = {
     # burst variants generated with someone's eyes closed (needs the faces step: fast / standard;
@@ -36,6 +37,12 @@ TRUTH = {
     # the three harbours prompted with a horizon tilted about 8 degrees; the other photos are
     # meant to be level, but some are not (see bench/eval-tilt.py for the rotated tilt set)
     "tilted": lambda t, ph: "tilted" in t,
+    # no `bystander` entry: the generator (scripts/comfy-testset-v2.py, comfy-photo-library.py) has no
+    # passer-by / stranger tag, so the synthetic library has no ground truth for it. Such issues are
+    # skipped by the loop below.
+    # burst frames prompted "mouth half open mid-sentence" (scripts/comfy-testset-v2.py BURST_FRAMES,
+    # tag "mid-talk"). Half-blink frames are tagged "eyes-closed" and count under closed_eyes instead.
+    "bad_expression": lambda t, ph: "mid-talk" in t,
 }
 METRICS = ["sharpness", "exposure", "noise", "mean_luminance", "clipped_highlights", "crushed_shadows"]
 
@@ -93,6 +100,8 @@ def main() -> int:
     out["issues"] = {}
     print("\nissue          TP  FP  FN   precision recall   false positives by phase / tag")
     for issue, bit in ISSUE_BITS.items():
+        if issue not in TRUTH:  # no ground truth in the synthetic library (see TRUTH)
+            continue
         tp = fp = fn = 0
         fp_where = Counter()
         fn_names = []
