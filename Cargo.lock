@@ -2471,6 +2471,7 @@ dependencies = [
  "ip-lite",
  "ip-render",
  "ip-worker-client",
+ "libc",
  "notify",
  "rayon",
  "regex",

@@ -208,6 +208,55 @@ export interface ImportBody {
   exclude?: string[]
 }
 
+/** One memory card from `GET /api/import/sources` (a removable volume with a DCIM folder). */
+export interface ImportSource {
+  label: string
+  path: string
+  kind: 'removable' | 'fixed' | 'remote' | 'optical' | 'unknown'
+  total_bytes: number | null
+  free_bytes: number | null
+  /** photos on the card (a RAW+JPEG pair counts once); a lower bound when `estimate_truncated` */
+  photo_estimate: number
+  estimate_truncated: boolean
+}
+
+export interface ImportSources {
+  sources: ImportSource[]
+  default_pattern: string
+}
+
+/** `POST /api/import/card` */
+export interface CardImportBody {
+  /** a card from the sources list */
+  source: string
+  /** destination root, inside the allowed folders */
+  dest: string
+  /** folder pattern below `dest`: tokens {yyyy} {mm} {dd} {yyyy-mm-dd} {yyyymmdd} */
+  pattern?: string
+  title?: string
+  exclude?: string[]
+}
+
+export interface CardFailure {
+  path: string
+  error: string
+}
+
+/** `params.report` of a `card_import` task. */
+export interface CardReport {
+  found: number
+  skipped_existing: number
+  copied: number
+  reused: number
+  bytes: number
+  failed_count: number
+  failed: CardFailure[]
+  not_attempted: number
+  cancelled: boolean
+  aborted: string | null
+  session_id: number | null
+}
+
 export interface ExportBody {
   /** M5: super-resolution factor applied after rendering (slow on CPU tiers) */
   upscale?: 2 | 4
@@ -289,7 +338,7 @@ export type TaskStatus = TaskState | 'cancelling' | 'interrupted'
 
 export interface TaskRecord {
   id: string
-  /** besttake | inpaint | enhance | export | analysis */
+  /** besttake | inpaint | enhance | export | analysis | card_import */
   kind: string
   status: TaskStatus
   /** what was asked, per kind (photo_id, op, count, dest, session_id, ...) */

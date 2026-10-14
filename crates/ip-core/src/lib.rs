@@ -5,6 +5,7 @@ pub mod analysis;
 pub mod assistant;
 pub mod auth;
 pub mod backup;
+pub mod card;
 pub mod catalog;
 pub mod collections;
 pub mod db;
@@ -49,6 +50,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use analysis::types::*;
+pub use card::{CardImportRequest, CardReport, CardSource};
 pub use edit::{
     AutoCropKind, AutoCropOut, AutoCropRequest, AutoRequest, CheckedStack, EditDoc, EditPut,
     LutOut, PresetCreate, PresetOut, Preview, PreviewRequest, RenderService, SyncRequest,

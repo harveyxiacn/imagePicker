@@ -81,6 +81,19 @@ export function useTasks(limit = 50, enabled = true) {
   })
 }
 
+/** GET /api/import/sources (owner only): memory cards plugged in; re-checked every few seconds while Home is open. */
+export function useImportSources(enabled = true) {
+  const ok = useNotGuest()
+  return useQuery({
+    queryKey: qk.importSources,
+    queryFn: api.importSources,
+    enabled: ok && enabled,
+    staleTime: 0,
+    retry: false,
+    refetchInterval: 5000,
+  })
+}
+
 export function useModels(enabled = true) {
   const ok = useNotGuest()
   return useQuery({ queryKey: qk.models, queryFn: api.models, select: (d) => d.models, enabled: ok && enabled, staleTime: 0 })
