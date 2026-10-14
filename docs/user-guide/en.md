@@ -242,6 +242,8 @@ Fixed shortcuts (marked with a lock) cannot be changed, and no other action can 
 
 **Device filter.** When a session mixes several cameras or phones (or has photos without camera EXIF), the filter bar shows a *Device* button. Tick one or more devices (each shows a kind icon: phone, camera, drone, action camera) or *No camera info* to narrow the library; the button shows how many are active, and "Clear filters" resets it. The Inspector shows the same kind icon next to the camera name.
 
+**Time alignment.** Cameras and phones rarely agree on the time; photos taken at the same moment can look hours apart, and bursts and events are split wrongly. Once a session has two or more devices and has been analysed, the *Device* popover shows *Time alignment* below the list: each device with its current correction (*no correction* or for example `-1h 02m 05s`) and the program's estimate, found from the GPS time or from pairs of photos in which different devices shot the same scene, with a confidence (high / medium / low) and the number of matches. *Accept* uses the estimate, *Accept N estimates* takes every estimate with at least 50% confidence at once, *Edit* types an offset (`-1h 02m 05s`, `+90s`, `1:02:05`, at most +-7 days; it is added to that device's capture times), *Reset* removes a correction, and the refresh button in the corner estimates again. A device that does not overlap with the others gets no estimate; type its offset instead. After a change bursts, scenes and events are grouped again (groups you split or merged by hand stay). A correction only changes the time used for grouping: your photo files and their EXIF capture times are never touched, and the grid still sorts by the original capture time.
+
 ### Edit page shortcuts
 
 | Key | Action |

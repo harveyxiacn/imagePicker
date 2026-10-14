@@ -355,6 +355,28 @@ ALTER TABLE face ADD COLUMN artificial REAL;
 ALTER TABLE face ADD COLUMN mouth_open REAL;
 ALTER TABLE analysis ADD COLUMN saliency TEXT;
 "#,
+    // v16: multi-device time alignment (docs/09 P1-2). `session_device_offset` holds, per session
+    // and device, the clock correction applied to `photo.taken_at` for grouping and events
+    // (`offset_ms`, 0 / 'none' = uncorrected; 'auto' = an accepted estimate; 'manual' = typed in)
+    // and the latest estimate (`est_*`, computed on request, cleared by a new analysis run).
+    // `photo.gps_time_ms` is the UTC time of the GPS fix (GPSDateStamp + GPSTimeStamp), the
+    // truth against which a camera clock is measured. The original `taken_at` is never changed.
+    r#"
+ALTER TABLE photo ADD COLUMN gps_time_ms INTEGER;
+CREATE TABLE session_device_offset (
+  session_id INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+  device_id INTEGER NOT NULL REFERENCES device(id) ON DELETE CASCADE,
+  offset_ms INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'none',
+  est_offset_ms INTEGER,
+  est_confidence REAL,
+  est_evidence INTEGER,
+  est_source TEXT,
+  est_at INTEGER,
+  updated_at INTEGER,
+  PRIMARY KEY(session_id, device_id)
+);
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.

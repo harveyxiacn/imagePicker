@@ -55,12 +55,13 @@ impl SceneRow {
 pub(crate) fn rebuild_events(conn: &Connection, session_id: i64) -> Result<usize> {
     let mut scenes: BTreeMap<i64, SceneRow> = BTreeMap::new();
     {
-        let mut st = conn.prepare(
+        let mut st = conn.prepare(&format!(
             "SELECT s.id, COALESCE(s.start_at,0), COALESCE(s.end_at,0),
-                    p.id, COALESCE(p.taken_at, p.mtime), p.gps_lat, p.gps_lon, p.taken_at_offset_min
+                    p.id, {}, p.gps_lat, p.gps_lon, p.taken_at_offset_min
              FROM scene s JOIN burst b ON b.scene_id=s.id JOIN photo p ON p.burst_id=b.id
              WHERE s.session_id=?1",
-        )?;
+            super::time_align::corrected_time_sql("p", "s.session_id")
+        ))?;
         let rows = st.query_map([session_id], |r| {
             Ok((
                 r.get::<_, i64>(0)?,

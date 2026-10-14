@@ -5,6 +5,7 @@ import { useDevices, useSession } from '@/api/queries'
 import type { DeviceKind } from '@/api/types'
 import { toggleDevice } from '@/lib/filter'
 import { useUi } from '@/stores/ui'
+import { DeviceTimePanel } from './DeviceTimePanel'
 
 const ICONS: Record<DeviceKind, LucideIcon> = {
   phone: Smartphone,
@@ -76,7 +77,7 @@ export function DeviceFilterButton({ sessionId }: { sessionId: number }) {
         <div
           role="dialog"
           aria-label={t('device.filter')}
-          className="anim-pop absolute top-full left-0 z-40 mt-1.5 w-[300px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
+          className="anim-pop absolute top-full left-0 z-40 mt-1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
           data-testid="device-filter-popover"
         >
           <ul className="flex max-h-[260px] flex-col gap-0.5 overflow-y-auto">
@@ -103,6 +104,7 @@ export function DeviceFilterButton({ sessionId }: { sessionId: number }) {
               </li>
             )}
           </ul>
+          {list.length >= 2 && <DeviceTimePanel sessionId={sessionId} open={open} />}
           <div className="mt-2 flex justify-end gap-2 border-t border-line pt-2">
             <button className="btn btn-ghost" disabled={selected.length === 0} onClick={() => setFilter({ device: [] })}>
               {t('device.reset')}

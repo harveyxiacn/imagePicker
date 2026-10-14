@@ -243,6 +243,7 @@ fn gen(dir: &Path, count: usize, megapixels: u32, seed: u64) -> Result<()> {
                 iso: Some([100, 200, 400, 800, 1600][rr.below(5) as usize]),
                 gps_lat: None,
                 gps_lon: None,
+                gps_time_ms: None,
             };
             let exif = jpegmeta::synth_exif(&md, (*w, *h), false);
             let jpg = jpegmeta::insert_segments(bytes, exif.as_deref(), None);

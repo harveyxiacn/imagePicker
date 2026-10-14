@@ -539,6 +539,8 @@ mod tests_search;
 #[cfg(test)]
 mod tests_tasks;
 #[cfg(test)]
+mod tests_timealign;
+#[cfg(test)]
 mod tests_timeline;
 #[cfg(test)]
 mod tests_watermark;

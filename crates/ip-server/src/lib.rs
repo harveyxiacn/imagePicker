@@ -14,6 +14,7 @@ pub mod m7;
 pub mod remote;
 pub mod routes;
 pub mod search;
+pub mod time_align;
 pub mod timeline;
 pub mod ws;
 
@@ -141,6 +142,10 @@ pub fn build_router_auth(
             get(routes::get_session).delete(routes::delete_session),
         )
         .route("/sessions/{id}/devices", get(routes::session_devices))
+        .route(
+            "/sessions/{id}/devices/offsets",
+            get(time_align::get_offsets).put(time_align::put_offsets),
+        )
         .route("/sessions/{id}/timeline", get(timeline::session_timeline))
         .route("/timeline", get(timeline::library_timeline))
         .route(

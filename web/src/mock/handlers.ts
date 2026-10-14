@@ -1,5 +1,5 @@
 import { delay, http, HttpResponse } from 'msw'
-import type { CardImportBody, CollageBody, ExportBody, ExportPreset, ImportBody, PhotoPatchBody, Photo } from '@/api/types'
+import type { CardImportBody, CollageBody, DeviceOffsets, ExportBody, ExportPreset, ImportBody, PhotoPatchBody, Photo } from '@/api/types'
 import { emit } from './bus'
 import {
   addSession,
@@ -24,6 +24,27 @@ import { m4Handlers, recordTasteLabels } from './m4'
 import { m5Handlers } from './m5'
 import { photoSvg } from './svg'
 import { endTask, isCancelled, taskHandlers, taskProgress, trackTask } from './tasks'
+
+/** Applied clock offsets per session and device (the mock "estimates" the second device 1 h 2 min 5 s fast). */
+const appliedOffsets = new Map<number, Map<number, { offset_ms: number; source: 'none' | 'auto' | 'manual' }>>()
+const MOCK_CLOCK_ERROR_MS = -3_725_000
+
+function mockOffsets(sid: number, photos: Photo[]): DeviceOffsets {
+  const applied = appliedOffsets.get(sid) ?? new Map()
+  const devices = deviceList(photos).map((d, i) => ({
+    device_id: d.id,
+    name: d.name,
+    kind: d.kind,
+    photo_count: d.photo_count,
+    offset_ms: applied.get(d.id)?.offset_ms ?? 0,
+    source: applied.get(d.id)?.source ?? ('none' as const),
+    estimate:
+      i === 0
+        ? { offset_ms: 0, confidence: 1, evidence: 0, source: 'reference' as const }
+        : { offset_ms: MOCK_CLOCK_ERROR_MS, confidence: 0.87, evidence: 24, source: 'visual' as const },
+  }))
+  return { devices, estimated_at: Date.now(), reference_device_id: devices[0]?.device_id ?? null }
+}
 
 const err = (status: number, code: string, message: string) =>
   HttpResponse.json({ error: { code, message } }, { status })
@@ -292,6 +313,33 @@ export const handlers = [
     const s = getSession(Number(params.id))
     if (!s) return err(404, 'not_found', 'session not found')
     return HttpResponse.json({ devices: deviceList(s.photos) })
+  }),
+  http.get('/api/sessions/:id/devices/offsets', async ({ params }) => {
+    await lat()
+    const s = getSession(Number(params.id))
+    if (!s) return err(404, 'not_found', 'session not found')
+    return HttpResponse.json(mockOffsets(Number(params.id), s.photos))
+  }),
+  http.put('/api/sessions/:id/devices/offsets', async ({ params, request }) => {
+    await lat()
+    const s = getSession(Number(params.id))
+    if (!s) return err(404, 'not_found', 'session not found')
+    const body = (await request.json()) as { action: string; device_id?: number; device_ids?: number[]; offset_ms?: number }
+    const sid = Number(params.id)
+    const applied = appliedOffsets.get(sid) ?? new Map()
+    appliedOffsets.set(sid, applied)
+    const cur = mockOffsets(sid, s.photos)
+    if (body.action === 'set' && body.device_id !== undefined && body.offset_ms !== undefined) {
+      applied.set(body.device_id, { offset_ms: body.offset_ms, source: body.offset_ms === 0 ? 'none' : 'manual' })
+    } else if (body.action === 'reset') {
+      for (const d of cur.devices) if (body.device_id === undefined || body.device_id === d.device_id) applied.delete(d.device_id)
+    } else if (body.action === 'accept') {
+      const ids = body.device_ids?.length ? body.device_ids : cur.devices.filter((d) => d.estimate && d.estimate.source !== 'reference').map((d) => d.device_id)
+      for (const d of cur.devices) if (ids.includes(d.device_id) && d.estimate) applied.set(d.device_id, { offset_ms: d.estimate.offset_ms, source: 'auto' })
+    } else {
+      return err(400, 'bad_request', 'unknown action')
+    }
+    return HttpResponse.json(mockOffsets(sid, s.photos))
   }),
   http.get('/api/sessions/:id/filter-options', async ({ params }) => {
     await lat()

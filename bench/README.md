@@ -30,6 +30,7 @@ These score the analysis itself rather than speed; inputs are the generated phot
 |---|---|
 | `bench/eval-library.py LIBRARY DATA_DIR` | Issue-tag precision / recall against the manifest tags, burst grouping, metric distributions, star histogram. |
 | `bench/make-tilt-set.py [LIBRARY] [OUT]` | Rotates 247 library photos by 0, +-1, +-2, +-3, +-5, +-8 degrees (border-free centre crop) into `bench/data/tilt-set` with the true angles in its manifest (Pillow). |
+| `bench/eval-time-align.py DATA_DIR [--session ID] [--trials N] [--offsets LIST]` | Multi-device time alignment (docs/03 section 2.4): opens an analysed catalog with photos of two or more devices read-only, shifts one device's capture times by known offsets (seconds to hours, in memory) and reports how often the estimator finds the shift again within 5 s, the median / p95 / max error, trials without an estimate and the real clock differences of the library. A numpy port of `analysis/time_align.rs`; run it on the GPU PC next to a real library, it is not part of CI. |
 | `bench/eval-tilt.py TILT_SET DATA_DIR [--library LIBRARY DATA_DIR]` | Tilt estimate error, `tilted` flag precision / recall per angle, false positives on the 0-degree copies and the library, and a threshold sweep (docs/03 section 3.1.1). |
 
 ## Search evaluation (`eval-search.py`)

@@ -424,7 +424,7 @@ pub fn apply_metadata(conn: &mut Connection, updates: &[MetaUpdate]) -> Result<(
         tx.execute(
             "UPDATE photo SET width=?2, height=?3, orientation=?4, taken_at=?5, taken_at_raw=?5, device_id=?6,
                camera=?7, lens=?8, focal=?9, aperture=?10, shutter=?11, iso=?12, gps_lat=?13, gps_lon=?14,
-               content_key=COALESCE(?15, content_key), taken_at_offset_min=?16, meta_done=1
+               content_key=COALESCE(?15, content_key), taken_at_offset_min=?16, gps_time_ms=?17, meta_done=1
              WHERE id=?1",
             params![
                 u.id,
@@ -443,6 +443,7 @@ pub fn apply_metadata(conn: &mut Connection, updates: &[MetaUpdate]) -> Result<(
                 m.gps_lon,
                 u.content_key,
                 m.taken_at_offset_min,
+                m.gps_time_ms,
             ],
         )?;
     }
