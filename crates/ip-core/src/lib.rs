@@ -6,6 +6,7 @@ pub mod assistant;
 pub mod auth;
 pub mod backup;
 pub mod catalog;
+pub mod collage;
 pub mod collections;
 pub mod db;
 pub mod device;
@@ -53,6 +54,7 @@ pub use edit::{
     AutoCropKind, AutoCropOut, AutoCropRequest, AutoRequest, CheckedStack, EditDoc, EditPut,
     LutOut, PresetCreate, PresetOut, Preview, PreviewRequest, RenderService, SyncRequest,
 };
+pub use collage::CollageRequest;
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};
 pub use files::{RejectFilesReport, RejectFilesRequest, RelocateReport, RelocateRequest, Trasher};
@@ -451,6 +453,8 @@ impl Core {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_collage;
 #[cfg(test)]
 mod tests_crop;
 #[cfg(test)]

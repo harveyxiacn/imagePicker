@@ -432,6 +432,7 @@ async fn guest_is_read_only() {
     for (m, uri) in [
         (Method::PATCH, "/api/photos"),
         (Method::POST, "/api/export"),
+        (Method::POST, "/api/export/collage"),
         (Method::POST, "/api/import"),
         (Method::PUT, "/api/edits/1"),
         (Method::DELETE, "/api/sessions/1"),
@@ -815,6 +816,18 @@ async fn whitelist_rejects_outside_paths_everywhere() {
     let r = send(
         &app,
         post("/api/export", json!({"ids": [1], "dest": outside})),
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::FORBIDDEN, "forbidden_path")
+    );
+    let r = send(
+        &app,
+        post(
+            "/api/export/collage",
+            json!({"ids": [1, 2], "dest": outside, "width": 400, "height": 300}),
+        ),
     )
     .await;
     assert_eq!(
