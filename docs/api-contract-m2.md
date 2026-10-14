@@ -167,6 +167,18 @@ interface Face {
 - 两种关系传递合并成组，`duplicate_group_id` = 组内最小照片 id；不在组里的照片为 `null`。已读不到元数据（`meta_done=0`）、文件已丢失（`missing`）和 RAW 附属文件不参与。
 - 内置智能集合 `duplicates`（`duplicates=1`）；`GET /api/photos?duplicates=1|0` 筛选。检测结果变化时对受影响的会话发 `groups.updated`，客户端重新拉取列表。
 
+### C.7 多设备时间对齐（09 P1-2 / F2.11）
+
+一个会话里的相机和手机时钟常差几分钟到几小时，连拍、场景和事件因此错位。每个会话的每台设备有一个**恒定时钟偏移**：`校正时间 = taken_at + offset_ms`。校正时间用于分组（连拍、场景）、事件和组内顺序；`photo.taken_at`、EXIF 与文件本身不变（API 里 `Photo.taken_at` 仍是原始时间）。没有 `device_id` 的照片（无相机 EXIF）和没有 EXIF 拍摄时间的照片（用文件时间）不受影响。偏移的估计方法见 03 §2.4。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/sessions/{id}/devices/offsets` | `{"devices":[{"device_id","name","kind","photo_count","offset_ms","source":"none"\|"auto"\|"manual","estimate":{"offset_ms","confidence":0..1,"evidence","source":"gps"\|"visual"\|"reference"}\|null}],"estimated_at":number\|null,"reference_device_id":number\|null}`，设备按照片数从多到少。`offset_ms`/`source` 是**已应用**的校正（0 / `none` = 未校正）；`estimate` 是最近一次估计（该设备与其他设备没有足够重叠时为 `null`）。第一次调用（或分析运行之后）现场估计并保存，之后直接返回；`?refresh=1` 强制重新估计。`reference_device_id`：没有 GPS 锚点时作为基准（偏移 0）的设备。会话不存在 → `404`；访客可读 |
+| PUT | `/api/sessions/{id}/devices/offsets` | 仅所有者。`{"action":"accept","device_ids"?:[..]}` 采纳估计值（省略 = 所有 `confidence ≥ 0.5` 且不是基准设备的估计；没有可采纳的 → `400`；列出的设备没有估计 → `400`）；`{"action":"set","device_id","offset_ms"}` 手动输入（`\|offset_ms\| ≤ 7 天`，否则 `400`；`0` = 取消校正）；`{"action":"reset","device_id"?}` 重置（省略 = 所有设备）。设备不属于该会话 → `404`。应用的偏移有变化时同步重算该会话的连拍 / 场景 / 事件 / 人脸轨迹 / 评分（手动拆分或合并的连拍组保留），发 `groups.updated`、`people.updated`；回应同 GET |
+
+- 新的分析运行会清空保存的估计（照片集合可能变了），**已应用的偏移保留**，并在这次运行的分组中继续使用。
+- 估计值：`source:"gps"` 以照片的 GPS 时间为 UTC 真值（需要 `photo.gps_time_ms` 与带 UTC 偏移的 EXIF 时间，新导入的照片才有），`"visual"` 由与已对齐设备的相似照片对得出，`"reference"` 是基准设备本身（偏移 0）。`confidence` 综合峰值显著性、支持对数与占比；`evidence` 是匹配对数（GPS 时为带 GPS 时间的照片数）。
+
 ## D. WebSocket 新增事件
 
 ```jsonc
