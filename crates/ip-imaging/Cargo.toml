@@ -16,7 +16,7 @@ memmap2 = "0.9.11"
 jpeg-encoder = { version = "0.7.1", features = ["simd"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "webp", "tiff", "jpeg"] }
 # ICC colour management (pure Rust; already in the tree through `image`).
-moxcms = "0.8.1"
+moxcms = "0.9.1"
 
 # HEIF/AVIF decoders (src/imp/heif.rs): libheif is loaded at runtime, never linked.
 [target.'cfg(not(target_os = "android"))'.dependencies]
