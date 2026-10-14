@@ -137,7 +137,7 @@ fn median(v: &mut [i64]) -> i64 {
 }
 
 /// An even sample of at most `max` photos, in time order.
-fn thin<'a>(mut v: Vec<&'a AlignPhoto>, max: usize) -> Vec<&'a AlignPhoto> {
+fn thin(mut v: Vec<&AlignPhoto>, max: usize) -> Vec<&AlignPhoto> {
     v.sort_by_key(|p| p.t);
     if v.len() <= max || max == 0 {
         return v;

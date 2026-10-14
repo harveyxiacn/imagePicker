@@ -217,7 +217,12 @@ async fn offsets_estimate_accept_set_reset() {
 
     // refresh=1 estimates again
     let r = call(&e.app, Method::GET, &format!("{url}?refresh=1"), None).await;
-    assert_eq!(r.status, StatusCode::OK, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(
+        r.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&r.body)
+    );
 
     // accept
     let r = call(&e.app, Method::PUT, &url, Some(json!({"action": "accept"}))).await;
@@ -240,7 +245,12 @@ async fn offsets_estimate_accept_set_reset() {
         Some(json!({"action": "reset", "device_id": phone_id})),
     )
     .await;
-    assert_eq!(r.status, StatusCode::OK, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(
+        r.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&r.body)
+    );
     assert_eq!(phone(&r.json())["offset_ms"], 0);
     assert_eq!(burst_count(&e, sid).await, 12);
 
@@ -253,7 +263,12 @@ async fn offsets_estimate_accept_set_reset() {
         Some(json!({"action": "set", "device_id": phone_id, "offset_ms": typed})),
     )
     .await;
-    assert_eq!(r.status, StatusCode::OK, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(
+        r.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&r.body)
+    );
     let v = r.json();
     assert_eq!(phone(&v)["source"], "manual");
     assert_eq!(phone(&v)["offset_ms"], typed);
@@ -261,7 +276,12 @@ async fn offsets_estimate_accept_set_reset() {
 
     // reset all
     let r = call(&e.app, Method::PUT, &url, Some(json!({"action": "reset"}))).await;
-    assert_eq!(r.status, StatusCode::OK, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(
+        r.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&r.body)
+    );
     assert_eq!(burst_count(&e, sid).await, 12);
 }
 

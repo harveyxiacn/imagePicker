@@ -25,7 +25,11 @@ pub async fn get_offsets(
     ApiPath(id): ApiPath<i64>,
     ApiQuery(p): ApiQuery<OffsetsParams>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(json!(st.core.device_offsets(id, matches!(p.refresh.as_deref(), Some("1" | "true"))).await?)))
+    Ok(Json(json!(
+        st.core
+            .device_offsets(id, matches!(p.refresh.as_deref(), Some("1" | "true")))
+            .await?
+    )))
 }
 
 /// `PUT /api/sessions/{id}/devices/offsets`: `{"action":"accept"|"set"|"reset",device_id?,
