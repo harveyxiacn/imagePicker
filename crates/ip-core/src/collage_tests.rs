@@ -69,7 +69,10 @@ fn golden_rectangles() {
     );
     // a portrait canvas puts the large photo on top
     let cells = compute_layout(CollageLayout::Story, 500, 1000, 10, 0, 0, &[1.0; 2]).unwrap();
-    assert_eq!(cells, [plain(r(0, 0, 500, 660)), plain(r(0, 670, 500, 330))]);
+    assert_eq!(
+        cells,
+        [plain(r(0, 0, 500, 660)), plain(r(0, 670, 500, 330))]
+    );
     // one photo fills the area inside the margin
     for l in LAYOUTS {
         let one = compute_layout(l, 300, 200, 10, 5, 0, &[1.5]).unwrap();
@@ -86,7 +89,8 @@ fn check_tiling(cells: &[Cell], w: u32, h: u32, gap: u32, margin: u32) {
         assert!(a.x >= margin && a.y >= margin, "{a:?}");
         assert!(a.x + a.w <= w - margin && a.y + a.h <= h - margin, "{a:?}");
         for b in &rects[i + 1..] {
-            let apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+            let apart =
+                a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
             assert!(apart, "overlap {a:?} {b:?}");
         }
         // nearest neighbour to the right / below that shares rows / columns
@@ -108,10 +112,16 @@ fn check_tiling(cells: &[Cell], w: u32, h: u32, gap: u32, margin: u32) {
             Some(d) => assert_eq!(d, gap, "vertical gap below {a:?}"),
             None => assert_eq!(a.y + a.h, h - margin, "bottom edge of {a:?}"),
         }
-        if !rects.iter().any(|b| b.x + b.w + gap <= a.x && b.y < a.y + a.h && a.y < b.y + b.h) {
+        if !rects
+            .iter()
+            .any(|b| b.x + b.w + gap <= a.x && b.y < a.y + a.h && a.y < b.y + b.h)
+        {
             assert_eq!(a.x, margin, "left edge of {a:?}");
         }
-        if !rects.iter().any(|b| b.y + b.h + gap <= a.y && b.x < a.x + a.w && a.x < b.x + b.w) {
+        if !rects
+            .iter()
+            .any(|b| b.y + b.h + gap <= a.y && b.x < a.x + a.w && a.x < b.x + b.w)
+        {
             assert_eq!(a.y, margin, "top edge of {a:?}");
         }
     }
@@ -139,8 +149,17 @@ fn layouts_tile_the_canvas_without_overlap_and_with_exact_gaps() {
     };
     for layout in LAYOUTS {
         for n in 1..=30usize {
-            for (w, h, gap, margin) in [(240, 180, 4, 6), (150, 260, 0, 0), (300, 300, 7, 3), (400, 120, 2, 10)] {
-                let caption = if layout == CollageLayout::Contact { 9 } else { 0 };
+            for (w, h, gap, margin) in [
+                (240, 180, 4, 6),
+                (150, 260, 0, 0),
+                (300, 300, 7, 3),
+                (400, 120, 2, 10),
+            ] {
+                let caption = if layout == CollageLayout::Contact {
+                    9
+                } else {
+                    0
+                };
                 match compute_layout(layout, w, h, gap, margin, caption, &aspects(n)) {
                     Ok(cells) => {
                         assert_eq!(cells.len(), n);
@@ -171,9 +190,15 @@ fn layout_is_deterministic_and_follows_the_order() {
     assert!(cells[1..].iter().all(|c| area(c) < area(&cells[0])));
     // a wide photo set picks a wide arrangement, a tall one a tall arrangement
     let wide = compute_layout(CollageLayout::Grid, 1000, 1000, 0, 0, 0, &[3.0; 3]).unwrap();
-    assert_eq!(wide.iter().map(|c| c.photo.w).collect::<Vec<_>>(), [1000, 1000, 1000]);
+    assert_eq!(
+        wide.iter().map(|c| c.photo.w).collect::<Vec<_>>(),
+        [1000, 1000, 1000]
+    );
     let tall = compute_layout(CollageLayout::Grid, 1000, 1000, 0, 0, 0, &[0.33; 3]).unwrap();
-    assert_eq!(tall.iter().map(|c| c.photo.h).collect::<Vec<_>>(), [1000, 1000, 1000]);
+    assert_eq!(
+        tall.iter().map(|c| c.photo.h).collect::<Vec<_>>(),
+        [1000, 1000, 1000]
+    );
 }
 
 #[test]
@@ -188,14 +213,32 @@ fn too_small_canvases_are_refused() {
 fn cover_window_follows_the_faces_and_stays_inside() {
     // 300x100 picture into a square cell: a 100x100 window
     assert_eq!(cover_window(300, 100, 50, 50, None), (100, 0, 100, 100));
-    assert_eq!(cover_window(300, 100, 50, 50, Some((0.9, 0.5))), (200, 0, 100, 100));
-    assert_eq!(cover_window(300, 100, 50, 50, Some((0.0, 0.0))), (0, 0, 100, 100));
-    assert_eq!(cover_window(300, 100, 50, 50, Some((1.0, 1.0))), (200, 0, 100, 100));
+    assert_eq!(
+        cover_window(300, 100, 50, 50, Some((0.9, 0.5))),
+        (200, 0, 100, 100)
+    );
+    assert_eq!(
+        cover_window(300, 100, 50, 50, Some((0.0, 0.0))),
+        (0, 0, 100, 100)
+    );
+    assert_eq!(
+        cover_window(300, 100, 50, 50, Some((1.0, 1.0))),
+        (200, 0, 100, 100)
+    );
     // portrait picture into a wide cell: the window is a full-width band
-    assert_eq!(cover_window(100, 300, 200, 100, Some((0.5, 0.25))), (0, 50, 100, 50));
+    assert_eq!(
+        cover_window(100, 300, 200, 100, Some((0.5, 0.25))),
+        (0, 50, 100, 50)
+    );
     // same aspect: everything
-    assert_eq!(cover_window(400, 300, 40, 30, Some((0.1, 0.9))), (0, 0, 400, 300));
-    assert_eq!(cover_window(100, 100, 10, 10, Some((f64::NAN, 0.5))), (0, 0, 100, 100));
+    assert_eq!(
+        cover_window(400, 300, 40, 30, Some((0.1, 0.9))),
+        (0, 0, 400, 300)
+    );
+    assert_eq!(
+        cover_window(100, 100, 10, 10, Some((f64::NAN, 0.5))),
+        (0, 0, 100, 100)
+    );
 }
 
 #[test]
@@ -310,7 +353,10 @@ fn every_cell_shows_its_own_photo() {
                     w: (c.photo.w / 3).max(1),
                     h: (c.photo.h / 3).max(1),
                 };
-                assert!(close(mean(&canvas, inner), COLORS[i], 3.0), "{layout:?} {fit:?} cell {i}");
+                assert!(
+                    close(mean(&canvas, inner), COLORS[i], 3.0),
+                    "{layout:?} {fit:?} cell {i}"
+                );
             }
             // margin and gaps stay background
             assert!(close(mean(&canvas, r(0, 0, 400, 8)), BG, 0.01));
@@ -318,7 +364,11 @@ fn every_cell_shows_its_own_photo() {
             assert!(close(mean(&canvas, r(0, 0, 8, 400)), BG, 0.01));
             if layout == CollageLayout::Grid {
                 // 2x2 grid: the cross between the cells
-                assert!(close(mean(&canvas, r(8 + cells[0].photo.w, 8, 8, 384)), BG, 0.01));
+                assert!(close(
+                    mean(&canvas, r(8 + cells[0].photo.w, 8, 8, 384)),
+                    BG,
+                    0.01
+                ));
             }
         }
     }
@@ -348,9 +398,18 @@ fn cover_fills_cells_and_contain_letterboxes() {
         &|_| {},
     )
     .unwrap();
-    assert!(close(mean(&contain, r(0, 0, 100, 36)), BG, 0.01), "bar above");
-    assert!(close(mean(&contain, r(0, 64, 100, 36)), BG, 0.01), "bar below");
-    assert!(close(mean(&contain, r(0, 40, 100, 20)), COLORS[0], 3.0), "picture in the middle");
+    assert!(
+        close(mean(&contain, r(0, 0, 100, 36)), BG, 0.01),
+        "bar above"
+    );
+    assert!(
+        close(mean(&contain, r(0, 64, 100, 36)), BG, 0.01),
+        "bar below"
+    );
+    assert!(
+        close(mean(&contain, r(0, 40, 100, 20)), COLORS[0], 3.0),
+        "picture in the middle"
+    );
 }
 
 #[test]
@@ -358,7 +417,10 @@ fn cover_centres_on_the_faces() {
     let dir = tempfile::tempdir().unwrap();
     // left half red, right half blue
     let two_tone = |x: u32, _| if x < 150 { COLORS[0] } else { COLORS[2] };
-    let refs = vec![photo(dir.path(), 1, 300, 100, two_tone), photo(dir.path(), 2, 300, 100, two_tone)];
+    let refs = vec![
+        photo(dir.path(), 1, 300, 100, two_tone),
+        photo(dir.path(), 2, 300, 100, two_tone),
+    ];
     let cells = [plain(r(0, 0, 50, 50)), plain(r(50, 0, 50, 50))];
     let mut focus = HashMap::new();
     focus.insert(2, (0.95, 0.5)); // faces on the right of photo 2 only
@@ -384,7 +446,14 @@ fn contact_sheet_draws_captions_in_the_band_only() {
     let cells = compute_layout(CollageLayout::Contact, 400, 300, 10, 10, 20, &[1.5; 2]).unwrap();
     let captions = vec!["p1.png  ★★★".to_string(), String::new()];
     let none = HashMap::new();
-    let mut j = job(&cells, (400, 300), CollageFit::Cover, &none, &captions, None);
+    let mut j = job(
+        &cells,
+        (400, 300),
+        CollageFit::Cover,
+        &none,
+        &captions,
+        None,
+    );
     j.background = [255, 255, 255];
     let canvas = render_collage(&crate::imaging::RealImaging, &refs, None, &j, &|_| {}).unwrap();
     let ink = |rect: Rect| {
@@ -394,7 +463,11 @@ fn contact_sheet_draws_captions_in_the_band_only() {
             .count()
     };
     assert!(ink(cells[0].caption.unwrap()) > 20, "the caption is drawn");
-    assert_eq!(ink(cells[1].caption.unwrap()), 0, "an empty caption draws nothing");
+    assert_eq!(
+        ink(cells[1].caption.unwrap()),
+        0,
+        "an empty caption draws nothing"
+    );
     // the picture above the first caption is untouched
     assert!(close(mean(&canvas, cells[0].photo), COLORS[0], 3.0));
 }
@@ -413,7 +486,14 @@ fn cancelling_stops_the_collage() {
         &crate::imaging::RealImaging,
         &refs,
         None,
-        &job(&cells, (200, 200), CollageFit::Cover, &none, &[], Some(&token)),
+        &job(
+            &cells,
+            (200, 200),
+            CollageFit::Cover,
+            &none,
+            &[],
+            Some(&token),
+        ),
         &|_| {
             rendered.fetch_add(1, Ordering::SeqCst);
         },
@@ -426,7 +506,14 @@ fn cancelling_stops_the_collage() {
         &crate::imaging::RealImaging,
         &refs,
         None,
-        &job(&cells, (200, 200), CollageFit::Cover, &none, &[], Some(&token)),
+        &job(
+            &cells,
+            (200, 200),
+            CollageFit::Cover,
+            &none,
+            &[],
+            Some(&token),
+        ),
         &|_| token.cancel(),
     );
     assert_eq!(res.unwrap_err(), CANCELLED);

@@ -53,11 +53,11 @@ use std::time::Duration;
 
 pub use analysis::types::*;
 pub use card::{CardImportRequest, CardReport, CardSource};
+pub use collage::CollageRequest;
 pub use edit::{
     AutoCropKind, AutoCropOut, AutoCropRequest, AutoRequest, CheckedStack, EditDoc, EditPut,
     LutOut, PresetCreate, PresetOut, Preview, PreviewRequest, RenderService, SyncRequest,
 };
-pub use collage::CollageRequest;
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};
 pub use files::{RejectFilesReport, RejectFilesRequest, RelocateReport, RelocateRequest, Trasher};

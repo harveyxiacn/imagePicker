@@ -52,7 +52,10 @@ async fn call(app: &Router, method: Method, uri: &str, body: Option<Value>) -> (
     let resp = app.clone().oneshot(req).await.unwrap();
     let status = resp.status();
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 /// Imports three JPEGs and returns their ids.
@@ -73,7 +76,13 @@ async fn photos(e: &Env, src: &std::path::Path) -> Vec<i64> {
         .wait_session_ready(sid, Duration::from_secs(30))
         .await
         .unwrap();
-    let (_, r) = call(&e.app, Method::GET, &format!("/api/photos?session_id={sid}"), None).await;
+    let (_, r) = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos?session_id={sid}"),
+        None,
+    )
+    .await;
     r["photos"]
         .as_array()
         .unwrap()
@@ -114,7 +123,11 @@ async fn collage_requests_are_validated_before_anything_runs() {
         b
     };
     bad("one photo", with("ids", json!([1]))).await;
-    bad("31 photos", with("ids", json!((1..=31).collect::<Vec<i64>>()))).await;
+    bad(
+        "31 photos",
+        with("ids", json!((1..=31).collect::<Vec<i64>>())),
+    )
+    .await;
     bad("repeated", with("ids", json!([1, 1]))).await;
     bad("width", with("width", json!(10))).await;
     bad("height", with("height", json!(20000))).await;
@@ -136,7 +149,10 @@ async fn collage_requests_are_validated_before_anything_runs() {
     assert!(status.is_client_error());
     // unknown photos: 404, nothing written
     let (status, r) = post(ok.clone()).await;
-    assert_eq!((status, r["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("not_found")));
+    assert_eq!(
+        (status, r["error"]["code"].as_str()),
+        (StatusCode::NOT_FOUND, Some("not_found"))
+    );
     assert_eq!(std::fs::read_dir(out.path()).unwrap().count(), 0);
 }
 

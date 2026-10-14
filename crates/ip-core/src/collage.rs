@@ -359,7 +359,10 @@ pub fn compute_layout(
             }
             let (hero, rest) = if landscape {
                 (
-                    Rect { w: hero_len, ..area },
+                    Rect {
+                        w: hero_len,
+                        ..area
+                    },
                     Rect {
                         x: area.x + hero_len + gap,
                         w: rest_len,
@@ -368,7 +371,10 @@ pub fn compute_layout(
                 )
             } else {
                 (
-                    Rect { h: hero_len, ..area },
+                    Rect {
+                        h: hero_len,
+                        ..area
+                    },
                     Rect {
                         y: area.y + hero_len + gap,
                         h: rest_len,
@@ -403,7 +409,11 @@ pub fn cover_window(
     };
     let (fx, fy) = focus.unwrap_or((0.5, 0.5));
     let place = |f: f64, full: u64, win: u64| -> u32 {
-        let f = if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.5 };
+        let f = if f.is_finite() {
+            f.clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
         let start = (f * full as f64 - win as f64 / 2.0).round();
         start.clamp(0.0, (full - win) as f64) as u32
     };
@@ -419,8 +429,8 @@ fn fit_into(
     fit: CollageFit,
     focus: Option<(f64, f64)>,
 ) -> (RgbImage, u32, u32) {
-    let src = image::RgbImage::from_raw(img.width, img.height, img.data.clone())
-        .expect("size matches");
+    let src =
+        image::RgbImage::from_raw(img.width, img.height, img.data.clone()).expect("size matches");
     let done = |buf: image::RgbImage, dx: u32, dy: u32| {
         (
             RgbImage {
@@ -446,9 +456,15 @@ fn fit_into(
         CollageFit::Contain => {
             let (iw, ih) = (img.width as u64, img.height as u64);
             let (w, h) = if iw * ch as u64 > ih * cw as u64 {
-                (cw, ((ih * cw as u64 + iw / 2) / iw).clamp(1, ch as u64) as u32)
+                (
+                    cw,
+                    ((ih * cw as u64 + iw / 2) / iw).clamp(1, ch as u64) as u32,
+                )
             } else {
-                (((iw * ch as u64 + ih / 2) / ih).clamp(1, cw as u64) as u32, ch)
+                (
+                    ((iw * ch as u64 + ih / 2) / ih).clamp(1, cw as u64) as u32,
+                    ch,
+                )
             };
             let out = if (w, h) == (img.width, img.height) {
                 src
@@ -606,10 +622,14 @@ pub fn render_collage(
                 return Err(CANCELLED.to_string());
             }
             let (cw, ch) = (cell.photo.w, cell.photo.h);
-            let (img, edited) =
-                render_for_cell(imaging, r, edits, cw, ch).map_err(|e| format!("{}: {e}", r.file_name))?;
+            let (img, edited) = render_for_cell(imaging, r, edits, cw, ch)
+                .map_err(|e| format!("{}: {e}", r.file_name))?;
             // face boxes belong to the stored picture: an edit may have cropped or rotated it
-            let focus = if edited { None } else { job.focus.get(&r.id).copied() };
+            let focus = if edited {
+                None
+            } else {
+                job.focus.get(&r.id).copied()
+            };
             let tile = fit_into(&img, cw, ch, job.fit, focus);
             progress(done.fetch_add(1, Ordering::SeqCst) + 1);
             Ok(tile)
@@ -621,7 +641,9 @@ pub fn render_collage(
     let mut canvas = RgbImage {
         width: job.width,
         height: job.height,
-        data: job.background.repeat(job.width as usize * job.height as usize),
+        data: job
+            .background
+            .repeat(job.width as usize * job.height as usize),
     };
     for (cell, tile) in job.cells.iter().zip(tiles) {
         let (img, dx, dy) = tile?;
@@ -638,7 +660,11 @@ pub fn render_collage(
         let lum = 0.299 * job.background[0] as f32
             + 0.587 * job.background[1] as f32
             + 0.114 * job.background[2] as f32;
-        let ink = if lum > 140.0 { [30, 30, 30] } else { [235, 235, 235] };
+        let ink = if lum > 140.0 {
+            [30, 30, 30]
+        } else {
+            [235, 235, 235]
+        };
         for (cell, text) in job.cells.iter().zip(job.captions) {
             if let (Some(rect), false) = (cell.caption, text.is_empty()) {
                 draw_caption(&mut canvas, &font, text, rect, ink);
@@ -696,7 +722,12 @@ fn face_focus(c: &rusqlite::Connection, ids: &[i64]) -> Result<HashMap<i64, (f64
 }
 
 /// Picks a file name for the collage (never an existing one) inside `dest`.
-fn plan_output(first: &PhotoRef, template: &str, dest: &Path, format: ExportFormat) -> std::path::PathBuf {
+fn plan_output(
+    first: &PhotoRef,
+    template: &str,
+    dest: &Path,
+    format: ExportFormat,
+) -> std::path::PathBuf {
     export::plan_names_with(
         std::slice::from_ref(first),
         template,
@@ -727,7 +758,8 @@ impl Core {
         let (refs, focus, info) = self
             .db
             .call(move |c| {
-                let members = crate::files::export_members(c, &ids, crate::model::PairMember::Jpeg)?;
+                let members =
+                    crate::files::export_members(c, &ids, crate::model::PairMember::Jpeg)?;
                 let refs = catalog::photo_refs(c, &members)?;
                 let found: Vec<i64> = refs.iter().map(|r| r.id).collect();
                 let focus = if want_faces && !found.is_empty() {
@@ -745,7 +777,8 @@ impl Core {
             ));
         }
         let n = refs.len();
-        let captions_on = req.layout == CollageLayout::Contact && (req.caption_name || req.caption_rating);
+        let captions_on =
+            req.layout == CollageLayout::Contact && (req.caption_name || req.caption_rating);
         let caption_h = if captions_on {
             caption_height(req.width, req.height)
         } else {
@@ -753,13 +786,7 @@ impl Core {
         };
         let aspects: Vec<f64> = refs.iter().map(aspect_of).collect();
         let cells = compute_layout(
-            req.layout,
-            req.width,
-            req.height,
-            req.gap,
-            req.margin,
-            caption_h,
-            &aspects,
+            req.layout, req.width, req.height, req.gap, req.margin, caption_h, &aspects,
         )
         .map_err(CoreError::bad_request)?;
         let dest = std::path::PathBuf::from(&req.dest);
@@ -815,8 +842,12 @@ impl Core {
                 error,
             };
             core.events.emit(ev(0, "running", None));
-            let (imaging, core2, tid2, cancel2) =
-                (core.imaging.clone(), core.clone(), tid.clone(), cancel.clone());
+            let (imaging, core2, tid2, cancel2) = (
+                core.imaging.clone(),
+                core.clone(),
+                tid.clone(),
+                cancel.clone(),
+            );
             let res = tokio::task::spawn_blocking(move || -> std::result::Result<(), String> {
                 let job = CollageJob {
                     cells: &cells,
@@ -845,7 +876,8 @@ impl Core {
                 if cancel2.is_cancelled() {
                     return Err(CANCELLED.into());
                 }
-                let bytes = formats::encode(&canvas, req.format, req.quality, &PreparedMeta::default())?;
+                let bytes =
+                    formats::encode(&canvas, req.format, req.quality, &PreparedMeta::default())?;
                 export::write_new(&out, &bytes).map_err(|e| e.to_string())
             })
             .await;

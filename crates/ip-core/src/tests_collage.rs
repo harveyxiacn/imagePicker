@@ -146,17 +146,29 @@ async fn collage_task_writes_one_file_and_never_overwrites() {
     // 2x2 grid with 8 px margin and gap: cells are 192 px
     let centres = [(104, 104), (296, 104), (104, 296), (296, 296)];
     for (i, (x, y)) in centres.iter().enumerate() {
-        assert!(near(px(&img, *x, *y), COLORS[i]), "cell {i}: {:?}", px(&img, *x, *y));
+        assert!(
+            near(px(&img, *x, *y), COLORS[i]),
+            "cell {i}: {:?}",
+            px(&img, *x, *y)
+        );
     }
-    assert!(near(px(&img, 4, 4), [10, 20, 30]), "margin is the background");
-    assert!(near(px(&img, 200, 200), [10, 20, 30]), "gap is the background");
+    assert!(
+        near(px(&img, 4, 4), [10, 20, 30]),
+        "margin is the background"
+    );
+    assert!(
+        near(px(&img, 200, 200), [10, 20, 30]),
+        "gap is the background"
+    );
     let before = std::fs::read(&out[0]).unwrap();
     // again: the existing file stays, the new one gets a suffix
     let (state, _) = run(&e, request(&e, ids)).await;
     assert_eq!(state, "done");
     let out = files(e.out.path());
     assert_eq!(
-        out.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect::<Vec<_>>(),
+        out.iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect::<Vec<_>>(),
         ["collage.png", "collage_1.png"]
     );
     assert_eq!(std::fs::read(&out[0]).unwrap(), before);
@@ -172,7 +184,11 @@ async fn every_format_and_layout_works() {
         (ExportFormat::Tiff, "tif"),
         (ExportFormat::Webp, "webp"),
     ] {
-        for layout in [CollageLayout::Grid, CollageLayout::Story, CollageLayout::Contact] {
+        for layout in [
+            CollageLayout::Grid,
+            CollageLayout::Story,
+            CollageLayout::Contact,
+        ] {
             let dir = tempfile::tempdir().unwrap();
             let mut req = request(&e, ids.clone());
             req.dest = dir.path().to_string_lossy().into_owned();
@@ -182,11 +198,18 @@ async fn every_format_and_layout_works() {
             req.width = 480;
             req.height = 320;
             let (state, error) = run(&e, req).await;
-            assert_eq!((state.as_str(), error), ("done", None), "{format:?} {layout:?}");
+            assert_eq!(
+                (state.as_str(), error),
+                ("done", None),
+                "{format:?} {layout:?}"
+            );
             let out = files(dir.path());
             assert_eq!(out.len(), 1);
             assert_eq!(out[0].extension().unwrap(), ext);
-            assert_eq!(image::open(&out[0]).unwrap().to_rgb8().dimensions(), (480, 320));
+            assert_eq!(
+                image::open(&out[0]).unwrap().to_rgb8().dimensions(),
+                (480, 320)
+            );
         }
     }
 }
