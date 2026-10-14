@@ -1,5 +1,7 @@
 # 合成评测集 · lite 档位首轮校准记录（2026-10-07）
 
+> **已过时（2026-10-13 标注）**：本文是首轮记录。下面「8 组连拍只成组 1 组」等结论已被后续的连拍分组改进（回看 / 补洞，提交 c9fef3b1、63a8ffe3）取代；当前数字见 [`docs/backlog.md`](../docs/backlog.md)、[`docs/09-完成度评审与收尾计划.md`](../docs/09-完成度评审与收尾计划.md) §2 与 `bench/photo-library-2026-10-08.md`、`bench/eval-library.py` 的输出。保留本文仅作历史记录。
+
 评测集：`scripts/comfy-testset.py`（ComfyUI + Qwen-Image 2.1，74 张），`scripts/comfy-testset-exif.py` 转为带 EXIF 时间的 JPEG。
 命令：`imagepicker analyze <dir> --profile lite`（纯 Rust：pHash + 清晰度 / 曝光 / 噪点，无人脸、无嵌入）。
 
