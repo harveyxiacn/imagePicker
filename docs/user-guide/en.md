@@ -26,7 +26,8 @@
 17. [Lightroom / darktable interop (XMP)](#17-lightroom--darktable-interop-xmp)
 18. [Settings](#18-settings)
 19. [Troubleshooting & FAQ](#19-troubleshooting--faq)
-20. [Uninstall](#20-uninstall)
+20. [Mobile & remote AI (experimental)](#20-mobile--remote-ai-experimental)
+21. [Uninstall](#21-uninstall)
 
 ---
 
@@ -49,7 +50,7 @@ Home: drop a folder (desktop) or click *Choose folder* to import; *Recent* lists
 | Right inspector | Score breakdown, AI suggestion (with *Accept*), flag, colour, faces, EXIF (`Tab` hides / shows it) |
 | Status bar | Thumbnail progress, selection count, picked / rejected / rated totals, connection state |
 
-> The search box in the top bar (natural-language search) is a greyed-out placeholder for now.
+> The search box in the top bar (natural-language search) is a greyed-out placeholder for now; to find photos use the filter bar, the `Ctrl+K` command palette or the assistant's filter commands. Narrow screens (width < 768 px, e.g. phones) switch to a mobile layout automatically, see [section 20](#20-mobile--remote-ai-experimental).
 
 ## 2. Installation
 
@@ -156,7 +157,7 @@ The first time an AI feature needs models, the *AI models required* dialog lists
 
 - *Download and continue* starts the download; *Move to background* keeps working meanwhile;
 - Models marked "non-commercial" or "research only" are not for commercial use, and models marked "licence unknown" have no established commercial-use standing yet (for example undisclosed training data): the badge next to the licence says so, and hovering it shows the training data and notes. Personal use is fine; check the terms before any commercial use;
-- Sources: Auto (falls back to a mirror) / Hugging Face / HF mirror / ModelScope, chosen in *Settings → Hardware & models*. The source you pick is tried first (with the HF mirror selected, the first request already goes to the mirror), the others are fallbacks;
+- Sources: Auto (falls back to a mirror) / Hugging Face / HF mirror / ModelScope, chosen in *Settings → Hardware & models*. The source you pick is tried first (with the HF mirror selected, the first request already goes to the mirror), the others are fallbacks. **ModelScope is a placeholder for now**: no model is hosted there yet, so choosing it behaves like *Auto*;
 - Models are stored locally; afterwards no network is needed. You can delete models in Settings to free space.
 
 ## 4. Importing photos
@@ -255,7 +256,7 @@ Fixed shortcuts (marked with a lock) cannot be changed, and no other action can 
 
 ### Touch (WebUI)
 
-Loupe: swipe left/right for previous/next; double-tap toggles Fit ↔ 100%; wheel zooms around the cursor, drag pans.
+Loupe: swipe left/right for previous/next; double-tap toggles Fit ↔ 100%; wheel zooms around the cursor, drag pans. The phone-specific gestures (swipe up to pick, down to reject, quick cull) are in [section 20](#20-mobile--remote-ai-experimental).
 
 ## 6. Smart analysis & stars
 
@@ -267,7 +268,8 @@ Click **Analyze** in the top bar, choose a profile and press *Start analysis*:
 |---|---|---|
 | **Fast** | Blur / exposure / face detection | Almost nothing to download |
 | **Standard** (default) | Adds people recognition, aesthetic and image-quality scores, scene classification | About 2 GB depending on tier |
-| **Quick (on device)** | Blur / exposure / noise scores and burst grouping, no people, aesthetic or scene scores | None: needs neither the AI components nor any model |
+| **Quick (on device)** (Lite) | Blur / exposure / noise scores, tilt detection and burst grouping; no closed-eye, people, aesthetic or scene scores | None: runs on this device with built-in algorithms and needs neither the AI components nor any model |
+| **Standard (remote AI, pairing required)** | Same as Standard, but downscaled copies of your photos are analysed by a paired computer at home | Models live on the host; pair first, see [section 20](#20-mobile--remote-ai-experimental) |
 
 - Analyse only the selection with *Analyse only the N selected*;
 - **Before the first analysis** the app explains what face recognition is used for (closed-eye and expression checks, grouping and filtering by person, best take, portrait retouching) and asks whether to use it. Until you agree no face is detected and no face feature is extracted; *Don't use face recognition* switches it off and the analysis runs without face-based results (closed eyes, people, best take). Change it any time in *Settings → Faces & privacy*;
@@ -392,7 +394,9 @@ Press `D` in Grid/Loupe (or right-click → *Edit*) to open the edit page. Every
 
 ### AI one-click
 
-*AI one-click* offers **Auto / Portrait / Landscape** and *Match reference…*. **Edit suggestions** (needs the local VLM, T2+) proposes adjustments with a reason; *Apply* applies it (undoable).
+*AI one-click* offers **Auto / Portrait / Landscape** (rule-based; the result is slider values you can keep tuning). **Edit suggestions** (needs the local VLM, T2+) proposes adjustments with a reason; *Apply* applies it (undoable).
+
+> *Match reference…* is a greyed-out placeholder for now (the tooltip says "Coming in a later release"); it cannot be used yet.
 
 ### Basic & colour
 
@@ -562,6 +566,8 @@ From the command line: `imagepicker ask --session <id> "only show 4 stars and ab
 
 ## 15. LAN WebUI & guest access
 
+> **Trusted LAN only:** the LAN WebUI and remote AI currently use **plain HTTP** (no HTTPS/TLS; TLS is planned for 1.x). Passwords, session cookies and photo content are not encrypted on the network and could be sniffed by other devices on it. Enable them only on your own home or office network; never expose the port to the internet, forward it through your router, or use it on untrusted Wi-Fi.
+
 Let phones and tablets on the same network use your library in a browser (e.g. a 4090 desktop serves, a laptop or tablet browses).
 
 1. *Settings → LAN / WebUI*: set the **owner password** first (first-time setup only from this computer; at least 8 characters). Optionally set a **guest password** (must differ from the owner's) and tick *Allow read-only guests*;
@@ -575,7 +581,7 @@ Let phones and tablets on the same network use your library in a browser (e.g. a
 | Owner | Full access |
 | Read-only guest | Browse only: cannot rate, edit or export; cannot see people or face data |
 
-Security notes: enable only on a trusted LAN and use a strong password; failed logins are limited to 5 per minute; remote devices can only reach the *allowed folders*; request origins are restricted. CLI: `imagepicker serve --lan` (the password may come from the `IMAGEPICKER_PASSWORD` environment variable so it stays off the command line).
+Security notes: LAN access currently uses **plain HTTP** (no HTTPS), so passwords and photos are not encrypted on the network: enable it only on a trusted LAN and use a strong password; failed logins are limited to 5 per minute; remote devices can only reach the *allowed folders*; request origins are restricted. CLI: `imagepicker serve --lan` (the password may come from the `IMAGEPICKER_PASSWORD` environment variable so it stays off the command line).
 
 ## 16. Privacy & data locations
 
@@ -654,6 +660,8 @@ Open with the gear icon on Home or in the top bar.
 | **LAN / WebUI** | See section 15; also *Allowed folders* (import, export and folder browsing are limited to these roots) |
 | **Interop (XMP)** | Off / Sidecar / Modify originals (confirmed twice), see section 17 |
 | **Shortcuts** | Editable table, see *Customising shortcuts* in section 5 |
+| **Remote AI** | Phone side: connect to a host at home (host address and 6-digit pairing code), see its state, disconnect; see section 20 |
+| **Remote AI devices** | Host side: *Start pairing* shows a code and QR code, list of paired devices with *Revoke*; see section 20 |
 | **Language & appearance** | UI language (简体中文 / English), theme (dark / light / follow system), **High contrast** (text, borders and focus rings meet WCAG AA; works with dark and light) and **Interface font size** (90%–150%; scales interface text and controls, not photos). The last two are stored on the current device / browser only |
 
 ![Settings: hardware & models](../images/settings-hardware.png)
@@ -666,7 +674,7 @@ Open with the gear icon on Home or in the top bar.
 |---|---|
 | Analyze says the AI engine is unavailable / the status dot is red | Install (or reinstall) the AI components in *Settings → Hardware & models*; the install log is `logs/runtime-install.log` in the data directory, worker logs are in `logs/` too |
 | NVIDIA GPU but the tier shows T0 / CPU only | Install with `--extra cuda` (driver >= 580); otherwise it is treated as CPU |
-| Model download fails / is slow | Switch to the HF mirror or ModelScope in *Settings → Hardware & models → Download source*; check that *Allow network* is on |
+| Model download fails / is slow | Switch to the HF mirror in *Settings → Hardware & models → Download source* (ModelScope currently behaves like *Auto*); check that *Allow network* is on |
 | AI stars feel "off" | Thresholds are not calibrated yet; treat them as suggestions, let *My taste* adapt, adjust strictness in Settings |
 | An analysis stopped with "AI analysis unavailable" / the model download failed | Click *Finish with quick analysis* (or choose *Quick (on device)* in the Analyze menu) to get grouping and sharpness / exposure scores now; install the AI components or retry the download later and run Standard again |
 | Burst grouping too loose / tight | *Settings → Analysis → Burst grouping strictness*, or *Split / Merge* by hand in group view |
@@ -685,14 +693,48 @@ Open with the gear icon on Home or in the top bar.
 
 - **Does it modify or delete my originals?** No. Ratings, flags and edits live in the catalog; *Reject* is only a mark; export writes to a new folder you choose (with XMP sidecars enabled only `.xmp` sidecar files are written next to photos). The only thing that rewrites originals is the *Modify originals (write embedded XMP)* mode, which you have to choose and confirm (section 17).
 - **Does it need the internet?** Only to download models. Afterwards it can run fully offline.
-- **Can I use it without a GPU?** Yes: fast analysis, basic editing and culling work; standard analysis, upscaling etc. are slower.
+- **Can I use it without a GPU?** Yes: fast analysis, basic editing and culling work; standard analysis, upscaling etc. are slower. Without the AI components you can still group and score basically with *Quick (on device)*.
 - **Which camera RAW formats?** Common brands (see section 4); RAW is shown from its embedded preview.
-- **Android?** There is only a [design document](../08-Android版本设计.md) (Chinese) so far.
-- **Natural-language search?** The search box is not active yet; use the assistant's filter commands meanwhile.
+- **Android?** Experimental: there is an app shell, a mobile UI, on-device quick analysis and remote-AI pairing, and CI builds a debug APK, but it has **not been verified on a real device** and there is no released installer. See [section 20](#20-mobile--remote-ai-experimental) and the [design document](../08-Android版本设计.md) (Chinese).
+- **Natural-language search?** The search box is not active yet; use the assistant's filter commands (e.g. "only show Alice's photos") or the `Ctrl+K` command palette meanwhile.
 
 More known issues: [backlog](../backlog.md) (Chinese). Please report problems via GitHub Issues and **never attach personal photos**.
 
-## 20. Uninstall
+## 20. Mobile & remote AI (experimental)
+
+> **Trusted LAN only:** the LAN WebUI and remote AI currently use **plain HTTP** (no HTTPS/TLS; TLS is planned for 1.x). Passwords, session cookies and photo content are not encrypted on the network and could be sniffed by other devices on it. Enable them only on your own home or office network; never expose the port to the internet, forward it through your router, or use it on untrusted Wi-Fi.
+
+> **Status:** the mobile UI already works in a narrow browser window (a phone using the WebUI of your computer at home, see section 15); an Android app shell exists too, but it is **not verified on real devices and there is no released installer**. What follows describes what the code does; how the Android app behaves in practice is to be confirmed in a later release.
+
+### Mobile layout
+
+Below 768 px window width (a phone in portrait) the app switches automatically: a bottom bar appears (**Library / Cull / People / Settings**) and the top bar collapses to *More* and *Filter*. Tablets (768–1024 px) and desktops use the wider layouts.
+
+- **Culling:** one photo full screen; **swipe left/right** to browse, **swipe up to pick, down to reject** (an *Undo* shows afterwards), **double-tap to zoom**, **long-press to multi-select** (pick/reject then apply to all selected photos). While zoomed in a drag only pans. Picking/rejecting tries a light haptic tick (it may have no effect in some WebViews).
+- **Quick cull:** the *Quick cull* button in the cull screen shows the AI's recommended cards of one burst group at a time: **swipe right = keep, left = reject, up = skip group**; the top shows "Group N/total" and the end gives "X kept, Y rejected". Run an analysis first so that burst groups exist.
+- **Editing:** a bottom drawer with *Adjust* / *Portrait* tabs, parameters chosen horizontally and one slider to adjust, *Hold for original* to compare; *Expand / collapse panel* changes the drawer height.
+- **Analysis:** the analyze button opens a bottom sheet to pick the profile. On a phone use **Quick (on device)** (no downloads; grouping and sharpness / exposure / noise scores only, no closed-eye or people) or, after pairing a computer at home, **Standard (remote AI)**.
+- **Import from phone albums** (Android app): *Import from phone albums* on Home asks for photo permission and lists the albums; if you only granted selected photos it says *Only some photos are accessible* and offers *Allow all*; *Browse folders instead* is the alternative. Only albums under DCIM / Pictures / Download can be imported for now; others are listed but cannot be imported.
+
+Known limitations: exporting to `Pictures/imagePicker`, sharing, moving to the trash and the foreground service (background analysis) exist in the code but **the UI is not wired to them yet**, so there are no such entry points on Android; HEIC on Android can only use the JPEG embedded in the file; there is no closed-eye detection, people clustering or portrait landmarks on the phone (use remote AI for those).
+
+### Remote AI: let your computer at home analyse for the phone
+
+When the phone is too weak, hand AI work to a computer at home that has the AI components installed (the "host"). The phone uploads **downscaled copies** of the photos; the host deletes them when done; originals never leave the phone.
+
+1. **Host:** enable LAN access and set the owner password in *Settings → LAN / WebUI* (section 15); then open *Settings → Remote AI devices* and press **Start pairing**: a **6-digit code** and a QR code appear, valid for 5 minutes (press *Generate again* when it expires).
+2. **Phone:** open *Settings → Remote AI*, enter the **host address** (e.g. `192.168.1.23:7878`) and the **6-digit pairing code**, press *Connect*. The Android app currently has **no camera QR scanner wired in**, so type them in (the *Scan QR code* button only shows when the platform provides a scanner).
+3. Once paired the page shows *Connected / Host offline / Not paired* and the host tier, and the analyze menu offers **Standard (remote AI)**. *Disconnect* returns to *Quick (on device)*.
+4. **Revoke:** *Settings → Remote AI devices* on the host lists the paired devices; *Revoke* disables a phone. Every phone has its own token and **can only use remote AI, not your library or settings**.
+
+Limits and cautions:
+
+- The transport is **plain HTTP**: use it on a trusted LAN only;
+- The host exposes only a limited set of AI methods (analysis, AI masks, portrait preparation, best-take composing, removal, denoise / face restore / upscale, search by face); a phone cannot make the host download models, and the **local AI assistant (LLM/VLM) is not included**;
+- While the host is offline the UI says "analysis jobs will wait in the queue"; the retry behaviour after a dropped connection has not been verified on a device;
+- A phone outside the host's LAN cannot connect (there is no built-in tunnelling).
+
+## 21. Uninstall
 
 1. Uninstall the app the usual way (Windows: Settings → Apps; macOS: delete the app; Linux: delete the AppImage or `sudo apt remove` / `pacman -R`).
 2. To remove all data as well, delete the [data directory](#data-locations) manually (catalog, caches and models). **This deletes your ratings, edits and people data**, so back up what you need first. Your original photos live in your own folders and are not touched.
