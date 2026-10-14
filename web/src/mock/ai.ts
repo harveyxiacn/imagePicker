@@ -38,6 +38,7 @@ export const MODELS: ModelInfo[] = [
   { id: 'mediapipe-face-landmarker', task: ['face_landmarks', 'blendshapes'], size_mb: 4, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: ['fast', 'standard'] },
   { id: 'auraface-v1', task: ['face_identity'], size_mb: 250, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: ['standard'] },
   { id: 'siglip2-base', task: ['embed_image', 'zero_shot'], size_mb: 375, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: ['standard'] },
+  { id: 'siglip2-base-text', task: ['embed_text', 'zero_shot'], size_mb: 550, license: 'Apache-2.0', noncommercial: false, usage: 'commercial-ok', installed: true, required_for: [] },
   { id: 'topiq-nr', task: ['iqa'], size_mb: 120, license: 'Research / NC', noncommercial: true, usage: 'non-commercial', installed: false, required_for: ['standard'] },
   { id: 'nima-aesthetic', task: ['aesthetic'], size_mb: 6, license: 'Apache-2.0', noncommercial: false, usage: 'unknown', license_info: { weights: 'Apache-2.0', training_data: 'AVA (photographer-rated aesthetics)', training_data_terms: 'research-only', usage: 'unknown', note: 'Training dataset has research-use terms; licence audit pending.' }, installed: false, required_for: ['standard'] },
   { id: 'aesthetic-head', task: ['aesthetic'], size_mb: 4, license: 'MIT', noncommercial: false, usage: 'commercial-ok', installed: false, required_for: ['standard'] },

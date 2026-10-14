@@ -21,6 +21,7 @@ import { MobileTopBar } from '@/components/mobile/MobileTopBar'
 import { QuickCull } from '@/components/mobile/QuickCull'
 import { Sheet } from '@/components/mobile/Sheet'
 import { Modal } from '@/components/Modal'
+import { SearchEmpty } from '@/components/SearchEmpty'
 import { ModelConsentDialog } from '@/components/ModelConsentDialog'
 import { usePhotoMenu } from '@/components/PhotoMenu'
 import { SaveCollectionDialog } from '@/components/SaveCollectionDialog'
@@ -187,10 +188,19 @@ export function Library() {
           ) : photosQ.isError ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-danger">
               {(photosQ.error as Error).message}
-              <button className="btn" onClick={() => void photosQ.refetch()}>
-                {t('common.retry')}
-              </button>
+              <div className="flex gap-2">
+                <button className="btn" onClick={() => void photosQ.refetch()}>
+                  {t('common.retry')}
+                </button>
+                {filter.search !== '' && (
+                  <button className="btn" onClick={() => useUi.getState().setFilter({ search: '' })}>
+                    {t('search.clear')}
+                  </button>
+                )}
+              </div>
             </div>
+          ) : filter.search !== '' && photos.length === 0 && !photosQ.isPlaceholderData ? (
+            <SearchEmpty query={filter.search} meta={photosQ.data?.search} />
           ) : view === 'grid' ? (
             <Grid
               items={items}

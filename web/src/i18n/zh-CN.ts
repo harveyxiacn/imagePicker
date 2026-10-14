@@ -90,6 +90,20 @@ export const zhCN = {
   },
   view: { label: '视图', grid: '网格', loupe: '单张', compare: '对比', group: '组' },
   library: { loading: '正在加载照片…', notFound: '找不到该会话' },
+  // 自然语言搜图（PRD F2.9）
+  search: {
+    placeholder: '搜索「海边日落」…',
+    label: '按描述搜索照片',
+    hint: '用中文或英文描述照片里有什么（回车搜索，Esc 清除）',
+    needsModel: '搜索需要文本模型（约 550 MB），安装后即可按描述搜图。',
+    install: '安装搜索模型',
+    clear: '清除搜索',
+    pill: '搜索',
+    empty: '没有照片符合「{{q}}」',
+    emptyHint: '换几个词试试，或把场景描述得简单一些。只有已分析的照片才能被搜到。',
+    notAnalysed: '当前范围内有 {{n}} 张照片还没有分析，无法搜索。请先运行标准分析。',
+    someNotAnalysed: '另有 {{n}} 张照片尚未分析，搜不到。',
+  },
   grid: { label: '照片网格', empty: '没有符合条件的照片' },
   filter: {
     aiRating: 'AI 星级',
