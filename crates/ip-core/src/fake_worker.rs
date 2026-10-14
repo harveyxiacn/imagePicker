@@ -163,6 +163,12 @@ pub struct FakeWorker {
     embed_faces: Mutex<Vec<([f64; 4], Vec<f32>)>>,
     pub embed_calls: AtomicUsize,
     pub last_embed_request: Mutex<Option<FacesEmbedRequest>>,
+    /// `text.embed`: vectors by exact query text (anything else gets a deterministic pseudo
+    /// vector), the calls received and the model ids reported missing (`-32010`).
+    text_vectors: Mutex<HashMap<String, Vec<f32>>>,
+    pub text_embed_calls: AtomicUsize,
+    pub last_text_request: Mutex<Option<TextEmbedRequest>>,
+    text_missing: Mutex<Vec<String>>,
     /// Makes `mask.generate` honour `person_bbox` for `person` masks: 255 inside the box, 0
     /// elsewhere (on a 100x100 raster). Off = the legacy "left half" mask.
     pub person_mask_from_bbox: std::sync::atomic::AtomicBool,
@@ -249,6 +255,10 @@ impl Default for FakeWorker {
             embed_faces: Mutex::new(vec![]),
             embed_calls: AtomicUsize::new(0),
             last_embed_request: Mutex::new(None),
+            text_vectors: Mutex::new(HashMap::new()),
+            text_embed_calls: AtomicUsize::new(0),
+            last_text_request: Mutex::new(None),
+            text_missing: Mutex::new(vec![]),
             person_mask_from_bbox: std::sync::atomic::AtomicBool::new(false),
             empty_person_masks: std::sync::atomic::AtomicBool::new(false),
             call_delay_ms: AtomicUsize::new(0),
@@ -317,6 +327,17 @@ impl FakeWorker {
     /// Faces `faces.embed` reports for any image (embeddings are L2-normalised on the way out).
     pub fn set_embed_faces(&self, faces: Vec<([f64; 4], Vec<f32>)>) {
         *self.embed_faces.lock().unwrap() = faces;
+    }
+    /// Vector `text.embed` answers for the query `text` (normalised on the way out).
+    pub fn set_text_vector(&self, text: &str, v: Vec<f32>) {
+        self.text_vectors
+            .lock()
+            .unwrap()
+            .insert(text.to_string(), v);
+    }
+    /// Makes `text.embed` answer `-32010` for these model ids (empty = installed).
+    pub fn set_text_missing(&self, ids: &[&str]) {
+        *self.text_missing.lock().unwrap() = ids.iter().map(|s| s.to_string()).collect();
     }
     /// Installs a language model that answers every `llm.plan` with `resp`.
     pub fn enable_llm(&self, resp: LlmPlanResponse) {
@@ -900,6 +921,39 @@ impl AiWorker for FakeWorker {
                 det_score: 0.99,
             });
             out.embeddings.push(emb);
+        }
+        Ok(out)
+    }
+    async fn text_embed(&self, req: &TextEmbedRequest) -> Result<TextEmbedResponse> {
+        self.text_embed_calls.fetch_add(1, Ordering::SeqCst);
+        *self.last_text_request.lock().unwrap() = Some(req.clone());
+        let missing = self.text_missing.lock().unwrap().clone();
+        if !missing.is_empty() {
+            return Err(WorkerError::Rpc {
+                code: ip_worker_client::error::CODE_MODEL_UNAVAILABLE,
+                message: "model unavailable".into(),
+                kind: Some("model_unavailable".into()),
+                detail: Some(json!({ "models": missing })),
+            });
+        }
+        let table = self.text_vectors.lock().unwrap().clone();
+        let mut out = TextEmbedResponse {
+            model: "fake-siglip-text".into(),
+            logit_scale: 112.67,
+            ..Default::default()
+        };
+        for t in &req.texts {
+            let mut v = table.get(t).cloned().unwrap_or_else(|| {
+                // deterministic and different per text (8 dimensions, like the fake photos)
+                let h = t
+                    .bytes()
+                    .fold(7u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+                (0..8).map(|i| ((h >> (i * 3)) & 7) as f32 + 1.0).collect()
+            });
+            crate::analysis::vecs::normalize(&mut v);
+            out.dim = v.len();
+            out.vectors.push(v);
+            out.cached.push(false);
         }
         Ok(out)
     }

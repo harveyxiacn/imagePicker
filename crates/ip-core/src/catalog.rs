@@ -866,7 +866,7 @@ pub fn query_photos_cached(
 
 /// M2 filters (docs/api-contract-m2.md C.4, docs/03 section 4.4). Ids and thresholds are inlined
 /// (all numeric), everything else binds parameters in order.
-fn push_m2_filters(q: &PhotoQuery, wheres: &mut Vec<String>, args: &mut Vec<Value>) {
+pub(crate) fn push_m2_filters(q: &PhotoQuery, wheres: &mut Vec<String>, args: &mut Vec<Value>) {
     if let Some(n) = q.ai_rating_gte {
         wheres.push("p.ai_rating >= ?".into());
         args.push(Value::Real(n));
@@ -975,7 +975,7 @@ fn push_m2_filters(q: &PhotoQuery, wheres: &mut Vec<String>, args: &mut Vec<Valu
 
 /// Filters completed in "filters complete": lens, capture time range, keywords, sharpness state
 /// and similar faces. Text values bind parameters; ids/thresholds are inlined.
-fn push_complete_filters(
+pub(crate) fn push_complete_filters(
     conn: &Connection,
     q: &PhotoQuery,
     wheres: &mut Vec<String>,
@@ -1031,6 +1031,11 @@ fn push_complete_filters(
                 "NOT {has_measure}) AND (COALESCE(p.issues,0) & {blurry_bit}) = 0"
             ),
         });
+    }
+    if let Some(ids) = &q.only_ids {
+        // natural-language search hits (`GET /api/search`), see search.rs
+        wheres.push("p.id IN (SELECT value FROM json_each(?))".into());
+        args.push(Value::Text(serde_json::to_string(ids)?));
     }
     if !q.face_ids.is_empty() {
         let hits = similar_face_photos(conn, q)?;

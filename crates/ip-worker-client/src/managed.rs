@@ -21,6 +21,7 @@ use crate::protocol::*;
 use crate::protocol_m4::*;
 use crate::protocol_m5::*;
 use crate::protocol_m6::*;
+use crate::protocol_search::*;
 use crate::{AiWorker, WorkerState, WorkerStatus};
 
 /// Receives `(kind, message, stderr tail)` when the worker dies or cannot start; the core
@@ -574,6 +575,13 @@ impl AiWorker for ManagedWorker {
             .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
         let v = self.rpc("faces.embed", params, None, None).await?;
         parse(v, "faces.embed")
+    }
+
+    async fn text_embed(&self, req: &TextEmbedRequest) -> Result<TextEmbedResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("text.embed", params, None, None).await?;
+        parse(v, "text.embed")
     }
 
     async fn besttake_compose(

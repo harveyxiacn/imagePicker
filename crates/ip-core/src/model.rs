@@ -414,6 +414,10 @@ pub struct PhotoQuery {
     /// photos match too.
     pub face_ids: Vec<i64>,
     pub face_similarity: Option<f64>,
+    // ---- natural-language search
+    /// Only these photos (`None` = no restriction; `Some(vec![])` matches nothing): the hits of
+    /// `GET /api/search`, so the grid can page, sort and filter them like any other result.
+    pub only_ids: Option<Vec<i64>>,
 }
 
 /// Sharpness state of a photo (`sharp` filter). `Blurry` = the analysis' sharpness is below
