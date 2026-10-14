@@ -148,6 +148,12 @@ pub struct Face {
     pub sharpness: Option<f64>,
     pub expression_score: Option<f64>,
     pub is_subject: bool,
+    /// 0-1 confidence that the face is on a statue / poster / screen / print; such a face is never
+    /// a subject or a bystander (it can still be removed by hand).
+    #[serde(default)]
+    pub artificial: Option<f64>,
+    #[serde(default)]
+    pub likely_artificial: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

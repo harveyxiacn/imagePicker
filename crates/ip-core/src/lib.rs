@@ -519,6 +519,8 @@ mod tests_m5;
 #[cfg(test)]
 mod tests_m6;
 #[cfg(test)]
+mod tests_p18;
+#[cfg(test)]
 mod tests_p1c;
 #[cfg(test)]
 mod tests_portable;

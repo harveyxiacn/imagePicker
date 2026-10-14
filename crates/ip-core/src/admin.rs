@@ -335,9 +335,9 @@ impl Core {
                 tx.execute("DELETE FROM face", [])?;
                 tx.execute("DELETE FROM person", [])?;
                 tx.execute("DELETE FROM beauty_geometry", [])?;
-                // issues that come from faces: closed eyes (1) and bystanders (32)
+                // issues that come from faces: closed eyes (1), bystanders (32), bad expression (128)
                 tx.execute(
-                    "UPDATE photo SET face_count=NULL, subject_face_count=NULL, issues = COALESCE(issues,0) & ~33",
+                    "UPDATE photo SET face_count=NULL, subject_face_count=NULL, issues = COALESCE(issues,0) & ~161",
                     [],
                 )?;
                 tx.commit()?;

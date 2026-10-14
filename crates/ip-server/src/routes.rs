@@ -343,7 +343,7 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
         .map(|s| {
             Issue::parse(s).ok_or_else(|| {
                 ApiError::bad_request(
-                    "issues_any must list closed_eyes|blurry|overexposed|underexposed|noisy|tilted",
+                    "issues_any must list closed_eyes|blurry|overexposed|underexposed|noisy|tilted|bystander|bad_expression",
                 )
             })
         })
