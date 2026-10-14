@@ -31,7 +31,7 @@ dirs = "7"
 axum = { version = "0.8", features = ["ws", "macros", "multipart"] }
 serde_urlencoded = "0.7"
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+tower-http = { version = "0.7", features = ["fs", "cors", "trace"] }
 clap = { version = "4", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 tokio-tungstenite = "0.30"

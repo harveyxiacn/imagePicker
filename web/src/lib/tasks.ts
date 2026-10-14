@@ -11,7 +11,7 @@ import { qk } from './cache'
 /** Error / `*.done` reason of a task stopped by the user. */
 export const CANCELLED = 'cancelled'
 
-export const TASK_KINDS = ['besttake', 'inpaint', 'enhance', 'export', 'analysis'] as const
+export const TASK_KINDS = ['besttake', 'inpaint', 'enhance', 'export', 'analysis', 'card_import'] as const
 export const TASK_STATUSES: readonly TaskStatus[] = ['running', 'paused', 'cancelling', 'done', 'failed', 'cancelled', 'interrupted']
 
 /** Still going on the server (the history polls while any task is live). */
@@ -43,6 +43,10 @@ export function taskDetail(t: Pick<TaskRecord, 'kind' | 'params'>): { key: strin
       const n = num('count')
       const dest = str('dest')
       return n !== null ? { key: 'tasks.detail_export', opts: { count: n, dest: dest ?? '' } } : null
+    }
+    case 'card_import': {
+      const dest = str('dest')
+      return dest !== null ? { key: 'tasks.detail_card', opts: { dest } } : null
     }
     case 'analysis':
       return num('session_id') !== null ? { key: 'tasks.detail_session', opts: { id: num('session_id'), count: num('count') ?? 0 } } : null

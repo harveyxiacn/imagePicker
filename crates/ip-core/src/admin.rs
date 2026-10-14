@@ -40,6 +40,12 @@ pub struct CacheInfo {
     pub sizes: CacheKinds,
     /// The configured limit in bytes.
     pub max_bytes: u64,
+    /// The data folder (catalog, caches, settings, logs).
+    pub data_dir: String,
+    /// `explicit` | `env` | `portable` | `platform` (see `paths::DataDirSource`).
+    pub data_dir_source: String,
+    /// Portable mode: the data lives next to the executable.
+    pub portable: bool,
 }
 
 struct Entry {
@@ -129,6 +135,9 @@ impl Core {
                 info.bytes += bytes;
             }
             info.max_bytes = (core.settings().cache.max_gb * GIB) as u64;
+            info.data_dir = core.dirs.root.to_string_lossy().into_owned();
+            info.data_dir_source = core.data_dir_source.as_str().into();
+            info.portable = core.data_dir_source == crate::paths::DataDirSource::Portable;
             info
         })
         .await
