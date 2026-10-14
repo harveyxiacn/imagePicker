@@ -68,6 +68,19 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **core:** Resumable, pausable analysis with lite fallback and per-step increments ([789ff9a](https://github.com/harveyxiacn/imagePicker/commit/789ff9a0af922a72c44a81474ee7bd6ea94a2a06))
 - **server:** Analysis pause, continue and plan routes; resume open runs at startup ([79cfabe](https://github.com/harveyxiacn/imagePicker/commit/79cfabe35fb1d82369f630d2709e2ad4b3b752ca))
 - **web:** Pause/continue, quick-analysis fallback and incremental-step hint ([74c56fa](https://github.com/harveyxiacn/imagePicker/commit/74c56fa98e4e50b0d1eb6b722e317caec7c572d3))
+- **core:** Rotating logs, panic crash records and a diagnostics bundle (P1-13) ([752d73e](https://github.com/harveyxiacn/imagePicker/commit/752d73ead2b11b5506d4cb9d5426cac1b2f74b78))
+- **web:** Settings > Diagnostics section to export the diagnostics bundle ([d830d6e](https://github.com/harveyxiacn/imagePicker/commit/d830d6e69403c1e80c23e47503f53adcdc4289b7))
+- **core,server:** Lens, time range, keyword, sharpness and similar-face filters ([0951260](https://github.com/harveyxiacn/imagePicker/commit/0951260678db92346e3d05f70e72b51707b53f7a))
+- **web:** Lens, keyword, date and sharpness filters and a tunable similar-faces filter ([9e2a17e](https://github.com/harveyxiacn/imagePicker/commit/9e2a17e9c6905bbf91719f6849b630df35e33b94))
+- **core:** Event layer and duplicate detection (P1-1, P1-3) ([43dffdf](https://github.com/harveyxiacn/imagePicker/commit/43dffdf80988d615c8dba2e686d464153ab99686))
+- **web:** Events in the sidebar, duplicate badge and filter ([e6005cc](https://github.com/harveyxiacn/imagePicker/commit/e6005cc96dd59d08036868833ee48ab8b82a8627))
+- **models:** Mirror-first downloads, tier override and structured model licences (P1-17) ([0a2c09c](https://github.com/harveyxiacn/imagePicker/commit/0a2c09c9cc1187110cd55b96fe4f4df48b55466a))
+- **edit:** Auto straighten and smart auto crop (P1-11) ([12bc743](https://github.com/harveyxiacn/imagePicker/commit/12bc7435423bb0072978151e413efed932d92729))
+- **server:** GET /api/people/{id}/faces so a person merge can be undone ([1457b5c](https://github.com/harveyxiacn/imagePicker/commit/1457b5c0fb75b48e4cf999cf104437380a5bdf6b))
+- **web:** High-contrast theme, UI font scale, Ctrl+K command palette, undo for group and person edits ([69f745e](https://github.com/harveyxiacn/imagePicker/commit/69f745e81047d7bda29598d1bdeb4fee1fe3a169))
+- **render:** Bench_render p50/p95 and --max-ms thresholds ([64c092d](https://github.com/harveyxiacn/imagePicker/commit/64c092db3bff97c00b5c3ae7d3b575662ac84539))
+- **core:** Watermark on export (F9.4) ([90d9659](https://github.com/harveyxiacn/imagePicker/commit/90d96590f9661070445945ac2162dc3b96d50ffa))
+- **web:** Watermark section in the export dialog ([b980c56](https://github.com/harveyxiacn/imagePicker/commit/b980c5645f950c75790a9be6715549a55915b447))
 
 ### Bug fixes
 
@@ -90,12 +103,15 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **inpaint:** Fall back to the body box when a bystander's person mask is empty ([c96f716](https://github.com/harveyxiacn/imagePicker/commit/c96f7160e64ae88eae527efb66c22c95ac261c74))
 - **assistant:** Recognise the worker's llm_plan / vlm_* model tasks ([ab2f2c4](https://github.com/harveyxiacn/imagePicker/commit/ab2f2c4be7192c4122b3a6c8cf5a30454256cc16))
 - **scoring,besttake:** Keep group-photo members as subjects and align group photos ([1c6ed47](https://github.com/harveyxiacn/imagePicker/commit/1c6ed47ae2b4e6885f13213897947eb3e51f2912))
+- **besttake:** Refuse source faces of another person, burst or look ([8114da7](https://github.com/harveyxiacn/imagePicker/commit/8114da725cb083a173d8b67c2477d97596337ac6))
+- **web:** Load node types for the contrast test ([f5557da](https://github.com/harveyxiacn/imagePicker/commit/f5557da61b548f36842ad8fda018eb7280cbeb39))
 
 ### Performance
 
 - **core,server:** Two-step photo pages, cached totals, lazy GPU init, batched label writes, JSON fast path; bench harness ([fdfd2ac](https://github.com/harveyxiacn/imagePicker/commit/fdfd2ac456a7ff9742a68652f901c3f4bdcdd835))
 - **web:** Instant loupe layers for preloaded photos, deeper decoded preload, i18n-free grid cells; real-server perf scripts ([53b9b2a](https://github.com/harveyxiacn/imagePicker/commit/53b9b2a90bdf91c0b96c6ea9e2bf5b4c77188f4a))
 - M7 benchmark report, harness docs and results; clippy fixes in bench ([541a5f1](https://github.com/harveyxiacn/imagePicker/commit/541a5f1b73ffaf29260eaf290cdcc3577333f6d6))
+- **core:** Per-session sort-key indexes and counters for 100k-photo sessions ([9e79dca](https://github.com/harveyxiacn/imagePicker/commit/9e79dcaea91656b372abe1ee8f8b7116cca88681))
 
 ### Refactor
 
@@ -122,9 +138,18 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **export:** Document formats, presets API, strip options and name tokens ([bb31060](https://github.com/harveyxiacn/imagePicker/commit/bb31060298cc41c3eef8b8ffafc68b4616c0ff83))
 - User guide and backlog for native-pixel zoom and the compare layouts ([636febf](https://github.com/harveyxiacn/imagePicker/commit/636febff73699ea35b9f5d9d2a0b5f6ea073b01b))
 - RAW+JPEG pairs, import exclusions, file watching, relocate and safe reject ([58bc09c](https://github.com/harveyxiacn/imagePicker/commit/58bc09c2283f85e2d43773940566fe4873263a82))
-- Sync changelog, completion review and backlog with merged PRs ([a623c47](https://github.com/harveyxiacn/imagePicker/commit/a623c471b459ed0b5650abec95d0641ce637f082))
 - Analysis resume, pause/continue, lite fallback and incremental steps ([3087b37](https://github.com/harveyxiacn/imagePicker/commit/3087b37fd51d91fcc34cfde518e56df7f76d258d))
+- Diagnostics bundle contract, user guide and backlog for P1-13 ([61af180](https://github.com/harveyxiacn/imagePicker/commit/61af1800ffba04df4149aae571a7d39fa1995408))
+- Sync changelog, completion review and backlog with merged PRs ([a623c47](https://github.com/harveyxiacn/imagePicker/commit/a623c471b459ed0b5650abec95d0641ce637f082))
 - Regenerate the changelog after #15; README no longer says HEIC is unavailable ([ba5b339](https://github.com/harveyxiacn/imagePicker/commit/ba5b339fc92856bb7025e086ce80faede1413ef0))
+- Regenerate the changelog after #18 ([33183ae](https://github.com/harveyxiacn/imagePicker/commit/33183ae6c1a642c7f3db3318cb9861c3e3ee779d))
+- Fix broken relative links; link and i18n parity report ([2bc7f81](https://github.com/harveyxiacn/imagePicker/commit/2bc7f8153cf0ed7a9c027a22be627216886327e8))
+- Filters complete (lens, time range, keywords, sharpness, similar faces) ([8cd4f32](https://github.com/harveyxiacn/imagePicker/commit/8cd4f327a9d9e82fd4d432be25a8874fdc4f0076))
+- Event layer and duplicate detection ([bea0312](https://github.com/harveyxiacn/imagePicker/commit/bea0312ab96688d5ff8a8f94e5ecbcf6781ac311))
+- Accessibility section, command palette, appearance settings and undo coverage ([35205f1](https://github.com/harveyxiacn/imagePicker/commit/35205f18a282b022d2a0bd95a5e4ef683d983396))
+- **bench:** Large-session before/after numbers ([6817232](https://github.com/harveyxiacn/imagePicker/commit/681723208ebefde197a2b38829e75799ff8f4b40))
+- IMAGEPICKER_REQUIRE_GPU, bench_render thresholds, P1-10 backlog note ([94931f8](https://github.com/harveyxiacn/imagePicker/commit/94931f84c93f5a8949ceb1c6fe885be9ba48f6b5))
+- Export watermark (F9.4) ([be3c4bb](https://github.com/harveyxiacn/imagePicker/commit/be3c4bb29d8e5e063d805adbc9dbd8ef25d293ac))
 
 ### Tests
 
@@ -144,6 +169,9 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **core:** Keep the lite analysis tests light under load ([9ac8e38](https://github.com/harveyxiacn/imagePicker/commit/9ac8e38d796ce82b227876677cb017efa4530f8c))
 - **core:** Give analysis runs five minutes of wall-clock time in tests_m2 ([7fc7eb1](https://github.com/harveyxiacn/imagePicker/commit/7fc7eb14607ed64447d416a92d6101e35066b079))
 - **core:** Give lite analysis runs five minutes of wall-clock time in tests_lite ([f98b9a2](https://github.com/harveyxiacn/imagePicker/commit/f98b9a2043229412ebf097bf7337ed1699df7f42))
+- **web:** Axe-core accessibility smoke script (pnpm a11y) ([d219edd](https://github.com/harveyxiacn/imagePicker/commit/d219edd42f5aca3de88c58580c387db8339cc85d))
+- **render:** Order independence, preview vs export dE and mandatory GPU parity (P1-10) ([7c30297](https://github.com/harveyxiacn/imagePicker/commit/7c302979acf3b53f83910160ddef183e5b32385c))
+- **web:** Stub localStorage in the watermark settings test ([05526df](https://github.com/harveyxiacn/imagePicker/commit/05526df7130c4d098290f53633dcc267846bd560))
 
 ### CI and build
 
@@ -155,6 +183,8 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **release:** Build and publish the Android APK ([9d72ee6](https://github.com/harveyxiacn/imagePicker/commit/9d72ee61d28f919596740dd632cff6f117902989))
 - **release:** Setup-android without the retired tools package ([aed2418](https://github.com/harveyxiacn/imagePicker/commit/aed24185d3c8b45d3ca114c7239784ddcc544360))
 - Exclude the tauri media plugin from the host rust job; fix import/settings test races ([3e0087c](https://github.com/harveyxiacn/imagePicker/commit/3e0087c83749d8cbb9092709ca723e59449c39ce))
+- **audit:** Let pip-audit check the pinned versions without installing them ([5d1339a](https://github.com/harveyxiacn/imagePicker/commit/5d1339a3c601d8910ba65eaa4eec16c70a8ac856))
+- **audit:** Drop the pnpm cache from the audit job ([7b34a81](https://github.com/harveyxiacn/imagePicker/commit/7b34a819f8fc9e4e3e0aeffcd46763a5a9ca6595))
 
 ### Miscellaneous
 
@@ -172,6 +202,10 @@ Conventional Commits by git-cliff (`cliff.toml`); do not edit by hand.
 - **bench:** EXIF converter rotates scenes over a camera and two phones; document-like images get no EXIF ([325e4ff](https://github.com/harveyxiacn/imagePicker/commit/325e4ff0219182b0588cde64aa3cedc2db33ecea))
 - **scripts:** Add the ComfyUI synthetic photo library generator, audit and test ([c55f36d](https://github.com/harveyxiacn/imagePicker/commit/c55f36d066981e70674599b38b7437b9ef18fe12))
 - Cargo fmt the subject_flags pass; ruff format gen_lite_fixtures.py; docs/09 notes the committed generator ([fd28e5d](https://github.com/harveyxiacn/imagePicker/commit/fd28e5d06ffa8d18aec82e9d2ec3fb9fab3ef1aa))
+- Cargo fmt ([bf480bc](https://github.com/harveyxiacn/imagePicker/commit/bf480bc66302b918d42d2685bebc783c152f9a2d))
+- **core:** Cargo fmt ([4d9b0a3](https://github.com/harveyxiacn/imagePicker/commit/4d9b0a33ffc0ffca1ec9e509438795ab326e1d46))
+- Dependabot, weekly dependency audit workflow, code of conduct ([7444750](https://github.com/harveyxiacn/imagePicker/commit/74447502638c32a31d025de229d3dc4b7947cc9f))
+- Cargo fmt ([98f3a51](https://github.com/harveyxiacn/imagePicker/commit/98f3a51e515e688ad976a844a6516a4f0a9597ac))
 
 ### Bench
 
