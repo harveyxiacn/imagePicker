@@ -284,8 +284,8 @@ fn mean(img: &RgbImage, rect: Rect) -> [f64; 3] {
     for y in rect.y..rect.y + rect.h {
         for x in rect.x..rect.x + rect.w {
             let i = ((y * img.width + x) * 3) as usize;
-            for c in 0..3 {
-                sum[c] += img.data[i + c] as f64;
+            for (c, v) in sum.iter_mut().enumerate() {
+                *v += img.data[i + c] as f64;
             }
         }
     }
