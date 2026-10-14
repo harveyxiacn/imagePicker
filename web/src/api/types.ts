@@ -1080,12 +1080,16 @@ export interface Settings {
   lan: { enabled: boolean; port: number; guest_enabled: boolean }
   roots: string[]
   assistant: { engine: 'auto' | 'rules' | 'llm' }
+  /** Custom key bindings: action id -> chord (`mod+shift+z`); only differences from the defaults are stored. */
+  shortcuts: Record<string, string>
 }
 
 /** Recursive partial used for `PATCH /api/settings`. */
 export type SettingsPatch = {
-  [K in keyof Settings]?: Settings[K] extends unknown[] ? Settings[K] : Settings[K] extends object ? Partial<Settings[K]> : Settings[K]
+  [K in Exclude<keyof Settings, 'shortcuts'>]?: Settings[K] extends unknown[] ? Settings[K] : Settings[K] extends object ? Partial<Settings[K]> : Settings[K]
 } & {
+  /** Merge patch for `shortcuts`: a chord sets it, `null` resets that action to its default. */
+  shortcuts?: Record<string, string | null>
   /** Confirms switching `xmp_mode` to `modify_originals` (required by the server; never stored). */
   confirm_modify_originals?: boolean
 }

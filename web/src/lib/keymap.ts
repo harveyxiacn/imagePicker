@@ -20,6 +20,8 @@ export interface Binding {
   hold?: boolean
   /** Hidden from the help overlay (aliases). */
   hidden?: boolean
+  /** Cannot be rebound by the user (Escape, help, palette, hold keys); see `lib/shortcuts.ts`. */
+  fixed?: boolean
 }
 
 const ALL: Scope[] = ['grid', 'loupe', 'compare', 'group']
@@ -54,7 +56,7 @@ export const BINDINGS: Binding[] = [
   { id: 'nav.first', keys: ['home'], scopes: NAV, group: 'nav', desc: 'first' },
   { id: 'nav.last', keys: ['end'], scopes: NAV, group: 'nav', desc: 'last' },
   { id: 'nav.open', keys: ['enter'], scopes: ['grid'], group: 'nav', desc: 'open' },
-  { id: 'nav.back', keys: ['escape'], scopes: ALL, group: 'nav', desc: 'back' },
+  { id: 'nav.back', keys: ['escape'], scopes: ALL, group: 'nav', desc: 'back', fixed: true },
 
   { id: 'view.grid', keys: ['g'], scopes: ALL, group: 'view', desc: 'viewGrid' },
   { id: 'view.loupe', keys: ['e'], scopes: ALL, group: 'view', desc: 'viewLoupe' },
@@ -65,15 +67,15 @@ export const BINDINGS: Binding[] = [
   { id: 'compare.swap', keys: ['tab'], scopes: ['compare', 'group'], group: 'view', desc: 'swap' },
   { id: 'compare.sync', keys: ['s'], scopes: ['compare', 'group'], group: 'view', desc: 'sync' },
   { id: 'zoom.toggle', keys: ['space'], scopes: ['loupe', 'compare', 'group'], group: 'zoom', desc: 'zoomToggle' },
-  { id: 'zoom.open', keys: ['space'], scopes: ['grid'], group: 'zoom', desc: 'open', hidden: true },
-  { id: 'zoom.hold', keys: ['z'], scopes: ['loupe', 'compare', 'group'], group: 'zoom', desc: 'zoomHold', hold: true },
+  { id: 'zoom.open', keys: ['space'], scopes: ['grid'], group: 'zoom', desc: 'open', hidden: true, fixed: true },
+  { id: 'zoom.hold', keys: ['z'], scopes: ['loupe', 'compare', 'group'], group: 'zoom', desc: 'zoomHold', hold: true, fixed: true },
 
   { id: 'edit.undo', keys: ['mod+z'], scopes: WITH_EDIT, group: 'edit', desc: 'undo' },
   { id: 'edit.redo', keys: ['mod+shift+z'], scopes: WITH_EDIT, group: 'edit', desc: 'redo' },
   { id: 'edit.redo', keys: ['mod+y'], scopes: WITH_EDIT, group: 'edit', desc: 'redo', hidden: true },
   { id: 'edit.open', keys: ['d'], scopes: ['grid', 'loupe'], group: 'edit', desc: 'editOpen' },
-  { id: 'edit.close', keys: ['escape'], scopes: ['edit'], group: 'edit', desc: 'editClose' },
-  { id: 'edit.close', keys: ['d'], scopes: ['edit'], group: 'edit', desc: 'editClose', hidden: true },
+  { id: 'edit.close', keys: ['escape'], scopes: ['edit'], group: 'edit', desc: 'editClose', fixed: true },
+  { id: 'edit.close', keys: ['d'], scopes: ['edit'], group: 'edit', desc: 'editClose', hidden: true, fixed: true },
   { id: 'edit.before', keys: ['\\'], scopes: ['edit'], group: 'edit', desc: 'beforeAfter' },
   { id: 'edit.mask', keys: ['o'], scopes: ['edit'], group: 'edit', desc: 'maskOverlay' },
   { id: 'edit.crop', keys: ['r'], scopes: ['edit'], group: 'edit', desc: 'cropMode' },
@@ -93,9 +95,43 @@ export const BINDINGS: Binding[] = [
   { id: 'personFilter.open', keys: ['shift+p'], scopes: ALL, group: 'ai', desc: 'personFilter' },
   { id: 'assistant.toggle', keys: ['mod+j'], scopes: WITH_EDIT, group: 'ai', desc: 'assistant' },
   { id: 'export.open', keys: ['mod+e'], scopes: WITH_EDIT, group: 'misc', desc: 'export' },
-  { id: 'palette.toggle', keys: ['mod+k'], scopes: WITH_EDIT, group: 'misc', desc: 'palette' },
-  { id: 'help.toggle', keys: ['?'], scopes: WITH_EDIT, group: 'misc', desc: 'help' },
+  { id: 'palette.toggle', keys: ['mod+k'], scopes: WITH_EDIT, group: 'misc', desc: 'palette', fixed: true },
+  { id: 'help.toggle', keys: ['?'], scopes: WITH_EDIT, group: 'misc', desc: 'help', fixed: true },
 ]
+
+// ---- active bindings: the defaults with the user's overrides applied (see `lib/shortcuts.ts`) ----
+
+let active: Binding[] = BINDINGS
+let activeVersion = 0
+const listeners = new Set<() => void>()
+
+/** The bindings currently in effect (defaults + user overrides). */
+export function getBindings(): Binding[] {
+  return active
+}
+
+/** Replace the effective bindings (called by the settings sync); notifies subscribers. */
+export function setActiveBindings(next: Binding[]): void {
+  if (next === active) return
+  active = next
+  activeVersion++
+  listeners.forEach((l) => l())
+}
+
+export function subscribeBindings(l: () => void): () => void {
+  listeners.add(l)
+  return () => listeners.delete(l)
+}
+
+/** Changes whenever the effective bindings change (for `useSyncExternalStore`). */
+export function bindingsVersion(): number {
+  return activeVersion
+}
+
+/** Key specs currently bound to action `id` (all scopes, aliases included). */
+export function specsFor(id: string, bindings: Binding[] = active): string[] {
+  return bindings.filter((b) => b.id === id).flatMap((b) => b.keys)
+}
 
 export interface KeyEventLike {
   key: string
@@ -122,7 +158,31 @@ export function eventToSpec(e: KeyEventLike): string {
   return [...mods, base].join('+')
 }
 
-export function findBinding(spec: string, scope: Scope, bindings: Binding[] = BINDINGS): Binding | undefined {
+const NAMED_KEYS = new Set([
+  'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'space', 'escape', 'enter', 'tab', 'home', 'end',
+  'pageup', 'pagedown', 'backspace', 'delete', ...Array.from({ length: 12 }, (_, i) => `f${i + 1}`),
+])
+
+/**
+ * Canonical form of a chord (`mod+alt+shift+key`, lower case) or null when it is not a valid chord. Shift is
+ * dropped for printable symbols (like `eventToSpec`), `+` itself cannot be a base key. The server validates the
+ * same syntax (`crates/ip-core/src/settings.rs`).
+ */
+export function normalizeChord(spec: string): string | null {
+  const parts = spec.trim().toLowerCase().split('+')
+  const base = parts.pop() ?? ''
+  const isSymbol = base.length === 1 && /[\x21-\x7e]/.test(base) && !/[a-z0-9]/.test(base) && base !== '+'
+  if (!(NAMED_KEYS.has(base) || isSymbol || /^[a-z0-9]$/.test(base))) return null
+  const seen = new Set<string>()
+  for (const m of parts) {
+    if (!['mod', 'alt', 'shift'].includes(m) || seen.has(m)) return null
+    seen.add(m)
+  }
+  const mods = ['mod', 'alt', 'shift'].filter((m) => seen.has(m) && !(m === 'shift' && isSymbol))
+  return [...mods, base].join('+')
+}
+
+export function findBinding(spec: string, scope: Scope, bindings: Binding[] = active): Binding | undefined {
   return bindings.find((b) => !b.hold && b.scopes.includes(scope) && b.keys.includes(spec))
 }
 
@@ -149,7 +209,7 @@ export function dispatchKey(
   e: KeyEventLike,
   scope: Scope,
   handlers: Handlers,
-  bindings: Binding[] = BINDINGS,
+  bindings: Binding[] = active,
 ): boolean {
   const spec = eventToSpec(e)
   const b = findBinding(spec, scope, bindings)
@@ -186,12 +246,12 @@ export function formatSpec(spec: string): string[] {
 }
 
 /** Registry grouped for the help overlay (hidden aliases removed, same actions merged). */
-export function helpGroups(): { group: Group; items: { desc: string; keys: string[][]; scopes: Scope[] }[] }[] {
+export function helpGroups(bindings: Binding[] = active): { group: Group; items: { desc: string; keys: string[][]; scopes: Scope[] }[] }[] {
   const order: Group[] = ['rate', 'flag', 'nav', 'view', 'zoom', 'edit', 'ai', 'misc']
   return order
     .map((group) => {
       const items: { desc: string; keys: string[][]; scopes: Scope[] }[] = []
-      for (const b of BINDINGS.filter((x) => x.group === group && !x.hidden)) {
+      for (const b of bindings.filter((x) => x.group === group && !x.hidden)) {
         const keys = b.keys.map(formatSpec)
         const existing = items.find((i) => i.desc === b.desc && b.desc !== 'rate' && b.desc !== 'rateNext')
         if (existing) existing.keys.push(...keys)

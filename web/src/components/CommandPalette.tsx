@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent 
 import { useTranslation } from 'react-i18next'
 import { matchPath, useLocation, useNavigate } from 'react-router-dom'
 import { eventToSpec } from '@/lib/keymap'
+import { useBindings } from '@/lib/shortcuts'
 import { buildItems, paletteSpecs, rankItems, type PaletteItem } from '@/lib/palette'
 import { getPaletteHost } from '@/lib/paletteHost'
 import { useUi } from '@/stores/ui'
@@ -55,6 +56,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
 
+  const bindings = useBindings()
   const host = useMemo(() => getPaletteHost(), [])
   const sessionId = useMemo(() => {
     const m = matchPath({ path: '/s/:sessionId', end: false }, pathname)
@@ -68,8 +70,9 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         t: (k) => t(k),
         available: (id) => !!host?.has(id),
         sessionId,
+        bindings,
       }),
-    [host, sessionId, t],
+    [host, sessionId, t, bindings],
   )
   const results = useMemo(() => rankItems(items, query), [items, query])
   const active = Math.min(cursor, Math.max(0, results.length - 1))

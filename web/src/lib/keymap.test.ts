@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { BINDINGS, dispatchKey, eventToSpec, findBinding, helpGroups, type Handlers } from './keymap'
+import { BINDINGS, dispatchKey, eventToSpec, findBinding, helpGroups, normalizeChord, specsFor, type Handlers } from './keymap'
 
 const ev = (key: string, extra: Partial<KeyboardEvent> = {}) => ({ key, ...extra })
 
@@ -19,6 +19,38 @@ describe('eventToSpec', () => {
 
   it('treats ? as a symbol regardless of shift', () => {
     expect(eventToSpec(ev('?', { shiftKey: true }))).toBe('?')
+  })
+})
+
+describe('normalizeChord', () => {
+  it('canonicalises modifier order and case', () => {
+    expect(normalizeChord('Shift+Mod+Z')).toBe('mod+shift+z')
+    expect(normalizeChord('alt+mod+x')).toBe('mod+alt+x')
+    expect(normalizeChord(' ArrowLeft ')).toBe('arrowleft')
+    expect(normalizeChord('F5')).toBe('f5')
+  })
+  it('drops shift for printable symbols, like eventToSpec', () => {
+    expect(normalizeChord('shift+?')).toBe('?')
+    expect(normalizeChord('shift+3')).toBe('shift+3')
+  })
+  it('rejects invalid chords', () => {
+    for (const bad of ['', '+', 'mod+', 'mod+mod+a', 'ctrl+a', 'ab', 'f13', 'mod+shift', 'a+b', 'shift+shift+a'])
+      expect(normalizeChord(bad), bad).toBeNull()
+  })
+  it('accepts every default binding as it is (the registry is canonical)', () => {
+    for (const b of BINDINGS) for (const k of b.keys) expect(normalizeChord(k), `${b.id} ${k}`).toBe(k)
+  })
+  it('round-trips what eventToSpec produces', () => {
+    for (const e of [ev('Z', { ctrlKey: true, shiftKey: true }), ev('ArrowUp'), ev(' ', { code: 'Space' }), ev('?', { shiftKey: true }), ev('F2')]) {
+      const spec = eventToSpec(e)
+      expect(normalizeChord(spec)).toBe(spec)
+    }
+  })
+})
+
+describe('specsFor', () => {
+  it('lists every key of an action including hidden aliases', () => {
+    expect(specsFor('edit.redo')).toEqual(['mod+shift+z', 'mod+y'])
   })
 })
 
