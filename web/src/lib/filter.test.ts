@@ -52,7 +52,9 @@ describe('buildPhotosQuery', () => {
     // "any issue" with no explicit selection lists every tag
     const all = buildPhotosQuery(1, { ...DEFAULT_FILTER, issueMode: 'any' }).issues_any
     expect(all).toContain('closed_eyes')
-    expect(all).toHaveLength(6)
+    expect(all).toContain('bystander')
+    expect(all).toContain('bad_expression')
+    expect(all).toHaveLength(8)
   })
 })
 

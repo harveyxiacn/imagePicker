@@ -37,9 +37,9 @@ describe('i18n', () => {
 
   it('dynamic key families are complete', () => {
     const families: [string, string[]][] = [
-      ['issue', ['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted']],
+      ['issue', ['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted', 'bystander', 'bad_expression']],
       ['scene_type', ['portrait', 'group', 'landscape', 'food', 'architecture', 'night', 'pet', 'other']],
-      ['reason', ['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'sharp', 'great_expression', 'high_aesthetic', 'best_in_burst']],
+      ['reason', ['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'sharp', 'great_expression', 'high_aesthetic', 'best_in_burst', 'bystander', 'bad_expression_talking', 'bad_expression_half_blink']],
       ['score', ['sharpness', 'exposure', 'noise', 'iqa', 'aesthetic', 'face', 'composition']],
       ['person', ['state_eyes_open', 'state_smiling', 'state_looking', 'state_subject', 'state_short_eyes_open', 'state_short_smiling', 'state_short_looking', 'state_short_subject', 'count_any', 'count_single', 'count_few', 'count_many', 'count_none', 'tri_off', 'tri_include', 'tri_exclude']],
       ['worker', ['state_stopped', 'state_starting', 'state_ready', 'state_busy', 'state_crashed', 'state_unavailable']],

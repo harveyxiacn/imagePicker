@@ -344,7 +344,18 @@ CREATE TRIGGER trg_photo_ai AFTER UPDATE OF ai_score ON photo WHEN OLD.ai_score 
   UPDATE session_photo SET sk_ai=NEW.ai_score WHERE photo_id=NEW.id;
 END;
 "#,
-    // v15: multi-device time alignment (docs/09 P1-2). `session_device_offset` holds, per session
+    // v15: issue tags and composition (docs/09 P1-8, docs/03 §3.3 / §3.4). `face.artificial` is
+    // the worker's 0-1 confidence that a face sits on a statue / poster / screen / print (such
+    // faces are never bystanders), `face.mouth_open` the jawOpen blendshape (the `bad_expression`
+    // tag); `analysis.saliency` is the JSON `[x, y, w, h]` box of the visual subject that anchors
+    // the composition score when no face does (`analysis.composition` exists since v1 and is
+    // written by the scorer).
+    r#"
+ALTER TABLE face ADD COLUMN artificial REAL;
+ALTER TABLE face ADD COLUMN mouth_open REAL;
+ALTER TABLE analysis ADD COLUMN saliency TEXT;
+"#,
+    // v16: multi-device time alignment (docs/09 P1-2). `session_device_offset` holds, per session
     // and device, the clock correction applied to `photo.taken_at` for grouping and events
     // (`offset_ms`, 0 / 'none' = uncorrected; 'auto' = an accepted estimate; 'manual' = typed in)
     // and the latest estimate (`est_*`, computed on request, cleared by a new analysis run).

@@ -142,9 +142,9 @@ export interface RejectFilesReport {
   errors: string[]
 }
 
-export type Issue = 'closed_eyes' | 'blurry' | 'overexposed' | 'underexposed' | 'noisy' | 'tilted'
+export type Issue = 'closed_eyes' | 'blurry' | 'overexposed' | 'underexposed' | 'noisy' | 'tilted' | 'bystander' | 'bad_expression'
 export type SceneType = 'portrait' | 'group' | 'landscape' | 'food' | 'architecture' | 'night' | 'pet' | 'other'
-export const ISSUES: Issue[] = ['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted']
+export const ISSUES: Issue[] = ['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted', 'bystander', 'bad_expression']
 export const SCENE_TYPES: SceneType[] = ['portrait', 'group', 'landscape', 'food', 'architecture', 'night', 'pet', 'other']
 
 export type ImportState = 'scanning' | 'thumbnailing' | 'ready'
@@ -500,6 +500,9 @@ export interface Face {
   sharpness: number | null
   expression_score: number | null
   is_subject: boolean
+  /** 0..1 confidence that the face is on a statue / poster / screen / print (never a bystander) */
+  artificial?: number | null
+  likely_artificial?: boolean
 }
 
 export interface PhotoAnalysis {

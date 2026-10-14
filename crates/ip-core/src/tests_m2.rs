@@ -264,7 +264,9 @@ async fn full_pipeline_groups_scores_people() {
     let sc = d.scores.unwrap();
     assert!(sc.sharpness.is_some() && sc.iqa.is_some() && sc.aesthetic.is_some());
     assert!(sc.face.is_some());
-    assert!(sc.composition.is_none());
+    // composition is measured from the two subject faces (P1-8) and enters the score
+    assert!(sc.composition.is_some_and(|c| (0.0..=1.0).contains(&c)));
+    assert!(d.contributions.iter().any(|c| c.key == "composition"));
     assert!(d
         .contributions
         .iter()
