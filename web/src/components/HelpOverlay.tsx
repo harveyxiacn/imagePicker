@@ -1,12 +1,12 @@
 import { useTranslation } from 'react-i18next'
 import { helpGroups } from '@/lib/keymap'
 import { useUi } from '@/stores/ui'
+import { useBindings } from '@/lib/shortcuts'
 import { Modal } from './Modal'
-
-const GROUPS = helpGroups()
 
 export function HelpOverlay() {
   const { t } = useTranslation()
+  const GROUPS = helpGroups(useBindings())
   const open = useUi((s) => s.helpOpen)
   const setOpen = useUi((s) => s.setHelpOpen)
   return (

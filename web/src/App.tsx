@@ -31,6 +31,7 @@ import { useCardImport } from '@/stores/cardImport'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import i18n from '@/i18n'
+import { activateOverrides } from '@/lib/shortcuts'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -92,12 +93,15 @@ function useAppearanceSync() {
   const settings = useSettings(can(me.data?.role ?? null, 'settings'))
   const lang = settings.data?.language
   const theme = settings.data?.theme
+  const shortcuts = settings.data?.shortcuts
   useEffect(() => {
     if (lang && useUi.getState().lang !== lang) useUi.getState().setLang(lang)
   }, [lang])
   useEffect(() => {
     if (theme && useUi.getState().theme !== theme) useUi.getState().setTheme(theme)
   }, [theme])
+  // user key bindings (settings.shortcuts); guests cannot read settings and keep the defaults
+  useEffect(() => activateOverrides(shortcuts), [shortcuts])
 }
 
 function Shell() {

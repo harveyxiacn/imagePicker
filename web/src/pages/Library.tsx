@@ -342,7 +342,7 @@ export function Library() {
       {photoMenu.node}
       <SaveCollectionDialog />
       <FaceSearchDialog sessionId={sessionId} />
-      <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={selectedIds} allIds={allIds} />
+      <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={selectedIds} allIds={allIds} photos={photos} />
     </div>
   )
 }

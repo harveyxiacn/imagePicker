@@ -614,18 +614,40 @@ pub async fn export(
     if !req.dest.trim().is_empty() {
         req.dest = whitelisted(&st, &req.dest).await?;
     }
-    // the logo and font files must lie inside the allowed folders too
-    if let Some(wm) = req.watermark.as_mut() {
+    whitelist_watermark(&st, req.watermark.as_mut()).await?;
+    let task_id = st.core.export_with(req, extras.pair_member).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "task_id": task_id }))).into_response())
+}
+
+/// The logo and font files of a watermark must lie inside the allowed folders too.
+async fn whitelist_watermark(
+    st: &AppState,
+    wm: Option<&mut ip_core::watermark::Watermark>,
+) -> ApiResult<()> {
+    if let Some(wm) = wm {
         for path in [&mut wm.image_path, &mut wm.font_path]
             .into_iter()
             .flatten()
         {
             if !path.trim().is_empty() {
-                *path = whitelisted(&st, path).await?;
+                *path = whitelisted(st, path).await?;
             }
         }
     }
-    let task_id = st.core.export_with(req, extras.pair_member).await?;
+    Ok(())
+}
+
+/// `POST /api/export/collage`: 2..30 photos combined into one image (PRD F9.5,
+/// `docs/api-contract-m5.md` F.2). Answers 202 with the task id like `POST /api/export`.
+pub async fn export_collage(
+    State(st): State<AppState>,
+    ApiJson(mut req): ApiJson<ip_core::CollageRequest>,
+) -> ApiResult<Response> {
+    // cheap checks first: a bad body is a 400 whatever the destination
+    req.validate()?;
+    req.dest = whitelisted(&st, &req.dest).await?;
+    whitelist_watermark(&st, req.watermark.as_mut()).await?;
+    let task_id = st.core.export_collage(req).await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "task_id": task_id }))).into_response())
 }
 

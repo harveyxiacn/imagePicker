@@ -253,7 +253,13 @@ flowchart LR
 | `Ctrl+K` / `Ctrl+J` | 命令面板 / AI 助手 | `?` | 快捷键帮助 |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | 撤销 / 重做 | `Ctrl+E` | 导出 |
 
-macOS 中 `Ctrl` 对应 `⌘`。快捷键可在设置中自定义。
+macOS 中 `Ctrl` 对应 `⌘`。快捷键可在设置中自定义（见下）。
+
+**自定义快捷键**（`lib/shortcuts.ts`、`components/settings/ShortcutsSection.tsx`）：
+- 覆盖表 `settings.shortcuts`（动作 id → 和弦，如 `mod+shift+p`；只存与默认不同的项）保存在服务端设置里，桌面端与局域网网页共用；服务端（`ip-core/src/settings.rs`）校验动作 id 与和弦语法，访客不能读写设置，始终用默认键位。
+- 解析层：`applyOverrides(BINDINGS, overrides)` 得到当前生效的键位，`dispatchKey` / `findBinding` / `helpGroups` / 命令面板提示 / 设置表都从它读取；覆盖某个动作会同时去掉它的隐藏别名（如 `Ctrl+Y` 重做）。和弦以平台无关的 `mod` 存储，显示按平台（`Ctrl` / `⌘`）。
+- 交互：点击按键 → 「请按键…」→ 按下新组合；`Esc` 取消。同一作用域内不允许两个动作同键（不同作用域可以）。冲突时显示占用的动作，可「互换」（对方换到本动作原来的键，且互换后不得再产生冲突）或「取消」。每项有「恢复默认」，页首有「全部恢复默认」。
+- 固定不可改：`Esc`（`nav.back`、`edit.close`）、`?`（`help.toggle`）、`Ctrl+K`（`palette.toggle`）、按住 `Z`（`zoom.hold`）、网格 `Space` 打开（`zoom.open`）、编辑页的 `D`（`edit.close` 别名）、`Shift+方向键` 扩选（硬编码）。这些键也不能被其他动作占用（不可互换）。
 
 **缩放与原始像素**（单张、对比、组视图共用同一缩放面板）：
 

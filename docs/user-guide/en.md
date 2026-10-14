@@ -231,6 +231,12 @@ Click selects one photo, `Ctrl+click` multi-selects, `Ctrl+A` selects all; ratin
 | `Ctrl+E` | Export | everywhere (incl. edit page) |
 | `?` | Shortcut help | everywhere (incl. edit page) |
 
+#### Customising shortcuts
+
+*Settings → Shortcuts* lists every action with its current key. **Click a key, then press the new combination** (`Esc` cancels). The change is saved at once in the server settings, so the desktop app and the LAN web UI (owner login) use the same keys; the `?` overlay and the `Ctrl+K` palette show the new keys. A key can be reused in different places (for example `S` is "sync zoom" in compare and "expand stack" in the grid) but never twice in the same place. If the combination is already taken you see which action holds it and can **swap** the two actions or **cancel**. The arrow button next to a custom key resets it; *Reset all to defaults* clears every change. On macOS `Ctrl` is stored as `⌘`/`Ctrl` ("mod") and shown as `⌘`.
+
+Fixed shortcuts (marked with a lock) cannot be changed, and no other action can take their keys: `Esc` (back / close / cancel), `?` (help), `Ctrl+K` (command palette), holding `Z` (100% loupe), `Space` to open a photo from the grid, `D` and `Esc` to leave the edit page, and `Shift+arrows` (extend the selection in the grid). Guests on the LAN web UI cannot open the settings and always use the default keys.
+
 **More filters.** The filter bar also offers (each appears only when the session has something to choose from): a *Lens* button to tick the lenses found in the session; a *Keywords* button to tick keywords (any of them by default, or tick *Photos must have all selected keywords*); a *Date* button with *From* / *To* dates (inclusive, in the local time of the place where the photos were taken, limited to the span of the session); and a *Sharpness* chip group: Sharp / Blurry / Not analysed (click again to clear; *Blurry* includes photos carrying the blurry issue, *Not analysed* means no sharpness result yet). Active conditions show as removable tags under the bar and are saved with the rest of the filter as a smart collection. Right-click a face and choose *Photos with similar faces*: a *Similar to chosen faces* tag appears; drag its slider to tune how alike a face must be (higher is stricter, default 38%, applied on release). In the Search-by-face dialog the *Minimum similarity* slider decides which faces count as similar (default 25%), and *Show these photos in the library* turns the face into the same filter.
 
 **Device filter.** When a session mixes several cameras or phones (or has photos without camera EXIF), the filter bar shows a *Device* button. Tick one or more devices (each shows a kind icon: phone, camera, drone, action camera) or *No camera info* to narrow the library; the button shows how many are active, and "Clear filters" resets it. The Inspector shows the same kind icon next to the camera name.
@@ -486,6 +492,21 @@ Press `Ctrl+E` (or *Export* in the top bar):
 
 While an export runs, its progress shows at the bottom right with a *Cancel* button: files already written stay, the remaining photos are skipped.
 
+### Collage and contact sheet
+
+Switch the export dialog from *Photos* to **Collage** to combine 2 to 30 photos (the selected ones, or everything in the filter) into a single image. The saved edits are rendered, colours are converted to sRGB, and the result is written in the format you pick (JPEG / PNG / TIFF / WebP) with the usual naming template (default `collage`; an existing file is never overwritten, the new one becomes `collage_1`…).
+
+| Option | Description |
+|---|---|
+| Layout | **Grid** (rows and columns chosen automatically from the photos' shapes), **Story** (the first photo large, the others small beside or below it) or **Contact sheet** (many thumbnails with the file name and star rating under each; both can be switched off) |
+| Canvas size | 4:5 (1080×1350), 1:1 (1080×1080), 16:9 (3840×2160), A4 at 300 dpi (2480×3508) or custom pixels (64 to 12000 per side, at most 80 megapixels) |
+| Gap / outer margin | Pixels between photos and between the photos and the edge |
+| Background | Colour of the gaps, the margin and the bars |
+| Fit | **Fill**: each photo fills its cell and the overflow is cropped, centred on the faces when the photo has detected faces (otherwise centred); **Whole photo**: nothing is cropped, bars show the background |
+| Format, quality, watermark | As above; the watermark is drawn once on the finished collage |
+
+The preview in the dialog shows the real layout for the photos' shapes and updates as you change the options; the photo order is the selection order. A collage runs as a task with progress and a *Cancel* button; cancelling writes no file.
+
 Export includes all your edits and carries the original's metadata over: EXIF (for RAW and TIFF files too; maker notes are not copied), XMP (rating, keywords, title, creator…; entries that only describe the original, such as its orientation or Lightroom/darktable develop settings, are left out) and IPTC. What each format can carry:
 
 | Format | EXIF | XMP | IPTC | Colour profile |
@@ -632,7 +653,7 @@ Open with the gear icon on Home or in the top bar.
 | **Rendering** | Render backend: Auto / GPU / CPU |
 | **LAN / WebUI** | See section 15; also *Allowed folders* (import, export and folder browsing are limited to these roots) |
 | **Interop (XMP)** | Off / Sidecar / Modify originals (confirmed twice), see section 17 |
-| **Shortcuts** | Read-only, generated from the built-in keymap |
+| **Shortcuts** | Editable table, see *Customising shortcuts* in section 5 |
 | **Language & appearance** | UI language (简体中文 / English), theme (dark / light / follow system), **High contrast** (text, borders and focus rings meet WCAG AA; works with dark and light) and **Interface font size** (90%–150%; scales interface text and controls, not photos). The last two are stored on the current device / browser only |
 
 ![Settings: hardware & models](../images/settings-hardware.png)

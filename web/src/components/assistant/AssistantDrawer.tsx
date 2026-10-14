@@ -2,6 +2,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Bot, Check, CheckCircle2, Eye, Loader2, Play, Send, Sparkles, Trash2, Undo2, X, XCircle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { eventToSpec, formatSpec, isTypingTarget, specsFor } from '@/lib/keymap'
+import { useBindings } from '@/lib/shortcuts'
 import { useAssistantStatus, useMe } from '@/api/queries'
 import type { AssistantPlan, PlanStep } from '@/api/types'
 import { affectedOf, needsConfirm, selectionOf, summarizeResults, type TranscriptItem } from '@/lib/assistant'
@@ -11,6 +13,8 @@ import { useHistory } from '@/lib/history'
 import { useAssistant } from '@/stores/assistant'
 import { useUi } from '@/stores/ui'
 import { Modal } from '../Modal'
+
+const chordLabel = (spec?: string) => (spec ? formatSpec(spec).join('+') : '')
 
 const CHIPS = ['best', 'tone', 'picked', 'bystanders'] as const
 
@@ -23,7 +27,9 @@ export function AssistantHost({ sessionId, photoId = null }: { sessionId: number
   useEffect(() => {
     if (!allowed) return
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'j') {
+      const spec = eventToSpec(e)
+      if (isTypingTarget(e.target) && !spec.startsWith('mod+')) return
+      if (specsFor('assistant.toggle').includes(spec)) {
         e.preventDefault()
         useAssistant.getState().toggle()
       }
@@ -42,9 +48,10 @@ export function AssistantButton() {
   const me = useMe()
   const open = useAssistant((s) => s.open)
   const toggle = useAssistant((s) => s.toggle)
+  useBindings() // re-render when the shortcut is rebound
   if (!can(me.data?.role ?? 'owner', 'assistant')) return null
   return (
-    <button className="btn btn-ai" aria-pressed={open} onClick={toggle} title={`${t('assistant.title')} (Ctrl+J)`} data-testid="assistant-toggle">
+    <button className="btn btn-ai" aria-pressed={open} onClick={toggle} title={`${t('assistant.title')} (${chordLabel(specsFor('assistant.toggle')[0])})`} data-testid="assistant-toggle">
       <Sparkles size={14} />
       <span className="hidden lg:inline">{t('assistant.title')}</span>
     </button>
