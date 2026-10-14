@@ -27,9 +27,11 @@ import { People } from '@/pages/People'
 import { Taste } from '@/pages/Taste'
 import { CommandPalette } from '@/components/CommandPalette'
 import { Toasts } from '@/components/Toasts'
+import { useCardImport } from '@/stores/cardImport'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import i18n from '@/i18n'
+import { activateOverrides } from '@/lib/shortcuts'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -91,12 +93,15 @@ function useAppearanceSync() {
   const settings = useSettings(can(me.data?.role ?? null, 'settings'))
   const lang = settings.data?.language
   const theme = settings.data?.theme
+  const shortcuts = settings.data?.shortcuts
   useEffect(() => {
     if (lang && useUi.getState().lang !== lang) useUi.getState().setLang(lang)
   }, [lang])
   useEffect(() => {
     if (theme && useUi.getState().theme !== theme) useUi.getState().setTheme(theme)
   }, [theme])
+  // user key bindings (settings.shortcuts); guests cannot read settings and keep the defaults
+  useEffect(() => activateOverrides(shortcuts), [shortcuts])
 }
 
 function Shell() {
@@ -111,6 +116,7 @@ function Shell() {
       startEvents(queryClient, {
         onTask: (t) => {
           if (t.kind === 'assistant') useAssistant.getState().dispatch({ type: 'progress', taskId: t.task_id, done: t.done, total: t.total })
+          else if (t.kind === 'card_import') useCardImport.getState().update(t) // shown in the Home dialog, not as an export toast
           else useToasts.getState().updateTask(t)
           genOnTask(queryClient, t)
           // the task history (settings) shows the final record

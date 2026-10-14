@@ -29,7 +29,7 @@ enum Command {
         port: u16,
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
-        /// Data directory (default: platform app-data dir or $IMAGEPICKER_DATA_DIR).
+        /// Data directory (default: $IMAGEPICKER_DATA_DIR, else `data/` next to the executable in portable mode, else the platform app-data dir).
         #[arg(long)]
         data_dir: Option<PathBuf>,
         /// Directory with the built web UI (default: ./web/dist if present).

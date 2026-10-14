@@ -47,7 +47,10 @@ export function patchAt(path: SettingPath, value: unknown): SettingsPatch {
 export function mergeSettings(s: Settings, patch: SettingsPatch): Settings {
   const merge = (a: Obj, b: Obj): Obj => {
     const out: Obj = { ...a }
-    for (const [k, v] of Object.entries(b)) out[k] = isObj(v) && isObj(a[k]) ? merge(a[k] as Obj, v) : v
+    for (const [k, v] of Object.entries(b)) {
+      if (v === null) delete out[k] // RFC 7396: null removes the key (back to its default)
+      else out[k] = isObj(v) && isObj(a[k]) ? merge(a[k] as Obj, v) : v
+    }
     return out
   }
   return merge(s as unknown as Obj, patch as Obj) as unknown as Settings
@@ -106,4 +109,5 @@ export const DEFAULT_SETTINGS: Settings = {
   lan: { enabled: false, port: 7878, guest_enabled: false },
   roots: [],
   assistant: { engine: 'auto' },
+  shortcuts: {},
 }

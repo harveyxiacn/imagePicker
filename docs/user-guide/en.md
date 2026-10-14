@@ -71,6 +71,15 @@ Home: drop a folder (desktop) or click *Choose folder* to import; *Recent* lists
 2. The installers are **not code-signed yet**, so Windows SmartScreen may say "Windows protected your PC": click *More info → Run anyway*. You can verify the download against `SHA256SUMS.txt` on the Releases page (PowerShell: `Get-FileHash .\imagePicker_*_x64-setup.exe`).
 3. If WebView2 is missing, install the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) first.
 
+### Windows portable (USB drive, no installer)
+
+1. Unpack a portable zip (`imagePicker_<version>_x64-portable.zip`, assembled as described in `docs/release.md`) anywhere, for example onto an external drive. It contains `imagePicker.exe` and an empty file `imagepicker.portable` next to it.
+2. Start `imagePicker.exe`. Everything the app stores (catalog, thumbnails, settings, logs, crash records, models, AI components) goes to the `data\` folder beside the exe, not to your Windows profile. *Settings → Cache* shows **Portable mode: on (data next to the app)** and the data folder. Your photos are never copied.
+3. To make an existing copy portable, close the app, create an empty file called `imagepicker.portable` next to `imagePicker.exe` (there is deliberately no button for it) and, to keep your catalog, move the contents of `%APPDATA%\imagePicker` into a new `data\` folder there. Delete the marker (and move the data back) to return to the normal mode.
+4. If the drive shows up under another letter on the next computer (`E:` → `F:`), photo folders that are on **the same drive as the app** follow automatically. Folders on other drives keep their path; if they are missing, use *Relocate folder* (section 4). The AI components may have to be reinstalled in *Settings → AI components*; downloaded models are kept.
+
+Order in which the data folder is chosen: `--data-dir` → `IMAGEPICKER_DATA_DIR` → portable folder → `%APPDATA%\imagePicker`. Window size and position are still remembered in your Windows profile.
+
 ### macOS
 
 Download the `.dmg` (universal: Intel and Apple silicon) and drag the app to *Applications*. The app is **not signed or notarised yet**, so Gatekeeper blocks the first launch: in Finder **right-click → Open → Open**, or click *Open Anyway* in *System Settings → Privacy & Security*, or run `xattr -dr com.apple.quarantine /Applications/imagePicker.app` in Terminal.
@@ -158,7 +167,7 @@ The first time an AI feature needs models, the *AI models required* dialog lists
 - Supported: JPEG, PNG, WebP, AVIF, TIFF, camera RAW (CR2/CR3, NEF, ARW, RAF, ORF, RW2, DNG and more) and HEIC/HEIF files. RAW thumbnails use the embedded preview.
 - Import scans sub-folders recursively: *Scanning…* → *Generating thumbnails…* → *Done*. You can browse and rate while thumbnails appear.
 - *Remove session* only removes the catalog record and caches; **originals are untouched**.
-- The *Import from SD card / phone* button is disabled for now.
+- **Memory cards (SD card / camera storage)**: when a card with a `DCIM` folder is plugged in (a removable drive on Windows, a volume under `/Volumes` on macOS, a mount under `/media` or `/run/media` on Linux), Home shows a *Memory cards* box with its name, free space and an estimated photo count. Nothing happens until you click *Import from card*: choose the destination folder (inside an allowed folder), a folder structure (default `year/year-month-day`, e.g. `2026/2026-10-03`, from each photo's capture date; a RAW and its JPEG always land together), and optionally a session name. The app then **copies** the new photos (the card is only read, never changed), checks every copy against the original, never overwrites anything (a clash gets `_1`, `_2`…), skips files that are already in your catalog, and imports the copies as a session; RAW+JPEG pairs and the exclusions from *Import options* work as usual. You can close the window while it runs and cancel from the dialog or the task history. If a file cannot be read or the destination fills up, the files already copied and checked are still imported and the summary lists what is left; run the import again later and only the missing files are copied. Ejecting the card is left to the operating system. Android is not supported yet.
 - **Import options** (the link under the drop area): list globs or sub-folders to leave out, one per line (`*.dng`, `backup/**`, `trip/rejects`; matching is case-insensitive, `*` stays inside a folder, `**` crosses folders). The same exclusions apply when the folder is rescanned.
 - **RAW + JPEG pairs**: a RAW file and a JPEG (or HEIC) with the same name in the same folder (`IMG_0001.CR2` + `IMG_0001.JPG`) become **one** grid item with an *RAW+JPEG* badge. The JPEG is shown and analysed, the RAW rides along: rating, flag and colour label apply to both files (and to both XMP sidecars when XMP sync is on: `IMG_0001.xmp` and `IMG_0001.CR2.xmp`). Groups and analysis count the pair once. A RAW without a JPEG next to it stays a normal item. When you export, choose *JPEG*, *RAW* or *Both* for such pairs.
 - **Changes on disk**: the desktop app watches imported folders. Files you add or remove show up within a few seconds; photos whose file has vanished stay in the catalog (with their ratings and edits) with a broken-link mark. If you moved or renamed the whole folder, use *Relocate folder…* in the banner above the grid and pick the new location: files are re-linked by relative path and size. *Rescan* does the same check by hand (useful on network drives).
@@ -222,6 +231,12 @@ Click selects one photo, `Ctrl+click` multi-selects, `Ctrl+A` selects all; ratin
 | `Ctrl+J` | Open AI assistant | everywhere (incl. edit page) |
 | `Ctrl+E` | Export | everywhere (incl. edit page) |
 | `?` | Shortcut help | everywhere (incl. edit page) |
+
+#### Customising shortcuts
+
+*Settings → Shortcuts* lists every action with its current key. **Click a key, then press the new combination** (`Esc` cancels). The change is saved at once in the server settings, so the desktop app and the LAN web UI (owner login) use the same keys; the `?` overlay and the `Ctrl+K` palette show the new keys. A key can be reused in different places (for example `S` is "sync zoom" in compare and "expand stack" in the grid) but never twice in the same place. If the combination is already taken you see which action holds it and can **swap** the two actions or **cancel**. The arrow button next to a custom key resets it; *Reset all to defaults* clears every change. On macOS `Ctrl` is stored as `⌘`/`Ctrl` ("mod") and shown as `⌘`.
+
+Fixed shortcuts (marked with a lock) cannot be changed, and no other action can take their keys: `Esc` (back / close / cancel), `?` (help), `Ctrl+K` (command palette), holding `Z` (100% loupe), `Space` to open a photo from the grid, `D` and `Esc` to leave the edit page, and `Shift+arrows` (extend the selection in the grid). Guests on the LAN web UI cannot open the settings and always use the default keys.
 
 **More filters.** The filter bar also offers (each appears only when the session has something to choose from): a *Lens* button to tick the lenses found in the session; a *Keywords* button to tick keywords (any of them by default, or tick *Photos must have all selected keywords*); a *Date* button with *From* / *To* dates (inclusive, in the local time of the place where the photos were taken, limited to the span of the session); and a *Sharpness* chip group: Sharp / Blurry / Not analysed (click again to clear; *Blurry* includes photos carrying the blurry issue, *Not analysed* means no sharpness result yet). Active conditions show as removable tags under the bar and are saved with the rest of the filter as a smart collection. Right-click a face and choose *Photos with similar faces*: a *Similar to chosen faces* tag appears; drag its slider to tune how alike a face must be (higher is stricter, default 38%, applied on release). In the Search-by-face dialog the *Minimum similarity* slider decides which faces count as similar (default 25%), and *Show these photos in the library* turns the face into the same filter.
 
@@ -470,6 +485,21 @@ Press `Ctrl+E` (or *Export* in the top bar):
 
 While an export runs, its progress shows at the bottom right with a *Cancel* button: files already written stay, the remaining photos are skipped.
 
+### Collage and contact sheet
+
+Switch the export dialog from *Photos* to **Collage** to combine 2 to 30 photos (the selected ones, or everything in the filter) into a single image. The saved edits are rendered, colours are converted to sRGB, and the result is written in the format you pick (JPEG / PNG / TIFF / WebP) with the usual naming template (default `collage`; an existing file is never overwritten, the new one becomes `collage_1`…).
+
+| Option | Description |
+|---|---|
+| Layout | **Grid** (rows and columns chosen automatically from the photos' shapes), **Story** (the first photo large, the others small beside or below it) or **Contact sheet** (many thumbnails with the file name and star rating under each; both can be switched off) |
+| Canvas size | 4:5 (1080×1350), 1:1 (1080×1080), 16:9 (3840×2160), A4 at 300 dpi (2480×3508) or custom pixels (64 to 12000 per side, at most 80 megapixels) |
+| Gap / outer margin | Pixels between photos and between the photos and the edge |
+| Background | Colour of the gaps, the margin and the bars |
+| Fit | **Fill**: each photo fills its cell and the overflow is cropped, centred on the faces when the photo has detected faces (otherwise centred); **Whole photo**: nothing is cropped, bars show the background |
+| Format, quality, watermark | As above; the watermark is drawn once on the finished collage |
+
+The preview in the dialog shows the real layout for the photos' shapes and updates as you change the options; the photo order is the selection order. A collage runs as a task with progress and a *Cancel* button; cancelling writes no file.
+
 Export includes all your edits and carries the original's metadata over: EXIF (for RAW and TIFF files too; maker notes are not copied), XMP (rating, keywords, title, creator…; entries that only describe the original, such as its orientation or Lightroom/darktable develop settings, are left out) and IPTC. What each format can carry:
 
 | Format | EXIF | XMP | IPTC | Colour profile |
@@ -616,7 +646,7 @@ Open with the gear icon on Home or in the top bar.
 | **Rendering** | Render backend: Auto / GPU / CPU |
 | **LAN / WebUI** | See section 15; also *Allowed folders* (import, export and folder browsing are limited to these roots) |
 | **Interop (XMP)** | Off / Sidecar / Modify originals (confirmed twice), see section 17 |
-| **Shortcuts** | Read-only, generated from the built-in keymap |
+| **Shortcuts** | Editable table, see *Customising shortcuts* in section 5 |
 | **Remote AI** | Phone side: connect to a host at home (host address and 6-digit pairing code), see its state, disconnect; see section 20 |
 | **Remote AI devices** | Host side: *Start pairing* shows a code and QR code, list of paired devices with *Revoke*; see section 20 |
 | **Language & appearance** | UI language (简体中文 / English), theme (dark / light / follow system), **High contrast** (text, borders and focus rings meet WCAG AA; works with dark and light) and **Interface font size** (90%–150%; scales interface text and controls, not photos). The last two are stored on the current device / browser only |

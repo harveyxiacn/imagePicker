@@ -1,5 +1,5 @@
 import { delay, http, HttpResponse } from 'msw'
-import type { ExportBody, ExportPreset, ImportBody, PhotoPatchBody, Photo } from '@/api/types'
+import type { CardImportBody, CollageBody, ExportBody, ExportPreset, ImportBody, PhotoPatchBody, Photo } from '@/api/types'
 import { emit } from './bus'
 import {
   addSession,
@@ -147,6 +147,49 @@ function simulateExport(total: number, params: Record<string, unknown>) {
   return task_id
 }
 
+let cardSeq = 0
+/** Mock of `POST /api/import/card`: scan, copy in steps (cancellable), then import what was copied as a session. */
+function simulateCardImport(body: CardImportBody): string {
+  const task_id = `card_import-${++cardSeq}`
+  const found = 330
+  const skipped = 12
+  const total = found - skipped
+  const params: Record<string, unknown> = { source: body.source, dest: body.dest, pattern: body.pattern ?? '{yyyy}/{yyyy-mm-dd}' }
+  trackTask(task_id, 'card_import', params, 0)
+  emit({ type: 'task.progress', task_id, kind: 'card_import', done: 0, total: 0, state: 'running' })
+  let done = 0
+  const finish = (cancelled: boolean) => {
+    let session_id: number | null = null
+    if (done > 0) {
+      session_id = createSessionId()
+      const title = body.title || 'EOS_DIGITAL'
+      const sess = addSession(session_id, title, `${body.dest}\\2026`, [], 'scanning')
+      emit({ type: 'session.updated', session: { ...sess.session } })
+      simulateImport(session_id, done, hashString(body.source))
+    }
+    params.report = {
+      found, skipped_existing: skipped, copied: done, reused: 0, bytes: done * 8_200_000, failed_count: 0, failed: [],
+      not_attempted: total - done, cancelled, aborted: null, session_id,
+    }
+    endTask(task_id, cancelled ? 'cancelled' : 'done')
+    emit({ type: 'task.progress', task_id, kind: 'card_import', done, total, state: cancelled ? 'cancelled' : 'done' })
+  }
+  const tick = () => {
+    if (isCancelled(task_id)) return finish(true)
+    done = Math.min(total, done + 24)
+    taskProgress(task_id, done, total)
+    if (done >= total) return finish(false)
+    emit({ type: 'task.progress', task_id, kind: 'card_import', done, total, state: 'running' })
+    setTimeout(tick, 250)
+  }
+  setTimeout(() => {
+    taskProgress(task_id, 0, total)
+    emit({ type: 'task.progress', task_id, kind: 'card_import', done: 0, total, state: 'running' })
+    setTimeout(tick, 250)
+  }, 400)
+  return task_id
+}
+
 const lat = () => delay(15 + Math.random() * 35)
 
 export const handlers = [
@@ -172,6 +215,23 @@ export const handlers = [
     emit({ type: 'session.updated', session: { ...sess.session } })
     simulateImport(sid, total, hashString(body.path))
     return HttpResponse.json({ session: { ...sess.session } }, { status: 201 })
+  }),
+
+  http.get('/api/import/sources', async () => {
+    await lat()
+    return HttpResponse.json({
+      sources: [
+        { label: 'EOS_DIGITAL', path: 'G:\\', kind: 'removable', total_bytes: 64_000_000_000, free_bytes: 41_000_000_000, photo_estimate: 318, estimate_truncated: false },
+      ],
+      default_pattern: '{yyyy}/{yyyy-mm-dd}',
+    })
+  }),
+  http.post('/api/import/card', async ({ request }) => {
+    await lat()
+    const body = (await request.json()) as CardImportBody
+    if (!body.source) return err(400, 'bad_request', 'source must not be empty')
+    if (!body.dest) return err(400, 'bad_request', 'dest must not be empty')
+    return HttpResponse.json({ task_id: simulateCardImport(body) }, { status: 202 })
   }),
 
   http.get('/api/sessions', async () => {
@@ -343,6 +403,15 @@ export const handlers = [
     ;(globalThis as { __lastExport?: unknown }).__lastExport = body
     const total = body.folders ? Object.values(body.folders).reduce((n, ids) => n + ids.length, 0) : (body.ids?.length ?? 0)
     return HttpResponse.json({ task_id: simulateExport(total, { dest: body.dest, long_edge: body.long_edge ?? null, upscale: body.upscale ?? null, count: total }) }, { status: 202 })
+  }),
+
+  http.post('/api/export/collage', async ({ request }) => {
+    await lat()
+    const body = (await request.json()) as CollageBody
+    if (!body.dest) return err(400, 'bad_request', 'dest required')
+    if (body.ids.length < 2 || body.ids.length > 30) return err(400, 'bad_request', 'a collage takes 2..30 photos')
+    ;(globalThis as { __lastCollage?: unknown }).__lastCollage = body
+    return HttpResponse.json({ task_id: simulateExport(body.ids.length, { dest: body.dest, count: body.ids.length, collage: body.layout }) }, { status: 202 })
   }),
 
   http.get('/api/fs/roots', () => HttpResponse.json({ roots: ['C:\\', 'D:\\', 'C:\\Users\\demo'] })),

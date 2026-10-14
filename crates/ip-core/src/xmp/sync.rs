@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    apply_catalog, atomic_write, find_sidecar, jpeg, normalize_tags, sidecar_candidates, values_of,
-    CatalogValues, Xmp, XmpValues,
+    apply_catalog, atomic_write, find_sidecar, jpeg, normalize_tags, sidecar_candidates, tmp_path,
+    values_of, CatalogValues, Xmp, XmpValues,
 };
 use crate::catalog::{self, now_ms};
 use crate::error::{CoreError, Result};
@@ -309,14 +309,7 @@ fn write_embedded(path: &Path, cat: &CatalogValues) -> std::result::Result<bool,
         return Err("rewrite would change image data; file left untouched".into());
     }
     let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let tmp = dir.join(format!(
-        ".{}.ip-tmp-{}",
-        path.file_name()
-            .map(|n| n.to_string_lossy())
-            .unwrap_or_default(),
-        std::process::id()
-    ));
+    let tmp = tmp_path(path);
     let res = (|| -> std::io::Result<()> {
         std::fs::write(&tmp, &out)?;
         if let Some(t) = mtime {

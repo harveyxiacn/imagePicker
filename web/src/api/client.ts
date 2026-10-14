@@ -7,6 +7,7 @@ import type {
   AnalysisStatus,
   ApiErrorBody,
   BurstFaces,
+  CollageBody,
   ExportBody,
   ExportPreset,
   FsList,
@@ -67,8 +68,7 @@ import type {
   RuntimeInfo,
   Settings,
   SettingsPatch,
-  TaskRecord,
-} from './types'
+  TaskRecord, CardImportBody, ImportSources } from './types'
 import { joinCsvText } from '@/lib/csvText'
 import { diagnosticsFilename } from '@/lib/diagnostics'
 
@@ -201,6 +201,10 @@ const unwrapSettings = (r: Settings | { settings: Settings }): Settings => ('set
 export const api = {
   health: () => request<{ ok: boolean; version: string }>('GET', '/health'),
   importFolder: (body: ImportBody) => request<{ session: Session }>('POST', '/import', body),
+  /** memory cards plugged in right now (PRD F1.8); the server only lists, it never imports by itself */
+  importSources: () => request<ImportSources>('GET', '/import/sources'),
+  /** copy the new photos of a card into `dest`, then import them: 202 with the task to follow */
+  importCard: (body: CardImportBody) => request<{ task_id: string }>('POST', '/import/card', body),
   sessions: () => request<{ sessions: Session[] }>('GET', '/sessions'),
   session: (id: number) => request<{ session: Session }>('GET', `/sessions/${id}`),
   deleteSession: (id: number) => request<void>('DELETE', `/sessions/${id}`),
@@ -217,6 +221,7 @@ export const api = {
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),
+  exportCollage: (body: CollageBody) => request<{ task_id: string }>('POST', '/export/collage', body),
   exportPresets: () => request<{ presets: ExportPreset[] }>('GET', '/export/presets'),
   // ---- task history / cancel (M5 G) ----
   tasks: (limit = 50) => request<{ tasks: TaskRecord[] }>('GET', `/tasks?limit=${limit}`),

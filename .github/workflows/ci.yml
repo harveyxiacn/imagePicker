@@ -60,7 +60,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -104,7 +104,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - uses: dtolnay/rust-toolchain@stable
@@ -140,7 +140,7 @@ jobs:
           java-version: 17
       # The action's default package list still names the retired "tools" package, which
       # sdkmanager 16+ no longer knows (the job failed on `sdkmanager tools`).
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           packages: platform-tools
       - name: Install NDK 27
@@ -150,7 +150,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Core cross-compile check

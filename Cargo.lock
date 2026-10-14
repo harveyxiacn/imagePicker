@@ -2363,7 +2363,7 @@ dependencies = [
  "bytemuck",
  "byteorder-lite",
  "image-webp",
- "moxcms",
+ "moxcms 0.8.1",
  "num-traits",
  "png 0.18.1",
  "tiff",
@@ -2471,6 +2471,7 @@ dependencies = [
  "ip-lite",
  "ip-render",
  "ip-worker-client",
+ "libc",
  "notify",
  "rayon",
  "regex",
@@ -2491,7 +2492,7 @@ name = "ip-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "ip-server",
  "serde_json",
  "tauri",
@@ -2516,9 +2517,9 @@ dependencies = [
  "image",
  "jpeg-decoder",
  "jpeg-encoder",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "memmap2",
- "moxcms",
+ "moxcms 0.9.1",
  "rayon",
  "serde",
  "tempfile",
@@ -2584,7 +2585,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.30.0",
  "tower",
- "tower-http",
+ "tower-http 0.7.1",
  "tracing",
 ]
 
@@ -2937,6 +2938,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libloading"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3125,6 +3136,16 @@ name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
+dependencies = [
+ "num-traits",
+ "pxfm",
+]
+
+[[package]]
+name = "moxcms"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "396077b717181ce3f9a6b66739b269b82d756be5ec0f76be0bc40a7c51775830"
 dependencies = [
  "num-traits",
  "pxfm",
@@ -4350,7 +4371,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "tower",
- "tower-http",
+ "tower-http 0.6.11",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -5227,9 +5248,9 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
 name = "tauri"
-version = "2.12.1"
+version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed99ee9694a2deb776d91cae48ac7411ddfc89ecae2f9b5041111d8c88f2ace9"
+checksum = "d061d042ccd2df9c9f1508c1e63d835278c0a4c8801eb41764080e51f2eaaf34"
 dependencies = [
  "anyhow",
  "bytes",
@@ -5887,6 +5908,24 @@ checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
 dependencies = [
  "bitflags 2.13.2",
  "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "pin-project-lite",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "url",
+]
+
+[[package]]
+name = "tower-http"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08a05a66a4fdd61cbbe0a1d755ffe0ca6aba159dd4820936a0ff8a8278245b9c"
+dependencies = [
+ "bitflags 2.13.2",
+ "bytes",
  "futures-core",
  "futures-util",
  "http",
@@ -5900,11 +5939,9 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util",
- "tower",
  "tower-layer",
  "tower-service",
  "tracing",
- "url",
 ]
 
 [[package]]

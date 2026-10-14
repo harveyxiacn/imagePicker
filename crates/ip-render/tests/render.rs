@@ -727,11 +727,12 @@ fn auto_good_image_is_near_zero_and_deterministic() {
     // The macbeth chart is "already right".
     let m = auto_adjust(&macbeth(240, 160), &AutoContext::default(), AutoMode::Auto);
     assert!(m.temp.abs() <= 400.0 && m.exposure.abs() < 0.6, "{m:?}");
-    // Speed: well under budget even in debug-ish builds on a 1024 px proxy.
+    // Speed is guarded by `examples/bench_render.rs`; a wall-clock bound here flaked on shared
+    // CI runners. Only a very generous sanity bound remains, to catch an accidental hang.
     let big = scene(1024, 768, 8);
     let t = std::time::Instant::now();
     let _ = auto_adjust(&big, &AutoContext::default(), AutoMode::Auto);
-    assert!(t.elapsed().as_millis() < 200, "{:?}", t.elapsed());
+    assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
 }
 
 #[test]

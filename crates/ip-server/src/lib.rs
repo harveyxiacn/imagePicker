@@ -1,6 +1,7 @@
 //! HTTP + WebSocket API (axum). Contracts: docs/api-contract-m1.md .. m3.md.
 
 pub mod auth;
+pub mod card;
 pub mod error;
 pub mod files;
 pub mod fs;
@@ -32,6 +33,7 @@ use tower_http::trace::TraceLayer;
 pub use auth::{AuthState, ServerOptions};
 pub use ip_core::auth::SecurityStore;
 pub use ip_core::logging;
+pub use ip_core::paths;
 pub use routes::AppState;
 
 #[derive(Debug, Clone)]
@@ -130,6 +132,8 @@ pub fn build_router_auth(
     let api = Router::new()
         .route("/health", get(routes::health))
         .route("/import", post(routes::import))
+        .route("/import/sources", get(card::sources))
+        .route("/import/card", post(card::import_card))
         .route("/sessions", get(routes::list_sessions))
         .route(
             "/sessions/{id}",
@@ -156,6 +160,7 @@ pub fn build_router_auth(
         .route("/original/{id}", get(routes::original))
         .route("/viewport", post(routes::viewport))
         .route("/export", post(routes::export))
+        .route("/export/collage", post(routes::export_collage))
         .route("/export/presets", get(routes::export_presets))
         .route("/fs/roots", get(fs::get_roots))
         .route("/fs/list", get(fs::get_list))

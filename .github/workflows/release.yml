@@ -160,7 +160,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -313,7 +313,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           packages: platform-tools # the default list names the retired "tools" package
       - name: Install NDK 27
@@ -323,7 +323,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm

@@ -42,6 +42,10 @@ getrandom.workspace = true
 notify = "8"
 trash = "5"
 
+# Free space of memory cards (card import).
+[target.'cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile.workspace = true
 # tests_safety.rs: originals are compared by SHA-256 before and after every operation
