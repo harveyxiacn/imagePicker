@@ -7,6 +7,7 @@ pub mod auth;
 pub mod backup;
 pub mod card;
 pub mod catalog;
+pub mod collage;
 pub mod collections;
 pub mod db;
 pub mod device;
@@ -53,6 +54,7 @@ use std::time::Duration;
 
 pub use analysis::types::*;
 pub use card::{CardImportRequest, CardReport, CardSource};
+pub use collage::CollageRequest;
 pub use edit::{
     AutoCropKind, AutoCropOut, AutoCropRequest, AutoRequest, CheckedStack, EditDoc, EditPut,
     LutOut, PresetCreate, PresetOut, Preview, PreviewRequest, RenderService, SyncRequest,
@@ -497,6 +499,8 @@ impl Core {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_collage;
 #[cfg(test)]
 mod tests_crop;
 #[cfg(test)]

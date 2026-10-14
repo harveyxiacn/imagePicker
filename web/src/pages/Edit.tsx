@@ -198,7 +198,7 @@ export function Edit() {
       <ModelConsentDialog />
       <AssistantHost sessionId={sessionId} photoId={photoId} />
       <CopyDialog />
-      <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={[photoId]} allIds={photos.map((p) => p.id)} />
+      <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={[photoId]} allIds={photos.map((p) => p.id)} photos={photos} />
     </div>
   )
 }

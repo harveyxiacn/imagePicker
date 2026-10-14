@@ -340,6 +340,27 @@ export interface WatermarkBody {
   shadow?: boolean
 }
 
+/** `POST /api/export/collage` (PRD F9.5, docs/api-contract-m5.md F.2): 2..30 photos in one image. */
+export interface CollageBody {
+  ids: number[]
+  dest: string
+  layout: 'grid' | 'story' | 'contact'
+  width: number
+  height: number
+  gap: number
+  margin: number
+  /** `#rrggbb` / `#rgb` */
+  background: string
+  fit: 'cover' | 'contain'
+  caption_name: boolean
+  caption_rating: boolean
+  format: ExportFormat
+  quality: number
+  name_template: string
+  /** drawn once on the finished collage */
+  watermark?: WatermarkBody
+}
+
 /** Output container of an export: `original` copies unchanged photos as they are and writes
  *  everything re-encoded as JPEG; WebP is lossless, TIFF 8-bit uncompressed. */
 export type ExportFormat = 'original' | 'jpeg' | 'png' | 'tiff' | 'webp'

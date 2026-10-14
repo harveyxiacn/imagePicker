@@ -492,6 +492,21 @@ Press `Ctrl+E` (or *Export* in the top bar):
 
 While an export runs, its progress shows at the bottom right with a *Cancel* button: files already written stay, the remaining photos are skipped.
 
+### Collage and contact sheet
+
+Switch the export dialog from *Photos* to **Collage** to combine 2 to 30 photos (the selected ones, or everything in the filter) into a single image. The saved edits are rendered, colours are converted to sRGB, and the result is written in the format you pick (JPEG / PNG / TIFF / WebP) with the usual naming template (default `collage`; an existing file is never overwritten, the new one becomes `collage_1`…).
+
+| Option | Description |
+|---|---|
+| Layout | **Grid** (rows and columns chosen automatically from the photos' shapes), **Story** (the first photo large, the others small beside or below it) or **Contact sheet** (many thumbnails with the file name and star rating under each; both can be switched off) |
+| Canvas size | 4:5 (1080×1350), 1:1 (1080×1080), 16:9 (3840×2160), A4 at 300 dpi (2480×3508) or custom pixels (64 to 12000 per side, at most 80 megapixels) |
+| Gap / outer margin | Pixels between photos and between the photos and the edge |
+| Background | Colour of the gaps, the margin and the bars |
+| Fit | **Fill**: each photo fills its cell and the overflow is cropped, centred on the faces when the photo has detected faces (otherwise centred); **Whole photo**: nothing is cropped, bars show the background |
+| Format, quality, watermark | As above; the watermark is drawn once on the finished collage |
+
+The preview in the dialog shows the real layout for the photos' shapes and updates as you change the options; the photo order is the selection order. A collage runs as a task with progress and a *Cancel* button; cancelling writes no file.
+
 Export includes all your edits and carries the original's metadata over: EXIF (for RAW and TIFF files too; maker notes are not copied), XMP (rating, keywords, title, creator…; entries that only describe the original, such as its orientation or Lightroom/darktable develop settings, are left out) and IPTC. What each format can carry:
 
 | Format | EXIF | XMP | IPTC | Colour profile |
