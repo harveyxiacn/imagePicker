@@ -24,6 +24,7 @@ export const qk = {
   mask: (photoId: number, target: string, personId?: number) => ['mask', photoId, target, personId ?? null] as const,
   burstFaces: (burstId: number) => ['burstFaces', burstId] as const,
   devices: (sid: number) => ['devices', sid] as const,
+  deviceOffsets: (sid: number) => ['deviceOffsets', sid] as const,
   filterOptions: (sid: number) => ['filterOptions', sid] as const,
   peopleAll: ['people'] as const,
   people: (sid: number | undefined) => ['people', sid ?? 'all'] as const,
@@ -303,6 +304,7 @@ export function applyEvents(
   for (const sid of groupsChanged) {
     void qc.invalidateQueries({ queryKey: qk.groups(sid) })
     void qc.invalidateQueries({ queryKey: qk.timeline(sid) })
+    void qc.invalidateQueries({ queryKey: qk.deviceOffsets(sid) })
     void qc.invalidateQueries({ queryKey: ['burstFaces'] })
     scheduleListRefetch(qc, sid)
   }

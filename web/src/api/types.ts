@@ -17,6 +17,39 @@ export interface Device {
   photo_count: number
 }
 
+/** How a device's clock offset was found (`GET /api/sessions/:id/devices/offsets`). */
+export type OffsetEstimateSource = 'gps' | 'visual' | 'reference'
+
+export interface OffsetEstimate {
+  /** ms to add to the capture time */
+  offset_ms: number
+  /** 0..1 */
+  confidence: number
+  /** matching pairs (visual) or photos with a GPS time (gps) behind the offset */
+  evidence: number
+  source: OffsetEstimateSource
+}
+
+/** A device of a session with its applied clock correction and the latest estimate. */
+export interface DeviceOffset {
+  device_id: number
+  name: string
+  kind: DeviceKind
+  photo_count: number
+  /** applied correction (ms added to the capture time for grouping); 0 = none */
+  offset_ms: number
+  source: 'none' | 'auto' | 'manual'
+  estimate: OffsetEstimate | null
+}
+
+export interface DeviceOffsets {
+  devices: DeviceOffset[]
+  /** when the estimate was made (ms); null = never */
+  estimated_at: number | null
+  /** the device the estimates are relative to (no GPS-anchored device in the session) */
+  reference_device_id: number | null
+}
+
 /** `GET /api/sessions/:id/filter-options`: values the lens / keyword / date pickers offer. */
 export interface FilterOptions {
   lenses: Array<{ lens: string; photo_count: number }>

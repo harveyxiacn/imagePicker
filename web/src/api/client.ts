@@ -2,6 +2,7 @@ import type {
   CatalogBackup,
   CatalogStatus,
   Device,
+  DeviceOffsets,
   AnalysisProfile,
   AnalysisPlan,
   AnalysisStatus,
@@ -69,6 +70,7 @@ import type {
   SettingsPatch,
   TaskRecord, CardImportBody, ImportSources } from './types'
 import { joinCsvText } from '@/lib/csvText'
+import type { OffsetsAction } from '@/lib/timeAlign'
 import { diagnosticsFilename } from '@/lib/diagnostics'
 
 export class ApiError extends Error {
@@ -252,6 +254,10 @@ export const api = {
   acceptAi: (ids: number[]) => request<{ updated: number }>('POST', '/photos/accept-ai', { ids }),
   filterOptions: (sessionId: number) => request<FilterOptions>('GET', `/sessions/${sessionId}/filter-options`),
   devices: (sessionId: number) => request<{ devices: Device[] }>('GET', `/sessions/${sessionId}/devices`),
+  deviceOffsets: (sessionId: number, refresh = false) =>
+    request<DeviceOffsets>('GET', `/sessions/${sessionId}/devices/offsets${refresh ? '?refresh=1' : ''}`),
+  putDeviceOffsets: (sessionId: number, body: OffsetsAction) =>
+    request<DeviceOffsets>('PUT', `/sessions/${sessionId}/devices/offsets`, body),
   people: (session_id?: number) =>
     request<{ people: Person[] }>('GET', `/people${session_id !== undefined ? `?session_id=${session_id}` : ''}`),
   patchPerson: (id: number, body: { name?: string | null; hidden?: boolean }) =>

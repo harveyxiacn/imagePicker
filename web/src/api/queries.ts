@@ -6,7 +6,8 @@ import { qk } from '@/lib/cache'
 import { isLive } from '@/lib/tasks'
 import { mergeSettings } from '@/lib/settingsForm'
 import { useToasts } from '@/stores/toasts'
-import type { AnalysisProfile, Settings, SettingsPatch } from './types'
+import type { OffsetsAction } from '@/lib/timeAlign'
+import type { AnalysisProfile, DeviceOffsets, Settings, SettingsPatch } from './types'
 import { api, fetchAllPhotos } from './client'
 
 
@@ -14,7 +15,7 @@ import { api, fetchAllPhotos } from './client'
  * Read-only guests get 403 for people, faces, taste, settings, assistant, system, fs, xmp, cache, onboarding,
  * masks, models, besttake, analysis and tasks: those queries wait for `/auth/me` and never run for a guest.
  */
-function useNotGuest(): boolean {
+export function useNotGuest(): boolean {
   const me = useQuery({ queryKey: qk.me, queryFn: api.me, staleTime: 30_000, retry: false })
   return me.isSuccess && me.data.role !== 'guest'
 }
@@ -169,6 +170,35 @@ export function useDevices(sessionId: number, photoCount?: number) {
     select: (d) => d.devices,
     staleTime: 15_000,
     enabled: me.isSuccess,
+  })
+}
+
+/**
+ * Clock offset per device of a session: applied correction and estimate. The server estimates on the
+ * first call after an analysis, which takes a moment, so this only runs when `enabled`.
+ */
+export function useDeviceOffsets(sessionId: number, enabled: boolean) {
+  const me = useQuery({ queryKey: qk.me, queryFn: api.me, staleTime: 30_000, retry: false })
+  return useQuery({
+    queryKey: qk.deviceOffsets(sessionId),
+    queryFn: () => api.deviceOffsets(sessionId),
+    staleTime: 15_000,
+    enabled: me.isSuccess && enabled,
+    retry: false,
+  })
+}
+
+/** Accept / type in / reset an offset, or estimate again (`refresh`); the session is grouped again by the server. */
+export function useDeviceOffsetsMutation(sessionId: number) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (v: OffsetsAction | { refresh: true }) => ('refresh' in v ? api.deviceOffsets(sessionId, true) : api.putDeviceOffsets(sessionId, v)),
+    onSuccess: (data: DeviceOffsets) => {
+      qc.setQueryData(qk.deviceOffsets(sessionId), data)
+      void qc.invalidateQueries({ queryKey: qk.groups(sessionId) })
+      void qc.invalidateQueries({ queryKey: qk.timeline(sessionId) })
+    },
+    onError: (e) => useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000),
   })
 }
 
