@@ -13,6 +13,8 @@ import type {
   DuplicatesResponse,
   GroupsResponse,
   TimelineResponse,
+  LibraryTimeline,
+  TimelineQuery,
   HardwareInfo,
   ImportBody,
   RelocateReport,
@@ -196,6 +198,18 @@ export function photosQueryString(q: PhotosQuery): string {
   return p.toString()
 }
 
+/** Query string of GET /api/timeline: the photo filters of `photosQueryString` without a session, plus level / window. */
+export function timelineQueryString(q: TimelineQuery): string {
+  const { granularity, from, to, session_id, ...filters } = q
+  const p = new URLSearchParams(photosQueryString({ ...filters, session_id: 0 }))
+  p.delete('session_id')
+  if (session_id !== undefined) p.set('session_id', String(session_id))
+  if (granularity) p.set('granularity', granularity)
+  if (from) p.set('from', from)
+  if (to) p.set('to', to)
+  return p.toString()
+}
+
 const unwrapSettings = (r: Settings | { settings: Settings }): Settings => ('settings' in r ? r.settings : r)
 
 export const api = {
@@ -214,6 +228,7 @@ export const api = {
   photo: (id: number) => request<{ photo: Photo }>('GET', `/photos/${id}`),
   photoDuplicates: (id: number) => request<DuplicatesResponse>('GET', `/photos/${id}/duplicates`),
   timeline: (session_id: number) => request<TimelineResponse>('GET', `/sessions/${session_id}/timeline`),
+  libraryTimeline: (q: TimelineQuery) => request<LibraryTimeline>('GET', `/timeline?${timelineQueryString(q)}`),
   patchPhotos: (body: PhotoPatchBody) => request<{ updated: number }>('PATCH', '/photos', body),
   viewport: (ids: number[]) => request<void>('POST', '/viewport', { ids }),
   exportPhotos: (body: ExportBody) => request<{ task_id: string }>('POST', '/export', body),
@@ -367,6 +382,8 @@ export async function fetchAllPhotos(
 
 // ---- Binary URLs ----
 
+/** Thumbnail by id only (the `v` cache key is optional): timeline tiles know just the photo ids. */
+export const thumbUrlById = (id: number, s: 256 | 512 = 256) => `${BASE}/thumb/${id}?s=${s}`
 export const thumbUrl = (p: Pick<Photo, 'id' | 'thumb_version'>, s: 256 | 512 = 256) =>
   `${BASE}/thumb/${p.id}?s=${s}&v=${encodeURIComponent(p.thumb_version)}`
 /** `v` (thumb_version) busts the cache when edits change the rendered preview. */
