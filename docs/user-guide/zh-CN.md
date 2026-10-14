@@ -72,6 +72,15 @@
 2. 安装包**暂未进行代码签名**，Windows SmartScreen 可能提示「Windows 已保护你的电脑」：点「更多信息 → 仍要运行」。可用 Releases 页的 `SHA256SUMS.txt` 核对文件（PowerShell：`Get-FileHash .\imagePicker_*_x64-setup.exe`）。
 3. 若系统缺少 WebView2，请先安装 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
 
+### Windows 便携版（U 盘 / 移动硬盘，免安装）
+
+1. 把便携 zip（`imagePicker_<版本>_x64-portable.zip`，打包方法见 `docs/release.md`）解压到任意位置，例如移动硬盘。里面有 `imagePicker.exe` 和旁边的一个空文件 `imagepicker.portable`。
+2. 运行 `imagePicker.exe`。应用保存的一切（目录库、缩略图、设置、日志、崩溃记录、模型、AI 组件）都写到 exe 旁的 `data\` 文件夹，而不是 Windows 用户目录。「设置 → 缓存」会显示 **便携模式：已开启（数据保存在程序旁）** 和数据目录。照片本身不会被复制。
+3. 想把现有的安装变成便携版：关闭应用，在 `imagePicker.exe` 旁新建一个名为 `imagepicker.portable` 的空文件（刻意不提供按钮），要保留目录库的话再把 `%APPDATA%\imagePicker` 里的内容移到旁边新建的 `data\` 文件夹。删掉标记文件（并把数据移回去）即可回到普通模式。
+4. 换一台电脑后盘符变了（`E:` → `F:`）时，位于**与程序同一个盘**上的照片文件夹会自动跟随；其他盘上的文件夹保持原路径，找不到时用「重新定位文件夹」（第 4 节）。AI 组件可能需要在「设置 → AI 组件」重新安装，已下载的模型保留。
+
+数据目录的选择顺序：`--data-dir` → `IMAGEPICKER_DATA_DIR` → 便携文件夹 → `%APPDATA%\imagePicker`。窗口大小和位置仍记在 Windows 用户配置里。
+
 ### macOS
 
 下载 `.dmg`（通用版，Intel 与 Apple 芯片均可），把应用拖入「应用程序」。应用**暂未签名/公证**，首次打开会被 Gatekeeper 拦截：在 Finder 中**右键 → 打开 → 打开**，或在「系统设置 → 隐私与安全性」中点「仍要打开」；也可在终端执行 `xattr -dr com.apple.quarantine /Applications/imagePicker.app`。

@@ -319,6 +319,18 @@ pub fn run() {
     // `setup`, so it keeps console-only logging.
     #[cfg(not(target_os = "android"))]
     ip_server::logging::init(None, "info,ip_server=info", true);
+    // Portable mode (`imagepicker.portable` next to the executable): keep the WebView2 profile
+    // (cookies, caches) in the portable data folder too, instead of %LOCALAPPDATA%.
+    #[cfg(windows)]
+    {
+        if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
+            use ip_server::paths::{current_exe_dir, resolve_data_dir_choice, DataDirSource};
+            let choice = resolve_data_dir_choice(None, current_exe_dir().as_deref());
+            if choice.source == DataDirSource::Portable {
+                std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", choice.dir.join("webview"));
+            }
+        }
+    }
     #[cfg(target_os = "android")]
     tracing_subscriber::fmt()
         .with_env_filter(

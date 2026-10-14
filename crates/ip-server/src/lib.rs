@@ -33,6 +33,7 @@ use tower_http::trace::TraceLayer;
 pub use auth::{AuthState, ServerOptions};
 pub use ip_core::auth::SecurityStore;
 pub use ip_core::logging;
+pub use ip_core::paths;
 pub use routes::AppState;
 
 #[derive(Debug, Clone)]
