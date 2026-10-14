@@ -51,7 +51,7 @@ Android 11+ 允许持有 `READ_MEDIA_IMAGES`（13+）/ `READ_EXTERNAL_STORAGE`�
 | POST | `/api/remote/pair/complete` | `{"code", "device_name"}`（无需登录，仅凭有效配对码；限速同登录） | `{"device_id", "token" /*256-bit，仅返回一次*/}` |
 | GET | `/api/remote/devices` | （owner） | `{"devices":[{"device_id","name","created_at","last_seen"}]}` |
 | DELETE | `/api/remote/devices/{id}` | （owner） | `204`（吊销） |
-| POST | `/api/remote/rpc` | `Authorization: Bearer <device token>`；`multipart/form-data`：`method`（worker RPC 名，白名单：`system.info`、`models.list`、`analyze.batch`、`mask.generate`、`beauty.prepare`、`besttake.compose`、`inpaint.run`、`enhance.run`、`faces.embed`）、`params`（JSON，其中所有图片路径改写为 `file:<字段名>`）、上传文件字段 | 与 worker 结果相同的 JSON，其中输出文件路径改写为 `remote:<file_id>`；超时与错误码同 worker |
+| POST | `/api/remote/rpc` | `Authorization: Bearer <device token>`；`multipart/form-data`：`method`（worker RPC 名，白名单：`system.info`、`models.list`、`analyze.batch`、`mask.generate`、`beauty.prepare`、`besttake.compose`、`inpaint.run`、`enhance.run`、`faces.embed`、`text.embed`）、`params`（JSON，其中所有图片路径改写为 `file:<字段名>`）、上传文件字段 | 与 worker 结果相同的 JSON，其中输出文件路径改写为 `remote:<file_id>`；超时与错误码同 worker |
 | GET | `/api/remote/files/{file_id}` | Bearer | 产物文件（`.npy`/`.png`…），10 分钟后过期 |
 
 - 设备角色 `device`：只能访问 `/api/remote/rpc`、`/api/remote/files/*`、`/api/health`；不可访问照片库、设置等。

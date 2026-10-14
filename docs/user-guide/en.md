@@ -49,7 +49,7 @@ Home: drop a folder (desktop) or click *Choose folder* to import; *Recent* lists
 | Right inspector | Score breakdown, AI suggestion (with *Accept*), flag, colour, faces, EXIF (`Tab` hides / shows it) |
 | Status bar | Thumbnail progress, selection count, picked / rejected / rated totals, connection state |
 
-> The search box in the top bar (natural-language search) is a greyed-out placeholder for now.
+> The search box in the top bar finds photos by description (see section 6, *Search by description*).
 
 ## 2. Installation
 
@@ -298,6 +298,17 @@ Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best o
 *My taste* (on Home) learns from your ratings, flags and in-group choices and blends the base score with your taste using a weight α (0–0.6). It only turns on after it beats the base score on a held-out set; all data stays local and can be reset any time.
 
 > **Honest note:** the issue thresholds were tuned on a 1000-image synthetic test library, not yet on a large set of real photos. Bright or dark frames that keep their detail (white backdrops, paper, neon streets at night) are no longer tagged over- or underexposed; inside a burst, a frame clearly softer than the sharpest one is tagged "blurry". Soft-background portraits can still be tagged blurry. Treat AI stars as suggestions.
+
+### Search by description
+
+Type what is in the photo into the top-bar search box, **in Chinese or English**: "sunset at the beach", "a cat on the sofa", "海边日落". The search runs about 0.4 s after you stop typing; press Enter to run it at once, `Esc` or the × in the box to clear it.
+
+- Results are ranked **best match first**. A "Search: …" pill appears in the filter bar; click its × to remove it. Search combines with the other filters (for example "3 stars and up + search: sunset").
+- At most the 300 best matches are shown; when nothing reaches the match threshold you see "No photos match …".
+- **Requirements**: (1) the photos went through the **standard analysis** (search uses the image features that analysis stores; photos that were only analysed with the fast profile, or not at all, cannot be found, and the app tells you how many); (2) the **search model** (`siglip2-base-text`, about 550 MB, one-time download, offline afterwards) is installed. Without it the box is greyed out and an *Install search model* button sits next to it.
+- Guests on the LAN can search too.
+
+> **Honest note:** search understands the overall content of a picture (scene, objects, colours, mood). It is not text recognition and does not count things; use the people filter for people. The model is multilingual but trained mostly on English, so **Chinese is usually less accurate than English**: if a Chinese query misses, try English or a simpler description. Recall has not been measured on a large set of real photos yet (the evaluation script is `bench/eval-search.py`).
 
 ## 7. Groups & stacks
 
@@ -662,7 +673,7 @@ Open with the gear icon on Home or in the top bar.
 - **Can I use it without a GPU?** Yes: fast analysis, basic editing and culling work; standard analysis, upscaling etc. are slower.
 - **Which camera RAW formats?** Common brands (see section 4); RAW is shown from its embedded preview.
 - **Android?** There is only a [design document](../08-Android版本设计.md) (Chinese) so far.
-- **Natural-language search?** The search box is not active yet; use the assistant's filter commands meanwhile.
+- **Natural-language search?** The top-bar search box works: describe the photo in Chinese or English. It needs the standard analysis and the search model (section 6, *Search by description*). A photo that cannot be found has most likely not been through the standard analysis.
 
 More known issues: [backlog](../backlog.md) (Chinese). Please report problems via GitHub Issues and **never attach personal photos**.
 
