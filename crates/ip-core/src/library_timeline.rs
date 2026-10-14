@@ -67,7 +67,9 @@ pub fn parse_ymd(s: &str) -> Option<i64> {
     }
     let num = |r: std::ops::Range<usize>| -> Option<i64> {
         let t = &s[r];
-        t.bytes().all(|c| c.is_ascii_digit()).then(|| t.parse().ok())?
+        t.bytes()
+            .all(|c| c.is_ascii_digit())
+            .then(|| t.parse().ok())?
     };
     let (y, m, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
     let days = days_from_civil(y, m, d);
@@ -93,8 +95,16 @@ pub fn bucket_of(day: i64, g: Granularity) -> (String, i64, i64) {
         Granularity::Day => (format_ymd(day), day, day),
         Granularity::Month => {
             let first = days_from_civil(y, m as i64, 1);
-            let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m as i64 + 1) };
-            (format!("{y:04}-{m:02}"), first, days_from_civil(ny, nm, 1) - 1)
+            let (ny, nm) = if m == 12 {
+                (y + 1, 1)
+            } else {
+                (y, m as i64 + 1)
+            };
+            (
+                format!("{y:04}-{m:02}"),
+                first,
+                days_from_civil(ny, nm, 1) - 1,
+            )
         }
         Granularity::Year => (
             format!("{y:04}"),
@@ -365,22 +375,24 @@ fn window_events(
             local_day(*s, *off) <= to_day && local_day((*e).max(*s), *off) >= from_day
         })
         .take(MAX_EVENTS)
-        .map(|(id, session_id, title, start_at, end_at, offset_min, photo_count)| {
-            let name = match title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-                Some(t) => t.to_string(),
-                None => crate::analysis::timeline::event_name(start_at, end_at, offset_min),
-            };
-            TimelineEventRef {
-                id,
-                session_id,
-                name,
-                title,
-                start_at,
-                end_at,
-                offset_min,
-                photo_count,
-            }
-        })
+        .map(
+            |(id, session_id, title, start_at, end_at, offset_min, photo_count)| {
+                let name = match title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+                    Some(t) => t.to_string(),
+                    None => crate::analysis::timeline::event_name(start_at, end_at, offset_min),
+                };
+                TimelineEventRef {
+                    id,
+                    session_id,
+                    name,
+                    title,
+                    start_at,
+                    end_at,
+                    offset_min,
+                    photo_count,
+                }
+            },
+        )
         .collect())
 }
 
@@ -403,11 +415,28 @@ mod tests {
 
     #[test]
     fn ymd_round_trips_and_rejects_non_dates() {
-        for s in ["1970-01-01", "2024-02-29", "1969-12-31", "2000-02-29", "0999-01-01"] {
+        for s in [
+            "1970-01-01",
+            "2024-02-29",
+            "1969-12-31",
+            "2000-02-29",
+            "0999-01-01",
+        ] {
             assert_eq!(format_ymd(parse_ymd(s).unwrap()), s);
         }
         assert_eq!(parse_ymd("1970-01-02"), Some(1));
-        for s in ["2023-02-29", "1900-02-29", "2024-13-01", "2024-00-10", "2024-1-1", "2024/01/01", "20240101", "", "2024-01-1x", "+024-01-01"] {
+        for s in [
+            "2023-02-29",
+            "1900-02-29",
+            "2024-13-01",
+            "2024-00-10",
+            "2024-1-1",
+            "2024/01/01",
+            "20240101",
+            "",
+            "2024-01-1x",
+            "+024-01-01",
+        ] {
             assert_eq!(parse_ymd(s), None, "{s}");
         }
     }
@@ -428,8 +457,14 @@ mod tests {
         assert_eq!(format_ymd(local_day(early, Some(-300))), "2024-05-02");
         assert_eq!(format_ymd(local_day(early, Some(-720))), "2024-05-02");
         // the exact boundaries
-        assert_eq!(format_ymd(local_day(ms(2024, 5, 3, 0, 0), Some(0))), "2024-05-03");
-        assert_eq!(format_ymd(local_day(ms(2024, 5, 3, 0, 0) - 1, Some(0))), "2024-05-02");
+        assert_eq!(
+            format_ymd(local_day(ms(2024, 5, 3, 0, 0), Some(0))),
+            "2024-05-03"
+        );
+        assert_eq!(
+            format_ymd(local_day(ms(2024, 5, 3, 0, 0) - 1, Some(0))),
+            "2024-05-02"
+        );
         // before 1970
         assert_eq!(format_ymd(local_day(-1, None)), "1969-12-31");
     }
@@ -438,11 +473,20 @@ mod tests {
     fn buckets_cover_whole_calendar_units() {
         let d = parse_ymd("2024-02-10").unwrap();
         let (k, a, b) = bucket_of(d, Granularity::Month);
-        assert_eq!((k.as_str(), format_ymd(a), format_ymd(b)), ("2024-02", "2024-02-01".into(), "2024-02-29".into()));
+        assert_eq!(
+            (k.as_str(), format_ymd(a), format_ymd(b)),
+            ("2024-02", "2024-02-01".into(), "2024-02-29".into())
+        );
         let (k, a, b) = bucket_of(parse_ymd("2023-12-31").unwrap(), Granularity::Month);
-        assert_eq!((k.as_str(), format_ymd(a), format_ymd(b)), ("2023-12", "2023-12-01".into(), "2023-12-31".into()));
+        assert_eq!(
+            (k.as_str(), format_ymd(a), format_ymd(b)),
+            ("2023-12", "2023-12-01".into(), "2023-12-31".into())
+        );
         let (k, a, b) = bucket_of(d, Granularity::Year);
-        assert_eq!((k.as_str(), format_ymd(a), format_ymd(b)), ("2024", "2024-01-01".into(), "2024-12-31".into()));
+        assert_eq!(
+            (k.as_str(), format_ymd(a), format_ymd(b)),
+            ("2024", "2024-01-01".into(), "2024-12-31".into())
+        );
         let (k, a, b) = bucket_of(d, Granularity::Day);
         assert_eq!((k.as_str(), a, b), ("2024-02-10", d, d));
         // consecutive months tile the year without a gap
@@ -465,7 +509,12 @@ mod tests {
     }
 
     fn row(id: i64, t: Option<i64>, off: Option<i32>, rank: (i64, i64, i64)) -> Row {
-        Row { id, taken_at: t, offset_min: off, rank }
+        Row {
+            id,
+            taken_at: t,
+            offset_min: off,
+            rank,
+        }
     }
 
     #[test]
@@ -516,6 +565,9 @@ mod tests {
         let (b, _) = acc.finish();
         let keys: Vec<_> = b.iter().map(|x| (x.key.as_str(), x.count)).collect();
         assert_eq!(keys, vec![("2024-05", 2), ("2024-06", 1)]);
-        assert_eq!((b[1].from.as_str(), b[1].to.as_str()), ("2024-06-01", "2024-06-30"));
+        assert_eq!(
+            (b[1].from.as_str(), b[1].to.as_str()),
+            ("2024-06-01", "2024-06-30")
+        );
     }
 }
