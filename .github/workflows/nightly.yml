@@ -52,7 +52,7 @@ jobs:
           pnpm lint
           pnpm test
           pnpm build
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - name: AI worker tests
         working-directory: ai-worker
         run: |
