@@ -82,8 +82,8 @@ pub fn ingest(
         tx.execute(
             "INSERT OR REPLACE INTO analysis(photo_id, profile, steps_done, model_versions, phash, embedding,
                sharpness, exposure, noise, aesthetic, iqa, mean_luminance, clipped_highlights, crushed_shadows,
-               scene_scores, explain, artifacts_dir, analyzed_at, tilt_deg, tilt_confidence)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16,?17,?18,?19)",
+               scene_scores, explain, artifacts_dir, analyzed_at, tilt_deg, tilt_confidence, saliency)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16,?17,?18,?19,?20)",
             params![
                 pid,
                 profile.as_str(),
@@ -103,7 +103,8 @@ pub fn ingest(
                 artifacts_dir,
                 now,
                 q.tilt_deg,
-                q.tilt_confidence
+                q.tilt_confidence,
+                q.saliency.map(|b| json!(b).to_string())
             ],
         )?;
         // faces
@@ -120,13 +121,15 @@ pub fn ingest(
                         yaw: f.yaw,
                         pitch: f.pitch,
                         sharpness: f.sharpness,
+                        artificial: f.artificial,
+                        mouth_open: f.mouth_open,
                         ..Default::default()
                     },
                     false,
                 )
             })
             .collect();
-        let subjects = scoring::subject_flags(&feats);
+        let subjects = scoring::subject_flags_live(&feats);
         for (i, f) in a.faces.iter().enumerate() {
             let emb = it
                 .face_embs
@@ -155,8 +158,8 @@ pub fn ingest(
             tx.execute(
                 "INSERT INTO face(photo_id, idx, person_id, person_locked, bbox_x, bbox_y, bbox_w, bbox_h,
                    det_score, embedding, eyes_open, smile, gaze, yaw, pitch, roll, sharpness, expression_score,
-                   is_subject, is_bystander, blendshapes)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+                   is_subject, is_bystander, blendshapes, artificial, mouth_open)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
                 params![
                     pid,
                     i as i64,
@@ -177,8 +180,10 @@ pub fn ingest(
                     f.sharpness,
                     expr,
                     subjects[i] as i64,
-                    (!subjects[i]) as i64,
+                    (!subjects[i] && !feats[i].0.likely_artificial()) as i64,
                     f.blendshapes.as_ref().map(|b| b.to_string()),
+                    f.artificial,
+                    f.mouth_open,
                 ],
             )?;
         }
@@ -553,6 +558,8 @@ pub(crate) fn load_faces_feat(
                 pitch: r.get(11)?,
                 sharpness: r.get(12)?,
                 is_subject: r.get::<_, i64>(13)? != 0,
+                artificial: r.get(14)?,
+                mouth_open: r.get(15)?,
             },
         ))
     })?;
@@ -565,7 +572,7 @@ pub(crate) fn load_faces_feat(
 
 pub(crate) const FACE_FEAT_COLS: &str =
     "f.photo_id, f.id, f.person_id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
-    f.eyes_open, f.smile, f.gaze, f.yaw, f.pitch, f.sharpness, f.is_subject";
+    f.eyes_open, f.smile, f.gaze, f.yaw, f.pitch, f.sharpness, f.is_subject, f.artificial, f.mouth_open";
 
 /// Scores, ranks and stars every analysed photo of the given bursts and writes the results.
 /// Returns the ids of the photos whose AI fields were written.
@@ -579,7 +586,7 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
             let mut st = tx.prepare(&format!(
                 "SELECT p.id, p.burst_id, COALESCE(p.taken_at, p.mtime), p.scene_type, a.sharpness, a.exposure,
                         a.noise, a.iqa, a.aesthetic, a.clipped_highlights, a.crushed_shadows,
-                        a.mean_luminance, a.embedding, a.tilt_deg, a.tilt_confidence
+                        a.mean_luminance, a.embedding, a.tilt_deg, a.tilt_confidence, a.saliency
                  FROM photo p JOIN analysis a ON a.photo_id=p.id WHERE p.burst_id IN ({ph})"
             ))?;
             let v = st
@@ -600,6 +607,10 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
                             mean_luminance: r.get(11)?,
                             tilt_deg: r.get(13)?,
                             tilt_confidence: r.get(14)?,
+                            saliency: r
+                                .get::<_, Option<String>>(15)?
+                                .and_then(|s| serde_json::from_str(&s).ok()),
+                            composition: None,
                             faces: Vec::new(),
                         },
                         emb: r
@@ -621,7 +632,12 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
         )?;
         for r in &mut rows {
             r.feat.faces = faces.remove(&r.feat.photo_id).unwrap_or_default();
+            r.feat.composition = super::composition::composition_score(&r.feat).map(|c| c.score);
         }
+        let compositions: HashMap<i64, Option<f64>> = rows
+            .iter()
+            .map(|r| (r.feat.photo_id, r.feat.composition))
+            .collect();
         let mut by_burst: BTreeMap<i64, Vec<SRow>> = BTreeMap::new();
         for r in rows {
             by_burst.entry(r.burst_id).or_default().push(r);
@@ -662,8 +678,16 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
                     "face_score": r.face_score,
                 });
                 tx.execute(
-                    "UPDATE analysis SET explain=?2 WHERE photo_id=?1",
-                    params![r.photo_id, explain.to_string()],
+                    "UPDATE analysis SET explain=?2, composition=?3 WHERE photo_id=?1",
+                    params![
+                        r.photo_id,
+                        explain.to_string(),
+                        compositions
+                            .get(&r.photo_id)
+                            .copied()
+                            .flatten()
+                            .map(|c| (c * 10_000.0).round() / 10_000.0)
+                    ],
                 )?;
                 touched.push(r.photo_id);
             }
@@ -696,7 +720,7 @@ pub fn recompute_subjects(conn: &mut Connection, photo_ids: &[i64]) -> Result<Ve
         let ph = placeholders(chunk.len());
         let mut st = tx.prepare(&format!(
             "SELECT f.photo_id, f.id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h, f.sharpness, f.gaze,
-                    f.is_subject, pe.name IS NOT NULL
+                    f.is_subject, pe.name IS NOT NULL, f.artificial
              FROM face f LEFT JOIN person pe ON pe.id=f.person_id
              WHERE f.photo_id IN ({ph}) ORDER BY f.photo_id, f.id"
         ))?;
@@ -716,6 +740,7 @@ pub fn recompute_subjects(conn: &mut Connection, photo_ids: &[i64]) -> Result<Ve
                         bbox: [r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?],
                         sharpness: r.get(6)?,
                         gaze: r.get(7)?,
+                        artificial: r.get(10)?,
                         ..Default::default()
                     },
                     was: r.get::<_, i64>(8)? != 0,
@@ -729,7 +754,7 @@ pub fn recompute_subjects(conn: &mut Connection, photo_ids: &[i64]) -> Result<Ve
         }
         drop(st);
         for (pid, faces) in per {
-            let flags = scoring::subject_flags(
+            let flags = scoring::subject_flags_live(
                 &faces
                     .iter()
                     .map(|f| (f.feat.clone(), f.named))
@@ -741,7 +766,7 @@ pub fn recompute_subjects(conn: &mut Connection, photo_ids: &[i64]) -> Result<Ve
                     diff = true;
                     tx.execute(
                         "UPDATE face SET is_subject=?2, is_bystander=?3 WHERE id=?1",
-                        params![f.id, *s as i64, (!*s) as i64],
+                        params![f.id, *s as i64, (!*s && !f.feat.likely_artificial()) as i64],
                     )?;
                 }
             }
@@ -1077,7 +1102,7 @@ pub fn recompute_person(conn: &Connection, person_id: i64) -> Result<()> {
 // ====================================================================== reads: faces, analysis, groups
 
 const FACE_SELECT: &str = "SELECT f.id, f.photo_id, f.person_id, pe.name, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
-    f.eyes_open, f.smile, f.gaze, f.yaw, f.pitch, f.roll, f.sharpness, f.expression_score, f.is_subject, f.track_id
+    f.eyes_open, f.smile, f.gaze, f.yaw, f.pitch, f.roll, f.sharpness, f.expression_score, f.is_subject, f.track_id, f.artificial
     FROM face f LEFT JOIN person pe ON pe.id=f.person_id";
 
 fn face_row(r: &rusqlite::Row) -> rusqlite::Result<(Face, Option<i64>)> {
@@ -1097,6 +1122,10 @@ fn face_row(r: &rusqlite::Row) -> rusqlite::Result<(Face, Option<i64>)> {
             sharpness: r.get(14)?,
             expression_score: r.get(15)?,
             is_subject: r.get::<_, i64>(16)? != 0,
+            artificial: r.get(18)?,
+            likely_artificial: r
+                .get::<_, Option<f64>>(18)?
+                .is_some_and(|a| a >= scoring::ARTIFICIAL_AT),
         },
         r.get(17)?,
     ))
@@ -1193,11 +1222,12 @@ pub fn analysis_detail(conn: &Connection, photo_id: i64) -> Result<AnalysisDetai
         Option<f64>,
         Option<f64>,
         Option<String>,
+        Option<f64>,
     );
     let row: Option<Row> = conn
         .query_row(
             "SELECT a.profile, a.sharpness, a.exposure, a.noise, a.iqa, a.aesthetic, a.explain,
-                    p.ai_score, p.ai_rating, p.scene_type
+                    p.ai_score, p.ai_rating, p.scene_type, a.composition
              FROM analysis a JOIN photo p ON p.id=a.photo_id WHERE a.photo_id=?1",
             [photo_id],
             |r| {
@@ -1208,11 +1238,12 @@ pub fn analysis_detail(conn: &Connection, photo_id: i64) -> Result<AnalysisDetai
                     r.get(7)?,
                     r.get(8)?,
                     r.get(9)?,
+                    r.get(10)?,
                 ))
             },
         )
         .optional()?;
-    let Some((profile, s, explain, ai_score, ai_rating, scene)) = row else {
+    let Some((profile, s, explain, ai_score, ai_rating, scene, composition)) = row else {
         return Ok(AnalysisDetail {
             photo_id,
             analyzed: false,
@@ -1280,7 +1311,7 @@ pub fn analysis_detail(conn: &Connection, photo_id: i64) -> Result<AnalysisDetai
             iqa: s[3],
             aesthetic: s[4],
             face: explain.get("face_score").and_then(Json::as_f64),
-            composition: None,
+            composition,
         }),
         ai_score,
         ai_rating,

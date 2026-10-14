@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { acceptedRating, canAccept, expressionTone, issueBadges, planAcceptAi, starFills } from './ai'
+import { acceptedRating, canAccept, expressionTone, issueBadges, planAcceptAi, reasonKey, starFills } from './ai'
 import { acceptAiRatings, undo } from './actions'
 import { qk, type PhotosData } from './cache'
 import { makePhoto } from './fixtures'
@@ -11,6 +11,20 @@ describe('issueBadges', () => {
     const b = issueBadges(['underexposed', 'closed_eyes', 'blurry', 'overexposed'])
     expect(b.map((x) => x.glyph)).toEqual(['⚠', '🌫', '☀', '🌑'])
     expect(b.map((x) => x.label)).toEqual(['closed_eyes', 'blurry', 'overexposed', 'underexposed'])
+  })
+
+  it('shows the P1-8 tags after the technical ones in a stable order', () => {
+    const b = issueBadges(['bystander', 'bad_expression', 'tilted', 'closed_eyes'])
+    expect(b.map((x) => x.label)).toEqual(['closed_eyes', 'bad_expression', 'tilted', 'bystander'])
+    expect(b.every((x) => x.glyph.length > 0)).toBe(true)
+  })
+
+  it('picks the reason sentence for each kind of bad expression', () => {
+    expect(reasonKey({ key: 'bad_expression', params: { kind: 'talking', count: 1 } })).toBe('reason.bad_expression_talking')
+    expect(reasonKey({ key: 'bad_expression', params: { kind: 'half_blink' } })).toBe('reason.bad_expression_half_blink')
+    expect(reasonKey({ key: 'bad_expression' })).toBe('reason.bad_expression_talking')
+    expect(reasonKey({ key: 'bystander', params: { count: 2 } })).toBe('reason.bystander')
+    expect(reasonKey({ key: 'tilted', params: { deg: 3 } })).toBe('reason.tilted')
   })
 
   it('handles empty / unanalysed input and drops unknown tags', () => {

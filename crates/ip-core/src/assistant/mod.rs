@@ -895,12 +895,16 @@ fn issue_label(k: &str, l: Locale) -> &'static str {
         ("underexposed", Locale::Zh) => "欠曝",
         ("noisy", Locale::Zh) => "噪点",
         ("tilted", Locale::Zh) => "倾斜",
+        ("bystander", Locale::Zh) => "路人入镜",
+        ("bad_expression", Locale::Zh) => "表情欠佳",
         ("closed_eyes", Locale::En) => "closed eyes",
         ("blurry", Locale::En) => "blurry",
         ("overexposed", Locale::En) => "overexposed",
         ("underexposed", Locale::En) => "underexposed",
         ("noisy", Locale::En) => "noisy",
         ("tilted", Locale::En) => "tilted",
+        ("bystander", Locale::En) => "bystander",
+        ("bad_expression", Locale::En) => "bad expression",
         _ => "?",
     }
 }

@@ -1,4 +1,4 @@
-import type { ColorName, FlagFilter, Issue, PersonMode, PersonState, PhotosQuery, SceneType, SharpState, SortKey } from '@/api/types'
+import { ISSUES, type ColorName, type FlagFilter, type Issue, type PersonMode, type PersonState, type PhotosQuery, type SceneType, type SharpState, type SortKey } from '@/api/types'
 
 /** Person filter (doc 04 3.6.1). Tri-state per person: absent = off, include, exclude. */
 export interface PersonFilter {
@@ -92,7 +92,7 @@ export const DEFAULT_FILTER: FilterState = {
 
 export type PhotosListQuery = Omit<PhotosQuery, 'cursor' | 'limit'>
 
-const ALL_ISSUES: Issue[] = ['closed_eyes', 'blurry', 'overexposed', 'underexposed', 'noisy', 'tilted']
+const ALL_ISSUES: Issue[] = ISSUES
 
 /** Translate UI filter state to /api/photos query params. Defaults are omitted. */
 export function buildPhotosQuery(sessionId: number, f: FilterState): PhotosListQuery {

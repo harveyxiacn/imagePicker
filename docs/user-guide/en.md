@@ -288,9 +288,9 @@ After analysis every photo gets an AI suggested rating (0–5, half stars possib
 | Sharpness / Exposure / Low noise | Technical metrics |
 | Quality / Aesthetic | Model estimates |
 | Face | Eyes open, smile, looking at camera |
-| Composition | (not active yet, see below) |
+| Composition | Rule of thirds, headroom, level horizon, subject not cut off by the frame edge (a small weight in the score; shown only when the photo has a face or a clear subject) |
 
-Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted. *Tilted* means the horizon or the building verticals are 2–10° off level (the reason shows the angle, e.g. "Horizon is tilted by 3.5°"); it is only judged when the photo has clear straight lines, so many tilted photos without them are not tagged, and it never lowers the rating: fix it with *Crop & straighten* (`R`) in the editor.
+Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted, bystander, expression not great. *Bystander* means a sharp, reasonably large face that is not one of the photo's subjects; faces on statues, posters, screens and printed matter are recognised by their flat, colourless look and are not counted (a heavily retouched or black-and-white photo, or a colourful smooth poster, can still fool this), and "Remove bystanders" skips them (you can still remove such a face by hand). *Expression not great* marks a subject caught mid-word (mouth open without a smile) or half-blinking; smiling or laughing is never tagged, and it needs the face landmarks (not in the Lite profile). Neither tag changes the rating. *Tilted* means the horizon or the building verticals are 2–10° off level (the reason shows the angle, e.g. "Horizon is tilted by 3.5°"); it is only judged when the photo has clear straight lines, so many tilted photos without them are not tagged, and it never lowers the rating: fix it with *Crop & straighten* (`R`) in the editor.
 
 - Click *Accept* in the inspector, or press `A`, to write the AI rating into **your** rating; `Ctrl+Shift+A` accepts in bulk.
 - The *AI rating* filter filters by suggested stars.
@@ -470,7 +470,7 @@ The **Repair** panel on the edit page:
 
 Generative tasks show progress and a *Cancel* button (in the Repair panel, the library status bar and the best-take editor's footer); a cancelled task leaves the photo untouched and stops the AI work in progress. Failures offer a retry. Every generative task is listed under *Settings → Task history*. Upscaling is chosen at [export](#13-export--presets).
 
-> Known limitations: large removals (holes over 512 px) come out blurry or with ghosting; faces on statues or posters can be taken for bystanders, which is why you confirm before erasing.
+> Known limitations: large removals (holes over 512 px) come out blurry or with ghosting; faces on statues, posters or screens are mostly skipped when finding bystanders (a flat, colourless look gives them away), but a colourful smooth poster or a black-and-white photo can still fool this, which is why you confirm before erasing.
 
 ## 13. Export & presets
 

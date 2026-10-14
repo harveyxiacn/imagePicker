@@ -82,7 +82,7 @@ type SceneType = "portrait" | "group" | "landscape" | "food" | "architecture" | 
   "photo_id": 12,
   "analyzed": true,
   "profile": "standard",
-  "scores": { "sharpness": 0.82, "exposure": 0.74, "noise": 0.12, "iqa": 0.71, "aesthetic": 0.64, "face": 0.58, "composition": null },
+  "scores": { "sharpness": 0.82, "exposure": 0.74, "noise": 0.12, "iqa": 0.71, "aesthetic": 0.64, "face": 0.58, "composition": 0.71 },
   "ai_score": 0.68, "ai_rating": 4.0,
   "contributions": [ { "key": "face", "label_key": "score.face", "delta": -0.12 } ],  // 对综合分的贡献（可正可负）
   "reasons": [ { "key": "closed_eyes", "params": { "person": "小红" } } ],          // 前端按 key 本地化；tilted 带 { "deg": 3.5 }（|倾角|，0.1°）
