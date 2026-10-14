@@ -1,15 +1,19 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { AlertTriangle, FolderOpen, Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
+import type { Photo } from '@/api/types'
 import { useHardware } from '@/api/queries'
 import { missingModelsOf } from '@/lib/analysis'
+import { aspectOfPhoto, MAX_PHOTOS, MIN_PHOTOS } from '@/lib/collageLayout'
+import { COLLAGE_TEMPLATE, collageBody, DEFAULT_COLLAGE, previewCells, problemOf, type CollageForm } from '@/lib/collageOptions'
 import { errorText } from '@/lib/errors'
-import { applyPreset as presetForm, ASPECTS, DEFAULT_FORM, exampleName, exportBody, FORMATS, loadWatermark, NAME_TOKENS, saveWatermark, usesQuality, watermarkIncomplete, type EdgeChoice, type ExportForm } from '@/lib/exportOptions'
+import { applyPreset as presetForm, watermarkBody, ASPECTS, DEFAULT_FORM, exampleName, exportBody, FORMATS, loadWatermark, NAME_TOKENS, saveWatermark, usesQuality, watermarkIncomplete, type EdgeChoice, type ExportForm } from '@/lib/exportOptions'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
+import { ExportCollage } from './ExportCollage'
 import { ExportWatermark } from './ExportWatermark'
 import { FolderBrowser } from './FolderBrowser'
 import { Modal } from './Modal'
@@ -21,6 +25,8 @@ interface Props {
   allIds: number[]
   /** Export by person: sub-folder name -> photo ids (replaces the scope choice; docs/api-contract-m4.md C.2). */
   folders?: Record<string, number[]>
+  /** The photos shown (for the collage preview: aspect ratios and thumbnails). */
+  photos?: Photo[]
 }
 
 const LS_KEY = 'imagepicker.exportDest'
@@ -32,7 +38,7 @@ const readDest = () => {
   }
 }
 
-export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders }: Props) {
+export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders, photos }: Props) {
   const { t } = useTranslation()
   const [dest, setDest] = useState(readDest)
   const [form, setForm] = useState<ExportForm>(() => ({ ...DEFAULT_FORM, watermark: loadWatermark() }))
@@ -43,6 +49,9 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const [scope, setScope] = useState<'selected' | 'all'>('selected')
   const [browse, setBrowse] = useState(false)
   const [upscale, setUpscale] = useState<0 | 2 | 4>(0)
+  const [mode, setMode] = useState<'photos' | 'collage'>('photos')
+  const [collage, setCollage] = useState<CollageForm>(DEFAULT_COLLAGE)
+  const [collageTemplate, setCollageTemplate] = useState(COLLAGE_TEMPLATE)
   const [pairMember, setPairMember] = useState<'jpeg' | 'raw' | 'both'>('jpeg')
   const hardware = useHardware().data
   const wantedPreset = useUi((s) => s.exportPreset)
@@ -74,8 +83,20 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
   const byFolder = folders && Object.keys(folders).length > 0 ? folders : undefined
   const ids = byFolder ? Object.values(byFolder).flat() : effectiveScope === 'selected' ? selectedIds : allIds
 
+  const isCollage = mode === 'collage' && !byFolder
+  // the collage preview: the photos in selection order with their aspect ratios
+  const byId = useMemo(() => new Map((photos ?? []).map((p) => [p.id, p])), [photos])
+  const collagePhotos = useMemo(() => ids.map((id) => byId.get(id) ?? null), [ids, byId])
+  const aspects = useMemo(() => collagePhotos.map((p) => (p ? aspectOfPhoto(p) : aspectOfPhoto({ width: null, height: null }))), [collagePhotos])
+  const collageCells = useMemo(() => (isCollage && ids.length >= MIN_PHOTOS && ids.length <= MAX_PHOTOS ? previewCells(collage, aspects) : null), [isCollage, ids.length, collage, aspects])
+  const collageProblem = isCollage ? problemOf(collage, aspects) : null
+  const setCollageForm = (patch: Partial<CollageForm>) => setCollage((c) => ({ ...c, ...patch }))
+
   const mut = useMutation({
-    mutationFn: () => api.exportPhotos({ ...exportBody(form, byFolder ? { folders: byFolder } : { ids }, dest, template, upscale), ...(pairMember !== 'jpeg' ? { pair_member: pairMember } : {}) }),
+    mutationFn: () =>
+      isCollage
+        ? api.exportCollage(collageBody(collage, ids, dest, { format, quality, template: collageTemplate, watermark: watermarkBody(watermark) }))
+        : api.exportPhotos({ ...exportBody(form, byFolder ? { folders: byFolder } : { ids }, dest, template, upscale), ...(pairMember !== 'jpeg' ? { pair_member: pairMember } : {}) }),
     onSuccess: ({ task_id }) => {
       try {
         localStorage.setItem(LS_KEY, dest)
@@ -95,7 +116,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
     },
   })
 
-  const example = exampleName(template, format)
+  const example = exampleName(isCollage ? collageTemplate || COLLAGE_TEMPLATE : template, isCollage && format === 'original' ? 'jpeg' : format)
 
   return (
     <>
@@ -108,9 +129,9 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
             <button className="btn" onClick={() => onOpenChange(false)}>
               {t('common.cancel')}
             </button>
-            <button className="btn btn-primary" disabled={!dest.trim() || ids.length === 0 || mut.isPending || watermarkIncomplete(watermark)} onClick={() => mut.mutate()}>
+            <button className="btn btn-primary" disabled={!dest.trim() || ids.length === 0 || mut.isPending || watermarkIncomplete(watermark) || collageProblem !== null} onClick={() => mut.mutate()}>
               {mut.isPending && <Loader2 size={14} className="animate-spin" />}
-              {t('export.start', { n: ids.length })}
+              {isCollage ? t('collage.start', { n: ids.length }) : t('export.start', { n: ids.length })}
             </button>
           </>
         }
@@ -129,7 +150,22 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
               </ul>
             </div>
           )}
-          <div className="flex flex-col gap-1" data-testid="export-presets">
+          {!byFolder && (
+            <div className="flex gap-1.5" role="group" aria-label={t('export.title')} data-testid="export-mode">
+              {(['photos', 'collage'] as const).map((m) => (
+                <button key={m} className="chip" aria-pressed={mode === m} onClick={() => setMode(m)} data-testid={`export-mode-${m}`}>
+                  {t(m === 'photos' ? 'collage.modePhotos' : 'collage.modeCollage')}
+                </button>
+              ))}
+            </div>
+          )}
+          {isCollage && (
+            <>
+              <div className="text-xs text-muted">{t('collage.intro', { n: ids.length })}</div>
+              <ExportCollage value={collage} onChange={setCollageForm} photos={collagePhotos} cells={collageCells} problem={collageProblem} />
+            </>
+          )}
+          <div className={`flex flex-col gap-1 ${isCollage ? 'hidden' : ''}`} data-testid="export-presets">
             <span className="text-muted">{t('export.preset')}</span>
             <div className="flex flex-wrap gap-1.5">
               {(presets ?? []).map(({ id }) => (
@@ -164,7 +200,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
             </div>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className={`flex flex-col gap-1 ${isCollage ? 'hidden' : ''}`}>
             <label htmlFor="exp-edge" className="text-muted">
               {t('export.longEdge')}
             </label>
@@ -195,17 +231,17 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
             <label htmlFor="exp-format" className="text-muted">
               {t('export.format')}
             </label>
-            <select id="exp-format" className="field w-fit" value={format} onChange={(e) => set({ format: e.target.value as ExportForm['format'] })} data-testid="export-format">
-              {FORMATS.map((f) => (
+            <select id="exp-format" className="field w-fit" value={isCollage && format === 'original' ? 'jpeg' : format} onChange={(e) => set({ format: e.target.value as ExportForm['format'] })} data-testid="export-format">
+              {FORMATS.filter((f) => !isCollage || f !== 'original').map((f) => (
                 <option key={f} value={f}>
                   {t(`export.format_${f}`)}
                 </option>
               ))}
             </select>
-            <div className="text-xs text-faint">{t(`export.formatHint_${format}`)}</div>
+            <div className="text-xs text-faint">{t(`export.formatHint_${isCollage && format === 'original' ? 'jpeg' : format}`)}</div>
           </div>
 
-          <div className="flex flex-col gap-1" data-testid="export-strip">
+          <div className={`flex flex-col gap-1 ${isCollage ? 'hidden' : ''}`} data-testid="export-strip">
             <label className="flex items-center gap-1.5">
               <input type="checkbox" checked={stripGps || stripMetadata} disabled={stripMetadata} onChange={(e) => set({ stripGps: e.target.checked })} data-testid="export-strip-gps" />
               {t('export.stripGps')}
@@ -217,9 +253,9 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
             {(stripGps || stripMetadata) && <div className="text-xs text-faint">{t('export.stripHint')}</div>}
           </div>
 
-          <ExportWatermark value={watermark} onChange={setWatermark} />
+          <ExportWatermark value={watermark} onChange={setWatermark} collage={isCollage} />
 
-          <div className="flex flex-col gap-1" data-testid="export-pair-member">
+          <div className={`flex flex-col gap-1 ${isCollage ? 'hidden' : ''}`} data-testid="export-pair-member">
             <label htmlFor="exp-pair" className="text-muted">
               {t('files.exportMember')}
             </label>
@@ -230,7 +266,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
             </select>
           </div>
 
-          <div className="flex flex-col gap-1" data-testid="export-upscale">
+          <div className={`flex flex-col gap-1 ${isCollage ? 'hidden' : ''}`} data-testid="export-upscale">
             <label htmlFor="exp-up" className="text-muted">
               {t('export.upscale')}
             </label>
@@ -262,7 +298,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders 
             <label htmlFor="exp-tpl" className="text-muted">
               {t('export.template')}
             </label>
-            <input id="exp-tpl" className="field font-mono text-xs" value={template} onChange={(e) => setTemplate(e.target.value)} spellCheck={false} />
+            <input id="exp-tpl" className="field font-mono text-xs" value={isCollage ? collageTemplate : template} onChange={(e) => (isCollage ? setCollageTemplate(e.target.value) : setTemplate(e.target.value))} spellCheck={false} />
             <div className="text-xs text-faint">
               {t('export.templateHint', { tokens: NAME_TOKENS.join(' ') })} <span className="tnum text-muted">{example}</span>
             </div>

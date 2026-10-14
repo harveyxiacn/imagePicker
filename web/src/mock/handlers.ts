@@ -1,5 +1,5 @@
 import { delay, http, HttpResponse } from 'msw'
-import type { CardImportBody, ExportBody, ExportPreset, ImportBody, PhotoPatchBody, Photo } from '@/api/types'
+import type { CardImportBody, CollageBody, ExportBody, ExportPreset, ImportBody, PhotoPatchBody, Photo } from '@/api/types'
 import { emit } from './bus'
 import {
   addSession,
@@ -403,6 +403,15 @@ export const handlers = [
     ;(globalThis as { __lastExport?: unknown }).__lastExport = body
     const total = body.folders ? Object.values(body.folders).reduce((n, ids) => n + ids.length, 0) : (body.ids?.length ?? 0)
     return HttpResponse.json({ task_id: simulateExport(total, { dest: body.dest, long_edge: body.long_edge ?? null, upscale: body.upscale ?? null, count: total }) }, { status: 202 })
+  }),
+
+  http.post('/api/export/collage', async ({ request }) => {
+    await lat()
+    const body = (await request.json()) as CollageBody
+    if (!body.dest) return err(400, 'bad_request', 'dest required')
+    if (body.ids.length < 2 || body.ids.length > 30) return err(400, 'bad_request', 'a collage takes 2..30 photos')
+    ;(globalThis as { __lastCollage?: unknown }).__lastCollage = body
+    return HttpResponse.json({ task_id: simulateExport(body.ids.length, { dest: body.dest, count: body.ids.length, collage: body.layout }) }, { status: 202 })
   }),
 
   http.get('/api/fs/roots', () => HttpResponse.json({ roots: ['C:\\', 'D:\\', 'C:\\Users\\demo'] })),

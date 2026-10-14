@@ -160,6 +160,7 @@ pub fn build_router_auth(
         .route("/original/{id}", get(routes::original))
         .route("/viewport", post(routes::viewport))
         .route("/export", post(routes::export))
+        .route("/export/collage", post(routes::export_collage))
         .route("/export/presets", get(routes::export_presets))
         .route("/fs/roots", get(fs::get_roots))
         .route("/fs/list", get(fs::get_list))
