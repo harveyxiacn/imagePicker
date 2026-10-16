@@ -1,4 +1,4 @@
-import { ArchiveRestore, Cpu, Database, FileJson, Globe, History, Keyboard, Palette, ScanFace, ScanSearch, Wifi, ChevronLeft, LifeBuoy, Layers, MonitorSmartphone, Smartphone } from 'lucide-react'
+import { ArchiveRestore, Cpu, Database, FileJson, Globe, HeartHandshake, History, Keyboard, Palette, ScanFace, ScanSearch, Wifi, ChevronLeft, LifeBuoy, Layers, MonitorSmartphone, Smartphone } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { useMe, useSettings } from '@/api/queries'
@@ -10,12 +10,14 @@ import { CatalogSection } from '@/components/settings/CatalogSection'
 import { DiagnosticsSection } from '@/components/settings/DiagnosticsSection'
 import { RemoteAiSection, RemoteDevicesSection } from '@/components/settings/RemoteAiSections'
 import { TasksSection } from '@/components/settings/TasksSection'
+import { TasteSection } from '@/components/settings/TasteSection'
 import { can } from '@/lib/auth'
 
 const SETTINGS_SECTIONS = [
   { id: 'hardware', icon: Cpu, view: HardwareSection },
   { id: 'analysis', icon: ScanSearch, view: AnalysisSection },
   { id: 'faces', icon: ScanFace, view: FacesSection },
+  { id: 'taste', icon: HeartHandshake, view: TasteSection },
   { id: 'cache', icon: Database, view: CacheSection },
   { id: 'catalog', icon: ArchiveRestore, view: CatalogSection },
   { id: 'tasks', icon: History, view: TasksSection },

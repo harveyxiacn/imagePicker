@@ -1506,8 +1506,9 @@ impl Core {
         let (updates, labels): (Vec<PhotoUpdate>, usize) = self
             .db
             .call(move |c| {
+                let before = crate::taste::agreeing(c, &ids)?;
                 let updates = store::accept_ai(c, &ids)?;
-                let labels = crate::taste::record_accept(c, &updates)?;
+                let labels = crate::taste::record_accept(c, &updates, &before)?;
                 Ok((updates, labels))
             })
             .await?;

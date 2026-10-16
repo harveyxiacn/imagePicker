@@ -239,7 +239,53 @@ pub async fn taste(State(st): State<AppState>) -> ApiResult<Json<Value>> {
     Ok(Json(json!(st.core.taste().await?)))
 }
 
-pub async fn taste_reset(State(st): State<AppState>) -> ApiResult<StatusCode> {
-    st.core.reset_taste().await?;
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TastePatch {
+    enabled: bool,
+}
+
+/// `PATCH /api/taste {"enabled": bool}`: switch learning on / off.
+pub async fn patch_taste(
+    State(st): State<AppState>,
+    ApiJson(b): ApiJson<TastePatch>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(st.core.set_taste_enabled(b.enabled).await?)))
+}
+
+/// `POST /api/taste/train`: starts a training in the background: `202` with the current
+/// status (`training: true`); `taste.updated` follows. 400 while switched off.
+pub async fn taste_train(State(st): State<AppState>) -> ApiResult<Response> {
+    let out = st.core.start_taste_training().await?;
+    Ok((StatusCode::ACCEPTED, Json(json!(out))).into_response())
+}
+
+/// `GET /api/taste/explain/{id}`.
+pub async fn taste_explain(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(json!(st.core.taste_explain(id).await?)))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct ResetBody {
+    #[serde(default)]
+    disable: bool,
+}
+
+/// `POST /api/taste/reset` with an optional `{"disable": true}` (forget and opt out).
+pub async fn taste_reset(
+    State(st): State<AppState>,
+    body: axum::body::Bytes,
+) -> ApiResult<StatusCode> {
+    let b: ResetBody = if body.iter().all(|c| c.is_ascii_whitespace()) {
+        ResetBody::default()
+    } else {
+        serde_json::from_slice(&body)
+            .map_err(|e| ApiError::bad_request(format!("invalid body: {e}")))?
+    };
+    st.core.reset_taste(b.disable).await?;
     Ok(StatusCode::NO_CONTENT)
 }
