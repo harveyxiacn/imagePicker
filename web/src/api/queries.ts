@@ -283,6 +283,17 @@ export function useTaste() {
   return useQuery({ queryKey: qk.taste, queryFn: api.taste, staleTime: 15_000, enabled: ok })
 }
 
+/** Why a photo got its taste score (only fetched while the explanation is open). */
+export function useTasteExplain(photoId: number | undefined, enabled: boolean) {
+  const ok = useNotGuest()
+  return useQuery({
+    queryKey: [...qk.taste, 'explain', photoId ?? -1],
+    queryFn: () => api.tasteExplain(photoId!),
+    enabled: ok && enabled && photoId !== undefined,
+    staleTime: 15_000,
+  })
+}
+
 /** Non-subject faces of a photo (M5 "消除路人"). */
 export function useBystanders(photoId: number | undefined) {
   const ok = useNotGuest()

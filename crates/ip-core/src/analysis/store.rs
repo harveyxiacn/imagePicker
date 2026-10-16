@@ -632,6 +632,15 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
             ),
             chunk,
         )?;
+        if taste.is_none() {
+            tx.execute(
+                &format!(
+                    "DELETE FROM taste_score WHERE photo_id IN
+                       (SELECT id FROM photo WHERE burst_id IN ({ph}))"
+                ),
+                params_from_iter(chunk.iter()),
+            )?;
+        }
         for r in &mut rows {
             r.feat.faces = faces.remove(&r.feat.photo_id).unwrap_or_default();
             r.feat.composition = super::composition::composition_score(&r.feat).map(|c| c.score);
@@ -654,12 +663,32 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
                 })
                 .collect();
             let mut ranked = scoring::rank_burst(scored);
-            if let Some((model, alpha)) = &taste {
-                let user: HashMap<i64, f64> = members
+            if let Some(active) = &taste {
+                // the model sees the burst-relative issue tags the ranking just produced
+                let issues: HashMap<i64, i64> = ranked
                     .iter()
-                    .map(|m| (m.feat.photo_id, model.user_score(&m.feat, m.emb.as_deref())))
+                    .map(|r| (r.photo_id, Issue::to_mask(&r.issues)))
                     .collect();
-                ranked = crate::taste::fuse(ranked, &user, *alpha);
+                let mut user: HashMap<i64, f64> = HashMap::new();
+                for m in &members {
+                    let id = m.feat.photo_id;
+                    let inp = crate::taste::Input {
+                        feat: &m.feat,
+                        issues: issues.get(&id).copied().unwrap_or(0),
+                        emb: m.emb.as_deref(),
+                    };
+                    user.insert(id, active.model.user_score(&inp));
+                    tx.execute(
+                        "INSERT OR REPLACE INTO taste_score(photo_id, score, model_version)
+                         VALUES(?1,?2,?3)",
+                        params![
+                            id,
+                            (active.model.taste_score(&inp) * 10_000.0).round() / 10_000.0,
+                            active.version
+                        ],
+                    )?;
+                }
+                ranked = crate::taste::fuse(ranked, &user, active.alpha);
             }
             let best = ranked.first().map(|r| r.photo_id);
             for r in &ranked {

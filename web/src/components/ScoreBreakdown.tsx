@@ -29,7 +29,8 @@ function Bar({ k, value, delta }: { k: (typeof BAR_KEYS)[number]; value: number;
       </div>
       <span className="tnum w-8 shrink-0 text-right text-xs">{pct}</span>
       <span className={`tnum w-10 shrink-0 text-right text-xs ${delta === undefined ? 'text-faint' : delta >= 0 ? 'text-success' : 'text-danger'}`} title={t('score.contribution')}>
-        {delta === undefined ? '' : `${delta >= 0 ? '+' : '−'}${Math.abs(delta).toFixed(2)}`}
+        {/* points on the same 0–100 scale as the total */}
+        {delta === undefined ? '' : `${delta >= 0 ? '+' : '−'}${Math.abs(delta * 100).toFixed(1)}`}
       </span>
     </div>
   )

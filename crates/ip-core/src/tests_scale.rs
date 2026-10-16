@@ -289,6 +289,8 @@ fn reference(rows: &[Row], sort: SortKey) -> Vec<i64> {
                 r.id,
             )
         }),
+        // no taste model in these libraries: every key ties, photo id order
+        SortKey::Taste => v.sort_by_key(|r| r.id),
     }
     v.into_iter().map(|r| r.id).collect()
 }
@@ -368,6 +370,7 @@ fn cursor_paging_follows_the_sort_order_with_ties_and_nulls() {
             SortKey::Name,
             SortKey::Rating,
             SortKey::Ai,
+            SortKey::Taste,
         ] {
             let want = reference(&rows, sort);
             for limit in [1, 7, 97, 500, 5000] {

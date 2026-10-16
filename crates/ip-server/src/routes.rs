@@ -330,7 +330,7 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
     let sort = match p.sort.as_deref().filter(|s| !s.is_empty()) {
         None => SortKey::TakenAt,
         Some(s) => SortKey::parse(s).ok_or_else(|| {
-            ApiError::bad_request("sort must be taken_at|-taken_at|name|rating|ai")
+            ApiError::bad_request("sort must be taken_at|-taken_at|name|rating|ai|taste")
         })?,
     };
     let color_label = p.color_label.filter(|s| !s.is_empty());
@@ -515,11 +515,22 @@ pub async fn get_photo(
     Ok(Json(json!({ "photo": st.core.photo(id).await? })))
 }
 
+/// `PATCH /api/photos` body: the patch plus who decided (taste labels, docs/03 §3.3):
+/// `user` (default) | `auto` (the client replaying an app decision) | `undo` (undoing one).
+#[derive(Deserialize)]
+pub struct PatchBody {
+    #[serde(flatten)]
+    req: PatchRequest,
+    #[serde(default)]
+    source: Option<String>,
+}
+
 pub async fn patch_photos(
     State(st): State<AppState>,
-    ApiJson(req): ApiJson<PatchRequest>,
+    ApiJson(b): ApiJson<PatchBody>,
 ) -> ApiResult<Json<Value>> {
-    let updated = st.core.patch_photos(req).await?;
+    let source = ip_core::taste::LabelSource::parse(b.source.as_deref())?;
+    let updated = st.core.patch_photos_as(b.req, source).await?;
     Ok(Json(json!({ "updated": updated })))
 }
 

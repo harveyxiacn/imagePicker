@@ -1255,6 +1255,47 @@ async fn scores(e: &Env) -> Vec<(i64, f64, f64)> {
         .unwrap()
 }
 
+/// Deadline for background retraining in tests (generous: CI runners are slow and loaded).
+const TASTE_WAIT: Duration = Duration::from_secs(300);
+
+async fn taste_rows(e: &Env) -> HashMap<i64, f64> {
+    e.core
+        .db
+        .call(|c| {
+            let mut st = c.prepare("SELECT photo_id, score FROM taste_score")?;
+            let v = st
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<HashMap<i64, f64>>>()?;
+            Ok(v)
+        })
+        .await
+        .unwrap()
+}
+
+/// Waits for a `taste.updated` that satisfies `ok`.
+async fn wait_taste(
+    rx: &mut tokio::sync::broadcast::Receiver<Event>,
+    ok: impl Fn(i64, bool) -> bool,
+) {
+    tokio::time::timeout(TASTE_WAIT, async {
+        loop {
+            match rx.recv().await {
+                Ok(Event::TasteUpdated { labels, active, .. }) if ok(labels, active) => return,
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(e) => panic!("event stream closed: {e}"),
+            }
+        }
+    })
+    .await
+    .expect("taste.updated");
+}
+
+fn sat_ratings(lib: &[(i64, f64)]) -> Vec<(i64, i64)> {
+    lib.iter()
+        .map(|(id, sat)| (*id, 1 + (sat * 4.999) as i64))
+        .collect()
+}
+
 #[tokio::test]
 async fn taste_learns_a_hidden_preference_and_resets() {
     let e = env();
@@ -1263,25 +1304,33 @@ async fn taste_learns_a_hidden_preference_and_resets() {
     assert!(before.iter().all(|(_, s, b)| (s - b).abs() < 1e-9));
     let t0 = e.core.taste().await.unwrap();
     assert_eq!((t0.labels, t0.active, t0.alpha), (0, false, 0.0));
+    assert_eq!(
+        (t0.state, t0.enabled, t0.min_per_class),
+        ("collecting", true, 30)
+    );
 
-    // the user prefers saturated photos
-    let ratings: Vec<(i64, i64)> = lib
-        .iter()
-        .map(|(id, sat)| (*id, 1 + (sat * 4.999) as i64))
-        .collect();
+    // the user prefers saturated photos (4-5 stars keep, 1-2 stars reject, 3 neutral)
+    let ratings = sat_ratings(&lib);
     let mut rx = e.core.events.subscribe();
     rate(&e, &ratings).await;
-    assert_eq!(e.core.taste().await.unwrap().labels, 120);
+    let t = e.core.taste().await.unwrap();
+    assert_eq!(t.labels, 120);
+    let pos = ratings.iter().filter(|r| r.1 >= 4).count() as i64;
+    let neg = ratings.iter().filter(|r| r.1 <= 2).count() as i64;
+    assert_eq!((t.positives, t.negatives), (pos, neg));
+    assert!(pos >= 30 && neg >= 30, "{pos} {neg}");
     let t = e.core.retrain_taste().await.unwrap();
     assert!(t.active, "{t:?}");
-    let (hold, base) = (t.holdout_accuracy.unwrap(), t.base_accuracy.unwrap());
-    assert!(
-        hold > 0.8 && hold > base + 0.2,
-        "holdout {hold} vs base {base}"
-    );
+    assert_eq!(t.state, "active");
+    let m = t.metrics.clone().unwrap();
+    assert!(m.auc > 0.85 && m.auc > m.base_auc + 0.2, "{m:?}");
+    assert_eq!(m.eval_positives as i64 + m.eval_negatives as i64, pos + neg);
+    assert_eq!(t.holdout_accuracy, Some(m.accuracy));
+    assert_eq!(t.base_accuracy, Some(m.base_accuracy));
     assert!(t.alpha > 0.3 && t.alpha <= 0.6, "{t:?}");
-    assert_eq!(t.labels, 120);
-    assert!(t.updated_at.is_some() && t.pairs > 100);
+    assert!(t.updated_at.is_some());
+    assert_eq!(t.pending, 0);
+    assert_eq!(t.scored, 120);
 
     // events
     let mut taste_events = 0;
@@ -1336,23 +1385,92 @@ async fn taste_learns_a_hidden_preference_and_resets() {
         .0;
     let d = e.core.photo_analysis(moved).await.unwrap();
     assert!(d.contributions.iter().any(|c| c.key == "taste"));
-    // traits are i18n keys
-    assert!(t
-        .traits
-        .iter()
-        .all(|v| v["key"].as_str().unwrap().starts_with("taste.")));
+    // traits name interpretable features
+    assert!(t.traits.iter().all(|v| {
+        matches!(v["key"].as_str(), Some("likes" | "dislikes"))
+            && v["params"]["feature"].is_string()
+    }));
 
-    // a later re-score (e.g. after a group edit) keeps using the model
-    // reset: labels gone, base scores back
-    e.core.reset_taste().await.unwrap();
+    // every photo carries its taste score; sorting by taste follows it
+    let page = e
+        .core
+        .photos(PhotoQuery {
+            session_id: sid,
+            sort: SortKey::Taste,
+            limit: Some(17),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut all = page.photos.clone();
+    let mut cursor = page.next_cursor.clone();
+    while let Some(c) = cursor {
+        let p = e
+            .core
+            .photos(PhotoQuery {
+                session_id: sid,
+                sort: SortKey::Taste,
+                limit: Some(17),
+                cursor: Some(c),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        all.extend(p.photos);
+        cursor = p.next_cursor;
+    }
+    assert_eq!(all.len(), 120);
+    let ts: Vec<f64> = all.iter().map(|p| p.taste_score.unwrap()).collect();
+    assert!(ts.windows(2).all(|w| w[0] >= w[1] - 1e-6), "{ts:?}");
+    let top: f64 = all[..20].iter().map(|p| sat_of[&p.id]).sum::<f64>() / 20.0;
+    let bottom: f64 = all[100..].iter().map(|p| sat_of[&p.id]).sum::<f64>() / 20.0;
+    assert!(top > bottom + 0.3, "{top} {bottom}");
+    // ... and each photo can explain its score
+    let ex = e.core.taste_explain(all[0].id).await.unwrap();
+    assert_eq!(ex.taste_score, all[0].taste_score);
+    assert!(!ex.contributions.is_empty());
+    assert!(e.core.taste_explain(999_999).await.is_err());
+
+    // explain and the cached score agree for every photo (no train/serve skew)
+    for ph in &all {
+        let ex = e.core.taste_explain(ph.id).await.unwrap();
+        assert_eq!(ex.taste_score, ph.taste_score, "photo {}", ph.id);
+    }
+
+    // reset: labels, model, metrics and scores gone, base scores back
+    e.core.reset_taste(false).await.unwrap();
+    e.core.rescore_taste().await.unwrap();
     let t = e.core.taste().await.unwrap();
     assert_eq!((t.labels, t.active, t.alpha), (0, false, 0.0));
-    assert!(t.holdout_accuracy.is_none());
+    assert_eq!(
+        (t.positives, t.negatives, t.scored, t.pending),
+        (0, 0, 0, 0)
+    );
+    assert!(t.holdout_accuracy.is_none() && t.metrics.is_none() && t.traits.is_empty());
+    assert_eq!((t.state, t.enabled), ("collecting", true));
+    assert!(taste_rows(&e).await.is_empty());
+    let leftovers: (i64, Option<String>) = e
+        .core
+        .db
+        .call(|c| {
+            Ok(c.query_row(
+                "SELECT (SELECT COUNT(*) FROM preference_label), model FROM taste_state WHERE id=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(leftovers, (0, None));
     let restored = scores(&e).await;
     assert!(restored.iter().all(|(_, s, b)| (s - b).abs() < 1e-9));
     for ((_, _, base_before), (_, s, _)) in before.iter().zip(&restored) {
         assert!((base_before - s).abs() < 1e-3);
     }
+    assert!(by_name(&e, sid)
+        .await
+        .values()
+        .all(|p| p.taste_score.is_none()));
 }
 
 #[tokio::test]
@@ -1367,22 +1485,22 @@ async fn taste_stays_inactive_without_signal() {
     rate(&e, &ratings).await;
     let t = e.core.retrain_taste().await.unwrap();
     assert!(!t.active, "{t:?}");
+    assert_eq!(t.state, "not_better");
+    assert!(t.metrics.is_some());
     assert_eq!(t.alpha, 0.0);
+    assert_eq!(t.scored, 0);
     assert!(scores(&e)
         .await
         .iter()
         .all(|(_, s, b)| (s - b).abs() < 1e-9));
 
-    // too few labels: nothing is trained either
+    // too few labels: nothing is trained or measured
     let e2 = env();
     let (_, lib2) = taste_library(&e2, 12).await;
-    let r2: Vec<(i64, i64)> = lib2
-        .iter()
-        .map(|(id, s)| (*id, 1 + (s * 4.999) as i64))
-        .collect();
-    rate(&e2, &r2).await;
+    rate(&e2, &sat_ratings(&lib2)).await;
     let t2 = e2.core.retrain_taste().await.unwrap();
-    assert!(!t2.active && t2.holdout_accuracy.is_none());
+    assert!(!t2.active && t2.holdout_accuracy.is_none() && t2.metrics.is_none());
+    assert_eq!(t2.state, "collecting");
 }
 
 #[tokio::test]
@@ -1426,30 +1544,178 @@ async fn labels_come_from_user_actions_only_and_retrain_every_50() {
         .await
         .unwrap();
     assert_eq!(e.core.taste().await.unwrap().labels, 0);
-    // accept-ai records the accepted stars; AI-originated analysis writes record nothing
+    // the app's own decisions are never labels: accepting AI stars and assistant actions
+    // record nothing; a user label they overwrite is silenced (not deleted), and an undo that
+    // restores the user's value brings it back
+    let labels = |e: &Env| {
+        let core = e.core.clone();
+        async move { core.taste().await.unwrap() }
+    };
     assert!(e.core.photo(ids[2]).await.unwrap().ai_rating.is_some());
+    e.core
+        .patch_photos(p(vec![ids[2]], Some(Some(1)), None))
+        .await
+        .unwrap();
     e.core.accept_ai(vec![ids[2], ids[3]]).await.unwrap();
-    let n = e.core.taste().await.unwrap().labels;
-    assert!((1..=2).contains(&n), "{n}");
+    let accepted = e.core.photo(ids[2]).await.unwrap().user_rating;
+    let t = labels(&e).await;
+    if accepted == Some(1) {
+        assert_eq!(t.labels, 1); // accepting left the same value: nothing changed
+    } else {
+        assert_eq!(t.labels, 0, "silenced by accept-ai");
+    }
+    e.core
+        .patch_photos(p(vec![ids[2]], Some(None), None))
+        .await
+        .unwrap();
+    e.core
+        .patch_photos(p(vec![ids[4]], None, Some(-1)))
+        .await
+        .unwrap();
+    e.core
+        .patch_photos(p(vec![ids[6]], None, Some(1)))
+        .await
+        .unwrap();
+    assert_eq!(labels(&e).await.labels, 2);
+    let pending0 = labels(&e).await.pending;
+    // keep-top style auto patch: picking an already picked photo keeps its label; flipping the
+    // rejected one silences that label and counts as a pending change
+    e.core
+        .patch_photos_as(
+            p(vec![ids[4], ids[5], ids[6]], None, Some(1)),
+            crate::taste::LabelSource::Auto,
+        )
+        .await
+        .unwrap();
+    let t = labels(&e).await;
+    assert_eq!((t.labels, t.pending), (1, pending0 + 1));
+    // the client's undo of that step restores the reject: the label counts again
+    e.core
+        .patch_photos_as(
+            p(vec![ids[4]], None, Some(-1)),
+            crate::taste::LabelSource::Undo,
+        )
+        .await
+        .unwrap();
+    let t = labels(&e).await;
+    assert_eq!((t.labels, t.pending), (2, pending0 + 2));
+    // an undo never creates a label of its own
+    e.core
+        .patch_photos_as(
+            p(vec![ids[7]], Some(Some(5)), None),
+            crate::taste::LabelSource::Undo,
+        )
+        .await
+        .unwrap();
+    assert_eq!(labels(&e).await.labels, 2);
+    // external edits (XMP sync, Lightroom) silence labels the same way
+    let id6 = ids[6];
+    e.core
+        .db
+        .call(move |c| {
+            c.execute("UPDATE photo SET flag=0 WHERE id=?1", [id6])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(labels(&e).await.labels, 1);
+    assert!(crate::taste::LabelSource::parse(Some("robot")).is_err());
+    assert_eq!(
+        crate::taste::LabelSource::parse(None).unwrap(),
+        crate::taste::LabelSource::User
+    );
 
     // 50 labels trigger a background retraining by themselves
     let mut rx = e.core.events.subscribe();
-    let ratings: Vec<(i64, i64)> = lib
+    rate(&e, &sat_ratings(&lib)).await;
+    wait_taste(&mut rx, |labels, _| labels >= 50).await;
+    let t = e.core.taste().await.unwrap();
+    assert!(t.updated_at.is_some());
+}
+
+#[tokio::test]
+async fn taste_retrains_when_the_user_pauses() {
+    let e = env();
+    // a pause far longer than the test: nothing can retrain until we shorten it below
+    e.core.taste_idle_ms.store(3_600_000, Ordering::Relaxed);
+    let (_, lib) = taste_library(&e, 40).await;
+    let mut rx = e.core.events.subscribe();
+    // 15 decisions in one go: fewer than RETRAIN_EVERY, more than RETRAIN_IDLE_MIN
+    e.core
+        .patch_photos(PatchRequest {
+            ids: lib[..15].iter().map(|l| l.0).collect(),
+            user_rating: Some(Some(5)),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let t = e.core.taste().await.unwrap();
+    assert_eq!((t.pending, t.updated_at), (15, None));
+    // the user "pauses": the waiting task re-reads the idle time and trains
+    e.core.taste_idle_ms.store(0, Ordering::Relaxed);
+    wait_taste(&mut rx, |labels, _| labels == 15).await;
+    let t = e.core.taste().await.unwrap();
+    assert_eq!(t.pending, 0);
+    assert!(t.updated_at.is_some());
+    assert_eq!(t.state, "collecting");
+}
+
+#[tokio::test]
+async fn taste_can_be_switched_off_and_forgotten() {
+    let e = env();
+    let (sid, lib) = taste_library(&e, 120).await;
+    rate(&e, &sat_ratings(&lib)).await;
+    assert!(e.core.retrain_taste().await.unwrap().active);
+    assert_eq!(taste_rows(&e).await.len(), 120);
+
+    // off: personalisation removed at once, labels kept, no new labels, no training
+    let t = e.core.set_taste_enabled(false).await.unwrap();
+    e.core.rescore_taste().await.unwrap();
+    assert_eq!(
+        (t.state, t.enabled, t.active, t.scored),
+        ("disabled", false, false, 0)
+    );
+    assert_eq!(t.labels, 120);
+    assert!(scores(&e)
+        .await
         .iter()
-        .map(|(id, s)| (*id, 1 + (s * 4.999) as i64))
-        .collect();
-    rate(&e, &ratings).await;
-    tokio::time::timeout(WAIT, async {
-        loop {
-            if let Ok(Event::TasteUpdated { labels, .. }) = rx.recv().await {
-                assert!(labels >= 50);
-                return;
-            }
-        }
-    })
-    .await
-    .expect("taste.updated after 50 labels");
-    assert!(e.core.taste().await.unwrap().updated_at.is_some());
+        .all(|(_, s, b)| (s - b).abs() < 1e-9));
+    assert!(by_name(&e, sid)
+        .await
+        .values()
+        .all(|p| p.taste_score.is_none()));
+    e.core
+        .patch_photos(PatchRequest {
+            ids: vec![lib[0].0],
+            flag: Some(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(e.core.taste().await.unwrap().labels, 120);
+    assert!(e.core.retrain_taste().await.is_err());
+    let ex = e.core.taste_explain(lib[0].0).await.unwrap();
+    assert!(ex.taste_score.is_none() && ex.contributions.is_empty());
+
+    // on again: the kept model is used again right away
+    let t = e.core.set_taste_enabled(true).await.unwrap();
+    assert!(t.active && t.enabled);
+    e.core.rescore_taste().await.unwrap();
+    assert_eq!(e.core.taste().await.unwrap().scored, 120);
+
+    // forget and opt out: everything deleted, stays off
+    e.core.reset_taste(true).await.unwrap();
+    let t = e.core.taste().await.unwrap();
+    assert_eq!((t.state, t.labels, t.scored), ("disabled", 0, 0));
+    e.core
+        .patch_photos(PatchRequest {
+            ids: vec![lib[1].0],
+            user_rating: Some(Some(5)),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(e.core.taste().await.unwrap().labels, 0);
 }
 
 #[test]

@@ -306,7 +306,14 @@ Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best o
 
 ### My taste
 
-*My taste* (on Home) learns from your ratings, flags and in-group choices and blends the base score with your taste using a weight α (0–0.6). It only turns on after it beats the base score on a held-out set; all data stays local and can be reset any time.
+*My taste* learns which photos **you** keep. Every pick (`P`) or reject (`X`), and every 4–5 star (keep) or 1–2 star (reject) rating you make by hand, is a training example; 3 stars count as neutral. Decisions the app makes (assistant actions, *Accept AI rating*) are never used. It learns across all your sessions and everything stays on this computer.
+
+- **Getting started:** it needs at least 30 kept and 30 rejected analysed photos. Until then *Settings → My taste* (also reachable from Home) shows what is missing, e.g. "12 more picks and 5 more rejects".
+- **Only when it helps:** each training checks itself with 5-fold cross-validation on your own decisions and compares against the generic AI score (AUC). It only switches on when it is clearly better; the card shows both numbers.
+- **Using it:** choose *Sort → My taste* in the grid to put the photos you're most likely to keep first. The inspector shows the photo's taste score; click *Why?* to see what speaks for and against it (e.g. "Open eyes ↑", "Blur ↑"). While it is on, the AI score is also blended with your taste (weight α up to 0.6).
+- **Training:** automatic after 50 new decisions, or after 10 new decisions once you pause culling for two minutes; *Retrain* trains right away. Training runs in the background and doesn't block the app or analysis.
+- **Older decisions:** decisions recorded by an earlier version may include the assistant's "keep the best, reject the rest" flags (that version could not tell them apart); the card shows how many, and *Forget my taste* starts fresh. A decision only counts while the photo still has that rating or flag, so changes from the assistant, *Accept AI rating*, XMP sync or Lightroom silence it, and undoing them brings it back.
+- **Privacy:** switch *Learn from my decisions* off to stop recording (picks made while it is off are not recorded later either) and remove the personalisation at once. *Forget my taste* deletes the recorded decisions, the model and its scores (tick *Also stop learning* to opt out at the same time). Your stars and flags are never changed.
 
 > **Honest note:** the issue thresholds were tuned on a 1000-image synthetic test library, not yet on a large set of real photos. Bright or dark frames that keep their detail (white backdrops, paper, neon streets at night) are no longer tagged over- or underexposed; inside a burst, a frame clearly softer than the sharpest one is tagged "blurry". Soft-background portraits can still be tagged blurry. Treat AI stars as suggestions.
 
@@ -715,7 +722,7 @@ Open with the gear icon on Home or in the top bar.
 | Login says "too many attempts" | Failed logins are limited to 5 per minute; wait as indicated |
 | A generative task times out | Retry; upscaling and face restore are slow on CPU tiers; reduce load or use a higher tier |
 | Cache too large | Clear kinds one by one or lower the limit in *Settings → Cache*; originals and edits are unaffected |
-| Reset what *My taste* learned | *My taste → Reset my taste* |
+| Reset what *My taste* learned | *Settings → My taste → Forget my taste* |
 | At start the app says *The catalog cannot be opened* or *The catalog failed its integrity check* | Pick a backup and *Restore* (section 16); the damaged file is kept in `backups/` in the data directory. Without a backup start over with the new empty catalog and import again (originals are not affected; ratings kept in XMP sidecars are read back on import) |
 | No people / closed-eye tags after analysis | Face recognition is off or not agreed to yet: *Settings → Faces & privacy*, show the explanation and agree, then analyse again |
 

@@ -78,3 +78,73 @@ def test_range_and_quality_output():
     q = analyze_quality(synth_image(1, (1024, 768)))
     assert -TILT_MAX_DEG <= q["tilt_deg"] <= TILT_MAX_DEG
     assert 0.0 <= q["tilt_confidence"] <= 1.0
+
+
+def _reference_line_profiles(g: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """`line_profiles` as it was before the 2026-10-16 speed-up (full-image masks, full-length
+    bincounts): the optimised version must give bit-identical profiles."""
+    import math
+
+    from imagepicker_ai.steps import tilt as t
+
+    h, w = g.shape
+    prof = np.zeros((2, t._K))
+    if min(h, w) < 4 * t.MARGIN + 16:
+        return prof[0], prof[1]
+    gb = cv2.GaussianBlur(g.astype(np.float32), (0, 0), t.BLUR_SIGMA)
+    gx = cv2.Sobel(gb, cv2.CV_32F, 1, 0, ksize=3).astype(np.float64)
+    gy = cv2.Sobel(gb, cv2.CV_32F, 0, 1, ksize=3).astype(np.float64)
+    mag = np.round(np.sqrt(gx * gx + gy * gy) * t.MAG_STEPS) / t.MAG_STEPS
+    ax, ay = np.abs(gx), np.abs(gy)
+    tt = math.tan(math.radians(t.TILT_MAX_DEG + t.GATE_DEG))
+    strong = mag > t.EDGE_LO
+    strong[: t.MARGIN] = strong[-t.MARGIN :] = False
+    strong[:, : t.MARGIN] = strong[:, -t.MARGIN :] = False
+    mp = np.pad(mag, 1)
+    hfam = strong & (ax <= tt * ay) & (mag >= mp[:-2, 1:-1]) & (mag > mp[2:, 1:-1])
+    vfam = strong & (ay <= tt * ax) & (mag >= mp[1:-1, :-2]) & (mag > mp[1:-1, 2:])
+    line_min = t.LINE_MIN_FRAC * max(w, h)
+    r0 = math.ceil(math.hypot(w, h) / 2) + 2
+    n_rho = 2 * r0 + 2
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    for i, (fam, vertical) in enumerate(((hfam, False), (vfam, True))):
+        ys, xs = np.nonzero(fam)
+        gxs, gys = gx[ys, xs], gy[ys, xs]
+        delta = np.degrees(np.arctan(gys / gxs if vertical else -gxs / gys))
+        wgt = np.clip((mag[ys, xs] - t.EDGE_LO) / (t.EDGE_HI - t.EDGE_LO), 0.0, 1.0)
+        acc = np.zeros(t._K * n_rho, np.float64)
+        xc, yc = xs - cx, ys - cy
+        k0 = np.ceil((delta - t.GATE_DEG + t.TILT_MAX_DEG) / t.BIN_DEG).astype(np.int64)
+        for j in range(t._GATE_BINS + 1 if len(delta) else 0):
+            k = k0 + j
+            ok = (k >= 0) & (k < t._K)
+            kk = np.where(ok, k, 0)
+            dist = np.abs(t._THETA[kk] - delta)
+            ok &= dist < t.GATE_DEG
+            if not ok.any():
+                continue
+            kk, dd = kk[ok], dist[ok]
+            wv = wgt[ok] * (1.0 - dd / t.GATE_DEG)
+            c, s = t._COS[kk], t._SIN[kk]
+            rho = (xc[ok] * c + yc[ok] * s if vertical else yc[ok] * c - xc[ok] * s) + r0
+            r = np.floor(rho).astype(np.int64)
+            f = rho - r
+            base = kk * n_rho + r
+            acc += np.bincount(base, wv * (1.0 - f), minlength=acc.size)
+            acc += np.bincount(base + 1, wv * f, minlength=acc.size)
+        prof[i] = t._line_profile(acc.reshape(t._K, n_rho), line_min)
+    return prof[0], prof[1]
+
+
+@pytest.mark.parametrize("deg", [0.0, 2.5, -7.0])
+def test_fast_line_profiles_are_bit_identical(deg):
+    from imagepicker_ai.steps.tilt import line_profiles
+
+    imgs = [gray(rotate(street(), deg)), gray(jpeg_roundtrip(rotate(street(800, 600), deg), 70))]
+    imgs += [gray(synth_image(s, (1024, 683))) for s in (11, 12)]
+    imgs.append(np.full((120, 160), 128, np.uint8))  # no edges at all
+    for g in imgs:
+        ph, pv = line_profiles(g)
+        rh, rv = _reference_line_profiles(g)
+        np.testing.assert_array_equal(ph, rh)
+        np.testing.assert_array_equal(pv, rv)

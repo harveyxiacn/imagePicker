@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { acceptedRating, canAccept, expressionTone, issueBadges, planAcceptAi, reasonKey, starFills } from './ai'
-import { acceptAiRatings, undo } from './actions'
+import { acceptAiRatings, redo, undo } from './actions'
 import { qk, type PhotosData } from './cache'
 import { makePhoto } from './fixtures'
 import { groupPatches, useHistory } from './history'
@@ -117,10 +117,14 @@ describe('acceptAiRatings (cache + history)', () => {
     await undo(qc)
     expect(qc.getQueryData<PhotosData>(key)!.photos.map((p) => p.user_rating)).toEqual([2, null, null])
     expect(calls.map((c) => c.body).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))).toEqual([
-      { ids: [1], user_rating: 2 },
-      { ids: [2], user_rating: null },
+      { ids: [1], user_rating: 2, source: 'undo' },
+      { ids: [2], user_rating: null, source: 'undo' },
     ])
     expect(useHistory.getState().undoStack).toHaveLength(0)
+    // redo replays the app's decision, marked as such (never a taste label)
+    calls.length = 0
+    await redo(qc)
+    expect(calls.map((c) => (c.body as { source?: string }).source)).toEqual(['auto', 'auto'])
   })
 
   it('does nothing (no history entry, no request) when nothing is acceptable', async () => {

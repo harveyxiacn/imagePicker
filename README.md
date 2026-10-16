@@ -112,7 +112,7 @@ cargo run -p ip-cli -- serve --web-dir web/dist     # http://127.0.0.1:7878
 
 ### 文档
 
-[用户指南（中文）](docs/user-guide/zh-CN.md) · [User Guide (English)](docs/user-guide/en.md) · [设计文档总览](docs/README.md) · [完成度评审与收尾计划](docs/09-完成度评审与收尾计划.md) · [待办与已知问题](docs/backlog.md) · [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md)
+[用户指南（中文）](docs/user-guide/zh-CN.md) · [User Guide (English)](docs/user-guide/en.md) · [设计文档总览](docs/README.md) · [完成度评审与收尾计划](docs/09-完成度评审与收尾计划.md) · [路线图](docs/10-路线图.md) · [待办与已知问题](docs/backlog.md) · [贡献指南](CONTRIBUTING.md) · [安全策略](SECURITY.md)
 
 ---
 
@@ -215,4 +215,4 @@ Code is licensed under [Apache-2.0](LICENSE). AI model weights are **not** distr
 
 ### Docs
 
-[User Guide (中文)](docs/user-guide/zh-CN.md) · [User Guide (English)](docs/user-guide/en.md) · [Design docs](docs/README.md) · [Completeness review](docs/09-完成度评审与收尾计划.md) · [Backlog](docs/backlog.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[User Guide (中文)](docs/user-guide/zh-CN.md) · [User Guide (English)](docs/user-guide/en.md) · [Design docs](docs/README.md) · [Completeness review](docs/09-完成度评审与收尾计划.md) · [Roadmap](docs/10-路线图.md#7-english-summary) · [Backlog](docs/backlog.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)

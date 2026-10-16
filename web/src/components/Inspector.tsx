@@ -8,6 +8,7 @@ import { formatBytes, formatDate, formatDims, formatShutter } from '@/lib/format
 import { usePhotoAnalysis } from '@/api/queries'
 import { DeviceKindIcon } from './DeviceFilterPopover'
 import { FaceStrip, ScoreBreakdown } from './ScoreBreakdown'
+import { TasteBadge } from './TasteBadge'
 import { AiStars, ColorDots, FlagButtons, StarRating } from './controls'
 
 interface Props {
@@ -93,6 +94,7 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor, onAccep
             </button>
           </div>
         </div>
+        <TasteBadge photo={photo} />
         <div className="flex items-center justify-between gap-2">
           <span className="text-muted">{t('inspector.flag')}</span>
           <FlagButtons value={photo.flag} onChange={onFlag} />

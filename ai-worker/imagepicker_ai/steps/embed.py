@@ -64,7 +64,11 @@ def _is_oom(e: BaseException) -> bool:
     )
 
 
-def _make_ort_session(path: Path, providers: list[str]) -> Any:
+def _make_ort_session(path: Path, providers: list[str], *, spinning: bool = True) -> Any:
+    """`spinning=False`: the intra-op threads sleep instead of busy-waiting between ops. The
+    analysis sessions run next to 2-8 decode threads (and AuraFace from all of them at once); idle
+    ORT threads spinning on every core took their CPU time: analysis on a 24-thread CPU ran 30%
+    faster without it, with bit-identical outputs (bench/perf-baseline-2026-10-16.md)."""
     import onnxruntime as ort
 
     if "CUDAExecutionProvider" in providers and hasattr(ort, "preload_dlls"):
@@ -75,6 +79,8 @@ def _make_ort_session(path: Path, providers: list[str]) -> Any:
     so = ort.SessionOptions()
     so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     so.log_severity_level = 3
+    if not spinning:
+        so.add_session_config_entry("session.intra_op.allow_spinning", "0")
     prov: list[Any] = []
     for p in providers:
         if p == "CUDAExecutionProvider":
@@ -210,7 +216,9 @@ class Embedder:
         else:
 
             def load_onnx(spec: ModelSpec, path: Path) -> Any:
-                return _OrtVision(_make_ort_session(path, self._providers()), spec.id)
+                return _OrtVision(
+                    _make_ort_session(path, self._providers(), spinning=False), spec.id
+                )
 
             try:
                 h = self.manager.acquire(mid, load_onnx)
@@ -293,7 +301,9 @@ class Embedder:
                 tok = Tokenizer.from_file(str(self.manager.dir(spec.id) / "tokenizer.json"))
                 tok.enable_padding(length=TEXT_LEN, pad_id=0, pad_token="<pad>")
                 tok.enable_truncation(TEXT_LEN)
-                return _OrtText(_make_ort_session(path, self._providers()), tok, spec.id)
+                return _OrtText(
+                    _make_ort_session(path, self._providers(), spinning=False), tok, spec.id
+                )
 
             h = self.manager.acquire(TEXT_MODEL, load_onnx)
             return _l2(np.concatenate([h.run(texts[i : i + 64]) for i in range(0, len(texts), 64)]))

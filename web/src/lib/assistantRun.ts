@@ -133,7 +133,9 @@ export async function onAssistantDone(qc: QueryClient, ev: DoneEvent): Promise<v
   } catch (e) {
     useToasts.getState().push('error', errText(e), 5000)
   }
-  const entry = undoToEntry(label, ev.undo, { photos, stacks })
+  const plain = undoToEntry(label, ev.undo, { photos, stacks })
+  // the assistant's changes are the app's decisions: undo / redo must not become taste labels
+  const entry = plain ? { ...plain, auto: true } : null
   if (entry) {
     useHistory.getState().push(entry)
     entries.set(ev.plan_id, entry)

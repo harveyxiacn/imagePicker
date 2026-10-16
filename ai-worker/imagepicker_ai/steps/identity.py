@@ -135,7 +135,7 @@ class IdentityEmbedder:
     def _handle(self) -> _OrtFace:
         def load(spec: ModelSpec, path: Path) -> _OrtFace:
             prov = ["CPUExecutionProvider"] if self.force_cpu else self.hw.providers
-            return _OrtFace(_make_ort_session(path, prov))
+            return _OrtFace(_make_ort_session(path, prov, spinning=False))
 
         h = self.manager.acquire(MODEL_ID, load)
         self.active_providers = list(h.providers)
