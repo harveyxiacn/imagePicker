@@ -840,7 +840,7 @@ async fn taste_endpoints_and_export_folders() {
         Some(json!({"enabled": "yes"})),
     )
     .await;
-    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
     let r = call(
         &e.app,
         Method::PATCH,

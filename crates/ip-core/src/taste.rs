@@ -497,7 +497,7 @@ fn rank_accuracy(scores: &[f64], y: &[bool]) -> f64 {
     let hit = order
         .iter()
         .enumerate()
-        .filter(|(rank, &i)| (*rank < p) == y[i])
+        .filter(|(rank, i)| (*rank < p) == y[**i])
         .count();
     hit as f64 / scores.len().max(1) as f64
 }
@@ -563,7 +563,7 @@ fn column_stats(raws: &[Vec<f32>]) -> (Vec<f32>, Vec<f32>) {
     let d = raws.first().map(Vec::len).unwrap_or(0);
     let mut mean = vec![0.0f32; d];
     let mut std = vec![1.0f32; d];
-    for j in 0..d {
+    for (j, (mj, sj)) in mean.iter_mut().zip(std.iter_mut()).enumerate() {
         let vals: Vec<f64> = raws
             .iter()
             .map(|r| r[j])
@@ -575,8 +575,8 @@ fn column_stats(raws: &[Vec<f32>]) -> (Vec<f32>, Vec<f32>) {
         }
         let m = vals.iter().sum::<f64>() / vals.len() as f64;
         let var = vals.iter().map(|v| (v - m).powi(2)).sum::<f64>() / vals.len() as f64;
-        mean[j] = m as f32;
-        std[j] = if var.sqrt() < 1e-4 {
+        *mj = m as f32;
+        *sj = if var.sqrt() < 1e-4 {
             1.0
         } else {
             var.sqrt() as f32
