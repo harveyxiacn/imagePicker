@@ -225,11 +225,11 @@ export const en: Messages = {
     conn_connecting: 'Connecting',
     conn_closed: 'Disconnected',
   },
+  history: {
     deshine: 'Remove sweat shine',
     flyaway: 'Tidy stray strands',
     sweatStrength: '{{name}} strength',
     sweatRemove: 'Remove {{name}}',
-  history: {
     hair: 'Hair for {{who}}',
     hairHide: 'Hide new hair ({{who}})',
     hairShow: 'Show new hair ({{who}})',
@@ -921,6 +921,7 @@ export const en: Messages = {
     reason_face_too_small: 'Face too small',
     reason_face_not_found: 'Face not found',
   },
+  hair: {
     sweatTitle: 'Sweat cleanup (no donor photo)',
     sweatHint: 'Tone down sweat shine on the skin and in the hair, or tidy stray strands around the hair outline.',
     deshine: 'Less shine',
@@ -929,7 +930,6 @@ export const en: Messages = {
     flyawayRun: 'Tidy stray strands',
     sweatRedo: 'Run again',
     sweatRemove: 'Remove: {{name}}',
-  hair: {
     title: 'Hair',
     intro: 'Swap in your own hair from a better photo of the same day: same person, similar head pose.',
     noFaces: 'No faces found in this photo',

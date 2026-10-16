@@ -223,11 +223,11 @@ export const zhCN = {
     conn_connecting: '连接中',
     conn_closed: '已断开',
   },
+  history: {
     deshine: '去除汗光',
     flyaway: '清理碎发',
     sweatStrength: '{{name}}强度',
     sweatRemove: '删除{{name}}',
-  history: {
     hair: '为 {{who}} 替换发型',
     hairHide: '隐藏新发型（{{who}}）',
     hairShow: '显示新发型（{{who}}）',
@@ -919,6 +919,7 @@ export const zhCN = {
     reason_face_too_small: '人脸太小',
     reason_face_not_found: '未找到人脸',
   },
+  hair: {
     sweatTitle: '去汗光 / 整理碎发（无需供发照片）',
     sweatHint: '减淡皮肤与头发上的汗光，或清理头发轮廓外的碎发。',
     deshine: '去汗光',
@@ -927,7 +928,6 @@ export const zhCN = {
     flyawayRun: '清理碎发',
     sweatRedo: '重新处理',
     sweatRemove: '删除：{{name}}',
-  hair: {
     title: '发型',
     intro: '用同一天里更好的一张照片中你自己的头发替换：须为同一人，头部姿态相近。',
     noFaces: '这张照片中没有找到人脸',
