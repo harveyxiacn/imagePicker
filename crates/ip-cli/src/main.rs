@@ -80,6 +80,13 @@ enum Command {
         /// docs/02 §8). Without this or the app's consent no face is detected or recognised.
         #[arg(long)]
         face_consent: bool,
+        /// After the analysis, export every photo of the session into this folder (default
+        /// export settings) and time it (`bench/profile-analysis.py`).
+        #[arg(long)]
+        export: Option<PathBuf>,
+        /// Write the stage timings (import, analysis stages, export) as JSON to this file.
+        #[arg(long)]
+        timings_json: Option<PathBuf>,
     },
     /// Render a photo (catalog id or image path) through an edit stack to a JPEG (debugging).
     Render {
@@ -542,6 +549,8 @@ fn print_stats(s: &ImportStats) {
 #[derive(Debug)]
 struct AnalyzeReport {
     session_id: i64,
+    /// Seconds of the import when `target` was a folder.
+    import_secs: Option<f64>,
     status: AnalysisStatus,
     /// (stage, seconds) in the order the stages were seen.
     stages: Vec<(String, f64)>,
@@ -566,6 +575,7 @@ async fn analyze_headless(
     force: bool,
     allow_download: bool,
 ) -> Result<AnalyzeReport> {
+    let mut import_secs = None;
     let session_id = match target.parse::<i64>() {
         Ok(id) => {
             core.session(id).await.context("session")?;
@@ -574,11 +584,9 @@ async fn analyze_headless(
         Err(_) => {
             let t0 = Instant::now();
             let st = import_headless(core, PathBuf::from(target), true, None).await?;
-            eprintln!(
-                "imported {} photos in {:.2}s",
-                st.photos,
-                t0.elapsed().as_secs_f64()
-            );
+            let secs = t0.elapsed().as_secs_f64();
+            eprintln!("imported {} photos in {secs:.2}s", st.photos);
+            import_secs = Some(secs);
             st.session_id
         }
     };
@@ -695,6 +703,7 @@ async fn analyze_headless(
     }
     Ok(AnalyzeReport {
         session_id,
+        import_secs,
         status,
         stages,
         total_secs,
@@ -709,6 +718,93 @@ async fn analyze_headless(
         people: people.len(),
         faces,
         sample_groups,
+    })
+}
+
+/// Exports every photo of the session into `dest` (default export settings) and waits for the
+/// task; returns (seconds, files written).
+async fn export_headless(
+    core: &Arc<Core>,
+    session_id: i64,
+    dest: &std::path::Path,
+) -> Result<(f64, i64)> {
+    let mut ids: Vec<i64> = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = core
+            .photos(PhotoQuery {
+                session_id,
+                limit: Some(5000),
+                cursor: cursor.take(),
+                ..Default::default()
+            })
+            .await?;
+        ids.extend(page.photos.iter().map(|p| p.id));
+        match page.next_cursor {
+            Some(c) => cursor = Some(c),
+            None => break,
+        }
+    }
+    let req: ip_core::model::ExportRequest = serde_json::from_value(serde_json::json!({
+        "ids": ids,
+        "dest": dest.to_string_lossy(),
+    }))
+    .context("export request")?;
+    let started = Instant::now();
+    let mut rx = core.events.subscribe();
+    let task_id = core.export(req).await.context("start export")?;
+    loop {
+        match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(Ok(Event::TaskProgress {
+                task_id: t,
+                state,
+                done,
+                error,
+                ..
+            })) if t == task_id && state != "running" => {
+                if state != "done" {
+                    anyhow::bail!("export {state}: {}", error.unwrap_or_default());
+                }
+                return Ok((started.elapsed().as_secs_f64(), done));
+            }
+            Ok(_) => continue,
+            Err(_) => {
+                // quiet period: the end event may have been coalesced away
+                let rec = core.tasks_list(Some(50)).await?;
+                if let Some(r) = rec
+                    .iter()
+                    .find(|r| r.id == task_id && r.status != "running")
+                {
+                    if r.status != "done" {
+                        anyhow::bail!(
+                            "export {}: {}",
+                            r.status,
+                            r.error.clone().unwrap_or_default()
+                        );
+                    }
+                    return Ok((started.elapsed().as_secs_f64(), r.done));
+                }
+            }
+        }
+    }
+}
+
+/// `--timings-json`: what `bench/profile-analysis.py` reads.
+fn timings_json(
+    r: &AnalyzeReport,
+    profile: Profile,
+    export: Option<(f64, i64)>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "profile": profile.as_str(),
+        "state": format!("{:?}", r.status.state),
+        "photos": r.photos,
+        "analyzed": r.analyzed,
+        "import_s": r.import_secs,
+        "analysis_s": r.total_secs,
+        "stages": r.stages.iter().map(|(s, t)| serde_json::json!({"stage": s, "s": t})).collect::<Vec<_>>(),
+        "export_s": export.map(|e| e.0),
+        "exported": export.map(|e| e.1),
     })
 }
 
@@ -819,6 +915,8 @@ async fn main() -> Result<()> {
             allow_download,
             force,
             face_consent,
+            export,
+            timings_json: timings_path,
         } => {
             init_tracing("warn", data_dir.as_deref());
             let profile = Profile::parse(&profile)
@@ -844,6 +942,19 @@ async fn main() -> Result<()> {
             core.worker.shutdown().await;
             let report = report?;
             print_report(&report);
+            let exported = match &export {
+                Some(dest) => {
+                    let e = export_headless(&core, report.session_id, dest).await?;
+                    println!("export:        {} files in {:.2}s", e.1, e.0);
+                    Some(e)
+                }
+                None => None,
+            };
+            if let Some(p) = timings_path {
+                let v = timings_json(&report, profile, exported);
+                std::fs::write(&p, serde_json::to_vec_pretty(&v)?)
+                    .with_context(|| format!("write {}", p.display()))?;
+            }
             if report.status.state == RunState::Failed {
                 std::process::exit(1);
             }
@@ -1180,6 +1291,21 @@ mod tests {
         assert_eq!((r.photos, r.analyzed), (6, 6));
         assert!(r.bursts >= 1 && r.scenes >= 1);
         assert!(r.stages.iter().any(|(s, _)| s == "grouping"));
+        assert!(r.import_secs.is_some());
+        let out = tempfile::tempdir().unwrap();
+        let (secs, written) = export_headless(&core, r.session_id, out.path())
+            .await
+            .unwrap();
+        assert_eq!(written, 6);
+        assert!(secs >= 0.0);
+        let v = timings_json(&r, Profile::Standard, Some((secs, written)));
+        assert_eq!(v["exported"], 6);
+        assert_eq!(v["profile"], "standard");
+        assert!(v["stages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["stage"] == "grouping"));
         // by session id the second call has nothing left to analyse
         let second = analyze_headless(
             &core,
