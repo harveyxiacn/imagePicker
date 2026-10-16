@@ -1,4 +1,5 @@
-"""`enhance.run` (docs/api-contract-m5.md section B): denoise / face_restore / upscale."""
+"""`enhance.run` (docs/api-contract-m5.md section B): denoise / face_restore / upscale, and the
+sweat cleanup ops deshine / flyaway (section H.5, doc 03 section 7.5)."""
 
 from __future__ import annotations
 
@@ -35,7 +36,9 @@ DENOISE = "scunet-color-real-psnr"
 FACE_RESTORE = "gfpgan-v1.4"
 FACE_LANDMARKER = "mediapipe-face-landmarker"
 UPSCALE = {2: ("realesrgan-x2-fp16", "realesrgan-x2"), 4: ("realesrgan-x4-fp16", "realesrgan-x4")}
-OPS = ("denoise", "face_restore", "upscale")
+OPS = ("denoise", "face_restore", "upscale", "deshine", "flyaway")
+SWEAT_OPS = ("deshine", "flyaway")
+SELFIE = "mediapipe-selfie-multiclass"
 MAX_FACES = 24
 MAX_OUTPUT_PIXELS = 400_000_000
 DENOISE_TILE = 512
@@ -72,6 +75,8 @@ class Enhancer:
             return [FACE_RESTORE, FACE_LANDMARKER]
         if op == "upscale":
             return [self.upscale_model(scale)]
+        if op in SWEAT_OPS:
+            return [FACE_LANDMARKER, SELFIE]
         raise KeyError(op)
 
     def _mesh_for(self) -> PoseFaceMesh:
@@ -173,6 +178,69 @@ class Enhancer:
             out["skipped"] = skipped
         return out
 
+    def _sweat(self, req: dict[str, Any], rgb: np.ndarray, notify: ProgressFn) -> dict[str, Any]:
+        """deshine / flyaway: one full-strength patch per face (the stack's `amount` is the strength)."""
+        from ..beauty.sweat import deshine_arrays, flyaway_arrays
+        from ..besttake.compose import Components
+        from ..masks.filters import resize_mask
+
+        h, w = rgb.shape[:2]
+        faces = req["faces"]
+        if faces is None:
+            faces = self._detect_faces(rgb)
+        faces = faces[:MAX_FACES]
+        selfie = self.masks._selfie()
+        mesh = self._mesh_for()
+
+        def parts(crop: np.ndarray) -> np.ndarray:
+            return resize_mask(selfie.predict(crop), crop.shape[1], crop.shape[0])
+
+        comp = Components(mesh.observe, parts)
+        fill = None
+        if req["op"] == "flyaway" and self.manager.is_installed("lama-big-fp32"):
+            from ..inpaint.core import FillEngine, inpaint_arrays
+
+            def lama(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
+                return self.rt.run_with_backoff(
+                    "lama-big-fp32", lambda hd, _t: _lama_run(hd, img, mask), MIN_TILE
+                )
+
+            engine = FillEngine(512, lama)
+
+            def fill(img: np.ndarray, mask: np.ndarray) -> np.ndarray:
+                out = inpaint_arrays(img, mask.astype(np.float32), engine)
+                if out is None:
+                    return img
+                res = img.copy()
+                x, y, pw, ph = out.rect
+                a = out.patch[..., 3:4].astype(np.float32) / 255.0
+                res[y : y + ph, x : x + pw] = np.clip(
+                    res[y : y + ph, x : x + pw] * (1 - a) + out.patch[..., :3] * a, 0, 255
+                ).astype(np.uint8)
+                return res
+
+        patches: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        stats: list[dict[str, Any]] = []
+        for i, fb in enumerate(faces):
+            box = box_px(fb, w, h)
+            if req["op"] == "deshine":
+                res = deshine_arrays(rgb, box, comp)
+            else:
+                res = flyaway_arrays(rgb, box, comp, fill)
+            stats.append({"face_index": i, **res.stats})
+            if res.patch is None or res.rect is None:
+                skipped.append({"face_index": i, "reason": res.reason})
+                continue
+            path = req["out_dir"] / f"{req['op']}_{safe_name(req['photo'].photo_id)}_{i}.png"
+            write_rgba_png(path, res.patch[..., :3], res.patch[..., 3])
+            patches.append({"patch": str(path), "rect": norm_rect(res.rect, w, h), "face_index": i})
+            notify({"kind": "enhance", "done": i + 1, "total": len(faces)})
+        out: dict[str, Any] = {"patches": patches, "stats": stats}
+        if skipped:
+            out["skipped"] = skipped
+        return out
+
     def _run(self, req: dict[str, Any], notify: ProgressFn) -> dict[str, Any]:
         Path(req["out_dir"]).mkdir(parents=True, exist_ok=True)
         rgb = load_rgb(req["photo"])
@@ -186,6 +254,8 @@ class Enhancer:
             return self._upscale(req, rgb, notify)
         if op == "denoise":
             return self._denoise(req, rgb, notify)
+        if op in SWEAT_OPS:
+            return self._sweat(req, rgb, notify)
         return self._face_restore(req, rgb, notify)
 
     # ------------------------------------------------------------------ entry
@@ -239,13 +309,29 @@ class Enhancer:
                 except Exception as e:  # noqa: BLE001
                     raise DownloadFailed(f"{mid}: {e}") from e
             missing = [m for m in need if not self.manager.is_installed(m)]
-        if op == "face_restore" and not mediapipe_available() and FACE_LANDMARKER not in missing:
+        if (
+            op in ("face_restore", *SWEAT_OPS)
+            and not mediapipe_available()
+            and FACE_LANDMARKER not in missing
+        ):
             missing.append(FACE_LANDMARKER)
         if missing:
             raise ModelUnavailable(f"enhance.{op} needs models: {', '.join(missing)}", missing)
-        if op == "face_restore" and req["faces"] is None and params.get("allow_download"):
+        if (
+            op in ("face_restore", *SWEAT_OPS)
+            and req["faces"] is None
+            and params.get("allow_download")
+        ):
             try:
                 await loop.run_in_executor(self.rt.pool, lambda: self.manager.ensure(YUNET))
             except Exception:  # noqa: BLE001
                 pass
         return await loop.run_in_executor(self.rt.pool, self._run, req, notify)
+
+
+def _lama_run(h: OrtHandle, img: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """LaMa 512 forward pass (same tensors as `inpaint.service`)."""
+    x = np.ascontiguousarray(img.transpose(2, 0, 1)[None].astype(np.float32) * (1 / 255.0))
+    m = np.ascontiguousarray(mask[None, None].astype(np.float32))
+    y = h.run({"image": x, "mask": m})[0]
+    return np.clip(np.rint(y.transpose(1, 2, 0)), 0, 255).astype(np.uint8)

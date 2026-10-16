@@ -180,6 +180,8 @@ class WorkerService:
                 "denoise": self.enhance.required_models("denoise"),
                 "face_restore": self.enhance.required_models("face_restore"),
                 "upscale": {str(sc): self.enhance.required_models("upscale", sc) for sc in (2, 4)},
+                "deshine": self.enhance.required_models("deshine"),
+                "flyaway": self.enhance.required_models("flyaway"),
             },
             "mask_models": {
                 t: self.masks.required_models(t) + self.masks.optional_models(t)
