@@ -60,6 +60,8 @@ function taste(): Taste {
   if (active && L >= 150) traits.push({ key: 'likes', params: { feature: 'scene_food', strength: 0.3 } })
   return {
     labels: tasteLabels,
+    legacy_labels: 0,
+    training: false,
     positives,
     negatives,
     min_per_class: TASTE_MIN,
@@ -309,9 +311,12 @@ export const m4Handlers = [
   http.post('/api/taste/train', async () => {
     await lat()
     if (!tasteEnabled) return err(400, 'bad_request', 'taste learning is switched off')
-    tasteUpdated = Date.now()
-    emitTaste()
-    return HttpResponse.json(taste())
+    // 202: the result follows as `taste.updated`
+    setTimeout(() => {
+      tasteUpdated = Date.now()
+      emitTaste()
+    }, 300)
+    return HttpResponse.json({ ...taste(), training: true }, { status: 202 })
   }),
   http.get('/api/taste/explain/:id', async ({ params }) => {
     await lat()

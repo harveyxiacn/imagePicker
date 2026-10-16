@@ -263,6 +263,8 @@ export interface PhotoPatchBody {
   user_rating?: number | null
   flag?: Flag
   color_label?: ColorLabel
+  /** who decided (taste labels): the user (default), the app (`auto`), or an undo of an app step */
+  source?: 'user' | 'auto' | 'undo'
 }
 
 /** Editable fields of a photo (what PATCH /api/photos accepts). */
@@ -984,6 +986,10 @@ export interface TasteMetrics {
 export type TasteState = 'disabled' | 'collecting' | 'ready' | 'not_better' | 'active'
 export interface Taste {
   labels: number
+  /** labels recorded before taste v2 (may include assistant "reject the rest" flags) */
+  legacy_labels: number
+  /** a training is running; `taste.updated` follows */
+  training: boolean
   positives: number
   negatives: number
   min_per_class: number

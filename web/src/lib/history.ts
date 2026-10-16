@@ -35,6 +35,11 @@ export interface HistoryEntry {
   group?: string
   /** push time (ms), used for coalescing */
   at?: number
+  /**
+   * The forward step was the app's decision (assistant, accept AI): redo is sent as `source: "auto"`
+   * and undo as `source: "undo"`, so neither becomes a taste label (docs/03 §3.3).
+   */
+  auto?: boolean
 }
 
 export const COALESCE_MS = 900

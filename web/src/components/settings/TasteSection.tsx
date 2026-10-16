@@ -40,10 +40,11 @@ export function TasteSection() {
   const onError = (e: unknown) => useToasts.getState().push('error', errText(e), 5000)
   const toggle = useMutation({ mutationFn: (on: boolean) => api.patchTaste(on), onSuccess: done, onError })
   const train = useMutation({
+    // 202: the training runs in the background; `taste.updated` refreshes the card when it is done
     mutationFn: api.trainTaste,
     onSuccess: (d) => {
       done(d)
-      useToasts.getState().push('success', t(d.active ? 'taste.trainedActive' : 'taste.trained'), 2500)
+      useToasts.getState().push('info', t('taste.trainStarted'), 2500)
     },
     onError,
   })
@@ -81,6 +82,7 @@ export function TasteSection() {
   const pct = (v: number) => `${Math.round(v * 100)}%`
   const fmt = (n: number) => n.toLocaleString(i18n.language)
   const busy = toggle.isPending || train.isPending || reset.isPending
+  const training = train.isPending || d.training
 
   return (
     <div className="flex flex-col gap-4" data-testid="taste-section">
@@ -99,6 +101,11 @@ export function TasteSection() {
           </div>
         </div>
 
+        {d.legacy_labels > 0 && (
+          <p className="px-4 py-2 text-xs text-muted" data-testid="taste-legacy">
+            {t('taste.legacyNote', { n: fmt(d.legacy_labels) })}
+          </p>
+        )}
         <Row
           label={t('taste.progress')}
           hint={t('taste.progressHint', { keep: fmt(d.positives), reject: fmt(d.negatives), min: d.min_per_class })}
@@ -132,9 +139,9 @@ export function TasteSection() {
         </Row>
 
         <Row label={t('taste.retrain')} hint={t('taste.retrainHint', { n: d.pending, every: d.retrain_every })}>
-          <button className="btn" onClick={() => train.mutate()} disabled={!d.enabled || busy} data-testid="taste-retrain">
-            {train.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            {t('taste.retrain')}
+          <button className="btn" onClick={() => train.mutate()} disabled={!d.enabled || busy || d.training} aria-busy={training} data-testid="taste-retrain">
+            {training ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <RefreshCw size={14} aria-hidden />}
+            {training ? t('taste.training') : t('taste.retrain')}
           </button>
         </Row>
 

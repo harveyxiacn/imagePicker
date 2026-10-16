@@ -14,11 +14,11 @@ export function TasteChip({ score, className = '' }: { score: number | null | un
     <span
       className={`tnum inline-flex items-center gap-1 rounded bg-ai/15 px-1.5 py-0.5 text-xs font-medium text-ai ${className}`}
       title={t('taste.scoreHint', { pct })}
-      aria-label={t('taste.scoreHint', { pct })}
       data-testid="taste-chip-score"
     >
       <HeartHandshake size={12} aria-hidden />
-      {pct}%
+      <span aria-hidden>{pct}%</span>
+      <span className="sr-only">{t('taste.scoreHint', { pct })}</span>
     </span>
   )
 }
@@ -31,7 +31,7 @@ function Reason({ c }: { c: TasteContribution }) {
   const Arrow = c.direction === 'high' ? ArrowUp : ArrowDown
   return (
     <li className="flex items-center gap-1.5" data-testid="taste-reason">
-      <Arrow size={12} className="shrink-0 text-muted" aria-label={t(c.direction === 'high' ? 'taste.dirHigh' : 'taste.dirLow')} />
+      <Arrow size={12} className="shrink-0 text-muted" role="img" aria-label={t(c.direction === 'high' ? 'taste.dirHigh' : 'taste.dirLow')} />
       <span>{name}</span>
     </li>
   )
