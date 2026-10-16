@@ -76,7 +76,7 @@ interface BeautyProfile {           // 不含 person_id；应用时填入
 | PATCH/DELETE | `/api/collections/{id}` | `{"name"?,"query"?}` | `{"collection"}` / `204`（内置不可改删 → 400） |
 | GET | `/api/taste` | — | `TasteOut`（见下） |
 | PATCH | `/api/taste` | `{"enabled": bool}` | `TasteOut`。关闭：不再记录新决定、不训练，立即撤销融合与口味分（标签和模型保留）；打开：沿用保留的模型，没有可用模型时后台训练 |
-| POST | `/api/taste/train` | — | 立即训练并返回 `TasteOut`；关闭时 `400` |
+| POST | `/api/taste/train` | — | `202` + 当前 `TasteOut`（`training: true`），训练在后台进行，完成后广播 `taste.updated`；关闭时 `400` |
 | POST | `/api/taste/reset` | 可选 `{"disable": bool}` | `204`。删除全部标签、模型、指标与口味分，AI 分回到基础分；`disable: true` 同时关闭学习（忘记并退出） |
 | GET | `/api/taste/explain/{photo_id}` | — | `{"photo_id","taste_score":number\|null,"base_score":number\|null,"contributions":[{"feature","delta","direction":"high"\|"low"}]}`：对口味分贡献最大的正、负各 ≤3 项（`feature` 为可解释特征名、`scene_<x>` 或 `look` = 整体画面与内容）；没有可用模型时 `taste_score: null`、`contributions: []`；未知照片 `404` |
 
@@ -84,7 +84,9 @@ interface BeautyProfile {           // 不含 person_id；应用时填入
 
 ```jsonc
 {
-  "labels": 184,              // 用户亲手的评分/旗标标签数
+  "labels": 184,              // 与照片当前星级/旗标一致的用户标签数
+  "legacy_labels": 40,        // 1.0 记录的标签（可能含助手「淘汰其余」的旗标）
+  "training": false,          // 正在训练
   "positives": 92, "negatives": 61, "min_per_class": 30,   // 已分析照片中留下 / 淘汰的张数（3 星为中性）
   "pending": 12, "retrain_every": 50,                      // 上次训练以来的新决定
   "enabled": true,
@@ -100,6 +102,8 @@ interface BeautyProfile {           // 不含 person_id；应用时填入
   "updated_at": 1760000000000
 }
 ```
+
+`PATCH /api/photos` 新增可选 `"source": "user" | "auto" | "undo"`（缺省 `user`）：`auto` = 应用自己的决定（客户端重做助手 / 接受 AI 评分的步骤），`undo` = 撤销这类步骤；两者都不产生口味标签，只让与照片不再一致的旧标签静音、或让恢复一致的标签重新生效。其它值 `400`。
 
 照片列表（`GET /api/photos`、`/api/search` 等）在有可用模型时每项多一个 `taste_score`（0..1，用户留下它的概率；没有时省略），`sort=taste` 按它降序排列（无分的排最后）。
 
