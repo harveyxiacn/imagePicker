@@ -40,8 +40,14 @@ uv run --project ai-worker python bench/profile-analysis.py bench/data/gen12 --l
     --imagepicker target/release/imagepicker --e2e-profile standard \
     --json bench/results/profile-gpu.json --md bench/results/profile-gpu.md \
     --dump-results bench/results/profile-gpu.items.json
-# did an optimisation change any score, tag or face? (exit status 1 if so)
-python bench/profile-analysis.py --compare before.items.json after.items.json --tol 1e-4
+# did an optimisation change any score, tag, face or vector? (exit status 1 if so)
+python bench/profile-analysis.py --compare before.items.json after.items.json
+# GPU only: does handing photos to the embedding thread in groups of 8 help? (same photos)
+uv run --project ai-worker python bench/profile-analysis.py bench/data/gen12 --limit 200 \
+    --profile standard --models-dir <models dir> --embed-flush 8 --label gpu-flush8 \
+    --json bench/results/profile-gpu-flush8.json --dump-results bench/results/profile-gpu-flush8.items.json
+python bench/profile-analysis.py --compare bench/results/profile-gpu.items.json \
+    bench/results/profile-gpu-flush8.items.json --tol 1e-3
 ```
 
 * The worker part needs the worker's environment (`uv run --project ai-worker`) and its models
@@ -54,6 +60,11 @@ python bench/profile-analysis.py --compare before.items.json after.items.json --
   the AI worker like the app does (a loopback WebSocket, so not inside sandboxes without one).
 * Step times are measured on the worker's decode threads, which run in parallel, so their sum is
   larger than the wall time; the wall time and photos/s are what a user waits for.
+* `--compare` diffs the per-photo results including the SigLIP2 and AuraFace vectors (`--tol` for
+  floats, `--ignore embedding,identity` against dumps written without them).
+* `ai-worker/scripts/bench_analyze.py` is the older single-step benchmark: it runs each step
+  alone over the whole set (images/s per step, SigLIP2 forward without decode). This profiler
+  runs the real combination, as the app does, and shows how the steps share the machine.
 
 ## Analysis quality (synthetic photo library)
 

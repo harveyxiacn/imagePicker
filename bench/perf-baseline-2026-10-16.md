@@ -97,3 +97,91 @@ next to the AI analysis. The export copies unchanged originals, so it is I/O onl
    thumbnail on NEF / DNG, an old-style JPEG it cannot decode on CR2) and does not open CR3 / RAF
    at all, so RAW photos without a JPEG twin were analysed from a thumbnail or failed with
    `decode_failed`. Not in the sets above (no RAW samples in the repository).
+
+## Changes
+
+| # | change | commit | outputs |
+|---|---|---|---|
+| 1 | ONNX Runtime sessions of the analysis (SigLIP2 image / text, AuraFace) are created with `session.intra_op.allow_spinning=0`: idle intra-op threads sleep instead of busy-waiting. Thread counts unchanged; generation runtimes untouched | `perf(worker): analysis ORT sessions sleep ...` | bit-identical (results JSON, 96 + 96 photos) |
+| 2 | Tilt estimate: family gate and edge thinning on the strong pixels only, accumulator updates limited to the touched span; same numbers added in the same order | `perf(worker): tilt estimate gates ...` | bit-identical (unit test against the old implementation; 180 photos in the micro-benchmark) |
+| 3 | RAW files are decoded from their largest embedded JPEG preview (port of `ip-imaging`'s `raw_preview`: TIFF IFDs / SubIFDs, CR3, RAF, byte scan), the RAW's orientation tag first, Pillow as the fallback. The generation methods (`imgio.load_rgb`: best take, inpaint, enhance) decode through the same function, so they get the preview too | `fix(worker): analyse RAW files ...` | RAW only (JPEG / PNG / HEIC untouched); was a thumbnail or `decode_failed` |
+| 4 | Embedding hand-off in groups (`embed_flush`), so SigLIP2 starts while the rest of a request is still decoding. **Default unchanged** (one hand-off per request): no gain on the CPU; needs GPU confirmation | `perf(worker): hand photos ...`, `perf(worker): keep one GPU hand-off ...` | bit-identical on the CPU incl. vectors (200 + 200 photos, groups of 8 vs 32) |
+
+Not changed, after checking the code:
+
+* "Decode once and share": the worker already decodes each photo once per request and hands the
+  same 1024 px array to every step (`pipeline._process_item`); the 224 px tensor is also shared by
+  NIMA and SigLIP2. The remaining duplicates (three grayscale conversions) cost ~1 ms.
+* Decode itself: JPEGs already use DCT-domain downscaling (`draft`) before the Lanczos resize;
+  cheaper resampling would change the pixels every score is computed on.
+* Big HEIC: the HEIF thumbnails phones store are about 320 px, below the 1024 px analysis size, so
+  there is no cheaper source than decoding the primary image.
+* More decode threads: 16 instead of 8 was slower (see the `fast` baseline).
+* Cascade (cheap checks first, skip identity / embedding on photos certain to be rejected): the
+  worker cannot know a reject; rejection is decided by the Core after grouping and scoring,
+  relative to the other frames of a burst, and the embeddings of every photo feed burst grouping,
+  duplicates and search. Skipping them would change the grouping of kept photos too, so it was not
+  done (not even behind a setting).
+
+## After (same sets, same machine, same method)
+
+### `standard`
+
+| set | before s | after s | change | photos/s before -> after |
+|---|---:|---:|---:|---:|
+| qwen (people) | 144.4 | 94.4 | -35% | 1.39 -> 2.12 |
+| gen12 (12 MP) | 64.6 | 43.2 | -33% | 3.10 -> 4.63 |
+
+Per step (mean ms per photo on the decode threads, before -> after):
+
+| step | qwen | gen12 |
+|---|---|---|
+| decode | 182 -> 86 | 174 -> 128 |
+| faces | 493 -> 345 | 178 -> 144 |
+| identity | 1990 -> 1386 | 1 -> 1 |
+| quality | 762 -> 472 | 255 -> 128 |
+| aesthetic / iqa | 106 / 106 -> 73 / 74 | 45 / 44 -> 47 / 46 |
+| embed, batched | 228 -> 144 | 220 -> 146 |
+
+Nearly all of it is change 1: with the ORT threads no longer spinning, the decode-thread steps run
+closer to their single-thread cost and SigLIP2 itself got faster (fewer threads fighting). Every
+result field of all 400 photos is identical before and after (`--compare`, the vectors were not in
+the "before" dump; change 1 alone was checked separately, change 4 including the vectors).
+
+Embedding hand-off in groups of 8 (change 4, opt-in): 95.1 s (qwen) and 42.5 s (gen12) against
+94.4 / 43.2 s with one hand-off per request: no difference on the CPU, where decoding and SigLIP2
+share the cores. With a GPU the embedding moves off the CPU and the overlap can pay off; the
+2026-10-09 GPU run measured 13-15% GPU utilisation ([standard-eval-2026-10-09.md](standard-eval-2026-10-09.md)),
+so the gain is probably small there too.
+
+### `fast` (no ONNX Runtime: change 2 only)
+
+| set | before s | after s (4 runs) | change |
+|---|---:|---:|---:|
+| qwen | 17.0 | 17.1-17.7 | none |
+| gen12 | 11.8 | 10.5-11.4 (mean 10.8) | -9% |
+
+`quality` per photo: qwen 359 -> 369-384 ms, gen12 179 -> 133-144 ms. The tilt change saves the
+full-image mask work, which dominates on photos with few edges (the generated 12 MP set); on the
+edge-rich library it is noise. Single-threaded `line_profiles` over 180 mixed photos: 83 -> 80 ms.
+
+### `lite`
+
+Unchanged by design (Rust; the worker changes do not apply): 2.29 / 4.05 s end to end.
+
+## Still open
+
+* **GPU numbers** (the PRD target "standard 1000 photos < 2 min" is a GPU number): run the
+  profiler on the desktop session with CUDA (README, "Analysis stage profile"), record the
+  `standard` table here, and A/B `--embed-flush 8` against the default with `--compare --tol 1e-3`
+  on the result dumps. Change 1 likely matters there too (AuraFace's CUDA sessions still have CPU
+  intra-op threads; the 2026-10-09 run measured ~0.19 s of thread time per face on the GPU), but
+  that is unmeasured.
+* AuraFace dominates people photos on the CPU (1.4 s per photo with ~4 faces after the change):
+  a ResNet-100 per face. Batching faces across photos would cut ORT call overhead only; a smaller
+  face model would change identity results (not done).
+* RAW: the preview path is tested on synthetic NEF / CR3 / RAF / ORF containers only; real camera
+  files (Canon CR3, Sony ARW, Nikon NEF, Fuji RAF) still need a check, like the Core's RAW previews
+  (backlog).
+* `quality` remains the largest CPU step without faces; the tilt estimate could run through the
+  Rust port (`ip-lite`, already parity-tested) via a binding, which this round did not add.
