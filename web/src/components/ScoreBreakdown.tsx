@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { faceCropUrl } from '@/api/client'
 import type { Face, PhotoAnalysis } from '@/api/types'
 import { reasonKey } from '@/lib/ai'
+import { formatAiScore } from '@/lib/score'
 import { useFaceMenu } from './FaceMenu'
 
 const BAR_KEYS = ['sharpness', 'exposure', 'noise', 'iqa', 'aesthetic', 'face', 'composition'] as const
@@ -41,12 +42,18 @@ export function ScoreBreakdown({ a }: { a: PhotoAnalysis }) {
   return (
     <div className="flex flex-col gap-1.5" data-testid="score-breakdown">
       {a.ai_score !== null && (
-        <div className="flex items-center justify-between">
-          <span className="flex items-center gap-1 text-ai">
-            <Sparkles size={13} />
-            {t('score.total')}
-          </span>
-          <span className="tnum font-medium">{a.ai_score.toFixed(2)}</span>
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center justify-between" title={t('score.tooltip', { score: formatAiScore(a.ai_score) })} data-testid="score-total">
+            <span className="flex items-center gap-1 text-ai">
+              <Sparkles size={13} />
+              {t('score.total')}
+            </span>
+            <span className="tnum font-medium">
+              {formatAiScore(a.ai_score)}
+              <span className="text-xs font-normal text-muted"> / 100</span>
+            </span>
+          </div>
+          <div className="text-[11px] text-faint">{t('score.hint')}</div>
         </div>
       )}
       {BAR_KEYS.map((k) => {

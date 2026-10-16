@@ -115,7 +115,7 @@ export const en: Messages = {
     issues_any: 'Has issues (any)',
     scene: 'Scene',
     scene_all: 'All',
-    sort_ai: 'AI score',
+    sort_ai: 'AI score (high to low)',
     remove: 'Remove filter',
     rating: 'Rating',
     any: 'Any',
@@ -448,6 +448,8 @@ export const en: Messages = {
     face: 'Faces',
     composition: 'Composition',
     total: 'AI score',
+    tooltip: 'AI score {{score}}/100 (higher is better)',
+    hint: '0–100, higher is better. The AI stars are the 0–5 summary of this score.',
     contribution: 'Contribution to the score',
   },
   reason: {

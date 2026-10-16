@@ -283,7 +283,7 @@ Click **Analyze** in the top bar, choose a profile and press *Start analysis*:
 
 ### AI stars & score breakdown
 
-After analysis every photo gets an AI suggested rating (0–5, half stars possible) and a 0–1 overall score. The inspector's *Score breakdown* lists each factor and its contribution:
+After analysis every photo gets an AI suggested rating (0–5, half stars possible) and an overall **AI score from 0 to 100 (higher is better)**. The inspector's *Score breakdown* lists each factor and its contribution:
 
 | Factor | Meaning |
 |---|---|
@@ -293,6 +293,13 @@ After analysis every photo gets an AI suggested rating (0–5, half stars possib
 | Composition | Rule of thirds, headroom, level horizon, subject not cut off by the frame edge (a small weight in the score; shown only when the photo has a face or a clear subject) |
 
 Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted, bystander, expression not great. *Bystander* means a sharp, reasonably large face that is not one of the photo's subjects; faces on statues, posters, screens and printed matter are recognised by their flat, colourless look and are not counted (a heavily retouched or black-and-white photo, or a colourful smooth poster, can still fool this), and "Remove bystanders" skips them (you can still remove such a face by hand). *Expression not great* marks a subject caught mid-word (mouth open without a smile) or half-blinking; smiling or laughing is never tagged, and it needs the face landmarks (not in the Lite profile). Neither tag changes the rating. *Tilted* means the horizon or the building verticals are 2–10° off level (the reason shows the angle, e.g. "Horizon is tilted by 3.5°"); it is only judged when the photo has clear straight lines, so many tilted photos without them are not tagged, and it never lowers the rating: fix it with *Crop & straighten* (`R`) in the editor.
+
+#### What the AI score means
+
+- **Scale:** 0–100, **higher is better** (100 is best, 0 is worst). The inspector shows it as *82 / 100*; hover a photo's AI star badge in the grid for the score too. *Sort → AI score* lists the highest scores first.
+- **What goes into it:** a weighted mix of sharpness, exposure, low noise, image quality and aesthetic (model estimates), faces (eyes open, smile, looking at the camera) and a small composition term. The weights depend on the scene type (a portrait leans on faces and sharpness, a landscape on aesthetics and technical quality). Serious problems such as closed eyes or heavy blur subtract points, and a photo that is nearly a copy of a better one in its burst loses a few.
+- **Stars:** the AI stars are the 0–5 summary of the same assessment: roughly 0 stars below 20, 1 star from 20, 2 from 35, 3 from 50, 4 from 65 and 5 from 80. The best photo of a burst gets half a star more, and a photo with a serious problem is capped at 2 stars.
+- **My taste:** once it is switched on (see below), the score is the base score blended with your learned taste, so it can move up or down for photos you would rate differently.
 
 - Click *Accept* in the inspector, or press `A`, to write the AI rating into **your** rating; `Ctrl+Shift+A` accepts in bulk.
 - The *AI rating* filter filters by suggested stars.

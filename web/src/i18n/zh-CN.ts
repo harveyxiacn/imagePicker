@@ -113,7 +113,7 @@ export const zhCN = {
     issues_any: '有问题（任意）',
     scene: '场景',
     scene_all: '全部',
-    sort_ai: 'AI 评分',
+    sort_ai: 'AI 评分（从高到低）',
     remove: '移除条件',
     rating: '星级',
     any: '不限',
@@ -446,6 +446,8 @@ export const zhCN = {
     face: '人脸',
     composition: '构图',
     total: 'AI 综合分',
+    tooltip: 'AI 综合分 {{score}}/100（越高越好）',
+    hint: '0–100 分，越高越好。AI 星级是这个分数换算出的 0–5 星。',
     contribution: '对综合分的贡献',
   },
   reason: {

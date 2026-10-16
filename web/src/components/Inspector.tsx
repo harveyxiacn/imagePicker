@@ -81,7 +81,7 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor, onAccep
         <div className="flex items-center justify-between gap-2">
           <span className="text-muted">{t('inspector.aiRating')}</span>
           <div className="flex items-center gap-1.5">
-            <AiStars value={photo.ai_rating} />
+            <AiStars value={photo.ai_rating} score={photo.ai_score} />
             <button
               className="btn !h-6 !px-1.5 text-xs text-ai"
               disabled={photo.ai_rating === null}
