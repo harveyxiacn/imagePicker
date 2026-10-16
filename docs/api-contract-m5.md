@@ -6,13 +6,14 @@
 ## A. 编辑栈：`patch` 操作
 
 ```jsonc
-{ "type": "patch", "kind": "best_take" | "inpaint" | "denoise" | "face_restore",
+{ "type": "patch", "kind": "best_take" | "hair" | "inpaint" | "denoise" | "face_restore" | "deshine" | "flyaway",
   "asset": "bt_4231_881",           // 资产 id（Core 管理的 RGBA PNG，alpha = 融合蒙版）
   "rect": [x, y, w, h],             // 归一化，正向图像、裁剪前坐标
   "feather": 0.08, "amount": 1, "enabled": true,
   "person_id": 12, "source_photo_id": 4229 }   // best_take 专用
 ```
 
+- `hair`（换发型，H 节）与 `best_take` 同形：另带 `source_face_id`、`base_face_id`、`align`、`warnings`（附加字段，类型里没有，按原样保存）。
 - 渲染顺序：**patch**（贴到正向原图上）→ crop → warp → global → local → beauty → LUT → sharpen。多个补丁按出现顺序叠加。
 - `enabled:false` 的补丁保留在栈中，但不渲染（历史中可开关）。
 - 资产存放：`<data_dir>/edits/<photo_id>/<asset>.png`；随照片删除一并清理；导出时按全分辨率重采样。
@@ -185,3 +186,78 @@
 - `cancelling` 只出现在列表中（已请求取消、尚未结束）；数据库中不保存。
 - 打开目录库时，仍为 `running` 的记录属于已退出的进程，改记为 `interrupted`（并删除其临时目录）。任务 id 的序号从已有记录的最大序号继续，不会与保留的记录冲突。
 - 访客（只读）无权访问 `/api/tasks`（参数里有导出目录等路径）。
+
+## H. 换成我最好的发型（Hair transfer，2026-10-16）
+
+算法见 [03 §5.1](03-AI与算法设计.md)。把一张照片中某个人的头发换成**同一个人**另一张照片中的头发（典型：同一天早些时候、出汗之前的照片），脸保持原样。
+
+### H.1 REST
+
+| 方法 | 路径 | 请求 | 响应 |
+|---|---|---|---|
+| GET | `/api/photos/{id}/hair/donors?face_id=&rank=` | `face_id` 必填（不在该照片 → 422，缺省 → 400）；`rank=0` 不调用 worker（只按姿态门限与时间排序） | `{"photo_id","face_id","person_id","ranked","rank_error","target":HairMetrics\|null,"candidates":[HairDonor]}` |
+| POST | `/api/photos/{id}/hair` | `{"face_id","donor_photo_id","donor_face_id","strength"?: 0..1}`（默认 1） | `202 {"task_id"}`（`hair-<n>`）；完成后在该照片编辑栈中**替换 / 插入**这张脸的 `hair` 补丁并广播 `edits.updated`，再发 `hair.done` |
+
+```jsonc
+// HairDonor（最多 40 个；排序：同一会话 → 可用 → score → 时间最近）
+{ "photo_id": 4100, "face_id": 771, "file_name": "IMG_0412.jpg", "taken_at": 1760000000000,
+  "minutes_from_target": -185,            // 负数 = 比目标早
+  "same_session": true, "composable": true,
+  "reason": null,                          // pose_too_different | donor_too_small | hair_not_found
+  "pose_delta": {"yaw": 4.0, "pitch": 2.1, "roll": 1.0}, "scale": 1.04,   // 供发脸宽 / 目标脸宽
+  "score": 0.81,                           // 0..1，未测量为 null
+  "cues": ["fuller", "less_shine", "tidier", "sharper", "similar_pose", "earlier", "same_session"],
+  "metrics": HairMetrics | null }
+// HairMetrics（worker hair.rank；脸宽统一缩放到 160 px 后测量）
+{ "photo_id", "ok": true, "reason": null, "yaw", "pitch", "roll", "face_px",
+  "hair_ratio": 0.62, "sharpness": 12.3, "shine": 0.004, "skin_shine": 0.02, "roughness": 0.08 }
+```
+
+- **候选**：同一人物（`person_id`）或同一人脸轨迹的其他照片中的脸；目标脸无人物、无轨迹时为同一会话中身份余弦 ≥ 0.40 的脸；两边都有身份嵌入且余弦 < 0.30 的候选去掉。每张照片一张脸。
+- **姿态门限**：偏航 > 20°、俯仰 > 15°、横滚 > 20° → `composable:false, reason:"pose_too_different"`；供发脸宽 < 目标脸宽 × 0.5 → `donor_too_small`；worker 测得没有头发 → `hair_not_found`。目录库缺角度时用 worker 测的关键点姿态。
+- **排名**（`ranked:true`）：worker 测量前 16 个可用候选与目标本身；评分公式与理由见 03 §5.1。worker 不可用 / 缺模型时 `ranked:false`，`rank_error` 为 `worker_unavailable` / `models_missing` / 错误信息，候选照样返回。
+- **服务端同人校验**（`POST`，不启动任务、不改编辑栈）：`422`，`error.code`：
+  - `hair_person_mismatch`：两张脸人物不同且不在同一轨迹；或没有任何关联、又没有身份嵌入可比；
+  - `hair_low_similarity`：两边都有身份嵌入，余弦 < 0.30（有人物 / 轨迹关联）或 < 0.40（无关联）；
+  - `hair_pose_too_different` / `hair_donor_too_small`：同上姿态门限（按目录库角度与照片尺寸）。
+  - 其他 `422 unprocessable`：脸不在所给照片、供发照片即目标照片；`strength` 超出 0..1 → `400`；模型缺失 → `409 models_missing`；worker 不可用 → `503`。
+- 访客（只读）无权访问 `photos/{id}/hair*`。
+
+### H.2 编辑栈
+
+```jsonc
+{ "type": "patch", "kind": "hair", "asset": "hair_4231_881_…", "rect": [x, y, w, h], "feather": 0.08,
+  "amount": 0.8,                 // 强度；之后可直接改，不必重算
+  "enabled": true,               // false = 暂时看原来的头发
+  "person_id": 12, "source_photo_id": 4100,
+  "base_face_id": 881, "source_face_id": 771,                       // 附加字段
+  "align": {"scale": 1.04, "rotation_deg": 2.1, "dx": 0.01, "dy": -0.02, "landmark_rms": 0.004},
+  "warnings": ["large_fill"] }
+```
+
+- 每张脸一个（按 `person_id`，无人物时按 `base_face_id` 替换旧的）。资产、渲染顺序、导出、撤销与 A 节相同（照片专属资产，不随同步 / 预设复制）。
+
+### H.3 Worker 方法
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `hair.rank` | `{"faces":[{"photo":{photo_id,path,orientation},"face":[x,y,w,h]}] /*≤24*/, "allow_download"}` | `{"results":[HairMetrics]}`（与 `faces` 同序；测不了的 `ok:false` + `reason`） |
+| `hair.compose` | `{"target":{...},"donor":{...},"target_face":[x,y,w,h],"donor_face":[x,y,w,h],"out_dir","allow_download"}` | `{"patch": path /*RGBA PNG*/, "rect":[x,y,w,h], "quality":{"score","aligned","warnings":["pose_differs"\|"large_fill"\|"donor_small"\|"seam"\|"lighting_unmatched"]}, "align":{...}}`；不可合成时 `{"patch":null,"reason":"pose_too_different"\|"donor_too_small"\|"donor_no_hair"\|"hair_not_found"\|"face_not_found"\|"face_too_small"\|"face_not_aligned"}` |
+
+- 必需模型（`models.list` 的 `hair_models`）：`mediapipe-face-landmarker`、`mediapipe-selfie-multiclass`；LaMa（`lama-big-fp32`）已安装时用于背景填充，否则 OpenCV Telea。超时：`hair.rank` 120 s、`hair.compose` 180 s。远程 worker（局域网主机）暂不转发 `hair.*`。
+
+### H.4 WebSocket
+
+```jsonc
+{ "type": "hair.done", "photo_id": 4231, "face_id": 881, "ok": true, "warnings": ["pose_differs"], "reason": null }
+```
+
+- worker 拒绝合成时 `ok:false`，`reason` 为上面的原因代码，任务 `failed`，编辑栈不变；取消时 `reason:"cancelled"`。任务记录 `kind:"hair"`，`params` 为 `{photo_id, face_id, donor_photo_id, strength}`。
+
+### H.5 去汗光 / 整理碎发（无需供发照片）
+
+`POST /api/photos/{id}/enhance` 新增 `op`：`"deshine"`（减淡皮肤与头发上的汗光）、`"flyaway"`（清理头发轮廓外的碎发），`strength` 0..1（默认 0.5）。照片没有人脸 → `422`；未知 `op` → `422`。
+
+- Core 把主体人脸（没有主体时为所有人脸）传给 `enhance.run`（`faces`）；worker 按脸返回**全强度**补丁 `{"patches":[{patch, rect, face_index}], "stats":[...], "skipped"?:[{face_index, reason}]}`（`reason`：`no_flyaways`、`no_skin_or_hair`、`face_not_found`、`model_unavailable`）；一个都没有时任务失败（`enhance.done` `ok:false`）。
+- 编辑栈：`{"type":"patch","kind":"deshine"|"flyaway","asset","rect","feather":0.08,"amount": strength}`；每种只保留一层（再次运行替换旧的），`amount` 可随时调整。
+- 必需模型（`enhance_models.deshine` / `.flyaway`）：`mediapipe-face-landmarker`、`mediapipe-selfie-multiclass`；`flyaway` 在装了 LaMa 时用 LaMa 填充。算法见 03 §7.5。
