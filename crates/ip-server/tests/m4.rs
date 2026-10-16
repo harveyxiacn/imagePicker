@@ -777,12 +777,106 @@ async fn taste_endpoints_and_export_folders() {
         call(&e.app, Method::GET, "/api/taste", None).await.json()["labels"],
         1
     );
+    let j = call(&e.app, Method::GET, "/api/taste", None).await.json();
+    assert_eq!(
+        (
+            j["state"].as_str(),
+            j["enabled"].as_bool(),
+            j["min_per_class"].as_i64()
+        ),
+        (Some("collecting"), Some(true), Some(30))
+    );
+    assert_eq!(
+        (j["positives"].as_i64(), j["negatives"].as_i64()),
+        (Some(1), Some(0))
+    );
+    // train now: too few decisions, nothing learned yet
+    let r = call(&e.app, Method::POST, "/api/taste/train", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["state"], "collecting");
+    assert!(r.json()["metrics"].is_null());
+    // no model: listings carry no taste score, sorting by taste still works
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos?session_id={}&sort=taste", s.sid),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let photos = r.json()["photos"].as_array().unwrap().clone();
+    assert!(!photos.is_empty() && photos.iter().all(|p| p.get("taste_score").is_none()));
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/taste/explain/{}", s.ids["a1.jpg"]),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.json()["taste_score"].is_null());
+    assert_eq!(r.json()["contributions"], json!([]));
+    let r = call(&e.app, Method::GET, "/api/taste/explain/999999", None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    // switch off / on
+    let r = call(
+        &e.app,
+        Method::PATCH,
+        "/api/taste",
+        Some(json!({"enabled": false})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        (r.json()["enabled"].as_bool(), r.json()["state"].as_str()),
+        (Some(false), Some("disabled"))
+    );
+    let r = call(&e.app, Method::POST, "/api/taste/train", None).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = call(
+        &e.app,
+        Method::PATCH,
+        "/api/taste",
+        Some(json!({"enabled": "yes"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = call(
+        &e.app,
+        Method::PATCH,
+        "/api/taste",
+        Some(json!({"enabled": true})),
+    )
+    .await;
+    assert_eq!(r.json()["enabled"], true);
+    // forget
     let r = call(&e.app, Method::POST, "/api/taste/reset", None).await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
     assert_eq!(
         call(&e.app, Method::GET, "/api/taste", None).await.json()["labels"],
         0
     );
+    // forget and opt out
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/taste/reset",
+        Some(json!({"disable": true})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        call(&e.app, Method::GET, "/api/taste", None).await.json()["enabled"],
+        false
+    );
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/taste/reset",
+        Some(json!({"nope": 1})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
 
     // export with folders and no ids
     let out = tempfile::tempdir().unwrap();

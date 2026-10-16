@@ -377,6 +377,27 @@ CREATE TABLE session_device_offset (
   PRIMARY KEY(session_id, device_id)
 );
 "#,
+    // v17: taste v2 (docs/03 §3.3, "learn my taste"). `taste_state` gains the user's on/off
+    // switch (default on, as in 1.0), the feature / model versions, the decisions pending since
+    // the last training, the label counts per class and the metrics JSON (cross-validated AUC
+    // against the generic score). `taste_score` caches each photo's taste score (0..1) under
+    // the current model; it is emptied whenever the model changes or is switched off. A v6
+    // model keeps `feature_version = 0` and is retrained once at startup.
+    r#"
+ALTER TABLE taste_state ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE taste_state ADD COLUMN feature_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE taste_state ADD COLUMN model_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE taste_state ADD COLUMN pending_labels INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE taste_state ADD COLUMN positives INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE taste_state ADD COLUMN negatives INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE taste_state ADD COLUMN metrics TEXT;
+INSERT OR IGNORE INTO taste_state(id) VALUES(1);
+CREATE TABLE taste_score (
+  photo_id INTEGER PRIMARY KEY REFERENCES photo(id) ON DELETE CASCADE,
+  score REAL NOT NULL,
+  model_version INTEGER NOT NULL
+);
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.
@@ -754,6 +775,60 @@ mod tests {
         assert!(crate::backup::is_corruption(&e), "{e:?}");
         assert_eq!(count(&db), 2);
         assert!(!dir.path().join("old2.db").exists());
+    }
+
+    #[test]
+    fn v17_taste_v2_applies_on_a_v16_catalog() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        assert_eq!(migrate_to(&mut conn, 16).unwrap(), 16);
+        // a 1.0 catalog with an active v6 model and a label
+        conn.execute_batch(
+            "INSERT INTO root_folder(id, path, added_at) VALUES(1, '/r', 0);
+             INSERT INTO photo(id, root_id, rel_path, file_name, fast_key) VALUES(7, 1, 'a.jpg', 'a.jpg', 'k');
+             INSERT INTO preference_label(photo_id, kind, value, source, created_at)
+               VALUES(7, 'rating', 5, 'patch', 1);
+             INSERT INTO taste_state(id, model, active, alpha, labels_at_train)
+               VALUES(1, '{\"dim\":4}', 1, 0.3, 64);",
+        )
+        .unwrap();
+        assert_eq!(migrate(&mut conn).unwrap(), 17);
+        let row: (i64, i64, i64, i64, i64, String) = conn
+            .query_row(
+                "SELECT enabled, feature_version, model_version, pending_labels, active, model
+                 FROM taste_state WHERE id=1",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        // switched on as before; the old model is kept but marked as feature version 0
+        assert_eq!(row, (1, 0, 0, 0, 1, "{\"dim\":4}".to_string()));
+        assert!(crate::taste::load_active(&conn).unwrap().is_none());
+        conn.execute(
+            "INSERT INTO taste_score(photo_id, score, model_version) VALUES(7, 0.8, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM photo WHERE id=7", []).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM taste_score", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "scores go with their photo");
+        // a fresh catalog has the state row from the start
+        let mut fresh = Connection::open_in_memory().unwrap();
+        migrate(&mut fresh).unwrap();
+        let st = crate::taste::status(&fresh).unwrap();
+        assert!(st.enabled && !st.active);
+        assert_eq!(st.state, "collecting");
     }
 
     #[test]

@@ -331,7 +331,7 @@ async fn filters_sorting_and_cursor_pagination() {
                 assert!(seen.windows(2).all(|w| r(&w[0]) >= r(&w[1])));
                 assert_eq!(seen[0].user_rating, Some(5));
             }
-            SortKey::Ai => {}
+            SortKey::Ai | SortKey::Taste => {}
         }
     }
 

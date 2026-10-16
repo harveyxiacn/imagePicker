@@ -74,11 +74,37 @@ interface BeautyProfile {           // 不含 person_id；应用时填入
 | GET | `/api/collections` | — | `{"collections":[{"id","name","query":string /*URLSearchParams，与 /api/photos 相同参数，不含 session_id/cursor/limit*/,"builtin":bool}]}`；内置：`best_per_group`、`has_closed_eyes`、`undecided`、`edited`、`duplicates`（`duplicates=1`，api-contract-m2 C.6） |
 | POST | `/api/collections` | `{"name","query"}` | `201 {"collection"}` |
 | PATCH/DELETE | `/api/collections/{id}` | `{"name"?,"query"?}` | `{"collection"}` / `204`（内置不可改删 → 400） |
-| GET | `/api/taste` | — | `{"labels":number,"active":bool,"alpha":number /*0..0.6 融合权重*/,"holdout_accuracy":number\|null,"traits":[{"key","params"}] /*「你偏好低饱和」等，i18n key*/,"updated_at"}` |
-| POST | `/api/taste/reset` | — | `204`（清空偏好数据，回到基础评分） |
+| GET | `/api/taste` | — | `TasteOut`（见下） |
+| PATCH | `/api/taste` | `{"enabled": bool}` | `TasteOut`。关闭：不再记录新决定、不训练，立即撤销融合与口味分（标签和模型保留）；打开：沿用保留的模型，没有可用模型时后台训练 |
+| POST | `/api/taste/train` | — | 立即训练并返回 `TasteOut`；关闭时 `400` |
+| POST | `/api/taste/reset` | 可选 `{"disable": bool}` | `204`。删除全部标签、模型、指标与口味分，AI 分回到基础分；`disable: true` 同时关闭学习（忘记并退出） |
+| GET | `/api/taste/explain/{photo_id}` | — | `{"photo_id","taste_score":number\|null,"base_score":number\|null,"contributions":[{"feature","delta","direction":"high"\|"low"}]}`：对口味分贡献最大的正、负各 ≤3 项（`feature` 为可解释特征名、`scene_<x>` 或 `look` = 整体画面与内容）；没有可用模型时 `taste_score: null`、`contributions: []`；未知照片 `404` |
+
+`TasteOut`：
+
+```jsonc
+{
+  "labels": 184,              // 用户亲手的评分/旗标标签数
+  "positives": 92, "negatives": 61, "min_per_class": 30,   // 已分析照片中留下 / 淘汰的张数（3 星为中性）
+  "pending": 12, "retrain_every": 50,                      // 上次训练以来的新决定
+  "enabled": true,
+  "state": "active",          // disabled | collecting（冷启动）| ready | not_better（不优于通用分）| active
+  "active": true, "alpha": 0.55,                           // 融合权重 0..0.6
+  "holdout_accuracy": 0.74, "base_accuracy": 0.63,         // 交叉验证准确率：口味模型 / 通用分
+  "metrics": { "auc": 0.78, "base_auc": 0.64, "accuracy": 0.74, "base_accuracy": 0.63, "margin": 0.04,
+               "eval_positives": 92, "eval_negatives": 61, "folds": 5, "lambda": 0.03, "dim": 768,
+               "fit_photos": 153, "train_ms": 210 },       // 未训练过时为 null
+  "traits": [{ "key": "likes", "params": { "feature": "eyes_open", "strength": 0.8 } }],  // likes | dislikes，仅 active 时
+  "scored": 4210,             // 有口味分的照片数
+  "feature_version": 2,
+  "updated_at": 1760000000000
+}
+```
+
+照片列表（`GET /api/photos`、`/api/search` 等）在有可用模型时每项多一个 `taste_score`（0..1，用户留下它的概率；没有时省略），`sort=taste` 按它降序排列（无分的排最后）。
 
 - 「这是新的人」（以脸搜脸结果里勾选同一个人的脸；以库内人脸搜索时查询脸本身也计入）：`POST /api/people` 新建人物，`face_ids` 中的人脸离开原人物（或「未归属」）并**锁定**到新人物——与「不是此人」/合并相同的用户约束，重新聚类与强制重新分析都不改变（锁定的脸按位置继承人物）。`name` 去空白后为空 = 未命名。原人物重算封面与中心，没有脸且未命名时删除；新人物的中心参与之后的聚类（相似的未锁定人脸可能自动归入）。同一照片的两张脸 → `400`（一个人在一张照片中只出现一次）；`face_ids` 为空 → `400`；未知人脸 → `404`。广播 `people.updated`（主角因此变化时另有 `analysis.updated`）。没有撤销（与合并、「不是此人」一致）：用合并或「不是此人」改回。
-- 个性化（03 §3.3）：Core 在用户评分/旗标/组内选择时记录偏好（显式评分、成对：选中 A 而淘汰同组 B ⇒ A ≻ B），每新增 50 条自动后台重训（Rust，排序头：嵌入 ⊕ 分项 ⊕ 场景），保留集上不优于基础分时自动停用；启用后 `ai_score`/`ai_rating` 为融合结果并广播 `analysis.updated`。
+- 个性化（03 §3.3，taste v2）：只有用户亲手的 `PATCH /api/photos` 评分 / 旗标是标签（助手操作、「接受 AI 评分」不是，并会删除被覆盖的旧标签）；每张照片按「淘汰或 ≤2 星 = 负、精选或 ≥4 星 = 正、3 星中性」归类，跨全部会话训练 L2 逻辑回归（嵌入 ⊕ 可解释分项 ⊕ 问题位 ⊕ 场景）。正负例各 ≥30 张才训练；5 折交叉验证 AUC 须 ≥0.6 且超过通用分一定余量才启用。新决定满 50 个立即、满 10 个且停顿 2 分钟后在后台重训，也可 `POST /api/taste/train`。启用后 `ai_score`/`ai_rating` 为融合结果、`taste_score` 写入缓存并广播 `analysis.updated`。1.0 的「同组未标注照片作隐式负例」与 `accept_ai` 标签在 v2 中不再使用。
 - `/api/export` 新增 `"folders"?: {"<子文件夹名>": number[]}`：按人物等分组导出到子文件夹（与 `ids` 二选一）。
 
 ## D. WebSocket 新增事件

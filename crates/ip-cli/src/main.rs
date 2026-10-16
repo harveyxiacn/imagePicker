@@ -159,6 +159,16 @@ enum Command {
         /// Train now instead of waiting for the next 50 labels.
         #[arg(long)]
         retrain: bool,
+        /// Read-only evaluation: cross-validated AUC of the taste model against the generic
+        /// score on the user's own decisions. Opens the catalog read-only, writes nothing.
+        #[arg(long, conflicts_with = "retrain")]
+        eval: bool,
+        /// Catalog file for `--eval` (default: `<data dir>/catalog.db`).
+        #[arg(long, requires = "eval")]
+        catalog: Option<PathBuf>,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
         #[arg(long)]
         data_dir: Option<PathBuf>,
     },
@@ -364,14 +374,49 @@ fn print_taste(t: &ip_core::taste::TasteOut) {
         v.map(|v| format!("{:.1}%", v * 100.0))
             .unwrap_or_else(|| "-".into())
     };
+    println!("state:             {}", t.state);
     println!("labels:            {}", t.labels);
-    println!("training pairs:    {}", t.pairs);
-    println!("model active:      {}", if t.active { "yes" } else { "no" });
+    println!(
+        "kept / rejected:   {} / {} (need {} each)",
+        t.positives, t.negatives, t.min_per_class
+    );
+    println!("pending:           {}", t.pending);
     println!("holdout accuracy:  {}", pct(t.holdout_accuracy));
     println!("base accuracy:     {}", pct(t.base_accuracy));
+    if let Some(m) = &t.metrics {
+        println!("AUC (taste/base):  {:.3} / {:.3}", m.auc, m.base_auc);
+    }
     println!("fusion alpha:      {:.2}", t.alpha);
+    println!("scored photos:     {}", t.scored);
     for tr in &t.traits {
         println!("trait:             {tr}");
+    }
+}
+
+fn print_taste_eval(o: &ip_core::taste::Outcome) {
+    println!("kept / rejected:   {} / {}", o.positives, o.negatives);
+    match &o.metrics {
+        None => println!(
+            "not evaluated:     fewer than {} kept or rejected analysed photos",
+            ip_core::taste::MIN_PER_CLASS
+        ),
+        Some(m) => {
+            println!(
+                "evaluated:         {} kept / {} rejected, {}-fold cross-validation",
+                m.eval_positives, m.eval_negatives, m.folds
+            );
+            println!("AUC taste:         {:.4}", m.auc);
+            println!("AUC generic score: {:.4}", m.base_auc);
+            println!("accuracy (taste):  {:.4}", m.accuracy);
+            println!("accuracy (base):   {:.4}", m.base_accuracy);
+            println!("required margin:   {:.4}", m.margin);
+            println!("lambda / dim:      {} / {}", m.lambda, m.dim);
+            println!(
+                "would switch on:   {}",
+                if o.model.is_some() { "yes" } else { "no" }
+            );
+            println!("time:              {} ms", m.train_ms);
+        }
     }
 }
 
@@ -927,15 +972,51 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Bench { cmd } => tokio::task::block_in_place(|| bench::run(cmd)),
-        Command::Taste { retrain, data_dir } => {
+        Command::Taste {
+            retrain,
+            eval,
+            catalog,
+            json,
+            data_dir,
+        } => {
             init_tracing("warn", data_dir.as_deref());
+            if eval {
+                // read-only: never opens the Core (which would migrate and start services)
+                let path = match catalog {
+                    Some(p) => p,
+                    None => {
+                        ip_core::paths::resolve_data_dir(data_dir.as_deref()).join("catalog.db")
+                    }
+                };
+                let o = tokio::task::block_in_place(|| ip_core::taste::evaluate_catalog(&path))
+                    .with_context(|| format!("evaluate {}", path.display()))?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "positives": o.positives,
+                            "negatives": o.negatives,
+                            "metrics": o.metrics,
+                            "would_activate": o.model.is_some(),
+                            "traits": o.traits,
+                        })
+                    );
+                } else {
+                    print_taste_eval(&o);
+                }
+                return Ok(());
+            }
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
             let t = if retrain {
                 core.retrain_taste().await?
             } else {
                 core.taste().await?
             };
-            print_taste(&t);
+            if json {
+                println!("{}", serde_json::to_string(&t)?);
+            } else {
+                print_taste(&t);
+            }
             Ok(())
         }
         Command::Render {

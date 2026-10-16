@@ -330,7 +330,7 @@ pub(crate) fn photo_query(p: PhotosParams) -> Result<PhotoQuery, ApiError> {
     let sort = match p.sort.as_deref().filter(|s| !s.is_empty()) {
         None => SortKey::TakenAt,
         Some(s) => SortKey::parse(s).ok_or_else(|| {
-            ApiError::bad_request("sort must be taken_at|-taken_at|name|rating|ai")
+            ApiError::bad_request("sort must be taken_at|-taken_at|name|rating|ai|taste")
         })?,
     };
     let color_label = p.color_label.filter(|s| !s.is_empty());

@@ -223,11 +223,14 @@ impl Core {
                 self.snapshot_photos(&ids, undo).await?;
                 let rating = args["rating"].as_i64();
                 let n = self
-                    .patch_photos(PatchRequest {
-                        ids,
-                        user_rating: Some(rating),
-                        ..Default::default()
-                    })
+                    .patch_photos_as(
+                        PatchRequest {
+                            ids,
+                            user_rating: Some(rating),
+                            ..Default::default()
+                        },
+                        crate::taste::LabelSource::Auto,
+                    )
                     .await?;
                 done(n)
             }
@@ -239,11 +242,14 @@ impl Core {
                 }
                 self.snapshot_photos(&ids, undo).await?;
                 let n = self
-                    .patch_photos(PatchRequest {
-                        ids,
-                        flag: args["flag"].as_i64(),
-                        ..Default::default()
-                    })
+                    .patch_photos_as(
+                        PatchRequest {
+                            ids,
+                            flag: args["flag"].as_i64(),
+                            ..Default::default()
+                        },
+                        crate::taste::LabelSource::Auto,
+                    )
                     .await?;
                 done(n)
             }
