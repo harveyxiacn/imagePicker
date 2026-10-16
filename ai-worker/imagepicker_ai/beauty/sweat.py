@@ -50,9 +50,20 @@ def _from_lab(lab: np.ndarray) -> np.ndarray:
 
 
 def _local_mean(v: np.ndarray, w: np.ndarray, sigma: float) -> np.ndarray:
-    num = cv2.GaussianBlur(v * w, (0, 0), sigma)
-    den = cv2.GaussianBlur(w, (0, 0), sigma)
-    return num / np.maximum(den, 1e-4)
+    """Weighted Gaussian mean of `v`. Wide kernels run on a downscaled copy (the result is smooth)."""
+    f = max(1.0, sigma / 4.0)
+    if f <= 1.5:
+        num = cv2.GaussianBlur(v * w, (0, 0), sigma)
+        den = cv2.GaussianBlur(w, (0, 0), sigma)
+        return num / np.maximum(den, 1e-4)
+    h, wd = v.shape
+    sh, sw = max(1, round(h / f)), max(1, round(wd / f))
+    num = cv2.GaussianBlur(
+        cv2.resize(v * w, (sw, sh), interpolation=cv2.INTER_AREA), (0, 0), sigma / f
+    )
+    den = cv2.GaussianBlur(cv2.resize(w, (sw, sh), interpolation=cv2.INTER_AREA), (0, 0), sigma / f)
+    m = num / np.maximum(den, 1e-4)
+    return cv2.resize(m, (wd, h), interpolation=cv2.INTER_LINEAR)
 
 
 def _crop(rgb: np.ndarray, face: Box, comp: Components):
