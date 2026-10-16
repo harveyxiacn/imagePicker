@@ -1574,7 +1574,11 @@ impl Core {
             }
         }
         // the sweat cleanup patches are full strength: the user's strength is the layer opacity
-        let amount = if is_sweat_op(op) { strength as f32 } else { 1.0 };
+        let amount = if is_sweat_op(op) {
+            strength as f32
+        } else {
+            1.0
+        };
         let (svc, id) = (self.render.clone(), r.id);
         let kind = op.to_string();
         let assets = tokio::task::spawn_blocking(move || -> Result<Vec<(String, [f32; 4])>> {

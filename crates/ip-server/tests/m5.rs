@@ -1256,8 +1256,18 @@ async fn sweat_cleanup_layers_take_the_strength_as_amount() {
         assert_eq!(r.status, StatusCode::ACCEPTED, "{op}");
         let done = wait_event(&mut rx, |ev| matches!(ev, Event::EnhanceDone { .. })).await;
         let v = serde_json::to_value(&done).unwrap();
-        assert_eq!((v["op"].as_str(), v["ok"].as_bool()), (Some(op), Some(true)));
-        let req = e.worker.enhance_requests.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(
+            (v["op"].as_str(), v["ok"].as_bool()),
+            (Some(op), Some(true))
+        );
+        let req = e
+            .worker
+            .enhance_requests
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .unwrap();
         assert_eq!(req.faces.map(|f| f.len()), Some(1), "the subject's face");
     }
     let stack = call(&e.app, Method::GET, &format!("/api/edits/{h1}"), None)
@@ -1269,7 +1279,10 @@ async fn sweat_cleanup_layers_take_the_strength_as_amount() {
     // one layer per op; the newer deshine replaced the older one
     assert_eq!((of("deshine").len(), of("flyaway").len()), (1, 1));
     let amount = |o: &Value| (o["amount"].as_f64().unwrap() * 100.0).round();
-    assert_eq!((amount(of("deshine")[0]), amount(of("flyaway")[0])), (60.0, 70.0));
+    assert_eq!(
+        (amount(of("deshine")[0]), amount(of("flyaway")[0])),
+        (60.0, 70.0)
+    );
     let r = call(
         &e.app,
         Method::POST,
