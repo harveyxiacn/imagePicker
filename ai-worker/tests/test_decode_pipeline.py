@@ -102,8 +102,8 @@ async def test_analyzer_classic_steps_without_models(tmp_path, synth_files):
 
 
 async def test_embedding_hand_off_in_groups_gives_the_same_results(tmp_path, synth_files):
-    """The GPU thread gets photos in groups of `embed_flush` (overlapping decode); results and
-    `.emb.npy` artefacts must be the same as with one hand-off per request."""
+    """`embed_flush` hands photos to the GPU thread in groups (overlapping decode); results and
+    `.emb.npy` artefacts must be the same as with the default, one hand-off per request."""
     from imagepicker_ai.hw import detect
     from imagepicker_ai.models import ModelManager, Registry
     from imagepicker_ai.pipeline import Analyzer
@@ -112,7 +112,7 @@ async def test_embedding_hand_off_in_groups_gives_the_same_results(tmp_path, syn
     files = synth_files * 3  # 12 photos
     items = [{"photo_id": f"p{i}", "path": str(p)} for i, p in enumerate(files)]
 
-    async def run(flush: int) -> tuple[list[int], list[dict], list[np.ndarray]]:
+    async def run(flush: int | None) -> tuple[list[int], list[dict], list[np.ndarray]]:
         an = Analyzer(ModelManager(tmp_path / "m", Registry.load(), hw), hw, decode_workers=3)
         an.embed_flush = flush
         sizes: list[int] = []
@@ -135,7 +135,7 @@ async def test_embedding_hand_off_in_groups_gives_the_same_results(tmp_path, syn
             r.pop("embedding_file"), r.pop("analysis_file", None)
         return sizes, res["items"], embs
 
-    sizes_one, items_one, emb_one = await run(32)
+    sizes_one, items_one, emb_one = await run(None)
     sizes_grp, items_grp, emb_grp = await run(5)
     assert sizes_one == [12] and sizes_grp == [5, 5, 2]
     assert items_one == items_grp

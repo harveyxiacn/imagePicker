@@ -97,7 +97,7 @@ def run_worker(args: argparse.Namespace, files: list[Path]) -> tuple[dict[str, A
     hw = hwmod.detect(args.device)
     manager = ModelManager(resolve_models_dir(args.models_dir), Registry.load(), hw)
     an = Analyzer(manager, hw, decode_workers=args.decode_workers, batch_size=args.batch)
-    if args.embed_flush:  # photos per GPU hand-off; the batch size = the pre-2026-10-16 behaviour
+    if args.embed_flush:  # photos per GPU hand-off (worker default: the batch size)
         an.embed_flush = args.embed_flush
     samples: dict[str, list[float]] = {}
     gpu_batches: list[dict[str, float]] = []
@@ -256,7 +256,7 @@ def markdown(rep: dict[str, Any]) -> str:
             f"Steps run: {', '.join(w['steps'])}; skipped: {', '.join(w['skipped_steps']) or 'none'}. "
             f"Device: {w['device']['device']} ({', '.join(w['device']['providers'] or [])}). "
             f"Decode threads {w['decode_workers']}, batch {w['batch_size']} (GPU hand-off every "
-            f"{w.get('embed_flush')}), analysis size {w['analysis_size']}.",
+            f"{w.get('embed_flush') or w['batch_size']}), analysis size {w['analysis_size']}.",
             "",
             f"**{w['ok']} photos in {w['wall_s']} s = {w['photos_per_s']} photos/s** "
             f"({w['ms_per_photo_wall']} ms per photo wall; model warm-up {w['warmup_s']} s not included"
@@ -349,9 +349,14 @@ def diff(a: Any, b: Any, tol: float, path: str = "") -> list[str]:
     return [] if a == b else [f"{path}: {a!r} vs {b!r}"]
 
 
-def compare(a_path: str, b_path: str, tol: float) -> int:
-    a = {str(r["photo_id"]): _norm(r) for r in json.loads(Path(a_path).read_text("utf-8"))}
-    b = {str(r["photo_id"]): _norm(r) for r in json.loads(Path(b_path).read_text("utf-8"))}
+def compare(a_path: str, b_path: str, tol: float, ignore: set[str]) -> int:
+    def load(p: str) -> dict[str, Any]:
+        rows = json.loads(Path(p).read_text("utf-8"))
+        return {
+            str(r["photo_id"]): _norm({k: v for k, v in r.items() if k not in ignore}) for r in rows
+        }
+
+    a, b = load(a_path), load(b_path)
     problems = []
     for pid in sorted(set(a) | set(b)):
         if pid not in a or pid not in b:
@@ -381,7 +386,7 @@ def main() -> int:
     )
     ap.add_argument("--batch", type=int, default=32, help="embedding batch size")
     ap.add_argument(
-        "--embed-flush", type=int, help="photos per GPU hand-off (worker default 8; 32 = old)"
+        "--embed-flush", type=int, help="photos per GPU hand-off (default: the batch size)"
     )
     ap.add_argument("--analysis-size", type=int, default=1024)
     ap.add_argument(
@@ -400,10 +405,13 @@ def main() -> int:
     ap.add_argument("--dump-results", help="write the per-photo worker results (for --compare)")
     ap.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"), help="diff two result dumps")
     ap.add_argument("--tol", type=float, default=0.0, help="float tolerance of --compare")
+    ap.add_argument(
+        "--ignore", default="", help="comma-separated result fields --compare leaves out"
+    )
     args = ap.parse_args()
 
     if args.compare:
-        return compare(*args.compare, args.tol)
+        return compare(*args.compare, args.tol, set(filter(None, args.ignore.split(","))))
     if not args.dir:
         ap.error("dir is required")
     src = Path(args.dir)

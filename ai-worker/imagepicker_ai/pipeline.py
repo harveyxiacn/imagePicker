@@ -8,11 +8,13 @@
 The SigLIP2 image embedding is computed once per photo and shared by `embed` (written to
 `.emb.npy`), `scene` and the zero-shot half of `iqa`.
 
-The GPU thread gets the photos in groups of `embed_flush` (default 8) as they come off the decode
-threads, not in one batch per request: the Core sends 32 photos per request, so with whole-request
-batches the embedding only started once all 32 were decoded and the next request's decoding only
-once it was done - the two never overlapped. Groups are consecutive photos in request order, so
-which photos share a forward pass does not depend on timing.
+`embed_flush` (default: the embedding batch size, i.e. one hand-off per request of 32) hands the
+photos to the GPU thread in smaller groups as they come off the decode threads, so the embedding
+of the first photos overlaps the decoding of the rest. Groups are consecutive photos in request
+order, so which photos share a forward pass does not depend on timing. On the CPU it measured no
+gain (both stages compete for the same cores); whether it helps with a GPU is still to be
+measured (`bench/profile-analysis.py --embed-flush 8`, bench/perf-baseline-2026-10-16.md), and
+CUDA kernels may round differently at another batch size, so the default stays unchanged.
 
 The event loop never runs heavy work: everything executes in thread pools, so progress
 notifications and other RPCs stay responsive while a batch is running.
@@ -162,7 +164,7 @@ class Analyzer:
         hw: HardwareInfo,
         decode_workers: int | None = None,
         batch_size: int = 32,
-        embed_flush: int = 8,
+        embed_flush: int | None = None,
         embed_backend: str = "auto",
     ):
         self.manager = manager
@@ -171,7 +173,7 @@ class Analyzer:
         self.decode_pool = ThreadPoolExecutor(self.decode_workers, thread_name_prefix="decode")
         self.gpu_pool = ThreadPoolExecutor(1, thread_name_prefix="gpu")
         self.embedder = Embedder(manager, hw, batch_size=batch_size, backend=embed_backend)
-        self.embed_flush = embed_flush  # photos per GPU hand-off (see the module docstring)
+        self.embed_flush = embed_flush  # photos per GPU hand-off; None = batch size (docstring)
         self.identity = IdentityEmbedder(manager, hw)
         self.bank = PromptBank(Path(manager.models_dir) / "_cache")
         self._faces: dict[tuple[str, str | None], FaceAnalyzer] = {}
@@ -377,7 +379,7 @@ class Analyzer:
 
         batch = max(1, self.embedder.batch_size)
         window = max(self.decode_workers * 2, batch * 2)
-        flush = max(1, min(batch, self.embed_flush))
+        flush = max(1, min(batch, self.embed_flush or batch))
         pending: list[tuple[int, asyncio.Future[_Work]]] = []
         buf: list[_Work] = []
         gpu_task: asyncio.Task[None] | None = None
