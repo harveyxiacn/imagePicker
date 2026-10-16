@@ -49,7 +49,7 @@ describe('preset strength', () => {
     const strong = scalePresetStack(preset, 9)
     expect(glob(strong).exposure).toBeCloseTo(0.4 * PRESET_AMOUNT_MAX)
     expect(lut(strong)?.amount).toBe(1)
-    expect(glob(strong).grading?.shadows[1]).toBeCloseTo(0.6)
+    expect(glob(strong).grading?.shadows?.[1]).toBeCloseTo(0.6)
     expect(scalePresetStack(preset, 0).ops).toEqual([])
   })
 

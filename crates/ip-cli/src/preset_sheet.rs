@@ -32,7 +32,7 @@ fn photos_in(dir: &Path, limit: usize) -> Result<Vec<(PathBuf, ImageFormat)>> {
         .filter(|p| p.is_file())
         .filter_map(|p| ImageFormat::from_path(&p).map(|f| (p, f)))
         .collect();
-    v.sort();
+    v.sort_by(|a, b| a.0.cmp(&b.0));
     v.truncate(limit);
     Ok(v)
 }
@@ -59,7 +59,13 @@ fn slug(p: &Path, i: usize) -> String {
         .unwrap_or_default();
     let clean: String = stem
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     format!("{i:03}_{clean}")
 }
@@ -67,10 +73,17 @@ fn slug(p: &Path, i: usize) -> String {
 pub fn run(a: SheetArgs) -> Result<()> {
     let ids: Vec<String> = match &a.presets {
         Some(v) => v.clone(),
-        None => ip_render::builtin_presets().into_iter().map(|p| p.0).collect(),
+        None => ip_render::builtin_presets()
+            .into_iter()
+            .map(|p| p.0)
+            .collect(),
     };
     let photos = photos_in(&a.dir, a.limit)?;
-    anyhow::ensure!(!photos.is_empty(), "no supported images in {}", a.dir.display());
+    anyhow::ensure!(
+        !photos.is_empty(),
+        "no supported images in {}",
+        a.dir.display()
+    );
     std::fs::create_dir_all(&a.out)?;
     let renderer = ip_render::create_renderer(false);
     let render = |src: &RgbImage, stack: &EditStack| -> Result<RgbImage> {
@@ -120,7 +133,10 @@ pub fn run(a: SheetArgs) -> Result<()> {
         let name = slug(path, i);
         let dir = a.out.join(&name);
         std::fs::create_dir_all(&dir)?;
-        save_jpeg(&render(&src, &EditStack::default())?, &dir.join("original.jpg"))?;
+        save_jpeg(
+            &render(&src, &EditStack::default())?,
+            &dir.join("original.jpg"),
+        )?;
         let _ = write!(
             html,
             "<tr><td><small>{}</small></td><td><img src=\"{name}/original.jpg\"></td>",
@@ -162,7 +178,8 @@ mod tests {
         let src = tempfile::tempdir().unwrap();
         let out = tempfile::tempdir().unwrap();
         for (i, k) in [0.3f32, 1.0].iter().enumerate() {
-            let s = ip_render::testutil::tint(&ip_render::testutil::scene(320, 200, i as u64), [*k; 3]);
+            let s =
+                ip_render::testutil::tint(&ip_render::testutil::scene(320, 200, i as u64), [*k; 3]);
             save_jpeg(&s, &src.path().join(format!("p{i}.jpg"))).unwrap();
         }
         std::fs::write(src.path().join("notes.txt"), "x").unwrap();

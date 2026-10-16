@@ -41,7 +41,9 @@ const KEEP: ToneIntent = ToneIntent {
     mid: 0.46,
     pull_up: 0.3,
     pull_down: 0.25,
-    ev: (-0.5, 0.5),
+    // Wide enough upwards that a look which darkens (contrast, S-curves) can still keep a dark
+    // photo from getting darker; the modest pull keeps the move small otherwise.
+    ev: (-0.6, 1.0),
     max_new_clip: 0.005,
     face_max: 0.85,
 };
@@ -76,7 +78,7 @@ pub(crate) fn builtin_specs() -> Vec<PresetSpec> {
         tone: ToneIntent {
             mid: 0.47,
             pull_up: 0.35,
-            ev: (-0.5, 0.6),
+            ev: (-0.6, 1.0),
             ..KEEP
         },
     });
@@ -100,7 +102,7 @@ pub(crate) fn builtin_specs() -> Vec<PresetSpec> {
         tone: ToneIntent {
             pull_up: 0.25,
             pull_down: 0.2,
-            ev: (-0.4, 0.4),
+            ev: (-0.4, 0.8),
             ..KEEP
         },
     });
@@ -129,7 +131,7 @@ pub(crate) fn builtin_specs() -> Vec<PresetSpec> {
             mid: 0.48,
             pull_up: 0.35,
             pull_down: 0.3,
-            ev: (-0.5, 0.6),
+            ev: (-0.6, 1.0),
             ..KEEP
         },
     });
@@ -159,7 +161,7 @@ pub(crate) fn builtin_specs() -> Vec<PresetSpec> {
             mid: 0.47,
             pull_up: 0.35,
             pull_down: 0.3,
-            ev: (-0.5, 0.6),
+            ev: (-0.6, 1.0),
             ..KEEP
         },
     });
@@ -232,7 +234,7 @@ pub(crate) fn builtin_specs() -> Vec<PresetSpec> {
             mid: 0.40,
             pull_up: 0.3,
             pull_down: 0.4,
-            ev: (-0.6, 0.3),
+            ev: (-0.6, 0.8),
             ..KEEP
         },
     });
@@ -273,8 +275,11 @@ pub(crate) fn builtin_specs() -> Vec<PresetSpec> {
             }),
             Op::OutputSharpen(OutputSharpen { amount: 20.0 }),
         ]),
+        // Its contrast and S-curve push dark tones down hard, so it may lift exposure further to
+        // keep a dark photo from getting darker.
         tone: ToneIntent {
             mid: 0.45,
+            ev: (-0.6, 1.8),
             ..KEEP
         },
     });
@@ -331,10 +336,7 @@ pub(crate) fn builtin_specs() -> Vec<PresetSpec> {
             }),
             Op::OutputSharpen(OutputSharpen { amount: 25.0 }),
         ]),
-        tone: ToneIntent {
-            mid: 0.45,
-            ..KEEP
-        },
+        tone: ToneIntent { mid: 0.45, ..KEEP },
     });
 
     v

@@ -37,8 +37,8 @@ fn with_face(img: &RgbImage, c: [f32; 3]) -> RgbImage {
             if d <= 1.0 {
                 let shade = 1.0 + 0.1 * ((x as f32 - cx) / rx);
                 let i = ((y * img.width + x) * 3) as usize;
-                for k in 0..3 {
-                    o.data[i + k] = (c[k] * shade).clamp(0.0, 255.0) as u8;
+                for (k, ck) in c.iter().enumerate() {
+                    o.data[i + k] = (ck * shade).clamp(0.0, 255.0) as u8;
                 }
             }
         }
@@ -68,12 +68,15 @@ fn cases() -> Vec<Case> {
         },
         Case {
             name: "high-key",
-            img: map(&base, |v| (v as f32 * 0.3 + 172.0) as u8),
+            img: map(&base, |v| (v as f32 * 0.33 + 168.0) as u8),
             faces: none(),
         },
         Case {
             name: "backlit-face",
-            img: with_face(&map(&base, |v| (v as f32 * 0.25 + 185.0) as u8), [96.0, 70.0, 56.0]),
+            img: with_face(
+                &map(&base, |v| (v as f32 * 0.25 + 185.0) as u8),
+                [96.0, 70.0, 56.0],
+            ),
             faces: vec![FACE],
         },
         Case {
@@ -83,10 +86,34 @@ fn cases() -> Vec<Case> {
         },
         Case {
             name: "snow",
-            img: map(&base, |v| (v as f32 * 0.12 + 222.0) as u8),
+            img: map(&base, |v| (v as f32 * 0.16 + 214.0) as u8),
+            faces: none(),
+        },
+        Case {
+            name: "bright-sky",
+            img: bright_sky(&base),
             faces: none(),
         },
     ]
+}
+
+/// A bright, nearly white sky over the top 45 % (225..=253 with a slight blue), the scene
+/// below: real highlight detail just under clipping, which fixed lifts used to blow out.
+fn bright_sky(base: &RgbImage) -> RgbImage {
+    let mut o = base.clone();
+    let h = (base.height as f32 * 0.45) as u32;
+    for y in 0..h {
+        let t = y as f32 / h as f32;
+        for x in 0..base.width {
+            let n = ((x * 7 + y * 13) % 5) as f32;
+            let v = 253.0 - 28.0 * t - n;
+            let i = ((y * base.width + x) * 3) as usize;
+            o.data[i] = (v - 6.0) as u8;
+            o.data[i + 1] = (v - 2.0) as u8;
+            o.data[i + 2] = v as u8;
+        }
+    }
+    o
 }
 
 /// The pre-adaptive japanese_clean (fixed +0.35 EV etc.), for the before/after comparison.
@@ -142,12 +169,24 @@ fn every_preset_keeps_the_highlight_budget_on_every_photo() {
                 before.face_median.map_or("-".into(), |v| format!("{v:.3}")),
                 after.face_median.map_or("-".into(), |v| format!("{v:.3}")),
             );
-            assert!(new_clip <= 0.008, "{} / {id}: newly clipped {new_clip}", c.name);
+            assert!(
+                new_clip <= 0.008,
+                "{} / {id}: newly clipped {new_clip}",
+                c.name
+            );
             if let (Some(fb), Some(fa)) = (before.face_clipped, after.face_clipped) {
-                assert!(fa - fb <= 0.004, "{} / {id}: face clipped {fb} -> {fa}", c.name);
+                assert!(
+                    fa - fb <= 0.004,
+                    "{} / {id}: face clipped {fb} -> {fa}",
+                    c.name
+                );
             }
             if let (Some(fb), Some(fa)) = (before.face_median, after.face_median) {
-                assert!(fa <= 0.86_f32.max(fb + 0.01), "{} / {id}: face {fb} -> {fa}", c.name);
+                assert!(
+                    fa <= 0.86_f32.max(fb + 0.01),
+                    "{} / {id}: face {fb} -> {fa}",
+                    c.name
+                );
             }
             // Concrete values in validated ranges, provenance recorded.
             let g = r
@@ -204,6 +243,69 @@ fn japanese_clean_brightens_dark_photos_and_spares_bright_ones() {
 }
 
 #[test]
+fn no_preset_darkens_a_dark_photo_and_old_vs_new_on_bright_photos() {
+    let cs = cases();
+    let ctx = PresetContext::default();
+    let dark = cs.iter().find(|c| c.name == "dark").unwrap();
+    for id in ids() {
+        let r = resolve_preset(&id, &dark.img, &ctx, 1.0).unwrap();
+        assert!(
+            r.after.median >= r.before.median - 0.005,
+            "{id} darkens a dark photo: {r:?}"
+        );
+    }
+    // The fixed pre-adaptive japanese_clean vs the adaptive one, full-size renders.
+    for c in cs.iter().filter(|c| {
+        matches!(
+            c.name,
+            "high-key" | "snow" | "backlit-face" | "normal" | "dark" | "bright-sky"
+        )
+    }) {
+        let ctx = PresetContext {
+            faces: c.faces.clone(),
+        };
+        let base = measure_tone(&c.img, &c.faces);
+        let old = measure_tone(&render(&c.img, &old_japanese_clean()), &c.faces);
+        let r = resolve_preset("japanese_clean", &c.img, &ctx, 1.0).unwrap();
+        let new = measure_tone(&render(&c.img, &r.stack), &c.faces);
+        println!(
+            "OLDNEW {:<13} clipped {:.2}% -> fixed {:.2}% / adaptive {:.2}% | median {:.3} -> fixed {:.3} / adaptive {:.3} | ev fixed +0.35 / adaptive {:+.2}",
+            c.name,
+            base.clipped * 100.0,
+            old.clipped * 100.0,
+            new.clipped * 100.0,
+            base.median,
+            old.median,
+            new.median,
+            r.exposure
+        );
+        assert!(
+            new.clipped <= old.clipped + 1e-6,
+            "{}: {old:?} {new:?}",
+            c.name
+        );
+    }
+}
+
+#[test]
+fn fitting_on_an_app_proxy_is_fast_enough() {
+    // The app fits on its 1024 px proxy (box-downscaled to <= 256 px for measuring).
+    let img = scene(1024, 683, 11);
+    let ctx = PresetContext::default();
+    let t0 = std::time::Instant::now();
+    for id in ids() {
+        resolve_preset(&id, &img, &ctx, 1.0).unwrap();
+    }
+    let ms = t0.elapsed().as_millis();
+    println!(
+        "TIMING all {} presets on a 1024 px proxy: {ms} ms",
+        ids().len()
+    );
+    // Generous bound (debug build, loaded 2-core CI runner): catches an accidental full-size solve.
+    assert!(ms < 120_000, "{ms} ms");
+}
+
+#[test]
 fn backlit_faces_are_lifted_but_not_blown() {
     let cs = cases();
     let c = cs.iter().find(|c| c.name == "backlit-face").unwrap();
@@ -228,8 +330,18 @@ fn strength_scales_the_effect() {
     let (r0, r5, r10, r15) = (at(0.0), at(0.5), at(1.0), at(1.5));
     assert!(r0.stack.ops.is_empty(), "{r0:?}");
     let lift = |r: &PresetResolution| r.after.median - r.before.median;
-    assert!(lift(&r5) > 0.0 && lift(&r5) < lift(&r10), "{} {}", lift(&r5), lift(&r10));
-    assert!(lift(&r15) >= lift(&r10) - 0.005, "{} {}", lift(&r15), lift(&r10));
+    assert!(
+        lift(&r5) > 0.0 && lift(&r5) < lift(&r10),
+        "{} {}",
+        lift(&r5),
+        lift(&r10)
+    );
+    assert!(
+        lift(&r15) >= lift(&r10) - 0.005,
+        "{} {}",
+        lift(&r15),
+        lift(&r10)
+    );
     assert!(r15.satisfied);
     assert_eq!(r5.amount, 0.5);
     // Out-of-range strength is clamped.
@@ -260,7 +372,11 @@ fn character_is_kept_while_tone_adapts() {
     for id in ids() {
         let d = g(&resolve_preset(&id, &cs[1].img, &ctx, 1.0).unwrap());
         let b = g(&resolve_preset(&id, &cs[2].img, &ctx, 1.0).unwrap());
-        assert_eq!((d.temp, d.tint, d.saturation, d.vibrance), (b.temp, b.tint, b.saturation, b.vibrance), "{id}");
+        assert_eq!(
+            (d.temp, d.tint, d.saturation, d.vibrance),
+            (b.temp, b.tint, b.saturation, b.vibrance),
+            "{id}"
+        );
         assert_eq!(d.hsl, b.hsl, "{id}");
     }
 }

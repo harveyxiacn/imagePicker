@@ -1122,7 +1122,11 @@ impl Core {
     /// (built-ins adapt their tone; user presets are returned as saved).
     pub async fn photo_presets(&self, photo_id: i64) -> Result<Vec<PresetOut>> {
         let mut all = self.presets().await?;
-        let ids: Vec<String> = all.iter().filter(|p| p.builtin).map(|p| p.id.clone()).collect();
+        let ids: Vec<String> = all
+            .iter()
+            .filter(|p| p.builtin)
+            .map(|p| p.id.clone())
+            .collect();
         let fitted = self.fit_builtin_presets(photo_id, ids, 1.0).await?;
         for p in all.iter_mut() {
             if let Some((_, r)) = fitted.iter().find(|(id, _)| *id == p.id) {

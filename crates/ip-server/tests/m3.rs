@@ -516,10 +516,22 @@ async fn presets_fit_the_photo_and_scale_with_strength() {
     };
 
     // GET /api/edits/{id}/presets: built-ins fitted to the photo.
-    let r = call(&e.app, Method::GET, &format!("/api/edits/{dark}/presets"), None).await;
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/edits/{dark}/presets"),
+        None,
+    )
+    .await;
     assert_eq!(r.status, StatusCode::OK);
     let on_dark = jp(&r.json());
-    let r = call(&e.app, Method::GET, &format!("/api/edits/{bright}/presets"), None).await;
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/edits/{bright}/presets"),
+        None,
+    )
+    .await;
     let on_bright = jp(&r.json());
     assert!(ev_of(&on_dark) > 0.3, "{on_dark}");
     assert!(ev_of(&on_bright) <= 0.05, "{on_bright}");
@@ -580,8 +592,14 @@ async fn presets_fit_the_photo_and_scale_with_strength() {
 
     // Errors.
     for (body, want) in [
-        (json!({"preset_id": "japanese_clean", "amount": 2.0}), StatusCode::BAD_REQUEST),
-        (json!({"preset_id": "japanese_clean", "amount": -0.1}), StatusCode::BAD_REQUEST),
+        (
+            json!({"preset_id": "japanese_clean", "amount": 2.0}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"preset_id": "japanese_clean", "amount": -0.1}),
+            StatusCode::BAD_REQUEST,
+        ),
         (json!({"preset_id": "no_such"}), StatusCode::NOT_FOUND),
         (json!({"amount": 1}), StatusCode::UNPROCESSABLE_ENTITY),
     ] {

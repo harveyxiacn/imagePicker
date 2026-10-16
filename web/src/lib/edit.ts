@@ -527,6 +527,12 @@ function scaleAdjust(a: Adjust, k: number): Adjust {
     const w = (p: Point | undefined): Point => [p?.[0] ?? 0, clamp((p?.[1] ?? 0) * k, 0, 1)]
     out.grading = { shadows: w(g.shadows), midtones: w(g.midtones), highlights: w(g.highlights), balance: clamp((g.balance ?? 0) * k, -100, 100) }
   }
+  if (k === 0) {
+    // 0 % = no look at all (a scaled curve would be a multi-point identity that is not dropped)
+    delete out.curve
+    delete out.hsl
+    delete out.grading
+  }
   return out
 }
 

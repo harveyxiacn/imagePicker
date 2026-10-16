@@ -39,12 +39,13 @@ pub(crate) fn downscale(src: &RgbImage, edge: u32) -> RgbImage {
             for y in oy * f..((oy + 1) * f).min(src.height) {
                 for x in ox * f..((ox + 1) * f).min(src.width) {
                     let i = ((y * src.width + x) * 3) as usize;
-                    for k in 0..3 {
-                        acc[k] += src.data[i + k] as u32;
+                    for (a, v) in acc.iter_mut().zip(&src.data[i..i + 3]) {
+                        *a += *v as u32;
                     }
                 }
             }
-            let n = (((oy + 1) * f).min(src.height) - oy * f) * (((ox + 1) * f).min(src.width) - ox * f);
+            let n = (((oy + 1) * f).min(src.height) - oy * f)
+                * (((ox + 1) * f).min(src.width) - ox * f);
             for a in acc {
                 data.push(((a + n / 2) / n.max(1)) as u8);
             }
@@ -233,11 +234,15 @@ fn adjust_is_neutral(a: &Adjust) -> bool {
     });
     nums.iter().all(|v| *v == 0.0)
         && curve_id
-        && a.hsl.values().all(|h| h.h == 0.0 && h.s == 0.0 && h.l == 0.0)
-        && a
-            .grading
-            .as_ref()
-            .is_none_or(|g| g.shadows[1] == 0.0 && g.midtones[1] == 0.0 && g.highlights[1] == 0.0 && g.balance == 0.0)
+        && a.hsl
+            .values()
+            .all(|h| h.h == 0.0 && h.s == 0.0 && h.l == 0.0)
+        && a.grading.as_ref().is_none_or(|g| {
+            g.shadows[1] == 0.0
+                && g.midtones[1] == 0.0
+                && g.highlights[1] == 0.0
+                && g.balance == 0.0
+        })
 }
 
 /// Scale a preset's deltas by `amount` (0 ..= [`PRESET_AMOUNT_MAX`]): every slider, curve
@@ -263,11 +268,21 @@ pub fn scale_preset_stack(stack: &EditStack, amount: f32) -> EditStack {
             }
             Op::Local(l) => {
                 let amount = (l.amount * k).clamp(0.0, 1.0);
-                (amount > 0.0).then(|| Op::Local(LocalAdjust { amount, ..l.clone() }))
+                (amount > 0.0).then(|| {
+                    Op::Local(LocalAdjust {
+                        amount,
+                        ..l.clone()
+                    })
+                })
             }
             Op::Lut(l) => {
                 let amount = (l.amount * k).clamp(0.0, 1.0);
-                (amount > 0.0).then(|| Op::Lut(Lut { amount, ..l.clone() }))
+                (amount > 0.0).then(|| {
+                    Op::Lut(Lut {
+                        amount,
+                        ..l.clone()
+                    })
+                })
             }
             Op::OutputSharpen(s) => {
                 let amount = (s.amount * k).clamp(0.0, 100.0);
@@ -434,7 +449,8 @@ pub(crate) fn resolve_spec(
     let before = measure_tone(&img, faces);
     let look = scale_preset_stack(&spec.look, a);
     let t = &spec.tone;
-    let valid = img.width > 0 && img.height > 0 && img.data.len() >= (img.width * img.height * 3) as usize;
+    let valid =
+        img.width > 0 && img.height > 0 && img.data.len() >= (img.width * img.height * 3) as usize;
     if a == 0.0 || !valid {
         let stack = tidy_stack(look, src);
         return PresetResolution {
@@ -542,12 +558,18 @@ mod tests {
 
     #[test]
     fn source_round_trips() {
-        assert_eq!(preset_source("japanese_clean", 0.8), "preset:japanese_clean;amount=80");
+        assert_eq!(
+            preset_source("japanese_clean", 0.8),
+            "preset:japanese_clean;amount=80"
+        );
         assert_eq!(
             parse_preset_source("preset:japanese_clean;amount=80"),
             Some(("japanese_clean".into(), 0.8))
         );
-        assert_eq!(parse_preset_source("preset:user_3"), Some(("user_3".into(), 1.0)));
+        assert_eq!(
+            parse_preset_source("preset:user_3"),
+            Some(("user_3".into(), 1.0))
+        );
         assert_eq!(parse_preset_source("preset"), None);
         assert_eq!(parse_preset_source("ai_auto@1"), None);
     }
@@ -556,8 +578,16 @@ mod tests {
     fn downscale_keeps_mean_and_bounds_size() {
         let img = crate::testutil::scene(1000, 600, 3);
         let d = downscale(&img, 256);
-        assert!(d.width <= 256 && d.height <= 256 && d.width > 100, "{}x{}", d.width, d.height);
-        let (a, b) = (crate::testutil::mean_rgb(&img), crate::testutil::mean_rgb(&d));
+        assert!(
+            d.width <= 256 && d.height <= 256 && d.width > 100,
+            "{}x{}",
+            d.width,
+            d.height
+        );
+        let (a, b) = (
+            crate::testutil::mean_rgb(&img),
+            crate::testutil::mean_rgb(&d),
+        );
         for k in 0..3 {
             assert!((a[k] - b[k]).abs() < 2.0, "{a:?} {b:?}");
         }
@@ -575,5 +605,51 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn protection_engages_when_the_look_would_blow_highlights() {
+        // An aggressive look on a bright scene: without protection it clips a lot.
+        let spec = PresetSpec {
+            id: "test_hot",
+            look: EditStack {
+                version: 1,
+                ops: vec![Op::Global(Adjust {
+                    whites: 60.0,
+                    contrast: 30.0,
+                    curve: Some(Curves {
+                        rgb: vec![[0.0, 0.0], [0.6, 0.75], [1.0, 1.0]],
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })],
+            },
+            tone: ToneIntent {
+                mid: 0.9,
+                pull_up: 1.0,
+                pull_down: 1.0,
+                ev: (-1.0, 2.0),
+                max_new_clip: 0.005,
+                face_max: 0.85,
+            },
+        };
+        let img = crate::testutil::tint(&crate::testutil::scene(320, 220, 5), [1.2, 1.2, 1.2]);
+        let ctx = PresetContext::default();
+        let r = resolve_spec(&spec, &img, &ctx, 1.0);
+        let unprotected = measure_tone(
+            &render_small(
+                &downscale(&img, MEASURE_EDGE),
+                &with_tone(&spec.look, 0.0, 0.0),
+            )
+            .unwrap(),
+            &[],
+        );
+        assert!(
+            unprotected.clipped - r.before.clipped > 0.005,
+            "test look should clip without protection: {unprotected:?}"
+        );
+        assert!(r.protection > 0.0, "{r:?}");
+        assert!(r.satisfied, "{r:?}");
+        assert!(r.after.clipped - r.before.clipped <= 0.005 + 1e-6, "{r:?}");
     }
 }
