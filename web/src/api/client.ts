@@ -1,4 +1,6 @@
 import type {
+  HairBody,
+  HairDonors,
   CatalogBackup,
   CatalogStatus,
   Device,
@@ -356,6 +358,8 @@ export const api = {
   bystanders: (id: number) => request<BystandersResponse>('GET', `/photos/${id}/bystanders`),
   inpaint: (id: number, body: InpaintBody) => request<{ task_id: string }>('POST', `/photos/${id}/inpaint`, body),
   enhance: (id: number, body: EnhanceBody) => request<{ task_id: string }>('POST', `/photos/${id}/enhance`, body),
+  hairDonors: (id: number, faceId: number) => request<HairDonors>('GET', `/photos/${id}/hair/donors?face_id=${faceId}`),
+  hair: (id: number, body: HairBody) => request<{ task_id: string }>('POST', `/photos/${id}/hair`, body),
   // ---- M6 ----
   assistantStatus: () => request<AssistantStatus>('GET', '/assistant/status'),
   assistantPlan: (body: { session_id: number; message: string; context: AssistantContext; engine?: 'auto' | 'rules' | 'llm' }) =>

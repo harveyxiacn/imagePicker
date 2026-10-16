@@ -290,6 +290,17 @@ export function useBystanders(photoId: number | undefined) {
   })
 }
 
+/** Hair donors of a face (same person, pose-gated, ranked by hair quality). Fetched on demand: ranking runs the AI worker. */
+export function useHairDonors(photoId: number, faceId: number | undefined, enabled: boolean) {
+  const ok = useNotGuest()
+  return useQuery({
+    queryKey: qk.hairDonors(photoId, faceId ?? -1),
+    queryFn: () => api.hairDonors(photoId, faceId!),
+    enabled: ok && enabled && faceId !== undefined,
+    staleTime: 60_000,
+  })
+}
+
 /** Best Take plan of a burst (M5): base photo + per-person candidates. */
 export function useBestTakePlan(burstId: number | null) {
   const ok = useNotGuest()

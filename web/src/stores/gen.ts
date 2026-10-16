@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import type { BestTakeResult, EditStack } from '@/api/types'
 
-export type GenKind = 'besttake' | 'inpaint' | 'enhance'
-export const GEN_KINDS: readonly string[] = ['besttake', 'inpaint', 'enhance']
+export type GenKind = 'besttake' | 'inpaint' | 'enhance' | 'hair'
+export const GEN_KINDS: readonly string[] = ['besttake', 'inpaint', 'enhance', 'hair']
 export const isGenKind = (k: string): k is GenKind => GEN_KINDS.includes(k)
 
 /** A running generative task (best take / inpaint / enhance) and what is needed to turn its result into ONE undo step. */
