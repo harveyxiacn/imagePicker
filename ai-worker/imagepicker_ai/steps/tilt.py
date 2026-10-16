@@ -85,8 +85,10 @@ def _accumulate(
         r = np.floor(rho).astype(np.int64)
         f = rho - r
         base = kk * n_rho + r
-        acc += np.bincount(base, wv * (1.0 - f), minlength=acc.size)
-        acc += np.bincount(base + 1, wv * f, minlength=acc.size)
+        # only the span this pass touches: the same per-bin sums as full-length bincounts
+        lo, hi = int(base.min()), int(base.max()) + 2
+        acc[lo:hi] += np.bincount(base - lo, wv * (1.0 - f), minlength=hi - lo)
+        acc[lo:hi] += np.bincount(base + 1 - lo, wv * f, minlength=hi - lo)
     return acc.reshape(_K, n_rho)
 
 
@@ -114,24 +116,28 @@ def line_profiles(gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     # 1/16 steps: equal magnitudes on both sides of a pixel-aligned edge stay equal whatever the
     # float rounding, so the thinning keeps the same pixel here and in the Rust port
     mag = np.round(np.sqrt(gx * gx + gy * gy) * MAG_STEPS) / MAG_STEPS
-    ax, ay = np.abs(gx), np.abs(gy)
     t = math.tan(math.radians(TILT_MAX_DEG + GATE_DEG))
     strong = mag > EDGE_LO
     strong[:MARGIN] = strong[-MARGIN:] = False
     strong[:, :MARGIN] = strong[:, -MARGIN:] = False
-    mp = np.pad(mag, 1)
-    # non-maximum suppression across the edge: up/down for H, left/right for V
-    hfam = strong & (ax <= t * ay) & (mag >= mp[:-2, 1:-1]) & (mag > mp[2:, 1:-1])
-    vfam = strong & (ay <= t * ax) & (mag >= mp[1:-1, :-2]) & (mag > mp[1:-1, 2:])
+    # family gate and non-maximum suppression across the edge (up/down for H, left/right for V),
+    # evaluated on the strong pixels only: the margin keeps the neighbours inside the image, and
+    # the pixels stay in row-major order (as np.nonzero of full-image masks), so every sum below
+    # adds the same numbers in the same order
+    ys0, xs0 = np.nonzero(strong)
+    m0, gx0, gy0 = mag[ys0, xs0], gx[ys0, xs0], gy[ys0, xs0]
+    ax, ay = np.abs(gx0), np.abs(gy0)
+    hsel = (ax <= t * ay) & (m0 >= mag[ys0 - 1, xs0]) & (m0 > mag[ys0 + 1, xs0])
+    vsel = (ay <= t * ax) & (m0 >= mag[ys0, xs0 - 1]) & (m0 > mag[ys0, xs0 + 1])
     line_min = LINE_MIN_FRAC * max(w, h)
     r0 = math.ceil(math.hypot(w, h) / 2) + 2
     n_rho = 2 * r0 + 2
     cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
-    for i, (fam, vertical) in enumerate(((hfam, False), (vfam, True))):
-        ys, xs = np.nonzero(fam)
-        gxs, gys = gx[ys, xs], gy[ys, xs]
+    for i, (sel, vertical) in enumerate(((hsel, False), (vsel, True))):
+        ys, xs = ys0[sel], xs0[sel]
+        gxs, gys = gx0[sel], gy0[sel]
         delta = np.degrees(np.arctan(gys / gxs if vertical else -gxs / gys))
-        wgt = np.clip((mag[ys, xs] - EDGE_LO) / (EDGE_HI - EDGE_LO), 0.0, 1.0)
+        wgt = np.clip((m0[sel] - EDGE_LO) / (EDGE_HI - EDGE_LO), 0.0, 1.0)
         acc = _accumulate(xs - cx, ys - cy, delta, wgt, vertical, n_rho, r0)
         prof[i] = _line_profile(acc, line_min)
     return prof[0], prof[1]
