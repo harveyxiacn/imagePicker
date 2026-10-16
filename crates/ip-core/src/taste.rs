@@ -60,6 +60,8 @@ const LAMBDAS: [f32; 3] = [0.3, 0.03, 0.003];
 /// Rows per gradient chunk; the chunking (not the thread count) fixes the summation order.
 const CHUNK: usize = 256;
 const PAR_MIN_ROWS: usize = 4 * CHUNK;
+/// Bursts rescored per database call by `rescore_everything` (~1-2k photos).
+const RESCORE_BURSTS_PER_CALL: usize = 300;
 
 /// Interpretable features, in vector order (the issue bits follow [`Issue::ALL`]).
 pub const NAMED: [&str; 21] = [
@@ -277,8 +279,13 @@ impl Model {
 /// Blends the user score into one burst's base ranking and recomputes ranks and stars.
 pub fn fuse(mut ranked: Vec<Ranked>, user: &HashMap<i64, f64>, alpha: f64) -> Vec<Ranked> {
     for r in &mut ranked {
-        let base = r.base_q;
-        let u = user.get(&r.photo_id).copied().unwrap_or(base);
+        let base = if r.base_q.is_finite() { r.base_q } else { 0.0 };
+        let u = user
+            .get(&r.photo_id)
+            .copied()
+            .filter(|u| u.is_finite())
+            .unwrap_or(base);
+        let alpha = if alpha.is_finite() { alpha } else { 0.0 };
         let fused = ((1.0 - alpha) * base + alpha * u).clamp(0.0, 1.0);
         let delta = fused - base;
         r.q = fused;
@@ -292,8 +299,7 @@ pub fn fuse(mut ranked: Vec<Ranked>, user: &HashMap<i64, f64>, alpha: f64) -> Ve
         }
     }
     ranked.sort_by(|a, b| {
-        b.q.partial_cmp(&a.q)
-            .unwrap()
+        b.q.total_cmp(&a.q)
             .then(a.rank.cmp(&b.rank))
             .then(a.photo_id.cmp(&b.photo_id))
     });
@@ -323,8 +329,12 @@ pub struct Sample {
     pub feat: PhotoFeat,
     pub issues: i64,
     pub emb: Option<Vec<f32>>,
-    /// The generic score (`base_score`, i.e. before personalisation): the baseline.
-    pub base: f64,
+    /// The generic score (`base_score`, never a taste-blended `ai_score`): the baseline.
+    /// `None` = never scored; such photos are left out of the baseline numbers.
+    pub base: Option<f64>,
+    /// Cross-validation group: the burst, else the duplicate group, else the photo itself, so
+    /// near-identical frames never end up on both sides of a fold.
+    pub group: i64,
 }
 
 impl Sample {
@@ -334,6 +344,15 @@ impl Sample {
             issues: self.issues,
             emb: self.emb.as_deref(),
         }
+    }
+}
+
+/// Cross-validation group key of a photo (burst, else duplicate group, else the photo).
+pub fn group_key(photo_id: i64, burst: Option<i64>, dup_group: Option<i64>) -> i64 {
+    match (burst, dup_group) {
+        (Some(b), _) => b.wrapping_mul(4).wrapping_add(1),
+        (None, Some(d)) => d.wrapping_mul(4).wrapping_add(2),
+        (None, None) => photo_id.wrapping_mul(4).wrapping_add(3),
     }
 }
 
@@ -558,13 +577,13 @@ fn most_common_dim(samples: &[Sample]) -> usize {
         .unwrap_or(0)
 }
 
-/// Column means / standard deviations ignoring missing values.
-fn column_stats(raws: &[Vec<f32>]) -> (Vec<f32>, Vec<f32>) {
-    let d = raws.first().map(Vec::len).unwrap_or(0);
+/// Column means / standard deviations of `rows` ignoring missing values.
+fn column_stats(rows: &[&Vec<f32>]) -> (Vec<f32>, Vec<f32>) {
+    let d = rows.first().map(|r| r.len()).unwrap_or(0);
     let mut mean = vec![0.0f32; d];
     let mut std = vec![1.0f32; d];
     for (j, (mj, sj)) in mean.iter_mut().zip(std.iter_mut()).enumerate() {
-        let vals: Vec<f64> = raws
+        let vals: Vec<f64> = rows
             .iter()
             .map(|r| r[j])
             .filter(|v| !v.is_nan())
@@ -583,6 +602,17 @@ fn column_stats(raws: &[Vec<f32>]) -> (Vec<f32>, Vec<f32>) {
         };
     }
     (mean, std)
+}
+
+/// Design matrix of `rows` standardised with `mean` / `std`, plus the bias column.
+fn design(rows: &[&Vec<f32>], mean: &[f32], std: &[f32]) -> Mat {
+    let d = mean.len() + 1;
+    let mut x = Vec::with_capacity(rows.len() * d);
+    for r in rows {
+        x.extend(standardise(r, mean, std));
+        x.push(1.0);
+    }
+    Mat { d, x }
 }
 
 /// Strongest interpretable weights as `{key: likes|dislikes, params: {feature, strength}}`.
@@ -606,7 +636,8 @@ fn traits_of(w: &[f32]) -> Vec<Value> {
 }
 
 /// Cold-start gate, cross-validation against the baseline and (when good enough) the final
-/// fit. Pure and deterministic apart from `train_ms`.
+/// fit. Folds are grouped by burst / duplicate group and the standardisation is fitted inside
+/// each fold. Pure and deterministic apart from `train_ms`.
 pub fn train(data: &TrainData) -> Outcome {
     let t0 = Instant::now();
     let mut out = Outcome {
@@ -622,20 +653,10 @@ pub fn train(data: &TrainData) -> Outcome {
         return out;
     }
     let s = &data.samples;
+    let y = &data.y;
     let dim = most_common_dim(s);
     let raws: Vec<Vec<f32>> = s.iter().map(|x| raw_features(&x.input(), dim)).collect();
-    let (mean, std) = column_stats(&raws);
-    let d = N_FIXED + dim + 1;
-    let mut x = Vec::with_capacity(s.len() * d);
-    for r in &raws {
-        x.extend(standardise(r, &mean, &std));
-        x.push(1.0);
-    }
-    drop(raws);
-    let m = Mat { d, x };
-    let y = &data.y;
-    let base: Vec<f64> = s.iter().map(|x| x.base).collect();
-    let fold: Vec<u64> = s.iter().map(|x| mix(x.photo_id) % FOLDS).collect();
+    let fold: Vec<u64> = s.iter().map(|x| mix(x.group) % FOLDS).collect();
 
     // cross-validation on (a subset of) the samples
     let items: Vec<(i64, bool)> = s.iter().zip(y).map(|(x, c)| (x.photo_id, *c)).collect();
@@ -645,26 +666,50 @@ pub fn train(data: &TrainData) -> Outcome {
         .map(|(id, _)| row_of[id])
         .collect();
     let y_eval: Vec<bool> = eval.iter().map(|&i| y[i]).collect();
-    let mut best: Option<(f64, f32, Vec<f64>)> = None;
-    for lambda in LAMBDAS {
-        let mut oof = vec![0.0f64; eval.len()];
-        for f in 0..FOLDS {
-            let train_idx: Vec<usize> = eval.iter().copied().filter(|&i| fold[i] != f).collect();
-            let w = fit(&m, &train_idx, y, lambda);
+    let eval_rows: Vec<&Vec<f32>> = eval.iter().map(|&i| &raws[i]).collect();
+    let mut oof = vec![vec![0.0f64; eval.len()]; LAMBDAS.len()];
+    for f in 0..FOLDS {
+        let train_local: Vec<usize> = (0..eval.len()).filter(|&k| fold[eval[k]] != f).collect();
+        if train_local.is_empty() {
+            continue;
+        }
+        let fit_rows: Vec<&Vec<f32>> = train_local.iter().map(|&k| eval_rows[k]).collect();
+        let (mean, std) = column_stats(&fit_rows);
+        let m = design(&eval_rows, &mean, &std);
+        for (l, lambda) in LAMBDAS.iter().enumerate() {
+            let w = fit(&m, &train_local, &y_eval, *lambda);
             for (k, &i) in eval.iter().enumerate() {
                 if fold[i] == f {
-                    oof[k] = dot(&w, m.row(i)) as f64;
+                    oof[l][k] = dot(&w, m.row(k)) as f64;
                 }
             }
         }
-        let a = auc(&oof, &y_eval).unwrap_or(0.5);
-        if best.as_ref().is_none_or(|b| a > b.0) {
-            best = Some((a, lambda, oof));
+    }
+    let mut best = 0;
+    let mut best_auc = f64::NEG_INFINITY;
+    for (l, scores) in oof.iter().enumerate() {
+        let a = auc(scores, &y_eval).unwrap_or(0.5);
+        if a > best_auc {
+            best_auc = a;
+            best = l;
         }
     }
-    let (model_auc, lambda, oof) = best.expect("LAMBDAS is not empty");
-    let base_eval: Vec<f64> = eval.iter().map(|&i| base[i]).collect();
-    let base_auc = auc(&base_eval, &y_eval).unwrap_or(0.5);
+    let (model_auc, lambda) = (best_auc, LAMBDAS[best]);
+    // the baseline only where a generic score exists
+    let with_base: Vec<usize> = (0..eval.len())
+        .filter(|&k| s[eval[k]].base.is_some())
+        .collect();
+    let base_scores: Vec<f64> = with_base
+        .iter()
+        .map(|&k| s[eval[k]].base.unwrap_or(0.0))
+        .collect();
+    let base_y: Vec<bool> = with_base.iter().map(|&k| y_eval[k]).collect();
+    let base_auc = auc(&base_scores, &base_y).unwrap_or(0.5);
+    let base_acc = if base_scores.is_empty() {
+        0.5
+    } else {
+        rank_accuracy(&base_scores, &base_y)
+    };
     let ep = y_eval.iter().filter(|v| **v).count();
     let en = y_eval.len() - ep;
     let margin = (0.3 / (ep.min(en).max(1) as f64).sqrt()).max(0.02);
@@ -672,8 +717,8 @@ pub fn train(data: &TrainData) -> Outcome {
     let mut metrics = Metrics {
         auc: r4(model_auc),
         base_auc: r4(base_auc),
-        accuracy: r4(rank_accuracy(&oof, &y_eval)),
-        base_accuracy: r4(rank_accuracy(&base_eval, &y_eval)),
+        accuracy: r4(rank_accuracy(&oof[best], &y_eval)),
+        base_accuracy: r4(base_acc),
         margin: r4(margin),
         eval_positives: ep,
         eval_negatives: en,
@@ -684,16 +729,25 @@ pub fn train(data: &TrainData) -> Outcome {
         train_ms: 0,
     };
     if model_auc >= MIN_AUC && model_auc - base_auc >= margin {
+        let rows: Vec<&Vec<f32>> = raws.iter().collect();
+        let (mean, std) = column_stats(&rows);
+        let m = design(&rows, &mean, &std);
+        drop(rows);
+        let d = m.d;
         let all: Vec<usize> = (0..s.len()).collect();
         let w = fit(&m, &all, y, lambda);
         let logits: Vec<f64> = all.iter().map(|&i| dot(&w, m.row(i)) as f64).collect();
         let stat = |v: &[f64]| {
+            if v.is_empty() {
+                return (0.5, 0.15);
+            }
             let mu = v.iter().sum::<f64>() / v.len() as f64;
             let sd = (v.iter().map(|e| (e - mu).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
             (mu, sd)
         };
         let (s_mu, s_sd) = stat(&logits);
-        let (q_mu, q_sd) = stat(&base);
+        let bases: Vec<f64> = s.iter().filter_map(|x| x.base).collect();
+        let (q_mu, q_sd) = stat(&bases);
         out.traits = traits_of(&w);
         metrics.fit_photos = s.len();
         out.model = Some(Model {
@@ -730,10 +784,13 @@ pub fn class_of(rating: Option<f64>, flag: Option<f64>) -> Option<bool> {
 
 /// `(photo id, positive?)` of every analysed photo with an explicit user decision, by id.
 pub fn labelled(conn: &Connection) -> Result<Vec<(i64, bool)>> {
-    let mut st = conn.prepare(
-        "SELECT l.photo_id, l.kind, l.value FROM preference_label l
-         WHERE l.source='patch' AND EXISTS (SELECT 1 FROM analysis a WHERE a.photo_id=l.photo_id)",
-    )?;
+    // A label only counts while it still agrees with the photo: a rating or flag changed since
+    // (assistant, "accept AI", XMP sync, Lightroom, a pair-file edit) silences it, and an undo
+    // that restores the value brings it back.
+    let mut st = conn.prepare(&format!(
+        "SELECT l.photo_id, l.kind, l.value FROM preference_label l JOIN photo p ON p.id=l.photo_id
+         WHERE {AGREES} AND EXISTS (SELECT 1 FROM analysis a WHERE a.photo_id=l.photo_id)"
+    ))?;
     let mut per: BTreeMap<i64, (Option<f64>, Option<f64>)> = BTreeMap::new();
     let rows = st.query_map([], |r| {
         Ok((
@@ -757,6 +814,11 @@ pub fn labelled(conn: &Connection) -> Result<Vec<(i64, bool)>> {
         .collect())
 }
 
+/// SQL condition (`l` = preference_label, `p` = photo): a user label that still matches the
+/// photo's current rating / flag.
+const AGREES: &str = "l.source='patch' AND ((l.kind='rating' AND p.user_rating = l.value)
+      OR (l.kind='flag' AND COALESCE(p.flag, 0) = l.value))";
+
 /// Analysed photos as model inputs, in the order of `ids` (unanalysed ids are skipped).
 pub fn load_samples(conn: &Connection, ids: &[i64]) -> Result<Vec<Sample>> {
     let mut by_id: HashMap<i64, Sample> = HashMap::new();
@@ -772,7 +834,8 @@ pub fn load_samples(conn: &Connection, ids: &[i64]) -> Result<Vec<Sample>> {
         let mut st = conn.prepare(&format!(
             "SELECT p.id, p.scene_type, a.sharpness, a.exposure, a.noise, a.iqa, a.aesthetic,
                     a.clipped_highlights, a.crushed_shadows, a.mean_luminance, a.embedding,
-                    COALESCE(p.base_score, p.ai_score), COALESCE(p.issues, 0), a.composition
+                    p.base_score, COALESCE(p.issues, 0), p.burst_id, p.dup_group_id,
+                    a.tilt_deg, a.tilt_confidence, a.saliency
              FROM photo p JOIN analysis a ON a.photo_id=p.id WHERE p.id IN ({ph})"
         ))?;
         let rows = st
@@ -790,21 +853,29 @@ pub fn load_samples(conn: &Connection, ids: &[i64]) -> Result<Vec<Sample>> {
                         clipped_highlights: r.get(7)?,
                         crushed_shadows: r.get(8)?,
                         mean_luminance: r.get(9)?,
-                        composition: r.get(13)?,
+                        tilt_deg: r.get(15)?,
+                        tilt_confidence: r.get(16)?,
+                        saliency: r
+                            .get::<_, Option<String>>(17)?
+                            .and_then(|s| serde_json::from_str(&s).ok()),
+                        composition: None,
                         faces: Vec::new(),
-                        ..Default::default()
                     },
                     emb: r
                         .get::<_, Option<Vec<u8>>>(10)?
                         .map(|b| decode_f16(&b))
                         .filter(|e| !e.is_empty()),
-                    base: r.get::<_, Option<f64>>(11)?.unwrap_or(0.5),
+                    base: r.get(11)?,
                     issues: r.get(12)?,
+                    group: group_key(r.get(0)?, r.get(13)?, r.get(14)?),
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         for mut s in rows {
             s.feat.faces = faces.remove(&s.photo_id).unwrap_or_default();
+            // exactly as `rescore_bursts` computes it (no train/serve skew)
+            s.feat.composition =
+                crate::analysis::composition::composition_score(&s.feat).map(|c| c.score);
             by_id.insert(s.photo_id, s);
         }
     }
@@ -850,16 +921,13 @@ pub fn store_outcome(conn: &Connection, out: &Outcome, consumed: i64) -> Result<
     ensure_state_row(conn)?;
     let active = out.model.is_some();
     // α grows with the number of user labels, as in 1.0
-    let labels: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM preference_label WHERE source='patch'",
-        [],
-        |r| r.get(0),
-    )?;
+    let labels = count_labels(conn)?;
     conn.execute(
         "UPDATE taste_state SET model=?1, active=?2, alpha=?3, holdout_accuracy=?4,
            base_accuracy=?5, metrics=?6, traits=?7, positives=?8, negatives=?9,
            pending_labels=MAX(0, pending_labels-?10), labels_at_train=?11, feature_version=?12,
-           model_version=model_version+?13, pairs=0, trained_at=?14
+           model_version=model_version+?13, pairs=0, trained_at=?14,
+           rescore_pending=CASE WHEN active=1 OR ?2=1 THEN 1 ELSE rescore_pending END
          WHERE id=1",
         params![
             out.model
@@ -915,14 +983,30 @@ pub fn load_active(conn: &Connection) -> Result<Option<Active>> {
 
 // ------------------------------------------------------------------ labels
 
-/// Who made a rating / flag change.
+/// Who made a rating / flag change (`PATCH /api/photos` `source`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LabelSource {
-    /// The user, by hand (UI / API `PATCH /api/photos`): a training label.
+    /// The user, by hand (`source` absent or `"user"`): a training label.
     User,
-    /// The app (assistant actions): never a label; an older label of the photo is dropped
-    /// because the user's decision was overwritten.
+    /// The app (assistant actions, the client's redo of one): never a label. The user's
+    /// label of the photo stays but is silenced while it disagrees with the photo.
     Auto,
+    /// The client undoing an app decision (`"undo"`): no new label; a silenced user label
+    /// that matches the restored value counts again.
+    Undo,
+}
+
+impl LabelSource {
+    pub fn parse(s: Option<&str>) -> Result<Self> {
+        match s {
+            None | Some("user") => Ok(Self::User),
+            Some("auto") => Ok(Self::Auto),
+            Some("undo") => Ok(Self::Undo),
+            Some(x) => Err(CoreError::bad_request(format!(
+                "source must be user|auto|undo, not {x:?}"
+            ))),
+        }
+    }
 }
 
 fn upsert(conn: &Connection, photo_id: i64, kind: &str, value: f64) -> Result<usize> {
@@ -930,7 +1014,8 @@ fn upsert(conn: &Connection, photo_id: i64, kind: &str, value: f64) -> Result<us
         .prepare_cached(
             "INSERT INTO preference_label(photo_id, kind, value, source, created_at)
              SELECT ?1,?2,?3,'patch',?4 WHERE EXISTS (SELECT 1 FROM photo WHERE id=?1)
-             ON CONFLICT(photo_id, kind) DO UPDATE SET value=?3, source='patch', created_at=?4
+             ON CONFLICT(photo_id, kind) DO UPDATE SET value=?3, source='patch', created_at=?4,
+               legacy=0
                WHERE value != ?3 OR source != 'patch'",
         )?
         .execute(params![photo_id, kind, value, now_ms()])?)
@@ -942,51 +1027,114 @@ fn remove(conn: &Connection, photo_id: i64, kind: &str) -> Result<usize> {
         .execute(params![photo_id, kind])?)
 }
 
-/// Records the rating / flag of a patch. Returns how many user labels changed (0 for
-/// [`LabelSource::Auto`] and while learning is switched off: then old labels are only dropped).
-pub fn record_patch(conn: &Connection, req: &PatchRequest, source: LabelSource) -> Result<usize> {
+/// The user labels of `ids` that currently agree with their photo (`(photo id, kind)`).
+pub fn agreeing(
+    conn: &Connection,
+    ids: &[i64],
+) -> Result<std::collections::HashSet<(i64, String)>> {
+    let mut out = std::collections::HashSet::new();
+    for chunk in ids.chunks(500) {
+        let ph = vec!["?"; chunk.len()].join(",");
+        let mut st = conn.prepare(&format!(
+            "SELECT l.photo_id, l.kind FROM preference_label l JOIN photo p ON p.id=l.photo_id
+             WHERE l.photo_id IN ({ph}) AND {AGREES}"
+        ))?;
+        for row in st.query_map(params_from_iter(chunk.iter()), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })? {
+            out.insert(row?);
+        }
+    }
+    Ok(out)
+}
+
+/// Labels whose agreement changed between `before` and now (silenced or revived).
+fn flips(
+    conn: &Connection,
+    ids: &[i64],
+    before: &std::collections::HashSet<(i64, String)>,
+) -> Result<usize> {
+    let after = agreeing(conn, ids)?;
+    Ok(before.symmetric_difference(&after).count())
+}
+
+fn add_pending(conn: &Connection, n: usize) -> Result<()> {
+    if n > 0 {
+        ensure_state_row(conn)?;
+        conn.execute(
+            "UPDATE taste_state SET pending_labels=pending_labels+?1 WHERE id=1",
+            [n as i64],
+        )?;
+    }
+    Ok(())
+}
+
+/// Records the rating / flag of a patch (call after the photos were written; `before` =
+/// [`agreeing`] for `req.ids` before the write). The user's own changes become labels while
+/// learning is on (while it is off nothing new is recorded; clearing still removes); the
+/// app's changes and undos only silence or revive existing labels. Returns the number of
+/// label changes, which are also added to the pending count (retraining trigger).
+pub fn record_patch(
+    conn: &Connection,
+    req: &PatchRequest,
+    source: LabelSource,
+    before: &std::collections::HashSet<(i64, String)>,
+) -> Result<usize> {
     if req.user_rating.is_none() && req.flag.is_none() {
         return Ok(0);
     }
     // one transaction: a select-all patch used to commit once per photo
     let tx = conn.unchecked_transaction()?;
     let conn = &*tx;
-    let record = source == LabelSource::User && is_enabled(conn)?;
-    let mut changed = 0;
-    for id in &req.ids {
-        match req.user_rating {
-            Some(Some(r)) if r >= 1 && record => changed += upsert(conn, *id, "rating", r as f64)?,
-            Some(_) => changed += remove(conn, *id, "rating")?,
-            None => {}
+    let enabled = is_enabled(conn)?;
+    let changed = if source == LabelSource::User {
+        let mut changed = 0;
+        for id in &req.ids {
+            match req.user_rating {
+                Some(Some(r)) if r >= 1 => {
+                    if enabled {
+                        changed += upsert(conn, *id, "rating", r as f64)?
+                    }
+                }
+                Some(_) => changed += remove(conn, *id, "rating")?,
+                None => {}
+            }
+            match req.flag {
+                Some(f) if f != 0 => {
+                    if enabled {
+                        changed += upsert(conn, *id, "flag", f as f64)?
+                    }
+                }
+                Some(_) => changed += remove(conn, *id, "flag")?,
+                None => {}
+            }
         }
-        match req.flag {
-            Some(f) if f != 0 && record => changed += upsert(conn, *id, "flag", f as f64)?,
-            Some(_) => changed += remove(conn, *id, "flag")?,
-            None => {}
-        }
-    }
-    if record && changed > 0 {
-        ensure_state_row(conn)?;
-        conn.execute(
-            "UPDATE taste_state SET pending_labels=pending_labels+?1 WHERE id=1",
-            [changed as i64],
-        )?;
+        changed
+    } else {
+        flips(conn, &req.ids, before)?
+    };
+    if enabled {
+        add_pending(conn, changed)?;
     }
     tx.commit()?;
-    Ok(if record { changed } else { 0 })
+    Ok(if enabled { changed } else { 0 })
 }
 
-/// "Accept AI ratings" is the app's own decision: it is not a label, and the rating label the
-/// photo may have had no longer reflects the user's choice.
-pub fn record_accept(conn: &Connection, updates: &[PhotoUpdate]) -> Result<usize> {
-    let tx = conn.unchecked_transaction()?;
-    for u in updates {
-        if u.user_rating.is_some() {
-            remove(&tx, u.id, "rating")?;
-        }
+/// "Accept AI ratings" is the app's own decision: no label is recorded; a user rating label it
+/// overwrote is silenced (and counted as pending). `before` as for [`record_patch`].
+pub fn record_accept(
+    conn: &Connection,
+    updates: &[PhotoUpdate],
+    before: &std::collections::HashSet<(i64, String)>,
+) -> Result<usize> {
+    let ids: Vec<i64> = updates.iter().map(|u| u.id).collect();
+    let n = flips(conn, &ids, before)?;
+    if is_enabled(conn)? {
+        add_pending(conn, n)?;
+        Ok(n)
+    } else {
+        Ok(0)
     }
-    tx.commit()?;
-    Ok(0)
 }
 
 // ------------------------------------------------------------------ status
@@ -994,8 +1142,13 @@ pub fn record_accept(conn: &Connection, updates: &[PhotoUpdate]) -> Result<usize
 /// `GET /api/taste`.
 #[derive(Debug, Clone, Serialize)]
 pub struct TasteOut {
-    /// Explicit user labels (ratings and flags) recorded.
+    /// Explicit user labels (ratings and flags) that still agree with their photo.
     pub labels: i64,
+    /// Labels recorded before taste v2 (1.0 cannot tell the assistant's "reject the rest"
+    /// flags from the user's; the UI says so and offers Forget).
+    pub legacy_labels: i64,
+    /// A training is running (`POST /api/taste/train` answers 202; `taste.updated` follows).
+    pub training: bool,
     /// Analysed photos the user kept / rejected (3 stars and undecided photos don't count).
     pub positives: i64,
     pub negatives: i64,
@@ -1020,9 +1173,21 @@ pub struct TasteOut {
     pub updated_at: Option<i64>,
 }
 
+/// User labels that currently agree with their photo.
+fn count_labels(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM preference_label l JOIN photo p ON p.id=l.photo_id WHERE {AGREES}"
+        ),
+        [],
+        |r| r.get(0),
+    )?)
+}
+
 pub fn status(conn: &Connection) -> Result<TasteOut> {
-    let labels: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM preference_label WHERE source='patch'",
+    let labels = count_labels(conn)?;
+    let legacy_labels: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM preference_label WHERE source='patch' AND legacy=1",
         [],
         |r| r.get(0),
     )?;
@@ -1082,6 +1247,8 @@ pub fn status(conn: &Connection) -> Result<TasteOut> {
     };
     Ok(TasteOut {
         labels,
+        legacy_labels,
+        training: false,
         positives,
         negatives,
         min_per_class: min,
@@ -1128,7 +1295,7 @@ pub fn explain(conn: &Connection, photo_id: i64) -> Result<TasteExplain> {
     let mut out = TasteExplain {
         photo_id,
         taste_score: None,
-        base_score: sample.as_ref().map(|s| s.base),
+        base_score: sample.as_ref().and_then(|s| s.base),
         contributions: vec![],
     };
     if let (Some(a), Some(s)) = (load_active(conn)?, sample) {
@@ -1138,17 +1305,28 @@ pub fn explain(conn: &Connection, photo_id: i64) -> Result<TasteExplain> {
     Ok(out)
 }
 
+/// Oldest catalog schema `--eval` can read (analysis.saliency arrived in v15).
+pub const EVAL_MIN_SCHEMA: i64 = 15;
+
 /// Read-only evaluation of a catalog file (`imagepicker taste --eval`): the same gathering
-/// and cross-validation as a training, nothing is written.
+/// and cross-validation as a training. Nothing is written to the catalog; SQLite may still
+/// create the `-shm` / `-wal` side files of a WAL catalog next to it.
 pub fn evaluate_catalog(path: &std::path::Path) -> Result<Outcome> {
     let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if v < 6 {
+    let newest = crate::db::MIGRATIONS.len() as i64;
+    if v < EVAL_MIN_SCHEMA {
         return Err(CoreError::bad_request(format!(
-            "catalog schema v{v} has no preference labels (needs v6 or later)"
+            "catalog schema v{v} is too old to evaluate (needs v{EVAL_MIN_SCHEMA}..v{newest}; \
+             open it once with this version of the app to upgrade it)"
+        )));
+    }
+    if v > newest {
+        return Err(CoreError::bad_request(format!(
+            "catalog schema v{v} is newer than this build (v{newest}); use a newer imagepicker"
         )));
     }
     Ok(train(&gather(&conn)?))
@@ -1158,7 +1336,9 @@ pub fn evaluate_catalog(path: &std::path::Path) -> Result<Outcome> {
 
 impl Core {
     pub async fn taste(&self) -> Result<TasteOut> {
-        self.db.call(|c| status(c)).await
+        let mut out = self.db.call(|c| status(c)).await?;
+        out.training = self.taste_training.load(Ordering::SeqCst);
+        Ok(out)
     }
 
     pub async fn taste_explain(&self, photo_id: i64) -> Result<TasteExplain> {
@@ -1173,8 +1353,16 @@ impl Core {
         });
     }
 
-    /// Called after user labels were written: retrains in the background right away after
-    /// [`RETRAIN_EVERY`] new decisions, or after [`RETRAIN_IDLE_MIN`] once the user paused.
+    async fn emit_taste_now(&self) {
+        if let Ok(out) = self.taste().await {
+            self.emit_taste(&out);
+        }
+    }
+
+    /// Called after label changes: retrains in the background right away after
+    /// [`RETRAIN_EVERY`] new decisions, or after [`RETRAIN_IDLE_MIN`] once the user paused for
+    /// `taste_idle_ms` (re-read while waiting, so tests can shorten it). Also retries a
+    /// rescoring that failed earlier.
     pub(crate) fn taste_after_labels(self: &Arc<Self>, changed: usize) {
         if changed == 0 || tokio::runtime::Handle::try_current().is_err() {
             return;
@@ -1183,6 +1371,9 @@ impl Core {
         let weak = Arc::downgrade(self);
         tokio::spawn(async move {
             let Some(core) = weak.upgrade() else { return };
+            if let Err(e) = core.rescore_taste().await {
+                tracing::warn!(error = %e, "taste rescoring failed");
+            }
             let pending = core.taste_pending().await;
             if pending < RETRAIN_IDLE_MIN {
                 return;
@@ -1190,12 +1381,20 @@ impl Core {
             let min = if pending >= RETRAIN_EVERY {
                 RETRAIN_EVERY
             } else {
-                let idle = core.taste_idle_ms.load(Ordering::Relaxed);
                 drop(core);
-                tokio::time::sleep(Duration::from_millis(idle)).await;
-                let Some(c) = weak.upgrade() else { return };
-                if c.taste_seq.load(Ordering::SeqCst) != seq {
-                    return; // newer decisions: their task decides
+                let start = Instant::now();
+                loop {
+                    let Some(c) = weak.upgrade() else { return };
+                    if c.taste_seq.load(Ordering::SeqCst) != seq {
+                        return; // newer decisions: their task decides
+                    }
+                    let idle = Duration::from_millis(c.taste_idle_ms.load(Ordering::Relaxed));
+                    drop(c);
+                    let waited = start.elapsed();
+                    if waited >= idle {
+                        break;
+                    }
+                    tokio::time::sleep((idle - waited).min(Duration::from_millis(50))).await;
                 }
                 RETRAIN_IDLE_MIN
             };
@@ -1233,8 +1432,8 @@ impl Core {
         Ok(())
     }
 
-    /// `POST /api/taste/train` (and the CLI): trains now, rescoring every analysed photo when
-    /// the model in use changed, and broadcasts `taste.updated`. 400 while switched off.
+    /// Trains now and waits for it, rescoring included (CLI `--retrain`, tests). 400 while
+    /// switched off.
     pub async fn retrain_taste(self: &Arc<Self>) -> Result<TasteOut> {
         let _g = self.taste_lock.lock().await;
         if !self.db.call(|c| is_enabled(c)).await? {
@@ -1245,17 +1444,41 @@ impl Core {
         Ok(out)
     }
 
-    /// Gather on a database connection, fit on the blocking pool without holding one, store.
+    /// `POST /api/taste/train`: starts a training in the background (202); `taste.updated`
+    /// follows when it is done. 400 while switched off.
+    pub async fn start_taste_training(self: &Arc<Self>) -> Result<TasteOut> {
+        if !self.db.call(|c| is_enabled(c)).await? {
+            return Err(CoreError::bad_request("taste learning is switched off"));
+        }
+        self.taste_training.store(true, Ordering::SeqCst);
+        let core = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = core.retrain_taste().await {
+                tracing::warn!(error = %e, "taste retraining failed");
+                core.taste_training.store(false, Ordering::SeqCst);
+                core.emit_taste_now().await;
+            }
+        });
+        let mut out = self.taste().await?;
+        out.training = true;
+        Ok(out)
+    }
+
+    /// Gather on a database connection, fit on the blocking pool without holding one, store
+    /// unless the user switched off / reset in the meantime, then rescore.
     async fn retrain_locked(self: &Arc<Self>) -> Result<TasteOut> {
-        let (data, before_active, pending) = self
+        self.taste_training.store(true, Ordering::SeqCst);
+        let r = self.retrain_inner().await;
+        self.taste_training.store(false, Ordering::SeqCst);
+        r?;
+        self.taste().await
+    }
+
+    async fn retrain_inner(self: &Arc<Self>) -> Result<()> {
+        let gen = self.taste_gen.load(Ordering::SeqCst);
+        let (data, pending) = self
             .db
             .call(|c| {
-                let before: i64 = c
-                    .query_row("SELECT active FROM taste_state WHERE id=1", [], |r| {
-                        r.get(0)
-                    })
-                    .optional()?
-                    .unwrap_or(0);
                 let pending: i64 = c
                     .query_row(
                         "SELECT pending_labels FROM taste_state WHERE id=1",
@@ -1264,7 +1487,7 @@ impl Core {
                     )
                     .optional()?
                     .unwrap_or(0);
-                Ok((gather(c)?, before != 0, pending))
+                Ok((gather(c)?, pending))
             })
             .await?;
         let outcome = tokio::task::spawn_blocking(move || train(&data))
@@ -1279,24 +1502,88 @@ impl Core {
                 "taste trained"
             );
         }
-        let active = outcome.model.is_some();
-        self.db
-            .call(move |c| store_outcome(c, &outcome, pending))
-            .await?;
-        if before_active || active {
-            self.rescore_everything().await?;
+        let stored = {
+            let _s = self.taste_state_lock.lock().await;
+            if self.taste_gen.load(Ordering::SeqCst) != gen {
+                false // switched off or forgotten while fitting: drop the result
+            } else {
+                self.db
+                    .call(move |c| {
+                        if !is_enabled(c)? {
+                            return Ok(false);
+                        }
+                        store_outcome(c, &outcome, pending)?;
+                        Ok(true)
+                    })
+                    .await?
+            }
+        };
+        if stored {
+            self.rescore_taste().await?;
         }
-        self.taste().await
+        Ok(())
+    }
+
+    /// Runs a pending rescoring (`taste_state.rescore_pending`), one at a time. When it fails
+    /// the flag is set again, so the next label change or the next start retries it.
+    pub(crate) async fn rescore_taste(&self) -> Result<()> {
+        let _r = self.taste_rescore_lock.lock().await;
+        let due = self
+            .db
+            .call(|c| {
+                let due: i64 = c
+                    .query_row(
+                        "SELECT rescore_pending FROM taste_state WHERE id=1",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                if due != 0 {
+                    c.execute("UPDATE taste_state SET rescore_pending=0 WHERE id=1", [])?;
+                }
+                Ok(due != 0)
+            })
+            .await?;
+        if !due {
+            return Ok(());
+        }
+        if let Err(e) = self.rescore_everything().await {
+            let _ = self
+                .db
+                .call(|c| {
+                    c.execute("UPDATE taste_state SET rescore_pending=1 WHERE id=1", [])?;
+                    Ok(())
+                })
+                .await;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    fn spawn_taste_rescore(self: &Arc<Self>) {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
+        let weak = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let Some(core) = weak.upgrade() else { return };
+            if let Err(e) = core.rescore_taste().await {
+                tracing::warn!(error = %e, "taste rescoring failed");
+            }
+            core.emit_taste_now().await;
+        });
     }
 
     /// `PATCH /api/taste {"enabled"}`: switching off stops recording decisions and training
-    /// and removes the personalisation at once (labels and model are kept); switching on uses
-    /// the kept model again, or trains one in the background.
+    /// and removes the personalisation (labels and model are kept); switching on uses the
+    /// kept model again, or trains one in the background. Never waits for a running training
+    /// (its result is dropped); the rescoring runs in the background.
     pub async fn set_taste_enabled(self: &Arc<Self>, on: bool) -> Result<TasteOut> {
         let usable = {
-            let _g = self.taste_lock.lock().await;
-            let (was_used, usable) = self
-                .db
+            let _s = self.taste_state_lock.lock().await;
+            self.taste_gen.fetch_add(1, Ordering::SeqCst);
+            self.db
                 .call(move |c| {
                     let used = load_active(c)?.is_some();
                     ensure_state_row(c)?;
@@ -1304,14 +1591,15 @@ impl Core {
                     if !on {
                         c.execute("DELETE FROM taste_score", [])?;
                     }
-                    Ok((used, load_active(c)?.is_some()))
+                    let usable = load_active(c)?.is_some();
+                    if used != usable {
+                        c.execute("UPDATE taste_state SET rescore_pending=1 WHERE id=1", [])?;
+                    }
+                    Ok(usable)
                 })
-                .await?;
-            if was_used != usable {
-                self.rescore_everything().await?;
-            }
-            usable
+                .await?
         };
+        self.spawn_taste_rescore();
         if on && !usable && tokio::runtime::Handle::try_current().is_ok() {
             let weak = Arc::downgrade(self);
             tokio::spawn(async move {
@@ -1327,44 +1615,41 @@ impl Core {
     }
 
     /// `POST /api/taste/reset`: forgets every label, the model, its metrics and the cached
-    /// scores; AI scores go back to the base. `disable` also switches learning off (opt out).
+    /// scores; AI scores go back to the base (rescored in the background). `disable` also
+    /// switches learning off (opt out). Never waits for a running training.
     pub async fn reset_taste(self: &Arc<Self>, disable: bool) -> Result<()> {
-        let _g = self.taste_lock.lock().await;
-        let was_active = self
-            .db
-            .call(move |c| {
-                let before: i64 = c
-                    .query_row("SELECT active FROM taste_state WHERE id=1", [], |r| {
-                        r.get(0)
-                    })
-                    .optional()?
-                    .unwrap_or(0);
-                let tx = c.transaction()?;
-                tx.execute("DELETE FROM preference_label", [])?;
-                tx.execute("DELETE FROM taste_score", [])?;
-                tx.execute("INSERT OR IGNORE INTO taste_state(id) VALUES(1)", [])?;
-                tx.execute(
-                    "UPDATE taste_state SET model=NULL, active=0, alpha=0, holdout_accuracy=NULL,
-                       base_accuracy=NULL, metrics=NULL, traits=NULL, pairs=0, positives=0,
-                       negatives=0, pending_labels=0, labels_at_train=0, trained_at=NULL,
-                       enabled=CASE WHEN ?1 THEN 0 ELSE enabled END
-                     WHERE id=1",
-                    [disable],
-                )?;
-                tx.commit()?;
-                Ok(before != 0)
-            })
-            .await?;
-        if was_active {
-            self.rescore_everything().await?;
+        {
+            let _s = self.taste_state_lock.lock().await;
+            self.taste_gen.fetch_add(1, Ordering::SeqCst);
+            self.db
+                .call(move |c| {
+                    let tx = c.transaction()?;
+                    tx.execute("DELETE FROM preference_label", [])?;
+                    tx.execute("DELETE FROM taste_score", [])?;
+                    tx.execute("INSERT OR IGNORE INTO taste_state(id) VALUES(1)", [])?;
+                    tx.execute(
+                        "UPDATE taste_state SET model=NULL, alpha=0, holdout_accuracy=NULL,
+                           base_accuracy=NULL, metrics=NULL, traits=NULL, pairs=0, positives=0,
+                           negatives=0, pending_labels=0, labels_at_train=0, trained_at=NULL,
+                           rescore_pending=CASE WHEN active=1 THEN 1 ELSE rescore_pending END,
+                           active=0,
+                           enabled=CASE WHEN ?1 THEN 0 ELSE enabled END
+                         WHERE id=1",
+                        [disable],
+                    )?;
+                    tx.commit()?;
+                    Ok(())
+                })
+                .await?;
         }
+        self.spawn_taste_rescore();
         let out = self.taste().await?;
         self.emit_taste(&out);
         Ok(())
     }
 
-    /// At startup: a model of an older feature version (taste v1) is retrained once in the
-    /// background, so its fused scores are replaced (or reverted) without waiting for labels.
+    /// At startup: finishes a rescoring that did not complete, and retrains a model of an
+    /// older feature version (taste v1) once, so its fused scores are replaced (or reverted).
     pub(crate) fn spawn_taste_upgrade(self_: &Arc<Self>) {
         if tokio::runtime::Handle::try_current().is_err() {
             return;
@@ -1372,6 +1657,9 @@ impl Core {
         let weak = Arc::downgrade(self_);
         tokio::spawn(async move {
             let Some(core) = weak.upgrade() else { return };
+            if let Err(e) = core.rescore_taste().await {
+                tracing::warn!(error = %e, "taste rescoring failed");
+            }
             let stale = core
                 .db
                 .call(|c| {
@@ -1396,41 +1684,45 @@ impl Core {
     }
 
     /// Re-runs scoring for all bursts (picks up the current taste model and writes the taste
-    /// scores) and tells clients.
+    /// scores) and tells clients. One database call per chunk of bursts, so other requests are
+    /// served in between even on a 100k-photo catalog.
     async fn rescore_everything(&self) -> Result<()> {
-        let sessions = self
+        let bursts = self
             .db
             .call(|c| {
-                let mut st = c.prepare("SELECT id FROM burst")?;
-                let bursts = st
+                let mut st = c.prepare("SELECT id FROM burst ORDER BY id")?;
+                let v = st
                     .query_map([], |r| r.get::<_, i64>(0))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
-                drop(st);
-                let touched = store::rescore_bursts(c, &bursts)?;
-                let mut by_session: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-                for chunk in touched.chunks(500) {
-                    let ph = vec!["?"; chunk.len()].join(",");
-                    let mut st = c.prepare(&format!(
-                        "SELECT session_id, photo_id FROM session_photo WHERE photo_id IN ({ph})"
-                    ))?;
-                    let rows = st
-                        .query_map(params_from_iter(chunk.iter()), |r| {
-                            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
-                        })?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    for (s, p) in rows {
-                        by_session.entry(s).or_default().push(p);
-                    }
-                }
-                Ok(by_session)
+                Ok(v)
             })
             .await?;
-        for (session_id, ids) in sessions {
-            for chunk in ids.chunks(5000) {
-                self.events.emit(Event::AnalysisUpdated {
-                    session_id,
-                    ids: chunk.to_vec(),
-                });
+        for chunk in bursts.chunks(RESCORE_BURSTS_PER_CALL) {
+            let chunk = chunk.to_vec();
+            let sessions = self
+                .db
+                .call(move |c| {
+                    let touched = store::rescore_bursts(c, &chunk)?;
+                    let mut by_session: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
+                    for part in touched.chunks(500) {
+                        let ph = vec!["?"; part.len()].join(",");
+                        let mut st = c.prepare(&format!(
+                            "SELECT session_id, photo_id FROM session_photo WHERE photo_id IN ({ph})"
+                        ))?;
+                        let rows = st
+                            .query_map(params_from_iter(part.iter()), |r| {
+                                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+                            })?
+                            .collect::<rusqlite::Result<Vec<_>>>()?;
+                        for (s, p) in rows {
+                            by_session.entry(s).or_default().push(p);
+                        }
+                    }
+                    Ok(by_session)
+                })
+                .await?;
+            for (session_id, ids) in sessions {
+                self.events.emit(Event::AnalysisUpdated { session_id, ids });
             }
         }
         Ok(())
@@ -1478,7 +1770,8 @@ mod tests {
                 },
                 issues: if rng.next() < 0.1 { 2 } else { 0 },
                 emb: Some(emb),
-                base: aesthetic,
+                base: Some(aesthetic),
+                group: group_key(i as i64 + 1, None, None),
             });
             y.push(label(i, hidden, aesthetic));
         }
@@ -1600,6 +1893,86 @@ mod tests {
         let noise = synth(240, 8, 7, &|i, _, _| coin[i]);
         let out = train(&noise);
         assert!(out.model.is_none(), "{:?}", out.metrics);
+    }
+
+    #[test]
+    fn near_identical_frames_do_not_leak_across_folds() {
+        // 120 bursts of two identical frames; whether a burst is kept is a coin flip, so there is
+        // nothing to learn. Folds grouped by burst must not let the model "recognise" a frame's
+        // twin from the training side.
+        let mut rng = Lcg(9);
+        let mut samples = Vec::new();
+        let mut y = Vec::new();
+        for b in 0..120i64 {
+            let emb: Vec<f32> = (0..48).map(|_| rng.next() as f32 - 0.5).collect();
+            let keep = rng.next() > 0.5;
+            let aesthetic = rng.next();
+            for k in 0..2 {
+                let id = b * 2 + k + 1;
+                samples.push(Sample {
+                    photo_id: id,
+                    feat: PhotoFeat {
+                        photo_id: id,
+                        aesthetic: Some(aesthetic),
+                        ..Default::default()
+                    },
+                    issues: 0,
+                    emb: Some(emb.clone()),
+                    base: Some(aesthetic),
+                    group: group_key(id, Some(1000 + b), None),
+                });
+                y.push(keep);
+            }
+        }
+        let positives = y.iter().filter(|v| **v).count();
+        let data = TrainData {
+            negatives: y.len() - positives,
+            positives,
+            samples,
+            y,
+        };
+        let out = train(&data);
+        let m = out.metrics.unwrap();
+        assert!(m.auc < 0.7, "{m:?}");
+        assert!(out.model.is_none(), "{m:?}");
+        // the folds really are per burst
+        assert_eq!(
+            mix(group_key(1, Some(1000), None)) % FOLDS,
+            mix(group_key(2, Some(1000), None)) % FOLDS
+        );
+    }
+
+    #[test]
+    fn the_baseline_skips_photos_without_a_generic_score() {
+        let mut data = synth(240, 8, 10, &|_, h, _| h > 0.5);
+        for s in data.samples.iter_mut().step_by(3) {
+            s.base = None;
+        }
+        let m = train(&data).metrics.unwrap();
+        assert!(m.base_auc < 0.7 && m.auc > 0.9, "{m:?}");
+    }
+
+    #[test]
+    fn fuse_survives_non_finite_scores() {
+        use crate::analysis::scoring::Ranked;
+        let r = |id: i64, q: f64| Ranked {
+            photo_id: id,
+            rank: id as usize,
+            burst_size: 2,
+            q,
+            base_q: q,
+            hard_issue: false,
+            ai_rating: 0.0,
+            issues: vec![],
+            contributions: vec![],
+            reasons: vec![],
+            face_score: None,
+        };
+        let user: HashMap<i64, f64> = [(1, f64::NAN), (2, 0.9)].into_iter().collect();
+        let out = fuse(vec![r(1, f64::NAN), r(2, 0.4)], &user, 0.5);
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|x| x.q.is_finite()));
+        assert_eq!(out[0].photo_id, 2);
     }
 
     #[test]

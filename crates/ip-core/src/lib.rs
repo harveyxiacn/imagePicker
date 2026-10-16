@@ -151,6 +151,13 @@ pub struct Core {
     pub(crate) taste_seq: AtomicU64,
     /// Quiet time before the idle retraining ([`taste::RETRAIN_IDLE_MS`]; tests shorten it).
     pub(crate) taste_idle_ms: AtomicU64,
+    /// Bumped by switching off / forgetting: a training that started before drops its result.
+    pub(crate) taste_gen: AtomicU64,
+    pub(crate) taste_training: std::sync::atomic::AtomicBool,
+    /// Short lock around taste state writes (never held while fitting).
+    pub(crate) taste_state_lock: tokio::sync::Mutex<()>,
+    /// One taste rescoring at a time.
+    pub(crate) taste_rescore_lock: tokio::sync::Mutex<()>,
 }
 
 impl Core {
@@ -329,6 +336,10 @@ impl Core {
             taste_lock: tokio::sync::Mutex::new(()),
             taste_seq: AtomicU64::new(0),
             taste_idle_ms: AtomicU64::new(taste::RETRAIN_IDLE_MS),
+            taste_gen: AtomicU64::new(0),
+            taste_training: std::sync::atomic::AtomicBool::new(false),
+            taste_state_lock: tokio::sync::Mutex::new(()),
+            taste_rescore_lock: tokio::sync::Mutex::new(()),
         });
         Core::spawn_worker_status_forwarder(&core);
         core.apply_settings(None, &core.settings());
@@ -442,8 +453,9 @@ impl Core {
         let (updates, labels) = self
             .db
             .call(move |c| {
+                let before = taste::agreeing(c, &req.ids)?;
                 let updates = catalog::patch_photos(c, &req)?;
-                let labels = taste::record_patch(c, &req, source)?;
+                let labels = taste::record_patch(c, &req, source, &before)?;
                 Ok((updates, labels))
             })
             .await?;

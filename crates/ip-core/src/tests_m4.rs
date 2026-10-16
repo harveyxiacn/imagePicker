@@ -1431,8 +1431,15 @@ async fn taste_learns_a_hidden_preference_and_resets() {
     assert!(!ex.contributions.is_empty());
     assert!(e.core.taste_explain(999_999).await.is_err());
 
+    // explain and the cached score agree for every photo (no train/serve skew)
+    for ph in &all {
+        let ex = e.core.taste_explain(ph.id).await.unwrap();
+        assert_eq!(ex.taste_score, ph.taste_score, "photo {}", ph.id);
+    }
+
     // reset: labels, model, metrics and scores gone, base scores back
     e.core.reset_taste(false).await.unwrap();
+    e.core.rescore_taste().await.unwrap();
     let t = e.core.taste().await.unwrap();
     assert_eq!((t.labels, t.active, t.alpha), (0, false, 0.0));
     assert_eq!(
@@ -1538,25 +1545,85 @@ async fn labels_come_from_user_actions_only_and_retrain_every_50() {
         .unwrap();
     assert_eq!(e.core.taste().await.unwrap().labels, 0);
     // the app's own decisions are never labels: accepting AI stars and assistant actions
-    // record nothing, and drop the user label they overwrite
+    // record nothing; a user label they overwrite is silenced (not deleted), and an undo that
+    // restores the user's value brings it back
+    let labels = |e: &Env| {
+        let core = e.core.clone();
+        async move { core.taste().await.unwrap() }
+    };
     assert!(e.core.photo(ids[2]).await.unwrap().ai_rating.is_some());
+    e.core
+        .patch_photos(p(vec![ids[2]], Some(Some(1)), None))
+        .await
+        .unwrap();
     e.core.accept_ai(vec![ids[2], ids[3]]).await.unwrap();
-    assert_eq!(e.core.taste().await.unwrap().labels, 0);
+    let accepted = e.core.photo(ids[2]).await.unwrap().user_rating;
+    let t = labels(&e).await;
+    if accepted == Some(1) {
+        assert_eq!(t.labels, 1); // accepting left the same value: nothing changed
+    } else {
+        assert_eq!(t.labels, 0, "silenced by accept-ai");
+    }
+    e.core
+        .patch_photos(p(vec![ids[2]], Some(None), None))
+        .await
+        .unwrap();
     e.core
         .patch_photos(p(vec![ids[4]], None, Some(-1)))
         .await
         .unwrap();
-    assert_eq!(e.core.taste().await.unwrap().labels, 1);
+    e.core
+        .patch_photos(p(vec![ids[6]], None, Some(1)))
+        .await
+        .unwrap();
+    assert_eq!(labels(&e).await.labels, 2);
+    let pending0 = labels(&e).await.pending;
+    // keep-top style auto patch: picking an already picked photo keeps its label; flipping the
+    // rejected one silences that label and counts as a pending change
     e.core
         .patch_photos_as(
-            p(vec![ids[4], ids[5]], None, Some(1)),
+            p(vec![ids[4], ids[5], ids[6]], None, Some(1)),
             crate::taste::LabelSource::Auto,
         )
         .await
         .unwrap();
-    let t = e.core.taste().await.unwrap();
-    // pending counts every change of a user label: +2, +1, -2, +1
-    assert_eq!((t.labels, t.pending), (0, 6));
+    let t = labels(&e).await;
+    assert_eq!((t.labels, t.pending), (1, pending0 + 1));
+    // the client's undo of that step restores the reject: the label counts again
+    e.core
+        .patch_photos_as(
+            p(vec![ids[4]], None, Some(-1)),
+            crate::taste::LabelSource::Undo,
+        )
+        .await
+        .unwrap();
+    let t = labels(&e).await;
+    assert_eq!((t.labels, t.pending), (2, pending0 + 2));
+    // an undo never creates a label of its own
+    e.core
+        .patch_photos_as(
+            p(vec![ids[7]], Some(Some(5)), None),
+            crate::taste::LabelSource::Undo,
+        )
+        .await
+        .unwrap();
+    assert_eq!(labels(&e).await.labels, 2);
+    // external edits (XMP sync, Lightroom) silence labels the same way
+    let id6 = ids[6];
+    e.core
+        .db
+        .call(move |c| {
+            c.execute("UPDATE photo SET flag=0 WHERE id=?1", [id6])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(labels(&e).await.labels, 1);
+    assert!(crate::taste::LabelSource::parse(Some("robot")).is_err());
+    assert_eq!(
+        crate::taste::LabelSource::parse(None).unwrap(),
+        crate::taste::LabelSource::User
+    );
 
     // 50 labels trigger a background retraining by themselves
     let mut rx = e.core.events.subscribe();
@@ -1569,7 +1636,8 @@ async fn labels_come_from_user_actions_only_and_retrain_every_50() {
 #[tokio::test]
 async fn taste_retrains_when_the_user_pauses() {
     let e = env();
-    e.core.taste_idle_ms.store(50, Ordering::Relaxed);
+    // a pause far longer than the test: nothing can retrain until we shorten it below
+    e.core.taste_idle_ms.store(3_600_000, Ordering::Relaxed);
     let (_, lib) = taste_library(&e, 40).await;
     let mut rx = e.core.events.subscribe();
     // 15 decisions in one go: fewer than RETRAIN_EVERY, more than RETRAIN_IDLE_MIN
@@ -1581,7 +1649,10 @@ async fn taste_retrains_when_the_user_pauses() {
         })
         .await
         .unwrap();
-    assert_eq!(e.core.taste().await.unwrap().pending, 15);
+    let t = e.core.taste().await.unwrap();
+    assert_eq!((t.pending, t.updated_at), (15, None));
+    // the user "pauses": the waiting task re-reads the idle time and trains
+    e.core.taste_idle_ms.store(0, Ordering::Relaxed);
     wait_taste(&mut rx, |labels, _| labels == 15).await;
     let t = e.core.taste().await.unwrap();
     assert_eq!(t.pending, 0);
@@ -1599,6 +1670,7 @@ async fn taste_can_be_switched_off_and_forgotten() {
 
     // off: personalisation removed at once, labels kept, no new labels, no training
     let t = e.core.set_taste_enabled(false).await.unwrap();
+    e.core.rescore_taste().await.unwrap();
     assert_eq!(
         (t.state, t.enabled, t.active, t.scored),
         ("disabled", false, false, 0)
@@ -1628,7 +1700,8 @@ async fn taste_can_be_switched_off_and_forgotten() {
     // on again: the kept model is used again right away
     let t = e.core.set_taste_enabled(true).await.unwrap();
     assert!(t.active && t.enabled);
-    assert_eq!(t.scored, 120);
+    e.core.rescore_taste().await.unwrap();
+    assert_eq!(e.core.taste().await.unwrap().scored, 120);
 
     // forget and opt out: everything deleted, stays off
     e.core.reset_taste(true).await.unwrap();

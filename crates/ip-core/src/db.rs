@@ -381,8 +381,10 @@ CREATE TABLE session_device_offset (
     // switch (default on, as in 1.0), the feature / model versions, the decisions pending since
     // the last training, the label counts per class and the metrics JSON (cross-validated AUC
     // against the generic score). `taste_score` caches each photo's taste score (0..1) under
-    // the current model; it is emptied whenever the model changes or is switched off. A v6
-    // model keeps `feature_version = 0` and is retrained once at startup.
+    // the current model; it is emptied whenever the model changes or is switched off;
+    // `rescore_pending` marks a rescoring still owed (retried at the next trigger / start). A v6
+    // model keeps `feature_version = 0` and is retrained once at startup. Labels recorded by
+    // 1.0 are marked `legacy` (1.0 kept no record of which flags the assistant set).
     r#"
 ALTER TABLE taste_state ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE taste_state ADD COLUMN feature_version INTEGER NOT NULL DEFAULT 0;
@@ -391,7 +393,10 @@ ALTER TABLE taste_state ADD COLUMN pending_labels INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE taste_state ADD COLUMN positives INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE taste_state ADD COLUMN negatives INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE taste_state ADD COLUMN metrics TEXT;
+ALTER TABLE taste_state ADD COLUMN rescore_pending INTEGER NOT NULL DEFAULT 0;
 INSERT OR IGNORE INTO taste_state(id) VALUES(1);
+ALTER TABLE preference_label ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0;
+UPDATE preference_label SET legacy=1;
 CREATE TABLE taste_score (
   photo_id INTEGER PRIMARY KEY REFERENCES photo(id) ON DELETE CASCADE,
   score REAL NOT NULL,
@@ -813,6 +818,14 @@ mod tests {
         // switched on as before; the old model is kept but marked as feature version 0
         assert_eq!(row, (1, 0, 0, 0, 1, "{\"dim\":4}".to_string()));
         assert!(crate::taste::load_active(&conn).unwrap().is_none());
+        let legacy: i64 = conn
+            .query_row(
+                "SELECT legacy FROM preference_label WHERE photo_id=7",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy, 1);
         conn.execute(
             "INSERT INTO taste_score(photo_id, score, model_version) VALUES(7, 0.8, 1)",
             [],

@@ -253,9 +253,11 @@ pub async fn patch_taste(
     Ok(Json(json!(st.core.set_taste_enabled(b.enabled).await?)))
 }
 
-/// `POST /api/taste/train`: retrain now (400 while switched off).
-pub async fn taste_train(State(st): State<AppState>) -> ApiResult<Json<Value>> {
-    Ok(Json(json!(st.core.retrain_taste().await?)))
+/// `POST /api/taste/train`: starts a training in the background: `202` with the current
+/// status (`training: true`); `taste.updated` follows. 400 while switched off.
+pub async fn taste_train(State(st): State<AppState>) -> ApiResult<Response> {
+    let out = st.core.start_taste_training().await?;
+    Ok((StatusCode::ACCEPTED, Json(json!(out))).into_response())
 }
 
 /// `GET /api/taste/explain/{id}`.

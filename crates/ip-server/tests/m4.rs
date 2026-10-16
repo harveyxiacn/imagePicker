@@ -790,11 +790,26 @@ async fn taste_endpoints_and_export_folders() {
         (j["positives"].as_i64(), j["negatives"].as_i64()),
         (Some(1), Some(0))
     );
-    // train now: too few decisions, nothing learned yet
+    // train now: answered at once (202), the result follows; too few decisions, so nothing is
+    // learned yet
     let r = call(&e.app, Method::POST, "/api/taste/train", None).await;
-    assert_eq!(r.status, StatusCode::OK);
-    assert_eq!(r.json()["state"], "collecting");
-    assert!(r.json()["metrics"].is_null());
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert_eq!(r.json()["training"], true);
+    let deadline = std::time::Instant::now() + Duration::from_secs(300);
+    let j = loop {
+        let j = call(&e.app, Method::GET, "/api/taste", None).await.json();
+        if j["training"] == false {
+            break j;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "training never finished"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(j["state"], "collecting");
+    assert!(j["metrics"].is_null());
+    assert!(j["updated_at"].is_number());
     // no model: listings carry no taste score, sorting by taste still works
     let r = call(
         &e.app,
@@ -818,6 +833,28 @@ async fn taste_endpoints_and_export_folders() {
     assert_eq!(r.json()["contributions"], json!([]));
     let r = call(&e.app, Method::GET, "/api/taste/explain/999999", None).await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
+    // PATCH /api/photos says who decided: an undo of an app step is not a new label
+    let r = call(
+        &e.app,
+        Method::PATCH,
+        "/api/photos",
+        Some(json!({"ids":[s.ids["a2.jpg"]],"flag":1,"source":"undo"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["updated"], 1);
+    let r = call(
+        &e.app,
+        Method::PATCH,
+        "/api/photos",
+        Some(json!({"ids":[s.ids["a2.jpg"]],"flag":-1,"source":"robot"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        call(&e.app, Method::GET, "/api/taste", None).await.json()["labels"],
+        1
+    );
     // switch off / on
     let r = call(
         &e.app,
