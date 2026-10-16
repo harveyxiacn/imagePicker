@@ -565,6 +565,41 @@ pub struct PresetCreate {
     pub stack: Value,
 }
 
+/// Body of `POST /api/edits/{id}/preset`: fit a preset to the photo (nothing is saved).
+#[derive(Debug, Clone, Deserialize)]
+pub struct PresetApplyRequest {
+    pub preset_id: String,
+    /// Strength 0..=1.5 (1 = 100 %, the default).
+    #[serde(default)]
+    pub amount: Option<f32>,
+}
+
+/// How a built-in preset was fitted to the photo (docs/03 §6.1.1).
+#[derive(Debug, Clone, Serialize)]
+pub struct PresetFit {
+    /// Solved exposure (EV).
+    pub exposure: f32,
+    /// Highlight protection used, 0..1.
+    pub protection: f32,
+    /// The highlight / face budget holds.
+    pub satisfied: bool,
+    pub before: ip_render::ToneStats,
+    pub after: ip_render::ToneStats,
+}
+
+/// Response of `POST /api/edits/{id}/preset`: the preset's ops with concrete values for this
+/// photo, to be put into the stack by the client (preset sections replace the current ones).
+#[derive(Debug, Clone, Serialize)]
+pub struct PresetApplied {
+    pub preset_id: String,
+    pub amount: f32,
+    /// Built-in presets are fitted to the photo; user presets are only scaled.
+    pub adaptive: bool,
+    pub stack: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fit: Option<PresetFit>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LutOut {
     pub id: String,
@@ -577,6 +612,15 @@ pub struct LutInfo {
     /// i18n key (`lut.<id>`) for built-ins, the file stem for imported LUTs.
     pub name: String,
     pub builtin: bool,
+}
+
+/// JSON of a typed stack through its text form, so `f32` values keep their shortest
+/// representation (`0.22`, not `0.2199999988079071`).
+fn stack_value(s: &EditStack) -> Value {
+    serde_json::to_string(s)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(empty_stack_json)
 }
 
 fn user_preset_id(n: i64) -> String {
@@ -1061,7 +1105,7 @@ impl Core {
                 id,
                 name,
                 builtin: true,
-                stack: serde_json::to_value(stack).unwrap_or_else(|_| empty_stack_json()),
+                stack: stack_value(&stack),
             })
             .collect();
         let rows = self.db.call(|c| store::presets(c)).await?;
@@ -1072,6 +1116,111 @@ impl Core {
             stack: p.stack,
         }));
         Ok(out)
+    }
+
+    /// `GET /api/edits/{id}/presets`: every preset with its stack fitted to this photo at 100 %
+    /// (built-ins adapt their tone; user presets are returned as saved).
+    pub async fn photo_presets(&self, photo_id: i64) -> Result<Vec<PresetOut>> {
+        let mut all = self.presets().await?;
+        let ids: Vec<String> = all
+            .iter()
+            .filter(|p| p.builtin)
+            .map(|p| p.id.clone())
+            .collect();
+        let fitted = self.fit_builtin_presets(photo_id, ids, 1.0).await?;
+        for p in all.iter_mut() {
+            if let Some((_, r)) = fitted.iter().find(|(id, _)| *id == p.id) {
+                p.stack = stack_value(&r.stack);
+            }
+        }
+        Ok(all)
+    }
+
+    /// `POST /api/edits/{id}/preset`: a preset fitted to the photo at a strength (not saved).
+    pub async fn apply_preset_for(
+        &self,
+        photo_id: i64,
+        req: PresetApplyRequest,
+    ) -> Result<PresetApplied> {
+        let amount = req.amount.unwrap_or(1.0);
+        if !(amount.is_finite() && (0.0..=ip_render::PRESET_AMOUNT_MAX).contains(&amount)) {
+            return Err(CoreError::bad_request(format!(
+                "amount must be within 0..{}",
+                ip_render::PRESET_AMOUNT_MAX
+            )));
+        }
+        let preset = self
+            .presets()
+            .await?
+            .into_iter()
+            .find(|p| p.id == req.preset_id)
+            .ok_or_else(|| CoreError::not_found(format!("preset {} not found", req.preset_id)))?;
+        if preset.builtin {
+            let (_, r) = self
+                .fit_builtin_presets(photo_id, vec![preset.id.clone()], amount)
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| CoreError::not_found(format!("preset {} not found", preset.id)))?;
+            return Ok(PresetApplied {
+                preset_id: preset.id,
+                amount: r.amount,
+                adaptive: true,
+                stack: stack_value(&r.stack),
+                fit: Some(PresetFit {
+                    exposure: r.exposure,
+                    protection: r.protection,
+                    satisfied: r.satisfied,
+                    before: r.before,
+                    after: r.after,
+                }),
+            });
+        }
+        // User presets: the photo must exist; the saved values are scaled, not fitted.
+        self.db
+            .call(move |c| catalog::photo_ref(c, photo_id))
+            .await?;
+        let stack: EditStack = serde_json::from_value(preset.stack.clone())
+            .map_err(|e| CoreError::Internal(anyhow::anyhow!("stored preset is invalid: {e}")))?;
+        let mut scaled = ip_render::scale_preset_stack(&stack, amount);
+        for op in scaled.ops.iter_mut() {
+            if let Op::Global(a) = op {
+                a.source = Some(ip_render::preset_source(&preset.id, amount));
+            }
+        }
+        Ok(PresetApplied {
+            preset_id: preset.id,
+            amount,
+            adaptive: false,
+            stack: stack_value(&scaled),
+            fit: None,
+        })
+    }
+
+    /// Fit built-in presets to the photo's proxy (one decode, CPU only, deterministic).
+    pub(crate) async fn fit_builtin_presets(
+        &self,
+        photo_id: i64,
+        ids: Vec<String>,
+        amount: f32,
+    ) -> Result<Vec<(String, ip_render::PresetResolution)>> {
+        let r = self
+            .db
+            .call(move |c| catalog::photo_ref(c, photo_id))
+            .await?;
+        let ctx = self.auto_context(photo_id).await?;
+        let pctx = ip_render::PresetContext { faces: ctx.faces };
+        self.render
+            .run_gated(move |svc, _| {
+                let proxy = svc.proxy(&r, 1024)?;
+                Ok(ids
+                    .into_iter()
+                    .filter_map(|id| {
+                        ip_render::resolve_preset(&id, &proxy, &pctx, amount).map(|r| (id, r))
+                    })
+                    .collect())
+            })
+            .await
     }
 
     pub async fn create_preset(&self, req: PresetCreate) -> Result<PresetOut> {

@@ -1,12 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { FileUp, Save, Trash2, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
-import { useLuts, usePresets } from '@/api/queries'
-import type { Preset } from '@/api/types'
+import { useLuts, usePhotoPresets } from '@/api/queries'
+import type { EditStack, Preset } from '@/api/types'
 import { qk } from '@/lib/cache'
-import { applyPreset, getLut, setLut, stackKey } from '@/lib/edit'
+import { appliedPreset, applyPreset, getLut, PRESET_AMOUNT_MAX, scalePresetStack, setLut, stackKey } from '@/lib/edit'
 import { changeStack, commitLive, setLive } from '@/lib/editActions'
 import { cachedThumb, renderThumb } from '@/lib/thumbQueue'
 import { useEdit } from '@/stores/edit'
@@ -16,7 +16,7 @@ import { Slider } from './Slider'
 
 /** Built-in LUT ids understood by the renderer (`{type:"lut", file}`); imported ones are added at runtime. */
 
-function PresetCard({ photoId, preset, label, onApply, onDelete }: { photoId: number; preset: Preset; label: string; onApply: () => void; onDelete?: () => void }) {
+function PresetCard({ photoId, preset, label, active, onApply, onDelete }: { photoId: number; preset: Preset; label: string; active: boolean; onApply: () => void; onDelete?: () => void }) {
   const { t } = useTranslation()
   const key = `${photoId}|${preset.id}|${stackKey(preset.stack)}`
   const [loaded, setLoaded] = useState<{ key: string; url: string } | null>(() => {
@@ -35,7 +35,13 @@ function PresetCard({ photoId, preset, label, onApply, onDelete }: { photoId: nu
   const url = loaded?.key === key ? loaded.url : null
   return (
     <div className="group relative">
-      <button className="block w-full overflow-hidden rounded-control border border-line text-left hover:border-accent" onClick={onApply} data-testid={`preset-${preset.id}`} title={label}>
+      <button
+        className={`block w-full overflow-hidden rounded-control border text-left hover:border-accent ${active ? 'border-accent' : 'border-line'}`}
+        onClick={onApply}
+        data-testid={`preset-${preset.id}`}
+        aria-pressed={active}
+        title={preset.builtin ? `${label} · ${t('edit.presetAdaptiveTip')}` : label}
+      >
         <div className="aspect-[3/2] bg-bg">{url ? <img src={url} alt="" className="h-full w-full object-cover" draggable={false} /> : <div className="skeleton h-full w-full" />}</div>
         <div className="truncate px-1.5 py-0.5 text-[11px]">{label}</div>
       </button>
@@ -131,16 +137,72 @@ function LutBlock() {
   )
 }
 
-/** Presets (built-in + user, live thumbnails) and LUT. */
+/**
+ * Strength of the applied preset (0–150 %). Dragging scales the fitted 100 % look in the browser
+ * for the live preview; on release the server fits the preset again at that strength (highlight
+ * protection included), so the stored values are the exact ones.
+ */
+function PresetStrength({ photoId, preset, label }: { photoId: number; preset: Preset; label: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const stack = useEdit((s) => s.stack)
+  const amount = appliedPreset(stack)?.amount ?? 1
+  // While dragging, the slider shows the dragged value (at 0 % the look, and its provenance, is gone).
+  const drag = useRef<number | null>(null)
+  const [shown, setShown] = useState<number | null>(null)
+  const live = (v: number) => {
+    drag.current = v
+    setShown(v)
+    setLive(applyPreset(useEdit.getState().stack, retag(scalePresetStack(preset.stack, v / 100), preset.id, v)))
+  }
+  const commit = async () => {
+    const v = drag.current ?? Math.round(amount * 100)
+    drag.current = null
+    try {
+      const res = await api.applyPresetFor(photoId, preset.id, v / 100)
+      if (useEdit.getState().photoId !== photoId) return
+      setLive(applyPreset(useEdit.getState().stack, res.stack))
+    } catch (err) {
+      useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000)
+    }
+    setShown(null)
+    commitLive(qc, t('history.presetStrength', { name: label }), 'preset:amount')
+  }
+  return (
+    <div className="mt-2" data-testid="preset-strength">
+      <Slider
+        testId="preset-amount"
+        label={t('edit.presetStrength')}
+        value={shown ?? Math.round(amount * 100)}
+        min={0}
+        max={Math.round(PRESET_AMOUNT_MAX * 100)}
+        step={5}
+        def={100}
+        unit="%"
+        onLive={live}
+        onCommit={() => void commit()}
+      />
+      {preset.builtin && <div className="text-[11px] text-muted">{t('edit.presetAdaptiveHint')}</div>}
+    </div>
+  )
+}
+
+/** Set the `source` of the global op to `preset:<id>;amount=<v>`. */
+function retag(s: EditStack, id: string, v: number): EditStack {
+  return { ...s, ops: s.ops.map((o) => (o.type === 'global' ? { ...o, source: `preset:${id};amount=${Math.round(v)}` } : o)) }
+}
+
+/** Presets (built-in + user, thumbnails fitted to this photo) and LUT. */
 export function PresetsPanel({ photoId }: { photoId: number }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const presets = usePresets()
+  const presets = usePhotoPresets(photoId)
+  const stack = useEdit((s) => s.stack)
   const [name, setName] = useState('')
 
   const label = (p: Preset) => (p.builtin ? t(p.name, { defaultValue: p.id }) : p.name)
-  const apply = (p: Preset) =>
-    changeStack(qc, applyPreset(useEdit.getState().stack, p.stack), t('history.preset', { name: label(p) }))
+  // The listed stacks are already fitted to this photo at 100 %.
+  const apply = (p: Preset) => changeStack(qc, applyPreset(useEdit.getState().stack, p.stack), t('history.preset', { name: label(p) }))
 
   const save = async () => {
     const n = name.trim()
@@ -156,6 +218,8 @@ export function PresetsPanel({ photoId }: { photoId: number }) {
   }
 
   const list = presets.data ?? []
+  const activeId = appliedPreset(stack)?.id ?? null
+  const active = list.find((p) => p.id === activeId)
   return (
     <Section id="presets" title={t('edit.presets')}>
       {presets.isError ? (
@@ -168,6 +232,7 @@ export function PresetsPanel({ photoId }: { photoId: number }) {
               photoId={photoId}
               preset={p}
               label={label(p)}
+              active={activeId === p.id}
               onApply={() => apply(p)}
               onDelete={
                 p.builtin
@@ -183,6 +248,7 @@ export function PresetsPanel({ photoId }: { photoId: number }) {
           {presets.isPending && Array.from({ length: 6 }, (_, i) => <div key={i} className="skeleton aspect-[3/2] rounded-control" />)}
         </div>
       )}
+      {active && <PresetStrength key={active.id} photoId={photoId} preset={active} label={label(active)} />}
       <div className="mt-2 flex gap-1.5">
         <input
           className="field min-w-0 flex-1"

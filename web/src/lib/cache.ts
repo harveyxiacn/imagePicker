@@ -22,6 +22,8 @@ export const qk = {
   editsAll: ['edits'] as const,
   edits: (photoId: number) => ['edits', photoId] as const,
   presets: ['presets'] as const,
+  /** presets fitted to one photo (prefix `presets`, so invalidating `presets` refreshes these too) */
+  photoPresets: (photoId: number) => ['presets', 'photo', photoId] as const,
   luts: ['luts'] as const,
   mask: (photoId: number, target: string, personId?: number) => ['mask', photoId, target, personId ?? null] as const,
   burstFaces: (burstId: number) => ['burstFaces', burstId] as const,
