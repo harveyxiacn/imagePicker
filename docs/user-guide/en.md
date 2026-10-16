@@ -474,6 +474,18 @@ Open **Portrait retouch** on the edit page. The first time click *Prepare portra
 
 > Known limitations: reshaping / beauty strengths were calibrated on synthetic portraits, so judge real faces yourself; generative background fill after body reshaping is not available.
 
+### Hair: swap in your best hair
+
+On a hot day the hair in later photos often goes flat, stringy or shiny with sweat. The **Hair** section on the edit page (under Portrait retouching) replaces a person's hair with **their own** hair from another photo, keeping this photo's face:
+
+1. Open the photo with the bad hair and expand **Hair**. With several people, pick whose hair to change;
+2. Click **Find my best hair…**. imagePicker looks for the same person in your other photos (this shoot first, then other sessions) and rates each candidate's hair: fuller, less shine, tidier (fewer stray strands), crisper, similar head pose, taken earlier. The reasons are shown under each thumbnail; photos where the head is turned or tilted too far are marked **Pose too different** and cannot be used;
+3. Click a donor photo (the best one is preselected), set **Strength** and click **Use this hair**. The result is a layer in the edit history: you can change its strength later, hide it to compare with the original hair, delete it, or undo it like any other edit; export includes it.
+
+> Limits: only the **same person** (checked with face recognition, the server refuses other people), in a **similar pose** (about 20° of head turn / 15° of nodding at most), and it works best within one shoot. The face below the eyebrows is never changed. Check the hair edge at 100%: very fine strands against a bright background can show a halo, and where your hair was bigger than the donor's the background is filled in. Needs analysis with faces (Standard) and the face and hair models; the AI rating needs the AI worker (without it the candidates are just sorted by shoot and time). Rating weights were tuned on synthetic heads only.
+
+**Sweat cleanup without a donor photo**: below the donors, *Remove sweat shine* tones down sweat shine on the face and in the hair (eyes, brows and lips are left alone), and *Tidy stray strands* removes thin strands and loose pieces around the hair outline. Each becomes one layer whose slider is its strength; the bin removes it.
+
 ## 12. Repair
 
 The **Repair** panel on the edit page:

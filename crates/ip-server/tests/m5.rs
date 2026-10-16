@@ -916,3 +916,379 @@ async fn people_singletons_and_float_cleanup_over_http() {
     assert_eq!(b[0].as_f64(), Some(0.4));
     assert_eq!(b[3].as_f64(), Some(0.3));
 }
+
+/// h1 (target) and h2 (morning, same person) / h3 (same person, head turned 40 degrees) / h4
+/// (somebody else), an hour apart each.
+async fn hair_scene(e: &Env) -> (HashMap<String, i64>, HashMap<i64, i64>) {
+    for (n, t) in [
+        ("h1.jpg", 7200),
+        ("h2.jpg", 0),
+        ("h3.jpg", 3600),
+        ("h4.jpg", 10800),
+    ] {
+        photo(e.src.path(), n, t);
+    }
+    let me = |yaw: f64| {
+        let mut f = FakeFace::new(noisy([0.35, 0.25, 0.3, 0.4]), person(0, 1.0));
+        f.yaw = Some(yaw);
+        f
+    };
+    e.worker
+        .set("h1.jpg", FakeSpec::at(0.0).with_faces(vec![me(2.0)]));
+    e.worker
+        .set("h2.jpg", FakeSpec::at(40.0).with_faces(vec![me(4.0)]));
+    e.worker
+        .set("h3.jpg", FakeSpec::at(80.0).with_faces(vec![me(42.0)]));
+    e.worker.set(
+        "h4.jpg",
+        FakeSpec::at(120.0).with_faces(vec![FakeFace::new(
+            noisy([0.35, 0.25, 0.3, 0.4]),
+            person(4, 0.0),
+        )]),
+    );
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/import",
+        Some(json!({"path": e.src.path().to_string_lossy()})),
+    )
+    .await;
+    let sid = r.json()["session"]["id"].as_i64().unwrap();
+    e.core
+        .wait_session_ready(sid, Duration::from_secs(30))
+        .await
+        .unwrap();
+    e.core
+        .analysis_run(AnalysisRunRequest {
+            session_id: sid,
+            profile: Profile::Standard,
+            photo_ids: None,
+            force: false,
+            allow_download: false,
+            fallback_lite: false,
+        })
+        .await
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
+    while e.core.analysis_status(sid).state == RunState::Running {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "analysis did not finish"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let photos = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos?session_id={sid}"),
+        None,
+    )
+    .await
+    .json()["photos"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let mut ids = HashMap::new();
+    let mut faces = HashMap::new();
+    for p in photos {
+        let id = p["id"].as_i64().unwrap();
+        ids.insert(p["file_name"].as_str().unwrap().to_string(), id);
+        let f = call(
+            &e.app,
+            Method::GET,
+            &format!("/api/photos/{id}/analysis"),
+            None,
+        )
+        .await
+        .json()["faces"][0]["id"]
+            .as_i64()
+            .unwrap();
+        faces.insert(id, f);
+    }
+    (ids, faces)
+}
+
+#[tokio::test]
+async fn hair_donors_rank_the_same_person_and_gate_the_pose() {
+    let e = env();
+    let (ids, faces) = hair_scene(&e).await;
+    let (h1, h2, h3, h4) = (ids["h1.jpg"], ids["h2.jpg"], ids["h3.jpg"], ids["h4.jpg"]);
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos/{h1}/hair/donors?face_id={}", faces[&h1]),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let j = r.json();
+    assert_eq!(
+        (j["photo_id"].as_i64(), j["ranked"].as_bool()),
+        (Some(h1), Some(true))
+    );
+    assert!(j["target"]["hair_ratio"].is_number());
+    let c = j["candidates"].as_array().unwrap();
+    let got: Vec<i64> = c.iter().map(|d| d["photo_id"].as_i64().unwrap()).collect();
+    assert_eq!(got, vec![h2, h3], "the same person only, composable first");
+    assert!(!got.contains(&h4));
+    let (good, turned) = (&c[0], &c[1]);
+    assert_eq!(good["composable"], true);
+    assert!(good["score"].as_f64().unwrap() > 0.0);
+    if !good["minutes_from_target"].is_null() {
+        assert_eq!(good["minutes_from_target"], -120);
+        assert!(good["cues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x == "earlier"));
+    }
+    for cue in ["same_session", "similar_pose"] {
+        assert!(
+            good["cues"].as_array().unwrap().iter().any(|x| x == cue),
+            "{cue}"
+        );
+    }
+    assert_eq!(
+        (turned["composable"].as_bool(), turned["reason"].as_str()),
+        (Some(false), Some("pose_too_different"))
+    );
+    assert_eq!(turned["pose_delta"]["yaw"], 40.0);
+    // rank=0: no worker call, no scores
+    let calls = e.worker.hair_rank_calls.load(Ordering::SeqCst);
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos/{h1}/hair/donors?face_id={}&rank=0", faces[&h1]),
+        None,
+    )
+    .await;
+    assert_eq!(r.json()["ranked"], false);
+    assert!(r.json()["candidates"][0]["score"].is_null());
+    assert_eq!(e.worker.hair_rank_calls.load(Ordering::SeqCst), calls);
+    // models missing: still listed, unranked, and says why
+    e.worker.set_missing(&[BESTTAKE_MODEL]);
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos/{h1}/hair/donors?face_id={}", faces[&h1]),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        (
+            r.json()["ranked"].as_bool(),
+            r.json()["rank_error"].as_str()
+        ),
+        (Some(false), Some("models_missing"))
+    );
+    e.worker.set_missing(&[]);
+    // a face of another photo / no face id
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos/{h1}/hair/donors?face_id={}", faces[&h2]),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/photos/{h1}/hair/donors"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn hair_transfer_refuses_other_people_and_writes_one_patch() {
+    let e = env();
+    let (ids, faces) = hair_scene(&e).await;
+    let (h1, h2, h3, h4) = (ids["h1.jpg"], ids["h2.jpg"], ids["h3.jpg"], ids["h4.jpg"]);
+    let post = |donor: i64, strength: Value| {
+        let app = e.app.clone();
+        let body = json!({"face_id": faces[&h1], "donor_photo_id": donor,
+            "donor_face_id": faces[&donor], "strength": strength});
+        async move {
+            call(
+                &app,
+                Method::POST,
+                &format!("/api/photos/{h1}/hair"),
+                Some(body),
+            )
+            .await
+        }
+    };
+    // somebody else's hair: refused before any task starts
+    let r = post(h4, json!(1.0)).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        ["hair_person_mismatch", "hair_low_similarity"].contains(&r.code().as_str()),
+        "{}",
+        r.code()
+    );
+    // the head turned too far
+    let r = post(h3, json!(1.0)).await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "hair_pose_too_different")
+    );
+    assert_eq!(post(h2, json!(1.5)).await.status, StatusCode::BAD_REQUEST);
+    assert!(e
+        .core
+        .tasks_list(None)
+        .await
+        .unwrap()
+        .iter()
+        .all(|t| t.kind != "hair"));
+    assert_eq!(e.worker.hair_calls.load(Ordering::SeqCst), 0);
+
+    // the morning's hair at 60 %
+    let mut rx = e.core.events.subscribe();
+    let r = post(h2, json!(0.6)).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert!(r.json()["task_id"].as_str().unwrap().starts_with("hair-"));
+    let done = wait_event(&mut rx, |ev| matches!(ev, Event::HairDone { .. })).await;
+    let v = serde_json::to_value(&done).unwrap();
+    assert_eq!(
+        (
+            v["type"].as_str(),
+            v["photo_id"].as_i64(),
+            v["ok"].as_bool()
+        ),
+        (Some("hair.done"), Some(h1), Some(true))
+    );
+    let req = e.worker.last_hair_request.lock().unwrap().clone().unwrap();
+    assert_eq!((req.target.photo_id, req.donor.photo_id), (h1, h2));
+    let stack = call(&e.app, Method::GET, &format!("/api/edits/{h1}"), None)
+        .await
+        .json()["stack"]
+        .clone();
+    let hair: Vec<&Value> = stack["ops"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|o| o["kind"] == "hair")
+        .collect();
+    assert_eq!(hair.len(), 1);
+    let op = hair[0];
+    assert_eq!(op["type"], "patch");
+    assert_eq!(
+        op["amount"].as_f64().map(|a| (a * 100.0).round()),
+        Some(60.0)
+    );
+    assert_eq!(
+        (
+            op["source_photo_id"].as_i64(),
+            op["base_face_id"].as_i64(),
+            op["source_face_id"].as_i64()
+        ),
+        (Some(h2), Some(faces[&h1]), Some(faces[&h2]))
+    );
+    assert!(op["align"]["scale"].is_number() && op["person_id"].is_i64());
+    let asset = op["asset"].as_str().unwrap();
+    let r = call(
+        &e.app,
+        Method::GET,
+        &format!("/api/assets/{h1}/{asset}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (r.status, r.content_type.as_str()),
+        (StatusCode::OK, "image/png")
+    );
+
+    // again (full strength): the face keeps one hair layer
+    let mut rx = e.core.events.subscribe();
+    assert_eq!(post(h2, json!(1.0)).await.status, StatusCode::ACCEPTED);
+    wait_event(&mut rx, |ev| matches!(ev, Event::HairDone { .. })).await;
+    let stack = call(&e.app, Method::GET, &format!("/api/edits/{h1}"), None)
+        .await
+        .json()["stack"]
+        .clone();
+    let hair: Vec<&Value> = stack["ops"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|o| o["kind"] == "hair")
+        .collect();
+    assert_eq!(hair.len(), 1);
+    assert_eq!(hair[0]["amount"], 1.0);
+
+    // a worker refusal ends the task as failed with its reason and leaves the stack alone
+    e.worker
+        .hair_refusals
+        .lock()
+        .unwrap()
+        .insert(h2, "donor_no_hair".into());
+    let mut rx = e.core.events.subscribe();
+    assert_eq!(post(h2, json!(1.0)).await.status, StatusCode::ACCEPTED);
+    let done = wait_event(&mut rx, |ev| matches!(ev, Event::HairDone { .. })).await;
+    let v = serde_json::to_value(&done).unwrap();
+    assert_eq!(
+        (v["ok"].as_bool(), v["reason"].as_str()),
+        (Some(false), Some("donor_no_hair"))
+    );
+    let after = call(&e.app, Method::GET, &format!("/api/edits/{h1}"), None)
+        .await
+        .json()["stack"]
+        .clone();
+    assert_eq!(after, stack);
+}
+
+#[tokio::test]
+async fn sweat_cleanup_layers_take_the_strength_as_amount() {
+    let e = env();
+    let (ids, _faces) = hair_scene(&e).await;
+    let h1 = ids["h1.jpg"];
+    for (op, strength) in [("deshine", 0.4), ("flyaway", 0.7), ("deshine", 0.6)] {
+        let mut rx = e.core.events.subscribe();
+        let r = call(
+            &e.app,
+            Method::POST,
+            &format!("/api/photos/{h1}/enhance"),
+            Some(json!({"op": op, "strength": strength})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{op}");
+        let done = wait_event(&mut rx, |ev| matches!(ev, Event::EnhanceDone { .. })).await;
+        let v = serde_json::to_value(&done).unwrap();
+        assert_eq!(
+            (v["op"].as_str(), v["ok"].as_bool()),
+            (Some(op), Some(true))
+        );
+        let req = e
+            .worker
+            .enhance_requests
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .unwrap();
+        assert_eq!(req.faces.map(|f| f.len()), Some(1), "the subject's face");
+    }
+    let stack = call(&e.app, Method::GET, &format!("/api/edits/{h1}"), None)
+        .await
+        .json()["stack"]
+        .clone();
+    let ops = stack["ops"].as_array().unwrap();
+    let of = |k: &str| ops.iter().filter(|o| o["kind"] == k).collect::<Vec<_>>();
+    // one layer per op; the newer deshine replaced the older one
+    assert_eq!((of("deshine").len(), of("flyaway").len()), (1, 1));
+    let amount = |o: &Value| (o["amount"].as_f64().unwrap() * 100.0).round();
+    assert_eq!(
+        (amount(of("deshine")[0]), amount(of("flyaway")[0])),
+        (60.0, 70.0)
+    );
+    let r = call(
+        &e.app,
+        Method::POST,
+        &format!("/api/photos/{h1}/enhance"),
+        Some(json!({"op": "shampoo"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+}

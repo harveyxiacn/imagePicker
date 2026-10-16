@@ -4,6 +4,7 @@ import { GradingPanel, HslPanel } from './ColorPanels'
 import { CropPanel } from './CropPanel'
 import { CurvesPanel } from './CurvesPanel'
 import { LocalPanel } from './LocalPanel'
+import { HairPanel } from './HairPanel'
 import { PortraitPanel } from './PortraitPanel'
 import { RepairPanel } from './RepairPanel'
 import { PresetsPanel } from './PresetsPanel'
@@ -19,6 +20,7 @@ export function EditPanel({ photo }: { photo: Photo }) {
       <GradingPanel />
       <LocalPanel photo={photo} />
       <PortraitPanel key={photo.id} photo={photo} />
+      <HairPanel key={`h${photo.id}`} photo={photo} />
       <RepairPanel key={`r${photo.id}`} photo={photo} />
       <CropPanel photo={photo} />
       <PresetsPanel photoId={photo.id} />

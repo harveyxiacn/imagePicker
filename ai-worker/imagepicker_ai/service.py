@@ -14,6 +14,7 @@ from . import PROTOCOL_VERSION, __version__
 from . import hw as hwmod
 from .beauty import BeautyPreparer
 from .besttake import BestTake
+from .besttake.hair_service import HairTransfer
 from .enhance import Enhancer
 from .errors import DownloadFailed, InvalidParams, RpcError
 from .inpaint import Inpainter
@@ -55,6 +56,7 @@ class WorkerService:
         self.gen = GenRuntime(self.manager, self.hw)
         self.besttake = BestTake(self.masks)
         self.inpaint = Inpainter(self.gen)
+        self.hair = HairTransfer(self.besttake, self.inpaint)
         self.enhance = Enhancer(self.gen, self.masks)
         self.assistant = Assistant(self.manager, self.hw)
         self.text_search = TextSearch(self.analyzer.embedder.embed_text)
@@ -81,6 +83,8 @@ class WorkerService:
             "faces.embed": self.faces_embed,
             "text.embed": self.text_embed,
             "besttake.compose": self.besttake_compose,
+            "hair.rank": self.hair_rank,
+            "hair.compose": self.hair_compose,
             "inpaint.run": self.inpaint_run,
             "enhance.run": self.enhance_run,
             "llm.plan": self.llm_plan,
@@ -170,11 +174,14 @@ class WorkerService:
             "beauty_models": self.beauty.required_models(),
             # M5: what `models.ensure` must fetch for each generative method on this machine
             "besttake_models": self.besttake.all_models(),
+            "hair_models": self.hair.required_models(),
             "inpaint_models": {m: self.inpaint.required_models(m) for m in ("lama", "sdxl")},
             "enhance_models": {
                 "denoise": self.enhance.required_models("denoise"),
                 "face_restore": self.enhance.required_models("face_restore"),
                 "upscale": {str(sc): self.enhance.required_models("upscale", sc) for sc in (2, 4)},
+                "deshine": self.enhance.required_models("deshine"),
+                "flyaway": self.enhance.required_models("flyaway"),
             },
             "mask_models": {
                 t: self.masks.required_models(t) + self.masks.optional_models(t)
@@ -258,6 +265,12 @@ class WorkerService:
 
     async def besttake_compose(self, params: Any, ctx: Ctx) -> dict[str, Any]:
         return await self.besttake.compose(params, lambda p: ctx.progress(**p))
+
+    async def hair_rank(self, params: Any, _ctx: Ctx) -> dict[str, Any]:
+        return await self.hair.rank(params)
+
+    async def hair_compose(self, params: Any, _ctx: Ctx) -> dict[str, Any]:
+        return await self.hair.compose(params)
 
     async def inpaint_run(self, params: Any, ctx: Ctx) -> dict[str, Any]:
         return await self.inpaint.run(params, lambda p: ctx.progress(**p))

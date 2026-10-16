@@ -315,9 +315,15 @@ fn yes() -> bool {
 #[serde(rename_all = "snake_case")]
 pub enum PatchKind {
     BestTake,
+    /// Hair from another photo of the same person (docs/03 section 5.1).
+    Hair,
     Inpaint,
     Denoise,
     FaceRestore,
+    /// Sweat cleanup: shine compressed on skin and hair (docs/03 section 7.5).
+    Deshine,
+    /// Sweat cleanup: stray strands outside the hair silhouette filled (docs/03 section 7.5).
+    Flyaway,
     #[serde(other)]
     Other,
 }
@@ -339,7 +345,7 @@ pub struct Patch {
     pub amount: f32,
     #[serde(default = "yes")]
     pub enabled: bool,
-    /// Best take: whose face was replaced, and from which photo.
+    /// Best take / hair: whose face (hair) was replaced, and from which photo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub person_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
