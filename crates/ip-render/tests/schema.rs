@@ -114,7 +114,9 @@ fn parses_m5_patch_op() {
     let json = r#"{"version":1,"ops":[
         {"type":"patch","kind":"best_take","asset":"bt_12_881","rect":[0.2,0.2,0.15,0.3],"feather":0.1,"person_id":12,"source_photo_id":4229},
         {"type":"patch","kind":"inpaint","asset":"ip_1","rect":[0,0,1,1],"enabled":false},
-        {"type":"patch","kind":"hologram","asset":"z","rect":[0,0,1,1]}
+        {"type":"patch","kind":"hologram","asset":"z","rect":[0,0,1,1]},
+        {"type":"patch","kind":"hair","asset":"hair_5_3","rect":[0.1,0.05,0.4,0.5],"amount":0.7,"person_id":12,"source_photo_id":4100,
+         "base_face_id":881,"source_face_id":771,"align":{"scale":1.04,"rotation_deg":2.1,"dx":0.01,"dy":-0.02,"landmark_rms":0.004}}
     ]}"#;
     let s: EditStack = serde_json::from_str(json).unwrap();
     match &s.ops[0] {
@@ -128,6 +130,18 @@ fn parses_m5_patch_op() {
         o => panic!("{o:?}"),
     }
     assert!(matches!(&s.ops[2], Op::Patch(p) if p.kind == PatchKind::Other));
+    // hair transfer: a patch like a best take; the extra fields are kept in the stored JSON
+    match &s.ops[3] {
+        Op::Patch(p) => {
+            assert_eq!(p.kind, PatchKind::Hair);
+            assert_eq!(
+                (p.amount, p.person_id, p.source_photo_id),
+                (0.7, Some(12), Some(4100))
+            );
+            assert_eq!(serde_json::to_value(p.kind).unwrap(), "hair");
+        }
+        o => panic!("{o:?}"),
+    }
     // A disabled patch alone is not an edit.
     let only_disabled = EditStack {
         version: 1,

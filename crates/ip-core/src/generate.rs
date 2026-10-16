@@ -49,7 +49,7 @@ pub const MIN_IDENTITY_COS: f32 = crate::analysis::cluster::TRACK_COS;
 /// Long edge of the removal mask handed to `inpaint.run` (analysis resolution).
 pub const INPAINT_MASK_EDGE: u32 = 1024;
 /// Edge feather stored on generated patches (fraction of the rect's short side).
-const PATCH_FEATHER: f32 = 0.08;
+pub(crate) const PATCH_FEATHER: f32 = 0.08;
 /// A person gets a new face only when a composable face of theirs beats the base face by more
 /// than this (expression score 0-1): smaller gains are not worth the compositing risk. The base
 /// choice uses the same margin ("good enough" = within this of the person's best).
@@ -725,7 +725,7 @@ pub fn body_box(face: [f64; 4]) -> [f32; 4] {
 
 // ------------------------------------------------------------------ patch ops
 
-fn mkphoto(r: &PhotoRef) -> MaskPhoto {
+pub(crate) fn mkphoto(r: &PhotoRef) -> MaskPhoto {
     MaskPhoto {
         photo_id: r.id,
         path: r.path.to_string_lossy().into_owned(),
@@ -742,7 +742,7 @@ fn clamp_rect(r: [f32; 4]) -> [f32; 4] {
     [x, y, w, h]
 }
 
-fn patch_op(
+pub(crate) fn patch_op(
     kind: &str,
     asset: &str,
     rect: [f32; 4],
@@ -766,16 +766,16 @@ fn is_patch(op: &Value, kind: &str) -> bool {
         && op.get("kind").and_then(Value::as_str) == Some(kind)
 }
 
-/// Whether `old` is the slot `new` takes over. A best take is tracked by person (or by the base
-/// face when the face has no person); denoise replaces denoise; face restoration replaces all
-/// face restoration; inpainting always appends.
+/// Whether `old` is the slot `new` takes over. A best take and a hair transfer are tracked by
+/// person (or by the base face when the face has no person); denoise replaces denoise; face
+/// restoration replaces all face restoration; inpainting always appends.
 fn same_slot(old: &Value, new: &Value) -> bool {
     let kind = new.get("kind").and_then(Value::as_str).unwrap_or("");
     if !is_patch(old, kind) {
         return false;
     }
     match kind {
-        "best_take" => match new.get("person_id").and_then(Value::as_i64) {
+        "best_take" | "hair" => match new.get("person_id").and_then(Value::as_i64) {
             Some(p) => old.get("person_id").and_then(Value::as_i64) == Some(p),
             None => {
                 old.get("person_id").and_then(Value::as_i64).is_none()
@@ -801,7 +801,7 @@ pub fn replace_patches(old: Vec<Value>, new: Vec<Value>) -> Vec<Value> {
 
 // ------------------------------------------------------------------ Core API
 
-fn reason_of(e: &CoreError) -> String {
+pub(crate) fn reason_of(e: &CoreError) -> String {
     e.to_string()
 }
 
@@ -874,7 +874,7 @@ impl Core {
         }
     }
 
-    fn gen_dir(&self, task_id: &str) -> PathBuf {
+    pub(crate) fn gen_dir(&self, task_id: &str) -> PathBuf {
         self.dirs.gen.join(task_id)
     }
 
@@ -892,7 +892,11 @@ impl Core {
 
     /// Saves `new` patch ops into the photo's stack (replacing the slots they take over) and
     /// sends `edits.updated`.
-    async fn apply_patches(self: &Arc<Self>, photo_id: i64, new: Vec<Value>) -> Result<()> {
+    pub(crate) async fn apply_patches(
+        self: &Arc<Self>,
+        photo_id: i64,
+        new: Vec<Value>,
+    ) -> Result<()> {
         let r = self
             .db
             .call(move |c| catalog::photo_ref(c, photo_id))

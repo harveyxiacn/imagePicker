@@ -526,13 +526,14 @@ fn guest_allows(method: &Method, path: &str, query: Option<&str>) -> bool {
         "tasks",
         "import",
     ];
-    const DENIED_SUB: [&str; 6] = [
+    const DENIED_SUB: [&str; 7] = [
         "people",
         "faces",
         "analysis",
         "bystanders",
         "besttake",
         "beauty",
+        "hair",
     ];
     let first = segs.first().copied().unwrap_or("");
     if DENIED_ROOT.contains(&first) {
