@@ -358,7 +358,8 @@ impl Core {
         }
     }
 
-    /// Replaces global / local / LUT / output-sharpen of every photo with the preset's.
+    /// Replaces global / local / LUT / output-sharpen of every photo with the preset's (built-in
+    /// presets fitted to each photo).
     async fn apply_preset_to(
         self: &Arc<Self>,
         ids: &[i64],
@@ -394,7 +395,23 @@ impl Core {
             .await?;
         let mut writes: Vec<(PhotoRef, Vec<Value>)> = Vec::new();
         for (r, cur) in work {
-            let merged = sync::merge_ops(&cur, &preset_ops, &include);
+            // Built-in presets are fitted to each photo (docs/03 §6.1.1), exactly as the
+            // editor's preset panel does; if the photo cannot be decoded the nominal look is used.
+            let fitted = if preset.builtin {
+                self.apply_preset_for(
+                    r.id,
+                    crate::edit::PresetApplyRequest {
+                        preset_id: preset.id.clone(),
+                        amount: Some(1.0),
+                    },
+                )
+                .await
+                .ok()
+                .map(|p| ops_of(&p.stack))
+            } else {
+                None
+            };
+            let merged = sync::merge_ops(&cur, fitted.as_ref().unwrap_or(&preset_ops), &include);
             if merged != cur {
                 writes.push((r, merged));
             }

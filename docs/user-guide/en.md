@@ -427,11 +427,21 @@ Press `D` in Grid/Loupe (or right-click → *Edit*) to open the edit page. Every
 | **HSL** | Hue, saturation, luminance for 8 bands (red, orange, yellow, green, aqua, blue, purple, magenta) |
 | **Colour grading** | Shadows / midtones / highlights wheels + balance |
 | **Crop & straighten** (`R`) | Aspect (original / free / …), angle; *Auto straighten* and *Auto crop* (see below) |
-| **Presets** | Built-in presets (Natural, Japanese clean, Cinematic, Classic B&W, Soft portrait, Landscape pop, Warm / Cool film, Vivid, Matte, High-contrast B&W, Teal & orange, Golden hour…); *Save as preset* |
+| **Presets** | Built-in presets (Natural, Vivid, Warm film, Cool film, Japanese clean, Cinematic, Classic B&W, High-contrast B&W, Soft portrait, Landscape pop) that adapt to each photo, a *Strength* slider, and *Save as preset* (see below) |
 | **LUT** | Built-in LUTs; import your own `.cube` (type the file path, must be inside an allowed folder), with an amount slider |
 | **Output sharpen** | Sharpening applied on output |
 
 Each section has *Reset section*; *Reset all* is at the top; *History* lists every step.
+
+#### Presets adapt to the photo
+
+Built-in presets describe a look and a brightness *goal* rather than fixed slider values. When you click one, the app measures the photo (its brightness, its brightest areas and, if faces were found, the faces) and works out the sliders for that photo:
+
+- **Brightness follows the goal.** *Japanese clean* aims for a bright, airy look: a dark photo is brightened a lot, a normal one moderately, and a photo that is already bright (high-key, snow, beach) is left about as it is or even brought down slightly. *Cinematic* aims a little darker; *Natural*, *Vivid* and the film and B&W looks only nudge clearly under- or over-exposed photos. Colour, contrast style and HSL character stay the same on every photo.
+- **Highlights and faces are protected.** A preset may not blow out more than a tiny share of the photo (about 0.3–0.5 % of new pure-white pixels) or push faces into white; if it would, it pulls back whites, highlights and exposure.
+- **Strength.** After applying a preset, a *Strength* slider (0–150 %) appears under the preset grid. Lower it for a subtler look or raise it for a stronger one; 0 % removes the look. Moving it re-applies the preset at that strength (highlight protection included), so slider changes you made after applying the preset are replaced; set the strength first, then fine-tune.
+- **Your own presets** are applied exactly as saved; the *Strength* slider scales them.
+- The result is ordinary slider values (you can see and change them in *Basic*, *Curves*, *HSL*), so exports match the preview. Preset thumbnails already show the look fitted to the open photo. The AI assistant ("apply Japanese clean to these") fits the preset to each photo the same way.
 
 #### Auto straighten and Auto crop
 

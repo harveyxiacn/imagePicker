@@ -5,10 +5,7 @@ use std::collections::BTreeMap;
 use crate::*;
 
 fn global(a: Adjust) -> Op {
-    Op::Global(Adjust {
-        source: Some("preset".into()),
-        ..a
-    })
+    Op::Global(a)
 }
 
 fn hsl(h: f32, s: f32, l: f32) -> Hsl {
@@ -23,13 +20,48 @@ fn pts(p: &[[f32; 2]]) -> Vec<[f32; 2]> {
     p.to_vec()
 }
 
-#[allow(clippy::vec_init_then_push)]
-pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
-    let mut v: Vec<(&str, EditStack)> = Vec::new();
+/// A preset's tonal intent, resolved against the photo when it is applied (docs/03 §6.1.1).
+/// Levels are sRGB-encoded luminance (0.46 ≈ 18 % grey).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ToneIntent {
+    /// Target subject level (the median, faces weighted 60 % when present).
+    pub mid: f32,
+    /// Share of the gap to `mid` closed when the photo is darker / brighter than it.
+    pub pull_up: f32,
+    pub pull_down: f32,
+    /// Exposure range the solver may use at 100 % (EV; scaled by the strength).
+    pub ev: (f32, f32),
+    /// Share of pixels the preset may newly clip (luminance >= 250/255).
+    pub max_new_clip: f32,
+    /// Face median level the preset must not push faces above (unless they already were).
+    pub face_max: f32,
+}
 
-    v.push((
-        "natural",
-        stack(vec![
+const KEEP: ToneIntent = ToneIntent {
+    mid: 0.46,
+    pull_up: 0.3,
+    pull_down: 0.25,
+    ev: (-0.5, 0.5),
+    max_new_clip: 0.005,
+    face_max: 0.85,
+};
+
+/// A built-in preset: the look (colour and tonal character; exposure is solved, so it is 0
+/// here) plus its tonal intent.
+pub(crate) struct PresetSpec {
+    pub id: &'static str,
+    pub look: EditStack,
+    pub tone: ToneIntent,
+}
+
+#[allow(clippy::vec_init_then_push)]
+pub(crate) fn builtin_specs() -> Vec<PresetSpec> {
+    let mut v: Vec<PresetSpec> = Vec::new();
+
+    // Natural: a gentle polish; nudges clearly under/over-exposed photos toward a normal level.
+    v.push(PresetSpec {
+        id: "natural",
+        look: stack(vec![
             global(Adjust {
                 contrast: 6.0,
                 highlights: -10.0,
@@ -41,11 +73,18 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
             }),
             Op::OutputSharpen(OutputSharpen { amount: 12.0 }),
         ]),
-    ));
+        tone: ToneIntent {
+            mid: 0.47,
+            pull_up: 0.35,
+            ev: (-0.5, 0.6),
+            ..KEEP
+        },
+    });
 
-    v.push((
-        "vivid",
-        stack(vec![
+    // Vivid: punchy colour and contrast; keeps the photo's brightness.
+    v.push(PresetSpec {
+        id: "vivid",
+        look: stack(vec![
             global(Adjust {
                 contrast: 16.0,
                 highlights: -8.0,
@@ -58,11 +97,18 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
             }),
             Op::OutputSharpen(OutputSharpen { amount: 18.0 }),
         ]),
-    ));
+        tone: ToneIntent {
+            pull_up: 0.25,
+            pull_down: 0.2,
+            ev: (-0.4, 0.4),
+            ..KEEP
+        },
+    });
 
-    v.push((
-        "film_warm",
-        stack(vec![
+    // Film warm: faded blacks, rolled-off highlights, warm cast; slightly bright.
+    v.push(PresetSpec {
+        id: "film_warm",
+        look: stack(vec![
             global(Adjust {
                 contrast: -4.0,
                 temp: 250.0,
@@ -79,16 +125,25 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
                 amount: 0.8,
             }),
         ]),
-    ));
+        tone: ToneIntent {
+            mid: 0.48,
+            pull_up: 0.35,
+            pull_down: 0.3,
+            ev: (-0.5, 0.6),
+            ..KEEP
+        },
+    });
 
-    v.push((
-        "film_cool",
-        stack(vec![
+    // Film cool: the same film base with a cool cast.
+    v.push(PresetSpec {
+        id: "film_cool",
+        look: stack(vec![
             global(Adjust {
                 contrast: -2.0,
                 temp: -280.0,
                 tint: -3.0,
                 saturation: -8.0,
+                highlights: -6.0,
                 curve: Some(Curves {
                     rgb: pts(&[[0.0, 0.025], [0.25, 0.24], [0.75, 0.77], [1.0, 0.99]]),
                     ..Default::default()
@@ -100,22 +155,32 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
                 amount: 0.8,
             }),
         ]),
-    ));
+        tone: ToneIntent {
+            mid: 0.47,
+            pull_up: 0.35,
+            pull_down: 0.3,
+            ev: (-0.5, 0.6),
+            ..KEEP
+        },
+    });
 
+    // Japanese clean (日系清新): bright and airy (subject level ≈ 0.60), low contrast, lifted
+    // shadows and blacks, cool and slightly desaturated greens/blues. Dark photos are brightened
+    // a lot; photos that are already bright are left alone or even brought down a little, and
+    // highlights / faces never blow out (the old fixed +0.35 EV did on high-key photos).
     let mut jp_hsl = BTreeMap::new();
     jp_hsl.insert(HslBand::Green, hsl(-12.0, -18.0, 8.0));
     jp_hsl.insert(HslBand::Aqua, hsl(0.0, -6.0, 8.0));
     jp_hsl.insert(HslBand::Blue, hsl(-4.0, -12.0, 10.0));
     jp_hsl.insert(HslBand::Orange, hsl(0.0, -4.0, 8.0));
-    v.push((
-        "japanese_clean",
-        stack(vec![
+    v.push(PresetSpec {
+        id: "japanese_clean",
+        look: stack(vec![
             global(Adjust {
-                exposure: 0.35,
                 contrast: -14.0,
-                highlights: -22.0,
-                shadows: 24.0,
-                whites: 10.0,
+                highlights: -24.0,
+                shadows: 20.0,
+                whites: 4.0,
                 blacks: 12.0,
                 temp: -170.0,
                 tint: -5.0,
@@ -124,7 +189,7 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
                 clarity: -10.0,
                 dehaze: -4.0,
                 curve: Some(Curves {
-                    rgb: pts(&[[0.0, 0.05], [0.25, 0.28], [0.75, 0.8], [1.0, 1.0]]),
+                    rgb: pts(&[[0.0, 0.05], [0.25, 0.28], [0.75, 0.78], [1.0, 1.0]]),
                     ..Default::default()
                 }),
                 hsl: jp_hsl,
@@ -132,11 +197,20 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
             }),
             Op::OutputSharpen(OutputSharpen { amount: 8.0 }),
         ]),
-    ));
+        tone: ToneIntent {
+            mid: 0.60,
+            pull_up: 0.8,
+            pull_down: 0.25,
+            ev: (-0.8, 1.2),
+            max_new_clip: 0.003,
+            face_max: 0.82,
+        },
+    });
 
-    v.push((
-        "cinematic",
-        stack(vec![
+    // Cinematic: teal shadows, warm highlights, a little moodier than the original.
+    v.push(PresetSpec {
+        id: "cinematic",
+        look: stack(vec![
             global(Adjust {
                 contrast: 10.0,
                 saturation: -8.0,
@@ -154,11 +228,18 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
                 amount: 0.85,
             }),
         ]),
-    ));
+        tone: ToneIntent {
+            mid: 0.40,
+            pull_up: 0.3,
+            pull_down: 0.4,
+            ev: (-0.6, 0.3),
+            ..KEEP
+        },
+    });
 
-    v.push((
-        "bw_classic",
-        stack(vec![
+    v.push(PresetSpec {
+        id: "bw_classic",
+        look: stack(vec![
             global(Adjust {
                 contrast: 12.0,
                 saturation: -100.0,
@@ -171,34 +252,41 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
             }),
             Op::OutputSharpen(OutputSharpen { amount: 12.0 }),
         ]),
-    ));
+        tone: KEEP,
+    });
 
-    v.push((
-        "bw_contrast",
-        stack(vec![
+    // High-contrast B&W: deep blacks and bright whites, but whites stop short of clipping.
+    v.push(PresetSpec {
+        id: "bw_contrast",
+        look: stack(vec![
             global(Adjust {
                 contrast: 35.0,
                 saturation: -100.0,
                 clarity: 25.0,
-                whites: 10.0,
+                whites: 6.0,
                 blacks: -12.0,
                 curve: Some(Curves {
-                    rgb: pts(&[[0.0, 0.0], [0.25, 0.18], [0.75, 0.84], [1.0, 1.0]]),
+                    rgb: pts(&[[0.0, 0.0], [0.25, 0.18], [0.75, 0.82], [1.0, 1.0]]),
                     ..Default::default()
                 }),
                 ..Default::default()
             }),
             Op::OutputSharpen(OutputSharpen { amount: 20.0 }),
         ]),
-    ));
+        tone: ToneIntent {
+            mid: 0.45,
+            ..KEEP
+        },
+    });
 
+    // Soft portrait: bright, glowing skin (face level ≈ 0.56) with soft contrast; faces are
+    // kept below 0.80 so skin keeps its texture.
     let mut pt_hsl = BTreeMap::new();
     pt_hsl.insert(HslBand::Orange, hsl(0.0, -6.0, 7.0));
     pt_hsl.insert(HslBand::Red, hsl(0.0, -6.0, 4.0));
-    v.push((
-        "portrait_soft",
-        stack(vec![global(Adjust {
-            exposure: 0.1,
+    v.push(PresetSpec {
+        id: "portrait_soft",
+        look: stack(vec![global(Adjust {
             contrast: -8.0,
             highlights: -16.0,
             shadows: 14.0,
@@ -209,21 +297,30 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
             hsl: pt_hsl,
             ..Default::default()
         })]),
-    ));
+        tone: ToneIntent {
+            mid: 0.56,
+            pull_up: 0.7,
+            pull_down: 0.3,
+            ev: (-0.6, 0.9),
+            max_new_clip: 0.005,
+            face_max: 0.80,
+        },
+    });
 
+    // Landscape pop: rich skies and foliage; highlights (skies) protected.
     let mut ls_hsl = BTreeMap::new();
     ls_hsl.insert(HslBand::Green, hsl(0.0, 16.0, 0.0));
     ls_hsl.insert(HslBand::Yellow, hsl(0.0, 8.0, 0.0));
     ls_hsl.insert(HslBand::Blue, hsl(0.0, 16.0, -8.0));
     ls_hsl.insert(HslBand::Aqua, hsl(0.0, 8.0, -4.0));
-    v.push((
-        "landscape_pop",
-        stack(vec![
+    v.push(PresetSpec {
+        id: "landscape_pop",
+        look: stack(vec![
             global(Adjust {
                 contrast: 15.0,
                 highlights: -18.0,
                 shadows: 16.0,
-                whites: 8.0,
+                whites: 6.0,
                 blacks: -6.0,
                 vibrance: 30.0,
                 saturation: 6.0,
@@ -234,10 +331,29 @@ pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
             }),
             Op::OutputSharpen(OutputSharpen { amount: 25.0 }),
         ]),
-    ));
+        tone: ToneIntent {
+            mid: 0.45,
+            ..KEEP
+        },
+    });
 
-    v.into_iter()
-        .map(|(id, s)| (id.to_string(), format!("preset.{id}"), s))
+    v
+}
+
+/// The presets as nominal stacks (the look at 100 % with exposure 0, before it is resolved
+/// against a photo). Their global op carries `source: "preset:<id>"`.
+pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
+    builtin_specs()
+        .into_iter()
+        .map(|p| {
+            let mut s = p.look;
+            for op in s.ops.iter_mut() {
+                if let Op::Global(a) = op {
+                    a.source = Some(format!("preset:{}", p.id));
+                }
+            }
+            (p.id.to_string(), format!("preset.{}", p.id), s)
+        })
         .collect()
 }
 

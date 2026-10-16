@@ -24,7 +24,7 @@ pub fn auto_adjust(source: &RgbImage, ctx: &AutoContext, mode: AutoMode) -> Adju
 
 /// Round suggestions to slider granularity so they display (and serialise) cleanly:
 /// exposure to 0.01 EV, temp to 10 K, everything else to whole units.
-fn tidy(mut a: Adjust) -> Adjust {
+pub(crate) fn tidy(mut a: Adjust) -> Adjust {
     let whole = |v: &mut f32| *v = v.round() + 0.0; // + 0.0 turns -0.0 into 0.0
     a.exposure = (a.exposure * 100.0).round() / 100.0 + 0.0;
     a.temp = (a.temp / 10.0).round() * 10.0 + 0.0;

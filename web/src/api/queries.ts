@@ -246,6 +246,11 @@ export function usePresets() {
   return useQuery({ queryKey: qk.presets, queryFn: api.presets, select: (d) => d.presets, staleTime: 60_000 })
 }
 
+/** Presets with stacks fitted to this photo (adaptive tone, docs/03 §6.1.1). */
+export function usePhotoPresets(photoId: number) {
+  return useQuery({ queryKey: qk.photoPresets(photoId), queryFn: () => api.photoPresets(photoId), select: (d) => d.presets, staleTime: 5 * 60_000 })
+}
+
 /** People detected in one photo + whether their geometry is prepared (M4 portrait panel). */
 export function usePhotoPeople(photoId: number | undefined, poll = false) {
   return useQuery({

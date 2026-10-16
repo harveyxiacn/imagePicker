@@ -1,7 +1,7 @@
 import { delay, http, HttpResponse } from 'msw'
 import type { Adjust, AutoCropBody, AutoCropResult, AutoMode, EditSection, EditStack, MaskTarget, Photo, Preset, SyncBody } from '@/api/types'
 import { MASK_TARGETS } from '@/api/types'
-import { applySections, emptyStack, inscribedRect, isEmptyStack, normalizeStack, stackKey } from '@/lib/edit'
+import { applySections, emptyStack, inscribedRect, isEmptyStack, normalizeStack, PRESET_AMOUNT_MAX, scalePresetStack, stackKey } from '@/lib/edit'
 import { missingModelIds } from './ai'
 import { emit } from './bus'
 import { findPhoto, hashString } from './db'
@@ -77,6 +77,11 @@ export const BUILTIN: Preset[] = [
 ]
 
 const userPresets: Preset[] = []
+
+const tagPreset = (s: EditStack, id: string, amount: number): EditStack => ({
+  ...s,
+  ops: s.ops.map((o) => (o.type === 'global' ? { ...o, source: `preset:${id};amount=${Math.round(amount * 100)}` } : o)),
+})
 let presetSeq = 0
 
 // ---------------------------------------------------------------- auto
@@ -235,6 +240,21 @@ export const editHandlers = [
     return HttpResponse.json({ updated: items.length })
   }),
 
+  // Adaptive presets: the mock does not fit the tone to the photo, it only scales and tags the stack.
+  http.get('/api/edits/:id/presets', async ({ params }) => {
+    await lat()
+    if (!findPhoto(Number(params.id))) return err(404, 'not_found', 'photo not found')
+    return HttpResponse.json({ presets: [...BUILTIN, ...userPresets].map((p) => ({ ...p, stack: tagPreset(p.stack, p.id, 1) })) })
+  }),
+  http.post('/api/edits/:id/preset', async ({ params, request }) => {
+    await lat()
+    if (!findPhoto(Number(params.id))) return err(404, 'not_found', 'photo not found')
+    const { preset_id, amount = 1 } = (await request.json()) as { preset_id: string; amount?: number }
+    if (!(amount >= 0 && amount <= PRESET_AMOUNT_MAX)) return err(400, 'bad_request', `amount must be within 0..${PRESET_AMOUNT_MAX}`)
+    const p = [...BUILTIN, ...userPresets].find((x) => x.id === preset_id)
+    if (!p) return err(404, 'not_found', `preset ${preset_id} not found`)
+    return HttpResponse.json({ preset_id, amount, adaptive: p.builtin, stack: tagPreset(scalePresetStack(p.stack, amount), p.id, amount) })
+  }),
   http.get('/api/presets', async () => {
     await lat()
     return HttpResponse.json({ presets: [...BUILTIN, ...userPresets] })

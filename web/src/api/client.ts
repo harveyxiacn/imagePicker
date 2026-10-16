@@ -38,6 +38,7 @@ import type {
   EditsPutResponse,
   EditsResponse,
   Preset,
+  PresetApplied,
   PreviewBody,
   PreviewResult,
   SyncBody,
@@ -318,6 +319,11 @@ export const api = {
   autoCrop: (id: number, body: AutoCropBody) => request<AutoCropResult>('POST', `/edits/${id}/auto-crop`, body),
   syncEdits: (body: SyncBody) => request<{ updated: number }>('POST', '/edits/sync', body),
   presets: () => request<{ presets: Preset[] }>('GET', '/presets'),
+  /** every preset with its stack fitted to this photo at 100 % */
+  photoPresets: (photoId: number) => request<{ presets: Preset[] }>('GET', `/edits/${photoId}/presets`),
+  /** one preset fitted to this photo at `amount` (0..1.5); nothing is saved */
+  applyPresetFor: (photoId: number, presetId: string, amount: number) =>
+    request<PresetApplied>('POST', `/edits/${photoId}/preset`, { preset_id: presetId, amount }),
   savePreset: (name: string, stack: EditStack) => request<{ preset: Preset }>('POST', '/presets', { name, stack }),
   deletePreset: (id: string) => request<void>('DELETE', `/presets/${encodeURIComponent(id)}`),
   luts: () => request<{ luts: LutInfo[] }>('GET', '/luts'),

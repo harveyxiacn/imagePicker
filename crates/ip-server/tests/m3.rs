@@ -488,6 +488,125 @@ async fn presets_http() {
 }
 
 #[tokio::test]
+async fn presets_fit_the_photo_and_scale_with_strength() {
+    let e = env();
+    let (_, ids) = setup(
+        &e,
+        &[("dark.jpg", [40, 40, 40]), ("bright.jpg", [235, 235, 235])],
+    )
+    .await;
+    let (dark, bright) = (ids[0], ids[1]);
+    let ev_of = |stack: &Value| -> f64 {
+        stack["ops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["type"] == "global")
+            .and_then(|g| g["exposure"].as_f64())
+            .unwrap_or(0.0)
+    };
+    let jp = |list: &Value| -> Value {
+        list["presets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == "japanese_clean")
+            .unwrap()["stack"]
+            .clone()
+    };
+
+    // GET /api/edits/{id}/presets: built-ins fitted to the photo.
+    let r = call(&e.app, Method::GET, &format!("/api/edits/{dark}/presets"), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let on_dark = jp(&r.json());
+    let r = call(&e.app, Method::GET, &format!("/api/edits/{bright}/presets"), None).await;
+    let on_bright = jp(&r.json());
+    assert!(ev_of(&on_dark) > 0.3, "{on_dark}");
+    assert!(ev_of(&on_bright) <= 0.05, "{on_bright}");
+    assert!(on_dark["ops"][0]["source"]
+        .as_str()
+        .unwrap()
+        .starts_with("preset:japanese_clean;amount=100"));
+
+    // POST /api/edits/{id}/preset: strength, fit report, nothing saved.
+    let r = call(
+        &e.app,
+        Method::POST,
+        &format!("/api/edits/{dark}/preset"),
+        Some(json!({"preset_id": "japanese_clean", "amount": 0.5})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let raw = String::from_utf8_lossy(&r.body).to_string();
+    assert!(!raw.contains("9999") && !raw.contains("0000001"), "{raw}");
+    let half = r.json();
+    assert_eq!(half["adaptive"], true);
+    assert_eq!(half["amount"], 0.5);
+    assert_eq!(half["fit"]["satisfied"], true);
+    assert!(half["fit"]["after"]["median"].as_f64() > half["fit"]["before"]["median"].as_f64());
+    assert!(ev_of(&half["stack"]) < ev_of(&on_dark), "{half}");
+    assert_eq!(
+        half["stack"]["ops"][0]["source"],
+        "preset:japanese_clean;amount=50"
+    );
+    let doc = call(&e.app, Method::GET, &format!("/api/edits/{dark}"), None)
+        .await
+        .json();
+    assert_eq!(doc["updated_at"], Value::Null);
+
+    // User presets are scaled, not fitted.
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/presets",
+        Some(json!({"name": "Mine", "stack": {"version":1,"ops":[
+            {"type":"global","exposure":0.4},{"type":"lut","file":"film_warm","amount":0.5}]}})),
+    )
+    .await;
+    let uid = r.json()["preset"]["id"].as_str().unwrap().to_string();
+    let r = call(
+        &e.app,
+        Method::POST,
+        &format!("/api/edits/{dark}/preset"),
+        Some(json!({"preset_id": uid, "amount": 0.5})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let u = r.json();
+    assert_eq!(u["adaptive"], false);
+    assert!(u.get("fit").is_none());
+    assert!((ev_of(&u["stack"]) - 0.2).abs() < 1e-6, "{u}");
+    assert_eq!(u["stack"]["ops"][1]["amount"], 0.25);
+
+    // Errors.
+    for (body, want) in [
+        (json!({"preset_id": "japanese_clean", "amount": 2.0}), StatusCode::BAD_REQUEST),
+        (json!({"preset_id": "japanese_clean", "amount": -0.1}), StatusCode::BAD_REQUEST),
+        (json!({"preset_id": "no_such"}), StatusCode::NOT_FOUND),
+        (json!({"amount": 1}), StatusCode::UNPROCESSABLE_ENTITY),
+    ] {
+        let r = call(
+            &e.app,
+            Method::POST,
+            &format!("/api/edits/{dark}/preset"),
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(r.status, want, "{body}");
+    }
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/edits/999/preset",
+        Some(json!({"preset_id": "japanese_clean"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(&e.app, Method::GET, "/api/edits/999/presets", None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn builtin_presets_are_listed_and_protected() {
     let data = tempfile::tempdir().unwrap();
     let core = Core::open(CoreConfig {
