@@ -112,6 +112,9 @@ export interface Photo {
   duplicate_group_id?: number | null
   /** `exact` = a byte-identical copy exists; `near` = the same picture saved again without metadata */
   duplicate_kind?: DuplicateKind
+  // ---- taste (docs/03 §3.3) ----
+  /** 0..1: how likely you keep this photo, from your personal taste model; absent while no model is in use */
+  taste_score?: number | null
 }
 
 export type DuplicateKind = 'exact' | 'near'
@@ -163,7 +166,7 @@ export interface Session {
 }
 
 export type FlagFilter = 'picked' | 'rejected' | 'unflagged' | 'not_rejected'
-export type SortKey = 'taken_at' | '-taken_at' | 'name' | 'rating' | 'ai'
+export type SortKey = 'taken_at' | '-taken_at' | 'name' | 'rating' | 'ai' | 'taste'
 export type PersonState = 'eyes_open' | 'smiling' | 'looking' | 'subject'
 export type PersonMode = 'all' | 'any'
 
@@ -958,17 +961,58 @@ export interface Collection {
 }
 
 export interface TasteTrait {
+  /** `likes` | `dislikes` (taste v2); params.feature names the feature */
   key: string
   params?: Record<string, string | number>
 }
+/** Cross-validated quality of the last training (docs/api-contract-m4.md C.2). */
+export interface TasteMetrics {
+  auc: number
+  /** AUC of the generic score on the same photos */
+  base_auc: number
+  accuracy: number
+  base_accuracy: number
+  margin: number
+  eval_positives: number
+  eval_negatives: number
+  folds: number
+  lambda: number
+  dim: number
+  fit_photos: number
+  train_ms: number
+}
+export type TasteState = 'disabled' | 'collecting' | 'ready' | 'not_better' | 'active'
 export interface Taste {
   labels: number
+  positives: number
+  negatives: number
+  min_per_class: number
+  pending: number
+  retrain_every: number
+  enabled: boolean
+  state: TasteState
   active: boolean
   /** 0..0.6 fusion weight */
   alpha: number
   holdout_accuracy: number | null
+  base_accuracy: number | null
+  metrics: TasteMetrics | null
   traits: TasteTrait[]
+  scored: number
+  feature_version: number
   updated_at: number | null
+}
+export interface TasteContribution {
+  /** a taste feature (`sharpness`, `closed_eyes`, …), `scene_<x>` or `look` */
+  feature: string
+  delta: number
+  direction: 'high' | 'low'
+}
+export interface TasteExplain {
+  photo_id: number
+  taste_score: number | null
+  base_score: number | null
+  contributions: TasteContribution[]
 }
 
 // ---- M5: patch layers, best take, inpaint, enhance (docs/api-contract-m5.md; mirrors ip-render `Patch`) ----

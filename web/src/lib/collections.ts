@@ -9,7 +9,7 @@ import { buildPhotosQuery, DEFAULT_FILTER, DEFAULT_PERSON_FILTER, isIsoDate, typ
 
 const COLORS: ColorName[] = ['red', 'yellow', 'green', 'blue', 'purple']
 const FLAGS: FlagFilter[] = ['picked', 'rejected', 'unflagged', 'not_rejected']
-const SORTS: SortKey[] = ['taken_at', '-taken_at', 'name', 'rating', 'ai']
+const SORTS: SortKey[] = ['taken_at', '-taken_at', 'name', 'rating', 'ai', 'taste']
 const STATES: PersonState[] = ['eyes_open', 'smiling', 'looking', 'subject']
 
 /** Serialise the current filter (session independent: no session_id / cursor / limit). */
