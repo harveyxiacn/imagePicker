@@ -526,8 +526,9 @@ export const m5Handlers = [
     if (!p) return err(404, 'not_found', 'photo not found')
     if (takeFail('503')) return err(503, 'worker_unavailable', 'worker unavailable')
     const body = (await request.json()) as EnhanceBody
-    if (body.op !== 'denoise' && body.op !== 'face_restore') return err(400, 'bad_request', 'unknown op')
-    const miss = missingModelIds([body.op === 'denoise' ? 'scunet' : 'gfpgan-v1.4'])
+    const sweatOp = body.op === 'deshine' || body.op === 'flyaway'
+    if (body.op !== 'denoise' && body.op !== 'face_restore' && !sweatOp) return err(422, 'unprocessable', 'unknown op')
+    const miss = missingModelIds([body.op === 'denoise' ? 'scunet' : sweatOp ? 'mediapipe-face-landmarker' : 'gfpgan-v1.4'])
     if (miss.length) return missing409(miss)
     const strength = clamp01(Number(body.strength ?? 0.6))
     const spec: TaskSpec = {
@@ -536,7 +537,24 @@ export const m5Handlers = [
     }
     const task_id = startTask('enhance', 3, async () => {
       let stack = savedStack(p.id)
-      if (body.op === 'denoise') {
+      if (sweatOp) {
+        // sweat cleanup: full-strength patch per subject face, the strength is the layer amount
+        const kind = body.op as 'deshine' | 'flyaway'
+        const faces = mockPeopleOfPhoto(p).filter((x) => x.is_subject)
+        if (faces.length === 0) {
+          emit({ type: 'enhance.done', photo_id: p.id, op: body.op, ok: false, reason: 'no_faces' })
+          return
+        }
+        const next: PatchOp[] = []
+        let n = 10
+        for (const f of faces) {
+          const [x, y, w, h] = f.face_box
+          const box: Box = kind === 'flyaway' ? [clamp01(x - 0.3 * w), clamp01(y - 0.5 * h), 1.6 * w, 1.2 * h] : f.face_box
+          const { asset, rect } = await faceRestorePatch(p, box, n++)
+          next.push({ type: 'patch', kind, asset, rect, feather: 0.08, amount: strength, enabled: true })
+        }
+        stack = replaceByKind(stack, kind, next)
+      } else if (body.op === 'denoise') {
         const { asset, rect } = await denoisePatch(p)
         stack = replaceByKind(stack, 'denoise', [{ type: 'patch', kind: 'denoise', asset, rect, feather: 0, amount: strength, enabled: true }])
       } else {

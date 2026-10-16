@@ -698,7 +698,7 @@ export type ServerEvent =
   | { type: 'beauty.ready'; photo_id: number }
   | { type: 'besttake.done'; photo_id: number; results: BestTakeResult[] }
   | { type: 'inpaint.done'; photo_id: number; ok: boolean; reason: string | null }
-  | { type: 'enhance.done'; photo_id: number; op: EnhanceOp; ok: boolean; reason: string | null }
+  | { type: 'enhance.done'; photo_id: number; op: EnhanceOp | SweatOp; ok: boolean; reason: string | null }
   | { type: 'hair.done'; photo_id: number; face_id: number; ok: boolean; warnings: string[]; reason: string | null }
   | { type: 'taste.updated'; labels: number; active: boolean; alpha: number }
   | { type: 'collections.updated' }
@@ -974,8 +974,8 @@ export interface Taste {
 
 // ---- M5: patch layers, best take, inpaint, enhance (docs/api-contract-m5.md; mirrors ip-render `Patch`) ----
 
-export type PatchKind = 'best_take' | 'hair' | 'inpaint' | 'denoise' | 'face_restore'
-export const PATCH_KINDS: PatchKind[] = ['best_take', 'hair', 'inpaint', 'denoise', 'face_restore']
+export type PatchKind = 'best_take' | 'hair' | 'inpaint' | 'denoise' | 'face_restore' | 'deshine' | 'flyaway'
+export const PATCH_KINDS: PatchKind[] = ['best_take', 'hair', 'inpaint', 'denoise', 'face_restore', 'deshine', 'flyaway']
 
 /** A generated raster layer: RGBA PNG `asset` (alpha = blend mask) placed over `rect` of the upright, pre-crop image. */
 export interface PatchOp {
@@ -1144,8 +1144,11 @@ export type InpaintBody =
   | { strokes: Stroke[]; model?: 'lama' | 'sdxl' }
 
 export type EnhanceOp = 'denoise' | 'face_restore'
+/** Sweat cleanup (docs/api-contract-m5.md H.5): full-strength patches whose `amount` is the strength. */
+export type SweatOp = 'deshine' | 'flyaway'
+export const SWEAT_OPS: SweatOp[] = ['deshine', 'flyaway']
 export interface EnhanceBody {
-  op: EnhanceOp
+  op: EnhanceOp | SweatOp
   strength: number
 }
 

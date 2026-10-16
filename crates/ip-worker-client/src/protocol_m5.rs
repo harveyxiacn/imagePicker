@@ -56,7 +56,8 @@ pub struct InpaintResponse {
     pub model: Option<String>,
 }
 
-/// `enhance.run` params. `op` is `denoise` | `face_restore` | `upscale`.
+/// `enhance.run` params. `op` is `denoise` | `face_restore` | `upscale` | `deshine` | `flyaway`
+/// (the last two: sweat cleanup per face, full strength, docs/api-contract-m5.md H.5).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EnhanceRequest {
     pub photo: MaskPhoto,

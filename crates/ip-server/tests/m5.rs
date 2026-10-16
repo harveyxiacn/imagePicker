@@ -1238,3 +1238,44 @@ async fn hair_transfer_refuses_other_people_and_writes_one_patch() {
         .clone();
     assert_eq!(after, stack);
 }
+
+#[tokio::test]
+async fn sweat_cleanup_layers_take_the_strength_as_amount() {
+    let e = env();
+    let (ids, _faces) = hair_scene(&e).await;
+    let h1 = ids["h1.jpg"];
+    for (op, strength) in [("deshine", 0.4), ("flyaway", 0.7), ("deshine", 0.6)] {
+        let mut rx = e.core.events.subscribe();
+        let r = call(
+            &e.app,
+            Method::POST,
+            &format!("/api/photos/{h1}/enhance"),
+            Some(json!({"op": op, "strength": strength})),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{op}");
+        let done = wait_event(&mut rx, |ev| matches!(ev, Event::EnhanceDone { .. })).await;
+        let v = serde_json::to_value(&done).unwrap();
+        assert_eq!((v["op"].as_str(), v["ok"].as_bool()), (Some(op), Some(true)));
+        let req = e.worker.enhance_requests.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(req.faces.map(|f| f.len()), Some(1), "the subject's face");
+    }
+    let stack = call(&e.app, Method::GET, &format!("/api/edits/{h1}"), None)
+        .await
+        .json()["stack"]
+        .clone();
+    let ops = stack["ops"].as_array().unwrap();
+    let of = |k: &str| ops.iter().filter(|o| o["kind"] == k).collect::<Vec<_>>();
+    // one layer per op; the newer deshine replaced the older one
+    assert_eq!((of("deshine").len(), of("flyaway").len()), (1, 1));
+    let amount = |o: &Value| (o["amount"].as_f64().unwrap() * 100.0).round();
+    assert_eq!((amount(of("deshine")[0]), amount(of("flyaway")[0])), (60.0, 70.0));
+    let r = call(
+        &e.app,
+        Method::POST,
+        &format!("/api/photos/{h1}/enhance"),
+        Some(json!({"op": "shampoo"})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+}

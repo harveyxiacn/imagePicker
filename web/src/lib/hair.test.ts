@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EditStack, HairDonor, PatchOp, PhotoPerson } from '@/api/types'
-import { bestDonor, defaultHairFace, donorReasonKeys, hairFaceIds, hairLayerOf, removeHair, scorePct, setHairEnabled, setHairStrength, timeOffset } from './hair'
+import { bestDonor, defaultHairFace, donorReasonKeys, hairFaceIds, hairLayerOf, removeHair, removeSweat, scorePct, setHairEnabled, setHairStrength, setSweatStrength, sweatLayerOf, timeOffset } from './hair'
 
 const hair = (face: number, amount = 1): PatchOp => ({ type: 'patch', kind: 'hair', asset: `hair_${face}`, rect: [0.1, 0.1, 0.3, 0.4], amount, enabled: true, base_face_id: face, source_photo_id: 7, source_face_id: 70 })
 const stack = (): EditStack => ({
@@ -71,5 +71,27 @@ describe('hair panel helpers', () => {
     expect(timeOffset(-125)).toEqual({ key: 'hair.earlier', h: 2, m: 5 })
     expect(timeOffset(40)).toEqual({ key: 'hair.later', h: 0, m: 40 })
     expect(timeOffset(0)?.key).toBe('hair.sameTime')
+  })
+})
+
+describe('sweat cleanup layers', () => {
+  it('changes and removes the deshine layer only', () => {
+    const s: EditStack = {
+      version: 1,
+      ops: [
+        { type: 'patch', kind: 'deshine', asset: 'ds_1', rect: [0, 0, 0.3, 0.3], amount: 0.5 },
+        { type: 'patch', kind: 'flyaway', asset: 'fa_1', rect: [0, 0, 0.3, 0.3], amount: 0.7 },
+        hair(11),
+      ],
+    }
+    expect(sweatLayerOf(s, 'deshine')?.amount).toBe(0.5)
+    const t = setSweatStrength(s, 'deshine', 0.333)
+    expect(sweatLayerOf(t, 'deshine')?.amount).toBe(0.33)
+    expect(sweatLayerOf(t, 'flyaway')?.amount).toBe(0.7)
+    const r = removeSweat(s, 'deshine')
+    expect(sweatLayerOf(r, 'deshine')).toBeUndefined()
+    expect(sweatLayerOf(r, 'flyaway')).toBeDefined()
+    expect(hairLayerOf(r, 11)).toBeDefined()
+    expect(removeSweat(r, 'deshine')).toBe(r)
   })
 })

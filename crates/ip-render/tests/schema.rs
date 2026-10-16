@@ -139,6 +139,11 @@ fn parses_m5_patch_op() {
                 (0.7, Some(12), Some(4100))
             );
             assert_eq!(serde_json::to_value(p.kind).unwrap(), "hair");
+            for k in ["deshine", "flyaway"] {
+                let k2: PatchKind = serde_json::from_value(serde_json::json!(k)).unwrap();
+                assert_ne!(k2, PatchKind::Other);
+                assert_eq!(serde_json::to_value(k2).unwrap(), k);
+            }
         }
         o => panic!("{o:?}"),
     }

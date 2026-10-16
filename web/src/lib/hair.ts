@@ -2,7 +2,7 @@
  * Hair transfer ("换成我最好的发型", docs/api-contract-m5.md H): pure helpers for the Hair panel.
  * A transfer is a `patch` layer of kind `hair` per face (`base_face_id`); its `amount` is the strength.
  */
-import type { EditStack, HairDonor, PatchOp, PhotoPerson } from '@/api/types'
+import type { EditStack, HairDonor, PatchOp, PhotoPerson, SweatOp } from '@/api/types'
 import { patchEntries, removePatch, updatePatch } from './patches'
 
 const hairEntry = (s: EditStack, faceId: number) => patchEntries(s).find((e) => e.op.kind === 'hair' && e.op.base_face_id === faceId)
@@ -60,3 +60,21 @@ export function timeOffset(minutes: number | null): { key: 'hair.earlier' | 'hai
 
 /** Score as a whole percentage (null = not measured). */
 export const scorePct = (s: number | null): number | null => (s === null ? null : Math.round(s * 100))
+
+// ---- sweat cleanup (deshine / flyaway): one layer per op, `amount` = strength
+
+const sweatEntry = (s: EditStack, op: SweatOp) => patchEntries(s).find((e) => e.op.kind === op)
+
+export const sweatLayerOf = (s: EditStack, op: SweatOp): PatchOp | undefined => sweatEntry(s, op)?.op
+
+export function setSweatStrength(s: EditStack, op: SweatOp, amount: number): EditStack {
+  const e = sweatEntry(s, op)
+  if (!e) return s
+  const a = Math.round(Math.min(1, Math.max(0, amount)) * 100) / 100
+  return updatePatch(s, e.index, (p) => ({ ...p, amount: a }))
+}
+
+export function removeSweat(s: EditStack, op: SweatOp): EditStack {
+  const e = sweatEntry(s, op)
+  return e ? removePatch(s, e.index) : s
+}

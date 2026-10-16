@@ -1,13 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, Eye, EyeOff, Loader2, RefreshCw, Scissors, Trash2 } from 'lucide-react'
+import { AlertTriangle, Check, Droplets, Eye, EyeOff, Loader2, RefreshCw, Scissors, Trash2, Wind } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, faceCropUrl, thumbUrlById } from '@/api/client'
 import { useHairDonors, usePhotoPeople } from '@/api/queries'
-import type { HairDonor, Photo } from '@/api/types'
+import type { HairDonor, Photo, SweatOp } from '@/api/types'
 import { setLive, changeStack, commitLive } from '@/lib/editActions'
 import { runGen } from '@/lib/gen'
-import { bestDonor, defaultHairFace, donorReasonKeys, hairLayerOf, removeHair, scorePct, setHairEnabled, setHairStrength, timeOffset } from '@/lib/hair'
+import { bestDonor, defaultHairFace, donorReasonKeys, hairLayerOf, removeHair, removeSweat, scorePct, setHairEnabled, setHairStrength, setSweatStrength, sweatLayerOf, timeOffset } from '@/lib/hair'
 import { useEdit } from '@/stores/edit'
 import { useGen } from '@/stores/gen'
 import { GenTasks } from '../GenTasks'
@@ -59,6 +59,61 @@ function DonorCard({ d, chosen, onPick }: { d: HairDonor; chosen: boolean; onPic
   )
 }
 
+/** One sweat cleanup op (去汗光 / 整理碎发): run it, then its layer's strength / remove. No donor photo needed. */
+function SweatRow({ photo, op, busy }: { photo: Photo; op: SweatOp; busy: boolean }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const stack = useEdit((s) => s.stack)
+  const mine = useEdit((s) => s.photoId === photo.id)
+  const layer = mine ? sweatLayerOf(stack, op) : undefined
+  const [strength, setStrength] = useState(op === 'deshine' ? 70 : 100)
+  const cur = () => useEdit.getState().stack
+  const run = () =>
+    void runGen(qc, {
+      kind: 'enhance',
+      sessionId: photo.session_id,
+      photoId: photo.id,
+      label: t(`history.${op}`),
+      start: () => api.enhance(photo.id, { op, strength: strength / 100 }),
+    })
+  return (
+    <div className="flex flex-col gap-1 rounded-control border border-line p-1.5" data-testid={`sweat-${op}`}>
+      <Slider
+        label={t(`hair.${op}`)}
+        value={layer ? Math.round((layer.amount ?? 1) * 100) : strength}
+        min={0}
+        max={100}
+        step={1}
+        def={op === 'deshine' ? 70 : 100}
+        unit="%"
+        testId={`sweat-${op}-strength`}
+        onLive={(v) => (layer ? setLive(setSweatStrength(cur(), op, v / 100)) : setStrength(v))}
+        onCommit={() => {
+          if (layer) commitLive(qc, t('history.sweatStrength', { name: t(`hair.${op}`) }), `sweat:${op}`)
+        }}
+      />
+      <div className="flex items-center gap-1">
+        <button type="button" className="btn flex-1 justify-start" disabled={busy || (!layer && strength <= 0)} onClick={run} data-testid={`sweat-${op}-run`}>
+          {busy ? <Loader2 size={14} className="animate-spin" /> : op === 'deshine' ? <Droplets size={14} /> : <Wind size={14} />}
+          {t(layer ? 'hair.sweatRedo' : `hair.${op}Run`)}
+        </button>
+        {layer && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon !h-7 !w-7"
+            aria-label={t('hair.sweatRemove', { name: t(`hair.${op}`) })}
+            title={t('hair.sweatRemove', { name: t(`hair.${op}`) })}
+            onClick={() => changeStack(qc, removeSweat(cur(), op), t('history.sweatRemove', { name: t(`hair.${op}`) }))}
+            data-testid={`sweat-${op}-remove`}
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /**
  * 发型 section of the edit panel (docs/04 section 3.5, docs/api-contract-m5.md H): replace a person's hair with their
  * own hair from another photo (same person, similar pose). Pick face -> donor strip -> apply -> strength / show / undo.
@@ -80,6 +135,7 @@ export function HairPanel({ photo }: { photo: Photo }) {
   const donor = donors.find((d) => d.face_id === picked && d.composable) ?? bestDonor(donors)
   const [strength, setStrength] = useState(100)
   const busy = Object.values(tasks).some((x) => x.kind === 'hair' && x.photoId === photo.id && x.state === 'running')
+  const enhanceBusy = Object.values(tasks).some((x) => x.kind === 'enhance' && x.photoId === photo.id && x.state === 'running')
   const layer = stackOfThisPhoto && faceId !== undefined ? hairLayerOf(stack, faceId) : undefined
   const layerOn = layer?.enabled !== false
   const cur = () => useEdit.getState().stack
@@ -261,6 +317,13 @@ export function HairPanel({ photo }: { photo: Photo }) {
                 )}
               </div>
             )}
+            <div className="flex flex-col gap-1.5 border-t border-line/60 pt-2" data-testid="sweat-cleanup">
+              <div className="text-[11px] font-medium text-muted">{t('hair.sweatTitle')}</div>
+              <p className="text-[10px] text-faint">{t('hair.sweatHint')}</p>
+              {(['deshine', 'flyaway'] as const).map((op) => (
+                <SweatRow key={op} photo={photo} op={op} busy={enhanceBusy} />
+              ))}
+            </div>
             <p className="text-[10px] text-faint">{t('hair.limits')}</p>
           </>
         )}

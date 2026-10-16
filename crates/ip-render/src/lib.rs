@@ -320,6 +320,10 @@ pub enum PatchKind {
     Inpaint,
     Denoise,
     FaceRestore,
+    /// Sweat cleanup: shine compressed on skin and hair (docs/03 section 7.5).
+    Deshine,
+    /// Sweat cleanup: stray strands outside the hair silhouette filled (docs/03 section 7.5).
+    Flyaway,
     #[serde(other)]
     Other,
 }

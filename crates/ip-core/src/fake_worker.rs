@@ -1179,7 +1179,7 @@ impl AiWorker for FakeWorker {
                 rect: Some([0.0, 0.0, 1.0, 1.0]),
                 ..Default::default()
             }),
-            "face_restore" => {
+            "face_restore" | "deshine" | "flyaway" => {
                 let mut patches = Vec::new();
                 for (i, f) in req.faces.clone().unwrap_or_default().iter().enumerate() {
                     patches.push(EnhancePatch {
