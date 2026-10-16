@@ -83,6 +83,8 @@ async def test_analyzer_classic_steps_without_models(tmp_path, synth_files):
     hw = detect("cpu")
     mgr = ModelManager(tmp_path / "m", Registry.load(), hw)
     an = Analyzer(mgr, hw, decode_workers=2)
+    seen: list[tuple[str, object, dict[str, float]]] = []
+    an.on_timing = lambda kind, key, tm: seen.append((kind, key, tm))  # bench hook
     try:
         items = [{"photo_id": f"p{i}", "path": str(p)} for i, p in enumerate(synth_files)]
         res = await an.analyze_batch(
@@ -93,5 +95,7 @@ async def test_analyzer_classic_steps_without_models(tmp_path, synth_files):
         assert j["phash"] == res["items"][0]["phash"]
         assert res["timings"]["images_per_s"] > 0
         assert "faces" not in res["items"][0]
+        assert sorted(k for kind, k, _ in seen if kind == "item") == ["p0", "p1", "p2", "p3"]
+        assert all({"decode", "quality", "phash"} <= set(tm) for _, _, tm in seen)
     finally:
         an.shutdown()

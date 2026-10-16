@@ -18,7 +18,42 @@ live in [`REPORT.md`](REPORT.md); raw numbers in `results/*.json`.
 | `scripts/comfy-photo-library.py`, `scripts/comfy-photo-library-audit.py`, `scripts/test_comfy_photo_library.py` | Generator of the synthetic photo library with a local ComfyUI (Qwen-Image; plan, resumable run, EXIF, audit with pHash burst distances and a contact sheet; the test runs without ComfyUI). Plan, categories and quality limits: [`photo-library-2026-10-08.md`](photo-library-2026-10-08.md). The images stay in the git-ignored `bench/data/`. |
 | `bench/eval-search.py` | Scores natural-language search (`GET /api/search`, docs/api-contract-m2.md C.7) on the same library: 20 concepts asked in English and in Chinese (40 queries), relevance from the manifest prompts and tags, precision / recall@20 per query and per language. Needs a running server, the library imported and analysed with `standard`, and the `siglip2-base-text` model (GPU PC); `--dry-run` only lists the queries and their relevant-photo counts. See "Search evaluation" below. |
 | `bench/api-features.py` | Drives the AI features of a running `imagepicker serve` end to end (masks, best take, inpaint, denoise, face restore, upscale on export, portrait retouch, assistant plan / execute / undo, describe, face search, XMP round trip) and saves before / after images with numeric checks. |
+| `bench/profile-analysis.py` | Stage profiler of the analysis (worker steps per photo, import -> analysis -> export), see "Analysis stage profile" below. |
 | `bench/worker-rpc.py`, `bench/besttake-align.py` | Call the AI worker's JSON-RPC methods directly (`system.info`, `models.ensure`, ...); global-alignment statistics of the library's bursts as Best Take computes them (`--legacy` = the pre-2026-10-09 exclusion zone). |
+
+## Analysis stage profile (`profile-analysis.py`): run this on your GPU PC
+
+Where the wait after an import goes: wall time per stage (import, analysis, grouping / clustering /
+scoring, export) and per analysis step and photo (decode, faces, identity, quality, phash, the
+224 px preparation, NIMA aesthetic / technical, the batched SigLIP2 embedding and its zero-shot
+heads), as p50 / p95 / totals and photos/s. Decode is reported on its own, both inside the
+pipeline and alone on one thread. CPU-only machines run it too (`--device cpu`); the numbers of
+record are in [`perf-baseline-2026-10-16.md`](perf-baseline-2026-10-16.md).
+
+```sh
+cargo build --release -p ip-cli
+target/release/imagepicker bench gen bench/data/gen12 --count 200      # 12 MP JPEGs, or use your own photos
+cd ai-worker && uv sync --extra cuda --extra mediapipe && cd ..       # CPU: --extra cpu
+# worker steps (in-process, real models; no server, no network) + import -> analysis -> export
+uv run --project ai-worker python bench/profile-analysis.py bench/data/gen12 --limit 200 \
+    --profile standard --models-dir <models dir> --label gpu-standard \
+    --imagepicker target/release/imagepicker --e2e-profile standard \
+    --json bench/results/profile-gpu.json --md bench/results/profile-gpu.md \
+    --dump-results bench/results/profile-gpu.items.json
+# did an optimisation change any score, tag or face? (exit status 1 if so)
+python bench/profile-analysis.py --compare before.items.json after.items.json --tol 1e-4
+```
+
+* The worker part needs the worker's environment (`uv run --project ai-worker`) and its models
+  (`--models-dir`, else `IMAGEPICKER_MODELS_DIR` or the app's data dir; nothing is downloaded).
+  It sends requests of 32 photos like the Core, after a warm-up batch that loads the models (its
+  time is reported separately). `--device cpu` forces the CPU; `auto` uses the GPU when there is one.
+* `--imagepicker BIN` adds the end-to-end run in a scratch data dir: `imagepicker analyze DIR
+  --export OUT --timings-json FILE` imports, analyses and exports every photo with the default
+  export settings. `--e2e-profile lite` works without Python and models; `fast` / `standard` start
+  the AI worker like the app does (a loopback WebSocket, so not inside sandboxes without one).
+* Step times are measured on the worker's decode threads, which run in parallel, so their sum is
+  larger than the wall time; the wall time and photos/s are what a user waits for.
 
 ## Analysis quality (synthetic photo library)
 

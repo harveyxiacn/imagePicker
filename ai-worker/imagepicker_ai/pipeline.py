@@ -59,6 +59,9 @@ YUNET = "yunet"
 LANDMARKER = "mediapipe-face-landmarker"
 
 ProgressFn = Callable[[dict[str, Any]], None]
+# bench hook (`bench/profile-analysis.py`): ("item", photo_id, {step: s}) per photo after its CPU
+# steps, ("gpu", n_photos, {"embed": s, "heads": s}) per embedding batch
+TimingFn = Callable[[str, Any, dict[str, float]], None]
 
 
 def _safe_name(photo_id: Any) -> str:
@@ -164,6 +167,7 @@ class Analyzer:
         self.identity = IdentityEmbedder(manager, hw)
         self.bank = PromptBank(Path(manager.models_dir) / "_cache")
         self._faces: dict[tuple[str, str | None], FaceAnalyzer] = {}
+        self.on_timing: TimingFn | None = None
 
     def shutdown(self) -> None:
         self.decode_pool.shutdown(wait=False, cancel_futures=True)
@@ -372,10 +376,10 @@ class Analyzer:
 
         async def run_gpu(works: list[_Work]) -> None:
             t0 = time.perf_counter()
+            heads = 0.0
             try:
-                timings["scene"] += await loop.run_in_executor(
-                    self.gpu_pool, self._embed_and_save, plan, works
-                )
+                heads = await loop.run_in_executor(self.gpu_pool, self._embed_and_save, plan, works)
+                timings["scene"] += heads
             except RpcError as e:
                 for w in works:
                     w.result["error"] = {"code": e.code, "message": e.message, "kind": e.kind}
@@ -387,7 +391,10 @@ class Analyzer:
                         "message": f"embed failed: {e}",
                         "kind": "step_failed",
                     }
-            timings["embed"] += time.perf_counter() - t0
+            dt = time.perf_counter() - t0
+            timings["embed"] += dt
+            if self.on_timing is not None:
+                self.on_timing("gpu", len(works), {"embed": dt - heads, "heads": heads})
             for _ in works:
                 finish_one()
 
@@ -414,6 +421,8 @@ class Analyzer:
                 results[idx] = w.result
                 for k, v in w.timings.items():
                     timings[k] += v
+                if self.on_timing is not None:
+                    self.on_timing("item", w.result["photo_id"], w.timings)
                 if need_emb and w.prepared is not None:
                     buf.append(w)
                     if len(buf) >= batch:
