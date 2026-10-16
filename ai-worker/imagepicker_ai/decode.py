@@ -1,11 +1,18 @@
-"""Image decoding: Pillow (+ pillow-heif), EXIF orientation applied, resized to `analysis_size`."""
+"""Image decoding: Pillow (+ pillow-heif), EXIF orientation applied, resized to `analysis_size`.
+
+Camera RAW files are decoded from their largest embedded JPEG preview (`rawprev`), like the
+Core's thumbnails and the lite analysis; Pillow alone would read a 160 px IFD0 thumbnail or fail.
+"""
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image, ImageOps
+
+from .rawprev import is_raw, raw_preview
 
 try:  # HEIC/HEIF/AVIF support is optional at runtime
     import pillow_heif
@@ -55,10 +62,17 @@ def load_image(
 
     The EXIF orientation embedded in the file wins; `orientation_hint` (EXIF value 1-8 from the
     Core's own metadata pass) is only applied when the file itself carries no orientation tag
-    (e.g. a HEIC/RAW preview extracted without EXIF).
+    (e.g. a HEIC/RAW preview extracted without EXIF). For RAW files the orientation tag of the
+    RAW itself counts, then the preview's own EXIF.
     """
     try:
-        im = Image.open(path)
+        prev = raw_preview(path) if is_raw(path) else None
+        raw_orient = None
+        if prev is not None:
+            im = Image.open(io.BytesIO(prev[0]))
+            raw_orient = prev[2]
+        else:
+            im = Image.open(path)
         file_orient = im.getexif().get(0x0112)
         w0, h0 = im.size
         if im.format == "JPEG" and max(w0, h0) > analysis_size * 2:
@@ -66,7 +80,11 @@ def load_image(
             # below the requested size, so the long edge stays >= analysis_size.
             s = analysis_size / max(w0, h0)
             im.draft("RGB", (max(1, round(w0 * s)), max(1, round(h0 * s))))
-        if file_orient in (None, 0, 1) and orientation_hint in _ORIENT_OPS:
+        if raw_orient is not None:  # the RAW's own tag beats its preview's EXIF
+            if raw_orient in _ORIENT_OPS:
+                im = im.transpose(_ORIENT_OPS[raw_orient])
+            swapped = raw_orient >= 5
+        elif file_orient in (None, 0, 1) and orientation_hint in _ORIENT_OPS:
             im = im.transpose(_ORIENT_OPS[orientation_hint])
             swapped = orientation_hint >= 5
         else:
