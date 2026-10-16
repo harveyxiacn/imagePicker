@@ -18,7 +18,53 @@ live in [`REPORT.md`](REPORT.md); raw numbers in `results/*.json`.
 | `scripts/comfy-photo-library.py`, `scripts/comfy-photo-library-audit.py`, `scripts/test_comfy_photo_library.py` | Generator of the synthetic photo library with a local ComfyUI (Qwen-Image; plan, resumable run, EXIF, audit with pHash burst distances and a contact sheet; the test runs without ComfyUI). Plan, categories and quality limits: [`photo-library-2026-10-08.md`](photo-library-2026-10-08.md). The images stay in the git-ignored `bench/data/`. |
 | `bench/eval-search.py` | Scores natural-language search (`GET /api/search`, docs/api-contract-m2.md C.7) on the same library: 20 concepts asked in English and in Chinese (40 queries), relevance from the manifest prompts and tags, precision / recall@20 per query and per language. Needs a running server, the library imported and analysed with `standard`, and the `siglip2-base-text` model (GPU PC); `--dry-run` only lists the queries and their relevant-photo counts. See "Search evaluation" below. |
 | `bench/api-features.py` | Drives the AI features of a running `imagepicker serve` end to end (masks, best take, inpaint, denoise, face restore, upscale on export, portrait retouch, assistant plan / execute / undo, describe, face search, XMP round trip) and saves before / after images with numeric checks. |
+| `bench/profile-analysis.py` | Stage profiler of the analysis (worker steps per photo, import -> analysis -> export), see "Analysis stage profile" below. |
 | `bench/worker-rpc.py`, `bench/besttake-align.py` | Call the AI worker's JSON-RPC methods directly (`system.info`, `models.ensure`, ...); global-alignment statistics of the library's bursts as Best Take computes them (`--legacy` = the pre-2026-10-09 exclusion zone). |
+
+## Analysis stage profile (`profile-analysis.py`): run this on your GPU PC
+
+Where the wait after an import goes: wall time per stage (import, analysis, grouping / clustering /
+scoring, export) and per analysis step and photo (decode, faces, identity, quality, phash, the
+224 px preparation, NIMA aesthetic / technical, the batched SigLIP2 embedding and its zero-shot
+heads), as p50 / p95 / totals and photos/s. Decode is reported on its own, both inside the
+pipeline and alone on one thread. CPU-only machines run it too (`--device cpu`); the numbers of
+record are in [`perf-baseline-2026-10-16.md`](perf-baseline-2026-10-16.md).
+
+```sh
+cargo build --release -p ip-cli
+target/release/imagepicker bench gen bench/data/gen12 --count 200      # 12 MP JPEGs, or use your own photos
+cd ai-worker && uv sync --extra cuda --extra mediapipe && cd ..       # CPU: --extra cpu
+# worker steps (in-process, real models; no server, no network) + import -> analysis -> export
+uv run --project ai-worker python bench/profile-analysis.py bench/data/gen12 --limit 200 \
+    --profile standard --models-dir <models dir> --label gpu-standard \
+    --imagepicker target/release/imagepicker --e2e-profile standard \
+    --json bench/results/profile-gpu.json --md bench/results/profile-gpu.md \
+    --dump-results bench/results/profile-gpu.items.json
+# did an optimisation change any score, tag, face or vector? (exit status 1 if so)
+python bench/profile-analysis.py --compare before.items.json after.items.json
+# GPU only: does handing photos to the embedding thread in groups of 8 help? (same photos)
+uv run --project ai-worker python bench/profile-analysis.py bench/data/gen12 --limit 200 \
+    --profile standard --models-dir <models dir> --embed-flush 8 --label gpu-flush8 \
+    --json bench/results/profile-gpu-flush8.json --dump-results bench/results/profile-gpu-flush8.items.json
+python bench/profile-analysis.py --compare bench/results/profile-gpu.items.json \
+    bench/results/profile-gpu-flush8.items.json --tol 1e-3
+```
+
+* The worker part needs the worker's environment (`uv run --project ai-worker`) and its models
+  (`--models-dir`, else `IMAGEPICKER_MODELS_DIR` or the app's data dir; nothing is downloaded).
+  It sends requests of 32 photos like the Core, after a warm-up batch that loads the models (its
+  time is reported separately). `--device cpu` forces the CPU; `auto` uses the GPU when there is one.
+* `--imagepicker BIN` adds the end-to-end run in a scratch data dir: `imagepicker analyze DIR
+  --export OUT --timings-json FILE` imports, analyses and exports every photo with the default
+  export settings. `--e2e-profile lite` works without Python and models; `fast` / `standard` start
+  the AI worker like the app does (a loopback WebSocket, so not inside sandboxes without one).
+* Step times are measured on the worker's decode threads, which run in parallel, so their sum is
+  larger than the wall time; the wall time and photos/s are what a user waits for.
+* `--compare` diffs the per-photo results including the SigLIP2 and AuraFace vectors (`--tol` for
+  floats, `--ignore embedding,identity` against dumps written without them).
+* `ai-worker/scripts/bench_analyze.py` is the older single-step benchmark: it runs each step
+  alone over the whole set (images/s per step, SigLIP2 forward without decode). This profiler
+  runs the real combination, as the app does, and shows how the steps share the machine.
 
 ## Analysis quality (synthetic photo library)
 
@@ -31,6 +77,7 @@ These score the analysis itself rather than speed; inputs are the generated phot
 | `bench/eval-library.py LIBRARY DATA_DIR` | Issue-tag precision / recall against the manifest tags, burst grouping, metric distributions, star histogram. |
 | `bench/make-tilt-set.py [LIBRARY] [OUT]` | Rotates 247 library photos by 0, +-1, +-2, +-3, +-5, +-8 degrees (border-free centre crop) into `bench/data/tilt-set` with the true angles in its manifest (Pillow). |
 | `bench/eval-time-align.py DATA_DIR [--session ID] [--trials N] [--offsets LIST]` | Multi-device time alignment (docs/03 section 2.4): opens an analysed catalog with photos of two or more devices read-only, shifts one device's capture times by known offsets (seconds to hours, in memory) and reports how often the estimator finds the shift again within 5 s, the median / p95 / max error, trials without an estimate and the real clock differences of the library. A numpy port of `analysis/time_align.rs`; run it on the GPU PC next to a real library, it is not part of CI. |
+| `imagepicker taste --eval [--catalog PATH] [--json]` | Learn my taste (docs/03 section 3.3) on the user's **own** decisions: opens the catalog read-only (default `<data dir>/catalog.db`; nothing is written, the app may keep running), gathers the analysed photos the user picked / rejected by hand and runs exactly the training-time 5-fold cross-validation. Prints the out-of-fold AUC and accuracy of the taste model next to the generic score (`base_score`) on the same photos, the required margin and whether the model would switch on. Needs at least 30 kept and 30 rejected photos. Training speed on synthetic 768-d data: `cargo test --release -p ip-core taste_training_speed -- --ignored --nocapture`. |
 | `bench/eval-tilt.py TILT_SET DATA_DIR [--library LIBRARY DATA_DIR]` | Tilt estimate error, `tilted` flag precision / recall per angle, false positives on the 0-degree copies and the library, and a threshold sweep (docs/03 section 3.1.1). |
 
 ## Search evaluation (`eval-search.py`)

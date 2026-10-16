@@ -23,11 +23,12 @@ export function guestBlocked(): boolean {
 }
 
 /** Optimistically write `side` values of the changes to the cache, then PATCH the server. */
-async function commit(qc: QueryClient, changes: Change[], side: 'before' | 'after'): Promise<void> {
+async function commit(qc: QueryClient, changes: Change[], side: 'before' | 'after', auto = false): Promise<void> {
   const other = side === 'after' ? 'before' : 'after'
   patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c[side]])))
+  const source = auto ? (side === 'before' ? 'undo' : 'auto') : undefined
   try {
-    await Promise.all(groupPatches(changes, side).map((body) => api.patchPhotos(body)))
+    await Promise.all(groupPatches(changes, side).map((body) => api.patchPhotos(source ? { ...body, source } : body)))
   } catch (err) {
     // Roll back the optimistic write and resync.
     patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c[other]])))
@@ -63,7 +64,7 @@ async function runCustom(e: HistoryEntry, dir: 'undo' | 'redo'): Promise<void> {
 export async function undo(qc: QueryClient): Promise<HistoryEntry | undefined> {
   const e = useHistory.getState().undo()
   if (e) {
-    if (e.changes.length) await commit(qc, e.changes, 'before')
+    if (e.changes.length) await commit(qc, e.changes, 'before', e.auto)
     if (e.edits?.length) await applyEditChanges(qc, e.edits, 'before')
     await runCustom(e, 'undo')
   }
@@ -73,7 +74,7 @@ export async function undo(qc: QueryClient): Promise<HistoryEntry | undefined> {
 export async function redo(qc: QueryClient): Promise<HistoryEntry | undefined> {
   const e = useHistory.getState().redo()
   if (e) {
-    if (e.changes.length) await commit(qc, e.changes, 'after')
+    if (e.changes.length) await commit(qc, e.changes, 'after', e.auto)
     if (e.edits?.length) await applyEditChanges(qc, e.edits, 'after')
     await runCustom(e, 'redo')
   }
@@ -102,7 +103,7 @@ export async function acceptAiRatings(qc: QueryClient, ids: number[], label: str
   if (guestBlocked()) return 0
   const changes = planAcceptAi(findCachedPhotos(qc, ids))
   if (changes.length === 0) return 0
-  useHistory.getState().push({ label, changes })
+  useHistory.getState().push({ label, changes, auto: true })
   patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c.after])))
   try {
     await api.acceptAi(changes.map((c) => c.id))

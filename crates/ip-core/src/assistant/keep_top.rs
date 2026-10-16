@@ -158,19 +158,25 @@ impl Core {
 
     async fn apply_keep_top(self: &Arc<Self>, plan: &KeepTop, reject_rest: bool) -> Result<()> {
         if !plan.kept.is_empty() {
-            self.patch_photos(PatchRequest {
-                ids: plan.kept.clone(),
-                flag: Some(1),
-                ..Default::default()
-            })
+            self.patch_photos_as(
+                PatchRequest {
+                    ids: plan.kept.clone(),
+                    flag: Some(1),
+                    ..Default::default()
+                },
+                crate::taste::LabelSource::Auto,
+            )
             .await?;
         }
         if reject_rest && !plan.rest.is_empty() {
-            self.patch_photos(PatchRequest {
-                ids: plan.rest.clone(),
-                flag: Some(-1),
-                ..Default::default()
-            })
+            self.patch_photos_as(
+                PatchRequest {
+                    ids: plan.rest.clone(),
+                    flag: Some(-1),
+                    ..Default::default()
+                },
+                crate::taste::LabelSource::Auto,
+            )
             .await?;
         }
         Ok(())

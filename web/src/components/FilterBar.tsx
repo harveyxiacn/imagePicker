@@ -12,7 +12,7 @@ import { DateFilterButton, LensFilterButton, SharpFilter, TagFilterButton } from
 import { PersonFilterButton } from './PersonFilterPopover'
 
 const FLAGS: ('all' | FlagFilter)[] = ['all', 'picked', 'not_rejected', 'unflagged', 'rejected']
-const SORTS: SortKey[] = ['taken_at', '-taken_at', 'name', 'rating', 'ai']
+const SORTS: SortKey[] = ['taken_at', '-taken_at', 'name', 'rating', 'ai', 'taste']
 
 interface Props {
   sessionId: number

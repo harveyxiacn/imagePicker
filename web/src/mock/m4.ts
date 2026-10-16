@@ -42,35 +42,64 @@ let collectionSeq = 0
 // ---------------------------------------------------------------- taste
 
 let tasteLabels = 84
+let tasteEnabled = true
 let tasteUpdated: number | null = null
+const TASTE_MIN = 30
 
 function taste(): Taste {
-  const L = tasteLabels
+  const L = tasteEnabled ? tasteLabels : 0
+  // roughly 45% kept, 40% rejected, the rest neutral
+  const positives = Math.round(tasteLabels * 0.45)
+  const negatives = Math.round(tasteLabels * 0.4)
+  const enough = positives >= TASTE_MIN && negatives >= TASTE_MIN
+  const trained = enough && tasteUpdated !== null
+  const auc = trained ? Math.round((0.62 + Math.min(0.2, tasteLabels / 1500)) * 1000) / 1000 : 0
+  const active = tasteEnabled && trained && auc >= 0.66
   const traits: TasteTrait[] = []
-  if (L >= 50) traits.push({ key: 'low_saturation', params: { pct: 12 + Math.min(20, Math.round(L / 20)) } })
-  if (L >= 60) traits.push({ key: 'bright_exposure', params: { ev: 0.3 } })
-  if (L >= 80) traits.push({ key: 'warm_tone' })
-  if (L >= 100) traits.push({ key: 'smile_over_sharp' })
-  if (L >= 150) traits.push({ key: 'centered_subject', params: { pct: 64 } })
-  if (L >= 200) traits.push({ key: 'dislikes_blur' })
-  const active = L >= 100
+  if (active) traits.push({ key: 'likes', params: { feature: 'eyes_open', strength: 0.8 } }, { key: 'dislikes', params: { feature: 'blurry', strength: 0.6 } })
+  if (active && L >= 150) traits.push({ key: 'likes', params: { feature: 'scene_food', strength: 0.3 } })
   return {
-    labels: L,
+    labels: tasteLabels,
+    legacy_labels: 0,
+    training: false,
+    positives,
+    negatives,
+    min_per_class: TASTE_MIN,
+    pending: tasteLabels % 50,
+    retrain_every: 50,
+    enabled: tasteEnabled,
+    state: !tasteEnabled ? 'disabled' : active ? 'active' : !enough ? 'collecting' : trained ? 'not_better' : 'ready',
     active,
-    alpha: active ? Math.round(Math.min(0.6, (L - 50) / 500) * 100) / 100 : 0,
-    holdout_accuracy: L >= 50 ? Math.round((0.58 + Math.min(0.25, L / 1200)) * 100) / 100 : null,
+    alpha: active ? Math.round(Math.min(0.6, (0.6 * tasteLabels) / 200) * 100) / 100 : 0,
+    holdout_accuracy: trained ? Math.round((auc - 0.05) * 100) / 100 : null,
+    base_accuracy: trained ? 0.58 : null,
+    metrics: trained
+      ? { auc, base_auc: 0.61, accuracy: Math.round((auc - 0.05) * 100) / 100, base_accuracy: 0.58, margin: 0.05, eval_positives: positives, eval_negatives: negatives, folds: 5, lambda: 0.03, dim: 768, fit_photos: positives + negatives, train_ms: 420 }
+      : null,
     traits,
+    scored: active ? 1200 : 0,
+    feature_version: 2,
     updated_at: tasteUpdated,
   }
 }
 
-/** Called by the PATCH /api/photos mock: every rating / flag is a training label. */
-export function recordTasteLabels(n: number): void {
-  if (n <= 0) return
-  tasteLabels += n
-  tasteUpdated = Date.now()
+function emitTaste(): void {
   const t = taste()
   emit({ type: 'taste.updated', labels: t.labels, active: t.active, alpha: t.alpha })
+}
+
+/** Mock taste score of a photo while the taste model is on (deterministic per id). */
+export function mockTasteScore(id: number): number | undefined {
+  if (!taste().active) return undefined
+  return Math.round((((id * 2654435761) >>> 0) % 1000) / 10) / 100
+}
+
+/** Called by the PATCH /api/photos mock: every rating / flag is a training label. */
+export function recordTasteLabels(n: number): void {
+  if (n <= 0 || !tasteEnabled) return
+  tasteLabels += n
+  tasteUpdated = Date.now()
+  emitTaste()
 }
 
 // ---------------------------------------------------------------- face search
@@ -271,12 +300,50 @@ export const m4Handlers = [
     await lat()
     return HttpResponse.json(taste())
   }),
-  http.post('/api/taste/reset', async () => {
+  http.patch('/api/taste', async ({ request }) => {
     await lat()
+    const b = (await request.json()) as { enabled?: unknown }
+    if (typeof b.enabled !== 'boolean') return err(400, 'bad_request', 'enabled must be a boolean')
+    tasteEnabled = b.enabled
+    emitTaste()
+    return HttpResponse.json(taste())
+  }),
+  http.post('/api/taste/train', async () => {
+    await lat()
+    if (!tasteEnabled) return err(400, 'bad_request', 'taste learning is switched off')
+    // 202: the result follows as `taste.updated`
+    setTimeout(() => {
+      tasteUpdated = Date.now()
+      emitTaste()
+    }, 300)
+    return HttpResponse.json({ ...taste(), training: true }, { status: 202 })
+  }),
+  http.get('/api/taste/explain/:id', async ({ params }) => {
+    await lat()
+    const id = Number(params.id)
+    const score = mockTasteScore(id) ?? null
+    return HttpResponse.json({
+      photo_id: id,
+      taste_score: score,
+      base_score: 0.6,
+      contributions:
+        score === null
+          ? []
+          : [
+              { feature: 'eyes_open', delta: 0.42, direction: 'high' },
+              { feature: 'look', delta: 0.21, direction: 'high' },
+              { feature: 'sharpness', delta: -0.18, direction: 'low' },
+            ],
+    })
+  }),
+  http.post('/api/taste/reset', async ({ request }) => {
+    await lat()
+    const text = await request.text()
+    const b = text ? (JSON.parse(text) as { disable?: boolean }) : {}
     tasteLabels = 0
-    tasteUpdated = Date.now()
-    const t = taste()
-    emit({ type: 'taste.updated', labels: t.labels, active: t.active, alpha: t.alpha })
+    tasteUpdated = null
+    if (b.disable) tasteEnabled = false
+    emitTaste()
     return new HttpResponse(null, { status: 204 })
   }),
 ]

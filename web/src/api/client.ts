@@ -52,6 +52,7 @@ import type {
   FilterOptions,
   PhotoPeopleResponse,
   Taste,
+  TasteExplain,
   BestTakePlan,
   BestTakeChoice,
   BystandersResponse,
@@ -350,7 +351,11 @@ export const api = {
     request<{ collection: Collection }>('PATCH', `/collections/${encodeURIComponent(id)}`, body),
   deleteCollection: (id: string) => request<void>('DELETE', `/collections/${encodeURIComponent(id)}`),
   taste: () => request<Taste>('GET', '/taste'),
-  resetTaste: () => request<void>('POST', '/taste/reset'),
+  patchTaste: (enabled: boolean) => request<Taste>('PATCH', '/taste', { enabled }),
+  trainTaste: () => request<Taste>('POST', '/taste/train'),
+  /** `disable` also switches learning off (forget and opt out) */
+  resetTaste: (disable = false) => request<void>('POST', '/taste/reset', disable ? { disable: true } : undefined),
+  tasteExplain: (photoId: number) => request<TasteExplain>('GET', `/taste/explain/${photoId}`),
   // ---- M5 ----
   bestTakePlan: (burstId: number) => request<BestTakePlan>('GET', `/bursts/${burstId}/besttake`),
   bestTake: (base_photo_id: number, choices: BestTakeChoice[]) => request<{ task_id: string }>('POST', '/besttake', { base_photo_id, choices }),

@@ -57,6 +57,7 @@ export function filterPhotos(photos: Photo[], q: URLSearchParams): Photo[] {
     out = [...out].sort((a, b) => (b.taken_at ?? -Infinity) - (a.taken_at ?? -Infinity) || byId(a, b))
   else if (sort === 'name') out = [...out].sort((a, b) => a.file_name.localeCompare(b.file_name) || byId(a, b))
   else if (sort === 'ai') out = sortAi(out)
+  else if (sort === 'taste') out = [...out].sort((a, b) => (b.taste_score ?? -1) - (a.taste_score ?? -1) || byId(a, b))
   else if (sort === 'rating')
     out = [...out].sort((a, b) => (b.user_rating ?? -1) - (a.user_rating ?? -1) || byId(a, b))
   return out

@@ -418,6 +418,7 @@ async fn guest_is_read_only() {
         "/api/photos/1/people",
         "/api/photos/1/analysis",
         "/api/taste",
+        "/api/taste/explain/1",
         "/api/settings",
         "/api/assistant/status",
         "/api/fs/roots",
@@ -437,6 +438,8 @@ async fn guest_is_read_only() {
         (Method::PUT, "/api/edits/1"),
         (Method::DELETE, "/api/sessions/1"),
         (Method::POST, "/api/taste/reset"),
+        (Method::POST, "/api/taste/train"),
+        (Method::PATCH, "/api/taste"),
         (Method::POST, "/api/auth/password"),
         (Method::POST, "/api/system/diagnostics"),
     ] {

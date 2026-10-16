@@ -80,6 +80,13 @@ enum Command {
         /// docs/02 §8). Without this or the app's consent no face is detected or recognised.
         #[arg(long)]
         face_consent: bool,
+        /// After the analysis, export every photo of the session into this folder (default
+        /// export settings) and time it (`bench/profile-analysis.py`).
+        #[arg(long)]
+        export: Option<PathBuf>,
+        /// Write the stage timings (import, analysis stages, export) as JSON to this file.
+        #[arg(long)]
+        timings_json: Option<PathBuf>,
     },
     /// Render a photo (catalog id or image path) through an edit stack to a JPEG (debugging).
     Render {
@@ -159,6 +166,16 @@ enum Command {
         /// Train now instead of waiting for the next 50 labels.
         #[arg(long)]
         retrain: bool,
+        /// Read-only evaluation: cross-validated AUC of the taste model against the generic
+        /// score on the user's own decisions. Opens the catalog read-only, writes nothing.
+        #[arg(long, conflicts_with = "retrain")]
+        eval: bool,
+        /// Catalog file for `--eval` (default: `<data dir>/catalog.db`).
+        #[arg(long, requires = "eval")]
+        catalog: Option<PathBuf>,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
         #[arg(long)]
         data_dir: Option<PathBuf>,
     },
@@ -364,14 +381,49 @@ fn print_taste(t: &ip_core::taste::TasteOut) {
         v.map(|v| format!("{:.1}%", v * 100.0))
             .unwrap_or_else(|| "-".into())
     };
+    println!("state:             {}", t.state);
     println!("labels:            {}", t.labels);
-    println!("training pairs:    {}", t.pairs);
-    println!("model active:      {}", if t.active { "yes" } else { "no" });
+    println!(
+        "kept / rejected:   {} / {} (need {} each)",
+        t.positives, t.negatives, t.min_per_class
+    );
+    println!("pending:           {}", t.pending);
     println!("holdout accuracy:  {}", pct(t.holdout_accuracy));
     println!("base accuracy:     {}", pct(t.base_accuracy));
+    if let Some(m) = &t.metrics {
+        println!("AUC (taste/base):  {:.3} / {:.3}", m.auc, m.base_auc);
+    }
     println!("fusion alpha:      {:.2}", t.alpha);
+    println!("scored photos:     {}", t.scored);
     for tr in &t.traits {
         println!("trait:             {tr}");
+    }
+}
+
+fn print_taste_eval(o: &ip_core::taste::Outcome) {
+    println!("kept / rejected:   {} / {}", o.positives, o.negatives);
+    match &o.metrics {
+        None => println!(
+            "not evaluated:     fewer than {} kept or rejected analysed photos",
+            ip_core::taste::MIN_PER_CLASS
+        ),
+        Some(m) => {
+            println!(
+                "evaluated:         {} kept / {} rejected, {}-fold cross-validation",
+                m.eval_positives, m.eval_negatives, m.folds
+            );
+            println!("AUC taste:         {:.4}", m.auc);
+            println!("AUC generic score: {:.4}", m.base_auc);
+            println!("accuracy (taste):  {:.4}", m.accuracy);
+            println!("accuracy (base):   {:.4}", m.base_accuracy);
+            println!("required margin:   {:.4}", m.margin);
+            println!("lambda / dim:      {} / {}", m.lambda, m.dim);
+            println!(
+                "would switch on:   {}",
+                if o.model.is_some() { "yes" } else { "no" }
+            );
+            println!("time:              {} ms", m.train_ms);
+        }
     }
 }
 
@@ -542,6 +594,8 @@ fn print_stats(s: &ImportStats) {
 #[derive(Debug)]
 struct AnalyzeReport {
     session_id: i64,
+    /// Seconds of the import when `target` was a folder.
+    import_secs: Option<f64>,
     status: AnalysisStatus,
     /// (stage, seconds) in the order the stages were seen.
     stages: Vec<(String, f64)>,
@@ -566,6 +620,7 @@ async fn analyze_headless(
     force: bool,
     allow_download: bool,
 ) -> Result<AnalyzeReport> {
+    let mut import_secs = None;
     let session_id = match target.parse::<i64>() {
         Ok(id) => {
             core.session(id).await.context("session")?;
@@ -574,11 +629,9 @@ async fn analyze_headless(
         Err(_) => {
             let t0 = Instant::now();
             let st = import_headless(core, PathBuf::from(target), true, None).await?;
-            eprintln!(
-                "imported {} photos in {:.2}s",
-                st.photos,
-                t0.elapsed().as_secs_f64()
-            );
+            let secs = t0.elapsed().as_secs_f64();
+            eprintln!("imported {} photos in {secs:.2}s", st.photos);
+            import_secs = Some(secs);
             st.session_id
         }
     };
@@ -695,6 +748,7 @@ async fn analyze_headless(
     }
     Ok(AnalyzeReport {
         session_id,
+        import_secs,
         status,
         stages,
         total_secs,
@@ -709,6 +763,93 @@ async fn analyze_headless(
         people: people.len(),
         faces,
         sample_groups,
+    })
+}
+
+/// Exports every photo of the session into `dest` (default export settings) and waits for the
+/// task; returns (seconds, files written).
+async fn export_headless(
+    core: &Arc<Core>,
+    session_id: i64,
+    dest: &std::path::Path,
+) -> Result<(f64, i64)> {
+    let mut ids: Vec<i64> = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = core
+            .photos(PhotoQuery {
+                session_id,
+                limit: Some(5000),
+                cursor: cursor.take(),
+                ..Default::default()
+            })
+            .await?;
+        ids.extend(page.photos.iter().map(|p| p.id));
+        match page.next_cursor {
+            Some(c) => cursor = Some(c),
+            None => break,
+        }
+    }
+    let req: ip_core::model::ExportRequest = serde_json::from_value(serde_json::json!({
+        "ids": ids,
+        "dest": dest.to_string_lossy(),
+    }))
+    .context("export request")?;
+    let started = Instant::now();
+    let mut rx = core.events.subscribe();
+    let task_id = core.export(req).await.context("start export")?;
+    loop {
+        match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(Ok(Event::TaskProgress {
+                task_id: t,
+                state,
+                done,
+                error,
+                ..
+            })) if t == task_id && state != "running" => {
+                if state != "done" {
+                    anyhow::bail!("export {state}: {}", error.unwrap_or_default());
+                }
+                return Ok((started.elapsed().as_secs_f64(), done));
+            }
+            Ok(_) => continue,
+            Err(_) => {
+                // quiet period: the end event may have been coalesced away
+                let rec = core.tasks_list(Some(50)).await?;
+                if let Some(r) = rec
+                    .iter()
+                    .find(|r| r.id == task_id && r.status != "running")
+                {
+                    if r.status != "done" {
+                        anyhow::bail!(
+                            "export {}: {}",
+                            r.status,
+                            r.error.clone().unwrap_or_default()
+                        );
+                    }
+                    return Ok((started.elapsed().as_secs_f64(), r.done));
+                }
+            }
+        }
+    }
+}
+
+/// `--timings-json`: what `bench/profile-analysis.py` reads.
+fn timings_json(
+    r: &AnalyzeReport,
+    profile: Profile,
+    export: Option<(f64, i64)>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "profile": profile.as_str(),
+        "state": format!("{:?}", r.status.state),
+        "photos": r.photos,
+        "analyzed": r.analyzed,
+        "import_s": r.import_secs,
+        "analysis_s": r.total_secs,
+        "stages": r.stages.iter().map(|(s, t)| serde_json::json!({"stage": s, "s": t})).collect::<Vec<_>>(),
+        "export_s": export.map(|e| e.0),
+        "exported": export.map(|e| e.1),
     })
 }
 
@@ -819,6 +960,8 @@ async fn main() -> Result<()> {
             allow_download,
             force,
             face_consent,
+            export,
+            timings_json: timings_path,
         } => {
             init_tracing("warn", data_dir.as_deref());
             let profile = Profile::parse(&profile)
@@ -844,6 +987,19 @@ async fn main() -> Result<()> {
             core.worker.shutdown().await;
             let report = report?;
             print_report(&report);
+            let exported = match &export {
+                Some(dest) => {
+                    let e = export_headless(&core, report.session_id, dest).await?;
+                    println!("export:        {} files in {:.2}s", e.1, e.0);
+                    Some(e)
+                }
+                None => None,
+            };
+            if let Some(p) = timings_path {
+                let v = timings_json(&report, profile, exported);
+                std::fs::write(&p, serde_json::to_vec_pretty(&v)?)
+                    .with_context(|| format!("write {}", p.display()))?;
+            }
             if report.status.state == RunState::Failed {
                 std::process::exit(1);
             }
@@ -927,15 +1083,51 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Bench { cmd } => tokio::task::block_in_place(|| bench::run(cmd)),
-        Command::Taste { retrain, data_dir } => {
+        Command::Taste {
+            retrain,
+            eval,
+            catalog,
+            json,
+            data_dir,
+        } => {
             init_tracing("warn", data_dir.as_deref());
+            if eval {
+                // read-only: never opens the Core (which would migrate and start services)
+                let path = match catalog {
+                    Some(p) => p,
+                    None => {
+                        ip_core::paths::resolve_data_dir(data_dir.as_deref()).join("catalog.db")
+                    }
+                };
+                let o = tokio::task::block_in_place(|| ip_core::taste::evaluate_catalog(&path))
+                    .with_context(|| format!("evaluate {}", path.display()))?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "positives": o.positives,
+                            "negatives": o.negatives,
+                            "metrics": o.metrics,
+                            "would_activate": o.model.is_some(),
+                            "traits": o.traits,
+                        })
+                    );
+                } else {
+                    print_taste_eval(&o);
+                }
+                return Ok(());
+            }
             let core = Core::open(CoreConfig::new(data_dir)).context("open catalog")?;
             let t = if retrain {
                 core.retrain_taste().await?
             } else {
                 core.taste().await?
             };
-            print_taste(&t);
+            if json {
+                println!("{}", serde_json::to_string(&t)?);
+            } else {
+                print_taste(&t);
+            }
             Ok(())
         }
         Command::Render {
@@ -1180,6 +1372,21 @@ mod tests {
         assert_eq!((r.photos, r.analyzed), (6, 6));
         assert!(r.bursts >= 1 && r.scenes >= 1);
         assert!(r.stages.iter().any(|(s, _)| s == "grouping"));
+        assert!(r.import_secs.is_some());
+        let out = tempfile::tempdir().unwrap();
+        let (secs, written) = export_headless(&core, r.session_id, out.path())
+            .await
+            .unwrap();
+        assert_eq!(written, 6);
+        assert!(secs >= 0.0);
+        let v = timings_json(&r, Profile::Standard, Some((secs, written)));
+        assert_eq!(v["exported"], 6);
+        assert_eq!(v["profile"], "standard");
+        assert!(v["stages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["stage"] == "grouping"));
         // by session id the second call has nothing left to analyse
         let second = analyze_headless(
             &core,

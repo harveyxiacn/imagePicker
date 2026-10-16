@@ -20,7 +20,7 @@ import { m6Gate, m6Handlers } from './m6'
 import { m8Handlers } from './m8'
 import { searchHandlers } from './search'
 import { editHandlers, renderEdited } from './edits'
-import { m4Handlers, recordTasteLabels } from './m4'
+import { m4Handlers, mockTasteScore, recordTasteLabels } from './m4'
 import { m5Handlers } from './m5'
 import { photoSvg } from './svg'
 import { endTask, isCancelled, taskHandlers, taskProgress, trackTask } from './tasks'
@@ -352,7 +352,11 @@ export const handlers = [
     const q = new URL(request.url).searchParams
     const s = getSession(Number(q.get('session_id')))
     if (!s) return err(404, 'not_found', 'session not found')
-    const list = filterPhotos(s.photos, q)
+    const scored = s.photos.map((p) => {
+      const ts = mockTasteScore(p.id)
+      return ts === undefined ? p : { ...p, taste_score: ts }
+    })
+    const list = filterPhotos(scored, q)
     const offset = q.get('cursor') ? Number(q.get('cursor')) : 0
     const limit = Math.min(5000, Number(q.get('limit') ?? 500))
     const photos = list.slice(offset, offset + limit)

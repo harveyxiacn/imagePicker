@@ -558,11 +558,11 @@ const PHOTO_COLS: &str = "p.id, r.path, p.rel_path, p.file_name, COALESCE(p.form
     p.face_count, p.subject_face_count, COALESCE(p.analysis_version,0),
     COALESCE(p.has_edits,0), p.edit_hash,
     p.device_id, (SELECT d.kind FROM device d WHERE d.id=p.device_id), COALESCE(p.missing,0),
-    p.dup_group_id, p.dup_kind";
+    p.dup_group_id, p.dup_kind, (SELECT ts.score FROM taste_score ts WHERE ts.photo_id=p.id)";
 
 /// Number of columns in `PHOTO_COLS`; queries append the session id at this index and the
 /// sort key (for cursors) right after it. Update when adding columns.
-const PHOTO_COL_COUNT: usize = 38;
+const PHOTO_COL_COUNT: usize = 39;
 
 /// Column `PHOTO_COL_COUNT` (after PHOTO_COLS) is the session id.
 fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
@@ -610,6 +610,7 @@ fn photo_row(r: &Row) -> rusqlite::Result<Photo> {
         duplicate_group_id: r.get(36)?,
         duplicate_kind: r.get(37)?,
         companions: Vec::new(),
+        taste_score: r.get(38)?,
     })
 }
 
@@ -711,6 +712,12 @@ pub fn query_photos_cached(
         SortKey::Rating => ("COALESCE(sp.sk_rating, -1)", true, false),
         SortKey::Ai => (
             "CAST(COALESCE(sp.sk_ai, -0.001) * 1000000 AS INTEGER)",
+            true,
+            false,
+        ),
+        // not an indexed key: sorts the filtered members (taste scores are cached per photo)
+        SortKey::Taste => (
+            "CAST(COALESCE((SELECT ts.score FROM taste_score ts WHERE ts.photo_id=sp.photo_id), -0.001) * 1000000 AS INTEGER)",
             true,
             false,
         ),

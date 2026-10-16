@@ -63,6 +63,11 @@ pub struct Photo {
     /// RAW (or other) files paired with this photo by name; the photo itself is the JPEG/HEIF.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub companions: Vec<Companion>,
+    // ---- taste (docs/03 §3.3)
+    /// Probability (0..1) that the user keeps this photo, from the personal taste model; absent
+    /// while no model is in use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taste_score: Option<f64>,
 }
 
 /// A file paired with a photo (same folder, same base name), e.g. the RAW of a RAW+JPEG shot.
@@ -312,6 +317,8 @@ pub enum SortKey {
     Rating,
     /// `ai_score` descending, unanalysed last.
     Ai,
+    /// Taste score descending (docs/03 §3.3), photos without one last.
+    Taste,
 }
 
 impl SortKey {
@@ -322,6 +329,7 @@ impl SortKey {
             "name" => Self::Name,
             "rating" => Self::Rating,
             "ai" => Self::Ai,
+            "taste" => Self::Taste,
             _ => return None,
         })
     }
