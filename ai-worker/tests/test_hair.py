@@ -1,4 +1,4 @@
-"""Hair transfer (doc 03 section 5.6): model-free tests on synthetic heads with known hair masks.
+"""Hair transfer (doc 03 section 5.1): model-free tests on synthetic heads with known hair masks.
 
 The fixture draws the same person twice on a green backdrop: a target with flat, stringy, shiny
 ("sweaty") hair and a donor with fuller, clean hair, shifted and slightly larger (a small pose

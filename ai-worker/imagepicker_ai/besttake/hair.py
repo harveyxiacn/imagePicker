@@ -1,4 +1,4 @@
-"""Hair transfer ("换成我最好的发型", doc 03 section 5.6): pure numpy / OpenCV, models injected.
+"""Hair transfer ("换成我最好的发型", doc 03 section 5.1): pure numpy / OpenCV, models injected.
 
 The user's case: photos of the same person from one day or event; early frames have good hair,
 later ones sweaty, flat, stringy or shiny hair. `hair_compose_arrays(target, donor, ...)` replaces
@@ -23,7 +23,7 @@ the target's hair with the donor's and keeps the target's own face:
   7  quality: pose delta, fill share, seam gradient -> score + warnings.
 
 `hair_metrics(rgb, face, components)` measures the hair-quality cues donor ranking uses (doc 03
-section 5.6): hair area relative to the face, sharpness inside the hair, specular shine in the hair
+section 5.1): hair area relative to the face, sharpness inside the hair, specular shine in the hair
 and on the skin, and how ragged the hair silhouette is. All at a normalised face width.
 """
 
@@ -49,7 +49,7 @@ from .region import _ell, _keep_component, oval_of
 
 MIN_FACE_PX = 48
 # Pose gates (degrees). Hair hangs with gravity and is seen from one side: a donor turned or tilted
-# further than this cannot be pasted convincingly by a 2-D similarity warp (doc 03 section 5.6).
+# further than this cannot be pasted convincingly by a 2-D similarity warp (doc 03 section 5.1).
 HAIR_MAX_YAW = 20.0
 HAIR_MAX_PITCH = 15.0
 HAIR_MAX_ROLL = 20.0
@@ -381,7 +381,7 @@ def hair_compose_arrays(
 
 # ------------------------------------------------------------------------------- ranking cues
 def hair_metrics(rgb: np.ndarray, face: Box, comp: Components) -> dict[str, Any]:
-    """Hair-quality cues of one face (doc 03 section 5.6), measured at METRIC_FACE_W.
+    """Hair-quality cues of one face (doc 03 section 5.1), measured at METRIC_FACE_W.
 
     hair_ratio  hair area / face-oval area (flat, sweaty hair covers less)
     sharpness   mean |Laplacian| of the luma inside the (eroded) hair, 0-255 scale (definition)

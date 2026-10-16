@@ -21,6 +21,7 @@ from ..imgio import (
     safe_name,
     write_rgba_png,
 )
+from ..inpaint.service import LAMA
 from ..masks.filters import resize_mask
 from ..masks.generator import SELFIE, bbox_hash
 from ..steps.embed import _is_oom
@@ -31,7 +32,6 @@ from .service import FACE_LANDMARKER, MAX_FACE_PX, BestTake
 
 log = logging.getLogger(__name__)
 
-LAMA = "lama"
 MAX_RANK_FACES = 24
 RANK_SIDE = 2048  # photos are decoded at most this large for ranking (cues are scale-normalised)
 
