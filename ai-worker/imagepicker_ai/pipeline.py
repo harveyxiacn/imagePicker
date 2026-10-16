@@ -8,6 +8,12 @@
 The SigLIP2 image embedding is computed once per photo and shared by `embed` (written to
 `.emb.npy`), `scene` and the zero-shot half of `iqa`.
 
+The GPU thread gets the photos in groups of `embed_flush` (default 8) as they come off the decode
+threads, not in one batch per request: the Core sends 32 photos per request, so with whole-request
+batches the embedding only started once all 32 were decoded and the next request's decoding only
+once it was done - the two never overlapped. Groups are consecutive photos in request order, so
+which photos share a forward pass does not depend on timing.
+
 The event loop never runs heavy work: everything executes in thread pools, so progress
 notifications and other RPCs stay responsive while a batch is running.
 """
@@ -156,6 +162,7 @@ class Analyzer:
         hw: HardwareInfo,
         decode_workers: int | None = None,
         batch_size: int = 32,
+        embed_flush: int = 8,
         embed_backend: str = "auto",
     ):
         self.manager = manager
@@ -164,6 +171,7 @@ class Analyzer:
         self.decode_pool = ThreadPoolExecutor(self.decode_workers, thread_name_prefix="decode")
         self.gpu_pool = ThreadPoolExecutor(1, thread_name_prefix="gpu")
         self.embedder = Embedder(manager, hw, batch_size=batch_size, backend=embed_backend)
+        self.embed_flush = embed_flush  # photos per GPU hand-off (see the module docstring)
         self.identity = IdentityEmbedder(manager, hw)
         self.bank = PromptBank(Path(manager.models_dir) / "_cache")
         self._faces: dict[tuple[str, str | None], FaceAnalyzer] = {}
@@ -369,6 +377,7 @@ class Analyzer:
 
         batch = max(1, self.embedder.batch_size)
         window = max(self.decode_workers * 2, batch * 2)
+        flush = max(1, min(batch, self.embed_flush))
         pending: list[tuple[int, asyncio.Future[_Work]]] = []
         buf: list[_Work] = []
         gpu_task: asyncio.Task[None] | None = None
@@ -425,7 +434,7 @@ class Analyzer:
                     self.on_timing("item", w.result["photo_id"], w.timings)
                 if need_emb and w.prepared is not None:
                     buf.append(w)
-                    if len(buf) >= batch:
+                    if len(buf) >= flush:
                         if gpu_task is not None:
                             await gpu_task
                         gpu_task, buf = asyncio.create_task(run_gpu(buf)), []

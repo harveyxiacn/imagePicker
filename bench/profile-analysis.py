@@ -97,6 +97,8 @@ def run_worker(args: argparse.Namespace, files: list[Path]) -> tuple[dict[str, A
     hw = hwmod.detect(args.device)
     manager = ModelManager(resolve_models_dir(args.models_dir), Registry.load(), hw)
     an = Analyzer(manager, hw, decode_workers=args.decode_workers, batch_size=args.batch)
+    if args.embed_flush:  # photos per GPU hand-off; the batch size = the pre-2026-10-16 behaviour
+        an.embed_flush = args.embed_flush
     samples: dict[str, list[float]] = {}
     gpu_batches: list[dict[str, float]] = []
 
@@ -179,6 +181,7 @@ def run_worker(args: argparse.Namespace, files: list[Path]) -> tuple[dict[str, A
         "errors": errors,
         "decode_workers": an.decode_workers,
         "batch_size": args.batch,
+        "embed_flush": getattr(an, "embed_flush", None),
         "analysis_size": args.analysis_size,
         "warmup_s": round(warmup, 3),
         "wall_s": round(t_wall, 3),
@@ -252,7 +255,8 @@ def markdown(rep: dict[str, Any]) -> str:
             "",
             f"Steps run: {', '.join(w['steps'])}; skipped: {', '.join(w['skipped_steps']) or 'none'}. "
             f"Device: {w['device']['device']} ({', '.join(w['device']['providers'] or [])}). "
-            f"Decode threads {w['decode_workers']}, batch {w['batch_size']}, analysis size {w['analysis_size']}.",
+            f"Decode threads {w['decode_workers']}, batch {w['batch_size']} (GPU hand-off every "
+            f"{w.get('embed_flush')}), analysis size {w['analysis_size']}.",
             "",
             f"**{w['ok']} photos in {w['wall_s']} s = {w['photos_per_s']} photos/s** "
             f"({w['ms_per_photo_wall']} ms per photo wall; model warm-up {w['warmup_s']} s not included"
@@ -376,6 +380,9 @@ def main() -> int:
         "--decode-workers", type=int, help="worker decode threads (default: cores-1, 2..8)"
     )
     ap.add_argument("--batch", type=int, default=32, help="embedding batch size")
+    ap.add_argument(
+        "--embed-flush", type=int, help="photos per GPU hand-off (worker default 8; 32 = old)"
+    )
     ap.add_argument("--analysis-size", type=int, default=1024)
     ap.add_argument(
         "--decode-sample", type=int, default=50, help="photos for the isolated decode timing"

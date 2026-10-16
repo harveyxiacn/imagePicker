@@ -99,3 +99,45 @@ async def test_analyzer_classic_steps_without_models(tmp_path, synth_files):
         assert all({"decode", "quality", "phash"} <= set(tm) for _, _, tm in seen)
     finally:
         an.shutdown()
+
+
+async def test_embedding_hand_off_in_groups_gives_the_same_results(tmp_path, synth_files):
+    """The GPU thread gets photos in groups of `embed_flush` (overlapping decode); results and
+    `.emb.npy` artefacts must be the same as with one hand-off per request."""
+    from imagepicker_ai.hw import detect
+    from imagepicker_ai.models import ModelManager, Registry
+    from imagepicker_ai.pipeline import Analyzer
+
+    hw = detect("cpu")
+    files = synth_files * 3  # 12 photos
+    items = [{"photo_id": f"p{i}", "path": str(p)} for i, p in enumerate(files)]
+
+    async def run(flush: int) -> tuple[list[int], list[dict], list[np.ndarray]]:
+        an = Analyzer(ModelManager(tmp_path / "m", Registry.load(), hw), hw, decode_workers=3)
+        an.embed_flush = flush
+        sizes: list[int] = []
+
+        def fake_embed(prepared):  # deterministic per photo, independent of the batch
+            sizes.append(len(prepared))
+            return np.stack([p.reshape(-1, 3).mean(0) / 255.0 for p in prepared]).astype(np.float32)
+
+        an.embedder.embed_prepared = fake_embed
+        an.missing_models = lambda steps: []
+        out = tmp_path / f"o{flush}"
+        try:
+            res = await an.analyze_batch(
+                {"items": items, "steps": ["phash", "embed"], "out_dir": str(out)}
+            )
+        finally:
+            an.shutdown()
+        embs = [np.load(r["embedding_file"]) for r in res["items"]]
+        for r in res["items"]:
+            r.pop("embedding_file"), r.pop("analysis_file", None)
+        return sizes, res["items"], embs
+
+    sizes_one, items_one, emb_one = await run(32)
+    sizes_grp, items_grp, emb_grp = await run(5)
+    assert sizes_one == [12] and sizes_grp == [5, 5, 2]
+    assert items_one == items_grp
+    for a, b in zip(emb_one, emb_grp, strict=True):
+        np.testing.assert_array_equal(a, b)
