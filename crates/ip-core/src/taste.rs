@@ -22,7 +22,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
-use rusqlite::{params, params_from_iter, Connection, OpenFlags, OptionalExtension};
+use rusqlite::{
+    params, params_from_iter, Connection, OpenFlags, OptionalExtension, TransactionBehavior,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -1075,7 +1077,7 @@ fn add_pending(conn: &Connection, n: usize) -> Result<()> {
 /// app's changes and undos only silence or revive existing labels. Returns the number of
 /// label changes, which are also added to the pending count (retraining trigger).
 pub fn record_patch(
-    conn: &Connection,
+    conn: &mut Connection,
     req: &PatchRequest,
     source: LabelSource,
     before: &std::collections::HashSet<(i64, String)>,
@@ -1083,8 +1085,16 @@ pub fn record_patch(
     if req.user_rating.is_none() && req.flag.is_none() {
         return Ok(0);
     }
-    // one transaction: a select-all patch used to commit once per photo
-    let tx = conn.unchecked_transaction()?;
+    // One transaction: a select-all patch used to commit once per photo.
+    //
+    // IMMEDIATE, not the default DEFERRED: the first statement below is a read
+    // (`is_enabled`), and in WAL mode a transaction that reads first and then tries to
+    // write is refused with SQLITE_BUSY_SNAPSHOT if any other connection committed in
+    // between — and the busy handler is *not* consulted for that error, so the 15 s
+    // `busy_timeout` does not help. Taking the write lock up front makes a concurrent
+    // writer (file watching, analysis, the rescan a relocate spawns) wait instead of
+    // turning PATCH /api/photos into a 500.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let conn = &*tx;
     let enabled = is_enabled(conn)?;
     let changed = if source == LabelSource::User {

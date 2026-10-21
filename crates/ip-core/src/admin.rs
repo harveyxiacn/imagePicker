@@ -322,7 +322,10 @@ impl Core {
         let (faces, people, sessions) = self
             .db
             .call(|c| {
-                let tx = c.transaction()?;
+                // IMMEDIATE: the counts are read before the deletes, and a WAL transaction that
+                // reads first and writes second dies with SQLITE_BUSY_SNAPSHOT if another
+                // connection committed in between (the busy handler does not cover that case).
+                let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
                 let faces: i64 = tx.query_row("SELECT COUNT(*) FROM face", [], |r| r.get(0))?;
                 let people: i64 = tx.query_row("SELECT COUNT(*) FROM person", [], |r| r.get(0))?;
                 let mut sessions: Vec<i64> = Vec::new();
