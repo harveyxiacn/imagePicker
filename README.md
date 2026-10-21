@@ -89,6 +89,12 @@ pnpm tauri build                        # 打包当前系统的安装包
 
 **只用 WebUI（浏览器）**
 
+Windows 用户直接双击根目录的 **`Start-WebUI.cmd`**：启动本机服务，等待就绪后自动打开浏览器。保留启动窗口，按 `Ctrl+C` 或关闭窗口即可停止服务；重复双击会打开已运行的 WebUI。
+
+Windows 启动脚本默认允许 GPU 图像渲染，并仅对本服务进程及子进程禁用 Vulkan 隐式叠加层，避开部分录屏软件叠加层引发的启动崩溃；需要 CPU 兼容模式时运行 `Start-WebUI.cmd -CpuRender`。已有的 `ai-worker/.venv` 会直接复用，保留已安装的 CUDA 依赖；AI 是否使用 GPU 仍取决于模型和 AI 组件配置。已设置的 `IMAGEPICKER_RENDER`、`IMAGEPICKER_WORKER_CMD`、`IMAGEPICKER_WORKER_DIR` 和 `VK_LOADER_LAYERS_DISABLE` 环境变量会保留。
+
+脚本优先使用已有的 `target/release/imagepicker.exe`（其次为 debug）和 `web/dist`。缺少产物时自动构建，需要 Rust / Visual Studio C++ Build Tools、Node 24 和 pnpm 10；首次构建需要联网。源码更新后运行 `Start-WebUI.cmd -Rebuild` 重新构建。端口被占用时可运行 `Start-WebUI.cmd -Port 7879`；`-NoBrowser` 可关闭自动打开浏览器，`-Check` 仅检查启动文件。AI 组件仍按下文单独安装。
+
 ```sh
 cd web && pnpm install && pnpm build && cd ..
 cargo run -p ip-cli -- serve --web-dir web/dist     # http://127.0.0.1:7878
