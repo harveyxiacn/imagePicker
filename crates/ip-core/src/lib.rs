@@ -125,6 +125,9 @@ pub struct Core {
     /// Adjustable per-method worker timeouts (defaults + `IMAGEPICKER_WORKER_TIMEOUT*`).
     pub worker_timeouts: TimeoutHandle,
     pub render: Arc<RenderService>,
+    /// The default renderer, when `CoreConfig::renderer` was `None`. `Core::drop` waits on its
+    /// (bounded) GPU warm-up; a caller-supplied renderer is not waited for.
+    lazy_renderer: Option<Arc<lazy_renderer::LazyRenderer>>,
     /// Persisted settings (`docs/api-contract-m6.md` section D).
     pub settings: SettingsStore,
     /// Assistant plans (in memory, 30 minute TTL).
@@ -286,15 +289,20 @@ impl Core {
         let worker = remote.wrap(worker);
         let worker: Arc<dyn AiWorker> =
             Arc::new(TimeoutWorker::new(worker, worker_timeouts.clone()));
-        let renderer: Arc<dyn ip_render::Renderer> = match cfg.renderer {
-            Some(r) => r,
-            None => {
-                let cpu_env = std::env::var("IMAGEPICKER_RENDER")
-                    .map(|v| v.trim().eq_ignore_ascii_case("cpu"))
-                    .unwrap_or(false);
-                let cpu_setting = settings.get().render.backend == "cpu";
-                lazy_renderer::LazyRenderer::spawn(!(cfg.force_cpu || cpu_env || cpu_setting))
-            }
+        // Nothing is initialised here: the lazy renderer starts its GPU warm-up on the first
+        // render. Doing it at open time put a driver load (seconds, and a loader lock the first
+        // requests need) in front of the requests that follow.
+        let lazy: Option<Arc<lazy_renderer::LazyRenderer>> = cfg.renderer.is_none().then(|| {
+            let cpu_env = std::env::var("IMAGEPICKER_RENDER")
+                .map(|v| v.trim().eq_ignore_ascii_case("cpu"))
+                .unwrap_or(false);
+            let cpu_setting = settings.get().render.backend == "cpu";
+            lazy_renderer::LazyRenderer::new(!(cfg.force_cpu || cpu_env || cpu_setting))
+        });
+        let renderer: Arc<dyn ip_render::Renderer> = match (cfg.renderer, &lazy) {
+            (Some(r), _) => r,
+            (None, Some(l)) => l.clone(),
+            (None, None) => unreachable!("every `None` renderer gets a lazy one"),
         };
         let render = Arc::new(RenderService::new(edit::service::ServiceParts {
             renderer,
@@ -320,6 +328,7 @@ impl Core {
             lite,
             worker_timeouts,
             render,
+            lazy_renderer: lazy,
             settings,
             assistant: Default::default(),
             runtime,
@@ -577,7 +586,12 @@ mod tests_watermark;
 
 impl Drop for Core {
     fn drop(&mut self) {
-        // Do not let the process exit while the GPU warm-up thread is inside the driver.
-        lazy_renderer::wait_for_warmup();
+        // Do not let the process exit while the GPU warm-up thread is inside the driver. Only
+        // this Core's own thread is waited for, and only for a bounded time: the wait used to be
+        // process-wide, so shutting one Core down could block on an unrelated one for as long as
+        // its driver load took.
+        if let Some(l) = &self.lazy_renderer {
+            l.wait_for_warmup();
+        }
     }
 }
