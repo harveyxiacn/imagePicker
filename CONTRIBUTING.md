@@ -25,6 +25,21 @@ User-facing docs: [docs/user-guide](docs/user-guide/README.md). Design docs: [do
 
 Prerequisites: Rust (stable; MSVC toolchain on Windows), Node 24, pnpm 10, and for the AI worker [uv](https://docs.astral.sh/uv/) with Python 3.12. Linux desktop builds also need `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev patchelf`.
 
+### Before you push
+
+The GitHub workflows are **manual** (`workflow_dispatch`) — nothing runs on a push or a pull request. Run the same checks locally first; on a desktop machine this takes a few minutes, against ~15 on a shared runner.
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --exclude ip-desktop --exclude tauri-plugin-imagepicker-media --all-targets -- -D warnings
+cargo test --workspace --exclude ip-desktop --exclude tauri-plugin-imagepicker-media
+(cd web && pnpm lint && pnpm test && pnpm build)
+(cd ai-worker && uv run ruff check . && uv run pytest -m "not models and not gpu")
+bash scripts/cargo-android.sh check -p ip-server -p ip-cli --target aarch64-linux-android
+```
+
+A local run on Windows covers Windows, the web bundle, the AI worker and the Android target, but **not** Linux or macOS compilation. Run `gh workflow run ci.yml` before a release, or after touching code behind `#[cfg(target_os = ...)]`, and `gh workflow run nightly.yml` for the ignored tests and the perf scripts.
+
 ### Rust crates (core, server, CLI, render, imaging)
 
 ```sh

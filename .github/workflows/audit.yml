@@ -2,18 +2,12 @@
 #
 # This workflow is deliberately separate from ci.yml. Advisories against third-party
 # packages change over time and are not caused by the PR under review, so they must not
-# block unrelated PRs. It runs weekly, on demand, and on PRs that change a lockfile.
+# block unrelated PRs. Manual only (2026-10-21), like the other workflows: run it with
+# `gh workflow run audit.yml` when a lockfile changes or before a release.
 name: Dependency audit
 
 on:
-  schedule:
-    - cron: "0 3 * * 1"
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "Cargo.lock"
-      - "**/pnpm-lock.yaml"
-      - "ai-worker/uv.lock"
 
 permissions:
   contents: read
