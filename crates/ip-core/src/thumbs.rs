@@ -416,11 +416,14 @@ impl Thumbs {
                 continue;
             }
             for s in THUMB_SIZES {
+                let _ = std::fs::remove_file(self.inner.path_for(k, s));
                 let _ = std::fs::remove_file(self.inner.thumbs.path_for(k, s));
             }
             for s in PREVIEW_SIZES {
+                let _ = std::fs::remove_file(self.inner.path_for(k, s));
                 let _ = std::fs::remove_file(self.inner.previews.path_for(k, s));
             }
+            let _ = std::fs::remove_file(self.inner.path_for(k, FULL_SIZE));
             let _ = std::fs::remove_file(self.inner.full.path_for(k));
         }
     }
@@ -436,10 +439,11 @@ impl Inner {
     }
 
     fn path_for(&self, key: &str, size: u32) -> PathBuf {
+        let key = format!("{key}-{}", catalog::ORIGINAL_CACHE_REVISION);
         if size == FULL_SIZE {
-            self.full.path_for(key)
+            self.full.path_for(&key)
         } else {
-            self.cache_for(size).path_for(key, size)
+            self.cache_for(size).path_for(&key, size)
         }
     }
 
@@ -477,7 +481,7 @@ impl Inner {
             Err(CoreError::NotFound(_)) => return Ok(()), // deleted meanwhile
             Err(e) => return Err(anyhow::anyhow!("{e}")),
         };
-        let path = self.thumbs.path_for(&r.fast_key, GRID_SIZE);
+        let path = self.path_for(&r.fast_key, GRID_SIZE);
         if path.exists() {
             self.record(&r, GRID_SIZE)?;
         } else {
@@ -496,9 +500,29 @@ impl Inner {
     ) -> std::result::Result<PathBuf, GenError> {
         let path = self.path_for(&r.fast_key, size);
         let edge = if size == FULL_SIZE { FULL_EDGE } else { size };
+        // Viewport boosts and direct image requests can beat the importer's metadata batch.
+        // A PhotoRef read at that point contains the schema default (orientation 1). Resolve
+        // direction before decoding, rather than persisting that default into the cache.
+        // Re-read the row here as the snapshot may predate a completed metadata update.
+        let orientation = self
+            .db
+            .with(|c| {
+                Ok(c.query_row(
+                    "SELECT CASE WHEN meta_done=1 THEN orientation END FROM photo WHERE id=?1",
+                    [r.id],
+                    |row| row.get::<_, Option<u8>>(0),
+                )?)
+            })
+            .map_err(|e| GenError::Other(e.to_string()))?;
+        let orientation = orientation.unwrap_or_else(|| {
+            self.imaging
+                .read_metadata(&r.path, r.format)
+                .map(|m| m.orientation.clamp(1, 8))
+                .unwrap_or(r.orientation)
+        });
         let img = self
             .imaging
-            .generate_thumbnail(&r.path, r.format, r.orientation, edge, quality_for(size))
+            .generate_thumbnail(&r.path, r.format, orientation, edge, quality_for(size))
             .with_context(|| match size {
                 FULL_SIZE => format!("decode {} at full resolution", r.path.display()),
                 _ => format!("generate {size}px for {}", r.path.display()),

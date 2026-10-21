@@ -43,7 +43,7 @@ interface Photo {
   color_label: ColorLabel;
   burst_id: number | null;      // M1 恒为 null
   thumb_ready: boolean;         // 256 网格缩略图已生成
-  thumb_version: string;        // 缓存破坏用，拼到 URL 上 ?v=（当前为 fast_key 前 8 位）
+  thumb_version: string;        // 缓存破坏用，拼到 URL 上 ?v=；8 位不透明哈希，包含图像管线版本与编辑状态
   missing?: boolean;            // 文件已不在磁盘上（见「文件」）；始终返回，缺省按 false
   companions?: Companion[];     // 与本照片配对的 RAW 文件（见「文件」）；无配对时省略
 }
