@@ -81,6 +81,7 @@ fn neutral_local_and_lut_identity() {
             },
             amount: 1.0,
             invert: false,
+            range: None,
             adjust: Adjust::default(),
         }),
         Op::Lut(Lut {
@@ -392,6 +393,7 @@ fn radial_linear_and_invert_masks() {
                 exposure: 1.0,
                 ..Default::default()
             },
+            range: None,
         })])
     };
     let o = render(&img, &radial(false));
@@ -405,6 +407,7 @@ fn radial_linear_and_invert_masks() {
         },
         amount: 1.0,
         invert: false,
+        range: None,
         adjust: Adjust {
             exposure: -1.0,
             ..Default::default()
@@ -421,6 +424,7 @@ fn radial_linear_and_invert_masks() {
         },
         amount: 0.5,
         invert: false,
+        range: None,
         adjust: Adjust {
             exposure: 1.0,
             ..Default::default()
@@ -444,6 +448,7 @@ fn ai_mask_is_resampled_edge_aware() {
         },
         amount: 1.0,
         invert: false,
+        range: None,
         adjust: Adjust {
             exposure: 1.0,
             ..Default::default()
@@ -866,6 +871,7 @@ fn gpu_cpu_parity_on_random_stacks() {
                 },
                 amount: 0.9,
                 invert: seed % 2 == 0,
+                range: None,
                 adjust: random_adjust(&mut ip_render::testutil::Rng::new(seed), 0.5),
             }));
         }

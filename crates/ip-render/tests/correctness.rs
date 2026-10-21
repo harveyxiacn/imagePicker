@@ -139,6 +139,7 @@ fn radial_local() -> Op {
             saturation: 15.0,
             ..Default::default()
         },
+        range: None,
     })
 }
 
@@ -155,6 +156,7 @@ fn linear_local() -> Op {
             temp: -300.0,
             ..Default::default()
         },
+        range: None,
     })
 }
 
@@ -171,6 +173,7 @@ fn ai_local() -> Op {
             contrast: 10.0,
             ..Default::default()
         },
+        range: None,
     })
 }
 

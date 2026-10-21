@@ -83,6 +83,7 @@ fn heavy_stack() -> EditStack {
                 },
                 amount: 1.0,
                 invert: false,
+                range: None,
                 adjust: Adjust {
                     exposure: 0.3,
                     shadows: 20.0,
@@ -97,6 +98,7 @@ fn heavy_stack() -> EditStack {
                 },
                 amount: 1.0,
                 invert: false,
+                range: None,
                 adjust: Adjust {
                     exposure: -0.4,
                     dehaze: 20.0,

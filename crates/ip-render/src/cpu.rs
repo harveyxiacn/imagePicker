@@ -11,6 +11,13 @@ use crate::*;
 const HAZE_A: f32 = 0.92;
 const SKIN_HUE: f32 = 55.0;
 const MID_PV: f32 = 0.4614; // sRGB-encoded 18 % grey
+/// Relative fine-band amplitude at which *texture* bites hardest (see `adjust`).
+const TEXTURE_TAU: f32 = 0.12;
+/// Perceptual chroma that counts as "fully saturated" in OKLab (matches `VIBRANCE`).
+const CHROMA_MAX: f32 = 0.26;
+/// Below this normalised chroma a pixel counts as neutral: its hue angle is undefined, so
+/// a colour range mask must not use it (see `range_weight`).
+const NEUTRAL_CHROMA: f32 = 0.05;
 
 pub struct CpuRenderer;
 
@@ -127,6 +134,21 @@ fn adjust(rec: &[f32; prep::REC], rgb_in: [f32; 3], lay: [f32; 4], curves: &[f32
         let g = (ratio.log2() * rec[r::CLARITY] * wm).exp2();
         c = [c[0] * g, c[1] * g, c[2] * g];
     }
+    if flag(rec, r::F_TEXTURE) {
+        // Texture works on the fine luminance band (`lay[0]`, one octave below clarity's
+        // `lay[1]`) with an amplitude-space weighting `t * e^(1-t)`: it peaks at
+        // `TEXTURE_TAU` and falls to zero both for near-flat areas (noise) and for hard
+        // edges, so raising it reveals pores, weave and foliage without the halo that a
+        // plain unsharp mask leaves on contrast edges. Negative amounts therefore even
+        // out texture while keeping edges and noise intact — the skin-friendly direction.
+        let k = rec[r::TEXTURE];
+        let base = lay[0].max(1e-4);
+        let d = lum(rgb_in) - lay[0];
+        let t = (d.abs() / base) / TEXTURE_TAU;
+        let w = t * (1.0 - t).exp();
+        let g = ((lay[0] + d * (1.0 + k * w)) / (lay[0] + d).max(1e-4)).clamp(0.5, 2.0);
+        c = [c[0] * g, c[1] * g, c[2] * g];
+    }
     if flag(rec, r::F_DEHAZE) {
         let w = rec[r::DEHAZE_W];
         if w > 0.0 {
@@ -157,7 +179,7 @@ fn adjust(rec: &[f32; prep::REC], rgb_in: [f32; 3], lay: [f32; 4], curves: &[f32
             *v = srgb_dec(t[i] + (t[i + 1] - t[i]) * f);
         }
     }
-    if flag(rec, r::F_COLOR | r::F_HSL | r::F_GRADE) {
+    if flag(rec, r::F_COLOR | r::F_HSL | r::F_GRADE | r::F_DODGE) {
         let mut lab = to_oklab(c);
         let chroma = lab[1].hypot(lab[2]);
         let mut hue = if chroma > 1e-6 {
@@ -201,6 +223,21 @@ fn adjust(rec: &[f32; prep::REC], rgb_in: [f32; 3], lay: [f32; 4], curves: &[f32
         lab[0] = (lab[0] + dl).clamp(0.0, 1.0);
         lab[1] = nc * hue.cos();
         lab[2] = nc * hue.sin();
+        if flag(rec, r::F_DODGE) {
+            // Dodge & burn as a masked luminance move, the way it is done by hand on a
+            // 50 % grey layer: dodge lifts with a rolloff that protects highlights, burn
+            // pushes down while protecting the deepest shadows. Chroma is scaled with L,
+            // which leaves the OKLab hue angle untouched — dodging skin brightens it
+            // instead of turning it grey.
+            let l = lab[0].max(1e-4);
+            let up = rec[r::DODGE] * (1.0 - l).powf(1.5);
+            let dn = rec[r::BURN] * l.powf(1.5);
+            let nl = (l + up - dn).clamp(0.0, 1.0);
+            let s = nl / l;
+            lab[0] = nl;
+            lab[1] *= s;
+            lab[2] *= s;
+        }
         if flag(rec, r::F_GRADE) {
             let pivot = rec[r::PIVOT];
             let l = lab[0];
@@ -255,7 +292,50 @@ fn layer_at_base(layer: &Layer, base: usize, proxy: (u32, u32), u: f32, v: f32) 
     o
 }
 
-fn mask_value(rec: &[f32; prep::REC], planes: &[f32], u: f32, v: f32, guide: f32) -> f32 {
+/// Weight of a *range mask* at one pixel: how well the pixel's own colour falls inside the
+/// selected luminance or hue band. 1 = fully inside, 0 = excluded. The selection is a
+/// trapezoid (or a hue wedge) with `softness`-wide shoulders, so a range mask never leaves
+/// the hard edges a threshold would.
+fn range_weight(rec: &[f32; prep::REC], c: [f32; 3]) -> f32 {
+    let kind = rec[r::MR];
+    if kind == r::MR_LUMINANCE {
+        let (lo, hi, soft) = (rec[r::MR + 1], rec[r::MR + 2], rec[r::MR + 3].max(1e-3));
+        let y = srgb_enc(lum(c));
+        smoothstep(lo - soft, lo, y) * (1.0 - smoothstep(hi, hi + soft, y))
+    } else if kind == r::MR_COLOR {
+        let (hue, width) = (rec[r::MR + 1], rec[r::MR + 2]);
+        let (smin, smax, soft) = (rec[r::MR + 3], rec[r::MR + 4], rec[r::MR + 5].max(1e-3));
+        let lab = to_oklab(c);
+        let chroma = lab[1].hypot(lab[2]) / CHROMA_MAX;
+        let h = if chroma > 1e-6 {
+            lab[2].atan2(lab[1])
+        } else {
+            0.0
+        };
+        // Shortest angular distance to the selected hue, in radians.
+        let mut dh = (h - hue).abs() % TAU;
+        if dh > std::f32::consts::PI {
+            dh = TAU - dh;
+        }
+        // A neutral pixel has no hue — its OKLab angle is float residue — so the hue term
+        // must fade out as chroma approaches zero. Without this gate a grey pixel picks up
+        // an arbitrary hue weight, and the CPU and GPU disagree on the last bits of `atan2`.
+        let wh = (1.0 - smoothstep(width, width + soft * std::f32::consts::PI, dh))
+            * smoothstep(0.0, NEUTRAL_CHROMA, chroma);
+        wh * smoothstep(smin - soft, smin, chroma) * (1.0 - smoothstep(smax, smax + soft, chroma))
+    } else {
+        1.0
+    }
+}
+
+fn mask_value(
+    rec: &[f32; prep::REC],
+    planes: &[f32],
+    u: f32,
+    v: f32,
+    guide: f32,
+    rgb0: [f32; 3],
+) -> f32 {
     let kind = rec[r::KIND];
     let m0 = &rec[r::M0..r::M0 + 5];
     let m = if kind == r::KIND_BEAUTY && m0[1] < 1.0 {
@@ -286,7 +366,116 @@ fn mask_value(rec: &[f32; prep::REC], planes: &[f32], u: f32, v: f32, guide: f32
         1.0 - smoothstep(0.0, 1.0, t)
     };
     let m = if rec[r::INVERT] > 0.5 { 1.0 - m } else { m };
+    let m = if (rec[r::FLAGS] as u32) & r::F_RANGE != 0 {
+        m * range_weight(rec, rgb0)
+    } else {
+        m
+    };
     m * rec[r::AMOUNT]
+}
+
+/// Deterministic 0..1 hash of a cell index. Integer-only so the WGSL port is exact.
+#[inline]
+fn hash2(ix: i32, iy: i32) -> f32 {
+    let mut h = (ix as u32).wrapping_mul(374_761_393) ^ (iy as u32).wrapping_mul(668_265_263);
+    h ^= h >> 13;
+    h = h.wrapping_mul(1_274_126_177);
+    h ^= h >> 16;
+    h as f32 / 4_294_967_296.0
+}
+
+/// Smooth value noise in -1..1 at grain coordinates (x, y).
+fn value_noise(x: f32, y: f32) -> f32 {
+    let (x0, y0) = (x.floor(), y.floor());
+    let (fx, fy) = (x - x0, y - y0);
+    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let (i, j) = (x0 as i32, y0 as i32);
+    let a = hash2(i, j);
+    let b = hash2(i + 1, j);
+    let c = hash2(i, j + 1);
+    let d = hash2(i + 1, j + 1);
+    let t = a + (b - a) * sx;
+    let u = c + (d - c) * sx;
+    (t + (u - t) * sy) * 2.0 - 1.0
+}
+
+/// Vignette + grain ([`Effects`]).
+///
+/// The vignette shape is a super-ellipse whose exponent slides from 3 (squared off toward
+/// the frame) through 2 (a true ellipse) to 1 (a diamond) as *Roundness* goes -100..100,
+/// so one slider covers the whole range without a special case at either end.
+///
+/// The grain is added in sRGB-encoded space with a midtone-weighted amplitude — film
+/// density noise is strongest where the negative is neither clear nor fully exposed — and
+/// two octaves whose mix is *Frequency*. It is a pure function of position, so it is stable
+/// frame to frame, and its cell size is anchored to the source image, so a preview and an
+/// export show the same grain.
+fn effects_px(rec: &[f32; prep::REC], c0: [f32; 3], u: f32, v: f32) -> [f32; 3] {
+    let mut c = c0;
+    let amt = rec[r::E_V_AMT];
+    if amt != 0.0 {
+        // Positive roundness raises the super-ellipse exponent: the contour bulges out along
+        // the diagonals, so the clear area becomes an oval. Negative lowers it toward 1, a
+        // diamond, which pushes the dark frame out to the corners — a rectangle.
+        let p = 2.0 + rec[r::E_V_ROUND];
+        let dx = (u - 0.5).abs() * 2.0;
+        let dy = (v - 0.5).abs() * 2.0;
+        let d = (dx.powf(p) + dy.powf(p)).powf(1.0 / p) * std::f32::consts::FRAC_1_SQRT_2;
+        let t0 = rec[r::E_V_MID] * 0.9;
+        let t1 = t0 + 0.15 + 0.85 * rec[r::E_V_FEATHER];
+        let mut w = smoothstep(t0, t1, d);
+        let hl = rec[r::E_V_HL];
+        if hl > 0.0 {
+            // Hold the effect back where the pixel is already bright.
+            w *= 1.0 - hl * smoothstep(0.35, 0.9, srgb_enc(lum(c)));
+        }
+        let g = (amt * w * 2.2).exp2();
+        let style = rec[r::E_V_STYLE];
+        if style > 1.5 {
+            // Paint Overlay: mix toward black/white in display space, as if painted on.
+            let t = (1.0 - g).clamp(0.0, 1.0);
+            let target = if amt < 0.0 { 0.0 } else { 1.0 };
+            c = [
+                srgb_dec(srgb_enc(c[0]) + (target - srgb_enc(c[0])) * t),
+                srgb_dec(srgb_enc(c[1]) + (target - srgb_enc(c[1])) * t),
+                srgb_dec(srgb_enc(c[2]) + (target - srgb_enc(c[2])) * t),
+            ];
+        } else {
+            let lit = [c[0] * g, c[1] * g, c[2] * g];
+            if style > 0.5 {
+                // Colour Priority: move luminance but keep each channel's *offset* from
+                // it, so a darkened corner stays as colourful as it was instead of
+                // drifting toward grey the way a plain multiply makes it.
+                let y0 = lum(c).max(1e-4);
+                let y1 = lum(lit).max(1e-4);
+                c = [
+                    (y1 + (c[0] - y0)).max(0.0),
+                    (y1 + (c[1] - y0)).max(0.0),
+                    (y1 + (c[2] - y0)).max(0.0),
+                ];
+            } else {
+                c = lit;
+            }
+        }
+    }
+    let ga = rec[r::E_G_AMT];
+    if ga > 0.0 {
+        let freq = rec[r::E_G_FREQ];
+        let x = u * rec[r::E_G_SX];
+        let y = v * rec[r::E_G_SY];
+        // Two octaves; frequency cross-fades the finer one in.
+        let n = value_noise(x, y) * (1.0 - 0.5 * freq)
+            + value_noise(x * 2.0 + 11.3, y * 2.0 + 7.7) * (0.5 * freq);
+        let pe = srgb_enc(lum(c));
+        let w = 0.25 + 0.75 * (4.0 * pe * (1.0 - pe));
+        let d = n * ga * 0.22 * w;
+        c = [
+            srgb_dec((srgb_enc(c[0]) + d).clamp(0.0, 1.0)),
+            srgb_dec((srgb_enc(c[1]) + d).clamp(0.0, 1.0)),
+            srgb_dec((srgb_enc(c[2]) + d).clamp(0.0, 1.0)),
+        ];
+    }
+    c
 }
 
 impl Ctx<'_> {
@@ -296,8 +485,12 @@ impl Ctx<'_> {
         let mut c = rgb0;
         for k in 0..nops {
             let rec = &self.plan.ops[k];
+            if rec[r::KIND] == r::KIND_EFFECTS {
+                c = effects_px(rec, c, u, v);
+                continue;
+            }
             if rec[r::KIND] == r::KIND_BEAUTY {
-                let m = mask_value(rec, &self.plan.planes, u, v, guide);
+                let m = mask_value(rec, &self.plan.planes, u, v, guide, rgb0);
                 let fl = rec[r::FLAGS] as u32;
                 if m > 0.0 || fl & (r::FB_EYE | r::FB_TEETH) != 0 {
                     c = self.beauty_px(rec, c, m, u, v, self.layers[k].as_ref());
@@ -308,7 +501,7 @@ impl Ctx<'_> {
             let m = if global {
                 1.0
             } else {
-                mask_value(rec, &self.plan.planes, u, v, guide)
+                mask_value(rec, &self.plan.planes, u, v, guide, rgb0)
             };
             if m <= 0.0 {
                 continue;
@@ -799,7 +992,7 @@ fn finalize(plan: &Plan, c: [f32; 3]) -> [f32; 3] {
 }
 
 #[inline]
-fn sharpen_px(
+pub(crate) fn sharpen_px(
     c: [f32; 3],
     l: [f32; 3],
     r_: [f32; 3],
@@ -869,11 +1062,14 @@ pub fn render_plan(plan: &Plan, src: &RgbImage) -> RgbImage {
             row[x * 3 + 2] = to8(o[2]);
         }
     });
-    RgbImage {
-        width: ow,
-        height: oh,
-        data,
-    }
+    crate::detail::apply(
+        plan,
+        RgbImage {
+            width: ow,
+            height: oh,
+            data,
+        },
+    )
 }
 
 #[allow(dead_code)]

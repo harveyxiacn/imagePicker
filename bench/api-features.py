@@ -570,7 +570,10 @@ def f_assistant(c: Ctx, message="把闭眼的照片都淘汰", engine=None, exec
                 return out
     before = flags()
     t0 = time.time()
-    ok(*http("POST", "/api/assistant/execute", {"plan_id": plan["plan_id"]})[:2], "assistant/execute")
+    # This harness operates on a disposable test catalog; explicitly accept the
+    # impact described by the plan, as the confirmation dialog does in the UI.
+    ok(*http("POST", "/api/assistant/execute", {"plan_id": plan["plan_id"],
+        "confirm": bool(plan.get("needs_confirmation"))})[:2], "assistant/execute")
     done = wait_event(lambda e: e.get("type") == "assistant.done" and e.get("plan_id") == plan["plan_id"], t0 - 1, 900)
     after = flags()
     changed = {k for k in after if after[k] != before.get(k)}

@@ -163,8 +163,9 @@ fn geo_sample(ox: u32, oy: u32, off: vec2<f32>) -> vec3<f32> {
 
 // ------------------------------------------------------------------ op records
 
+// Records are REC floats (20 vec4) wide; keep this in step with prep::REC.
 fn R(k: u32, i: u32) -> f32 {
-    let v = ops[k * 16u + (i >> 2u)];
+    let v = ops[k * 20u + (i >> 2u)];
     return v[i & 3u];
 }
 
@@ -222,7 +223,42 @@ fn warp_at(u: f32, v: f32) -> vec2<f32> {
     return o;
 }
 
-fn mask_value(k: u32, u: f32, v: f32, guide: f32) -> f32 {
+// Range mask: how well this pixel's own colour falls inside the selected luminance or hue
+// band. See range_weight() in cpu.rs.
+fn range_weight(k: u32, c: vec3<f32>) -> f32 {
+    let kind = R(k, 68u);
+    if kind == 1.0 {
+        let lo = R(k, 69u);
+        let hi = R(k, 70u);
+        let soft = max(R(k, 71u), 1e-3);
+        let y = enc1(lum(c));
+        return ss(lo - soft, lo, y) * (1.0 - ss(hi, hi + soft, y));
+    }
+    if kind == 2.0 {
+        let hue = R(k, 69u);
+        let width = R(k, 70u);
+        let smin = R(k, 71u);
+        let smax = R(k, 72u);
+        let soft = max(R(k, 73u), 1e-3);
+        let lab = to_oklab(c);
+        let chroma = length(vec2<f32>(lab.y, lab.z)) / 0.26;
+        var h = 0.0;
+        if chroma > 1e-6 {
+            h = atan2(lab.z, lab.y);
+        }
+        var dh = abs(h - hue) % TAU;
+        if dh > PI {
+            dh = TAU - dh;
+        }
+        // Neutral pixels have no hue; fade the hue term out so a grey pixel does not pick
+        // up an arbitrary weight from float residue in atan2 (see cpu.rs).
+        let wh = (1.0 - ss(width, width + soft * PI, dh)) * ss(0.0, 0.05, chroma);
+        return wh * ss(smin - soft, smin, chroma) * (1.0 - ss(smax, smax + soft, chroma));
+    }
+    return 1.0;
+}
+
+fn mask_value(k: u32, u: f32, v: f32, guide: f32, rgb0: vec3<f32>) -> f32 {
     let kind = R(k, 0u);
     var m: f32;
     if kind == 4.0 && R(k, 29u) < 1.0 {
@@ -269,7 +305,98 @@ fn mask_value(k: u32, u: f32, v: f32, guide: f32) -> f32 {
     if R(k, 3u) > 0.5 {
         m = 1.0 - m;
     }
+    if (u32(R(k, 1u)) & 8192u) != 0u {
+        m = m * range_weight(k, rgb0);
+    }
     return m * R(k, 2u);
+}
+
+// ------------------------------------------------------------------ effects
+
+// Deterministic 0..1 hash of a cell index; integer-only so it matches cpu.rs exactly.
+fn hash2(ix: i32, iy: i32) -> f32 {
+    var h = (u32(ix) * 374761393u) ^ (u32(iy) * 668265263u);
+    h = h ^ (h >> 13u);
+    h = h * 1274126177u;
+    h = h ^ (h >> 16u);
+    return f32(h) / 4294967296.0;
+}
+
+// Smooth value noise in -1..1.
+fn value_noise(x: f32, y: f32) -> f32 {
+    let x0 = floor(x);
+    let y0 = floor(y);
+    let fx = x - x0;
+    let fy = y - y0;
+    let sx = fx * fx * (3.0 - 2.0 * fx);
+    let sy = fy * fy * (3.0 - 2.0 * fy);
+    let i = i32(x0);
+    let j = i32(y0);
+    let a = hash2(i, j);
+    let b = hash2(i + 1, j);
+    let c = hash2(i, j + 1);
+    let d = hash2(i + 1, j + 1);
+    let t = a + (b - a) * sx;
+    let u2 = c + (d - c) * sx;
+    return (t + (u2 - t) * sy) * 2.0 - 1.0;
+}
+
+fn effects_px(k: u32, c0: vec3<f32>, u: f32, v: f32) -> vec3<f32> {
+    var c = c0;
+    let amt = R(k, 4u);
+    if amt != 0.0 {
+        // See cpu.rs: positive roundness = oval, negative = rectangular.
+        let p = 2.0 + R(k, 6u);
+        let dx = abs(u - 0.5) * 2.0;
+        let dy = abs(v - 0.5) * 2.0;
+        let d = pow(pow(dx, p) + pow(dy, p), 1.0 / p) * 0.70710678;
+        let t0 = R(k, 5u) * 0.9;
+        let t1 = t0 + 0.15 + 0.85 * R(k, 7u);
+        var w = ss(t0, t1, d);
+        let hl = R(k, 8u);
+        if hl > 0.0 {
+            w = w * (1.0 - hl * ss(0.35, 0.9, enc1(lum(c))));
+        }
+        let g = exp2(amt * w * 2.2);
+        let style = R(k, 14u);
+        if style > 1.5 {
+            let t = clamp(1.0 - g, 0.0, 1.0);
+            // "target" is a reserved word in WGSL, hence `paint`.
+            var paint = 1.0;
+            if amt < 0.0 {
+                paint = 0.0;
+            }
+            c = vec3<f32>(
+                dec1(enc1(c.x) + (paint - enc1(c.x)) * t),
+                dec1(enc1(c.y) + (paint - enc1(c.y)) * t),
+                dec1(enc1(c.z) + (paint - enc1(c.z)) * t),
+            );
+        } else if style > 0.5 {
+            let lit = c * g;
+            let y0 = max(lum(c), 1e-4);
+            let y1 = max(lum(lit), 1e-4);
+            c = max(vec3<f32>(y1) + (c - vec3<f32>(y0)), vec3<f32>(0.0));
+        } else {
+            c = c * g;
+        }
+    }
+    let ga = R(k, 9u);
+    if ga > 0.0 {
+        let freq = R(k, 11u);
+        let x = u * R(k, 12u);
+        let y = v * R(k, 13u);
+        let n = value_noise(x, y) * (1.0 - 0.5 * freq)
+            + value_noise(x * 2.0 + 11.3, y * 2.0 + 7.7) * (0.5 * freq);
+        let pe = enc1(lum(c));
+        let w = 0.25 + 0.75 * (4.0 * pe * (1.0 - pe));
+        let d = n * ga * 0.22 * w;
+        c = vec3<f32>(
+            dec1(clamp(enc1(c.x) + d, 0.0, 1.0)),
+            dec1(clamp(enc1(c.y) + d, 0.0, 1.0)),
+            dec1(clamp(enc1(c.z) + d, 0.0, 1.0)),
+        );
+    }
+    return c;
 }
 
 // ------------------------------------------------------------------ adjust
@@ -329,6 +456,17 @@ fn adjust(k: u32, rgb_in: vec3<f32>, lay: vec4<f32>) -> vec3<f32> {
         let wm = 1.0 - (2.0 * pm - 1.0) * (2.0 * pm - 1.0);
         c = c * exp2(log2(ratio) * R(k, 21u) * wm);
     }
+    if has(k, 2048u) {
+        // Texture: amplitude-weighted emphasis of the fine luminance band. See adjust() in
+        // cpu.rs. It runs before dehaze, which is a divide and so order-sensitive.
+        let kk = R(k, 64u);
+        let base = max(lay.x, 1e-4);
+        let d = lum(rgb_in) - lay.x;
+        let t = (abs(d) / base) / 0.12;
+        let w = t * exp(1.0 - t);
+        let g = clamp((lay.x + d * (1.0 + kk * w)) / max(lay.x + d, 1e-4), 0.5, 2.0);
+        c = c * g;
+    }
     if has(k, 64u) {
         let w = R(k, 22u);
         if w > 0.0 {
@@ -351,7 +489,7 @@ fn adjust(k: u32, rgb_in: vec3<f32>, lay: vec4<f32>) -> vec3<f32> {
             c[i] = dec1(tables[base] + (tables[base + 1u] - tables[base]) * f);
         }
     }
-    if (u32(R(k, 1u)) & (256u | 512u | 1024u)) != 0u {
+    if (u32(R(k, 1u)) & (256u | 512u | 1024u | 4096u)) != 0u {
         var lab = to_oklab(c);
         let chroma = length(vec2<f32>(lab.y, lab.z));
         var hue = 0.0;
@@ -413,6 +551,18 @@ fn adjust(k: u32, rgb_in: vec3<f32>, lay: vec4<f32>) -> vec3<f32> {
         lab.x = clamp(lab.x + dl, 0.0, 1.0);
         lab.y = nc * cos(hue);
         lab.z = nc * sin(hue);
+        if has(k, 4096u) {
+            // Dodge & burn: a masked luminance move that leaves the OKLab hue alone.
+            // See adjust() in cpu.rs.
+            let l = max(lab.x, 1e-4);
+            let up = R(k, 65u) * pow(1.0 - l, 1.5);
+            let dn = R(k, 66u) * pow(l, 1.5);
+            let nl = clamp(l + up - dn, 0.0, 1.0);
+            let s = nl / l;
+            lab.x = nl;
+            lab.y = lab.y * s;
+            lab.z = lab.z * s;
+        }
         if has(k, 1024u) {
             let pivot = R(k, 33u);
             let l = lab.x;
@@ -580,8 +730,12 @@ fn eval_ops(rgb0: vec3<f32>, u: f32, v: f32, nops: u32) -> vec3<f32> {
     let guide = enc1(lum(rgb0));
     var c = rgb0;
     for (var k = 0u; k < nops; k = k + 1u) {
+        if R(k, 0u) == 5.0 {
+            c = effects_px(k, c, u, v);
+            continue;
+        }
         if R(k, 0u) == 4.0 {
-            let mb = mask_value(k, u, v, guide);
+            let mb = mask_value(k, u, v, guide, rgb0);
             if mb > 0.0 || (u32(R(k, 1u)) & 24u) != 0u {
                 c = beauty_px(k, c, mb, u, v);
             }
@@ -590,13 +744,13 @@ fn eval_ops(rgb0: vec3<f32>, u: f32, v: f32, nops: u32) -> vec3<f32> {
         let global = R(k, 0u) == 0.0;
         var m = 1.0;
         if !global {
-            m = mask_value(k, u, v, guide);
+            m = mask_value(k, u, v, guide, rgb0);
         }
         if m <= 0.0 {
             continue;
         }
         var lay = vec4<f32>(0.0);
-        if (u32(R(k, 1u)) & (4u | 32u | 64u)) != 0u {
+        if (u32(R(k, 1u)) & (4u | 32u | 64u | 2048u)) != 0u {
             lay = layer_at(u32(R(k, 27u)), u, v);
         }
         let a = adjust(k, c, lay);
