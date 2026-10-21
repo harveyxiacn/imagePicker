@@ -1,9 +1,10 @@
 name: CI
 
+# Manual only: the same checks run locally before each push (CONTRIBUTING.md, "Before you
+# push"), which is both faster and free of the runner flakiness tracked in issue #78. Run it
+# with `gh workflow run ci.yml` before a release or after touching platform-specific code.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
