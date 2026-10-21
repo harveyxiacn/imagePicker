@@ -17,6 +17,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # A normal run is ~15 min on windows-latest. The suite occasionally stalls (issue #78);
+    # without this the job waits out GitHub's 6-hour default before anyone sees it.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
