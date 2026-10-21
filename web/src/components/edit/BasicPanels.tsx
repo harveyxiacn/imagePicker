@@ -92,7 +92,7 @@ const PRESENCE: AdjustKey[] = ['clarity', 'dehaze', 'texture']
 /** Dodge & burn: the darkroom's two moves, each with a rolloff that protects the end it aims at. */
 const DARKROOM: AdjustKey[] = ['dodge', 'burn']
 
-/** Basic: Lightroom-like sliders on the global op. */
+/** Basic: the global op's sliders. */
 export function BasicPanel() {
   const { t } = useTranslation()
   const qc = useQueryClient()
