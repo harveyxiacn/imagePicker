@@ -11,6 +11,7 @@
 | v0.3 | 2026-10-09 | 新增完成度评审与收尾计划（09）：逐条对照代码与测试的需求状态、文档矛盾、P0/P1/P2 缺口与并行工作包、合成图库测试计划；06 的排期由 09 取代 |
 | v0.4 | 2026-10-14 | 文档一致性修订（09 P0-13）：README 状态、02 仓库结构与渲染管线、03 档位与算法现状、05 路由/事件/表结构/编辑栈示例、07 默认模型组合、08 Android 能力状态列、用户指南（Lite、移动端、远程 AI）；PRD 按默认产品决定修订，09 新增 §5.5「默认决定」；逐项证据见 [reports/2026-10-14-docs-consistency.md](reports/2026-10-14-docs-consistency.md) |
 | v0.5 | 2026-10-16 | 新增路线图（10）：1.0 阻塞项、进行中工作线、1.x 下一步与依赖、负责人决定；取代 06 §7 的发布后路线图 |
+| v0.6 | 2026-10-21 | 新增 M9 精修契约：纹理、减淡/加深、效果（暗角 + 颗粒）、细节（锐化 + 降噪）、范围蒙版；流水线顺序、校验规则与前后端改动 |
 
 ## 用户文档与参考
 
@@ -19,7 +20,7 @@
 | [用户指南（中文）](user-guide/zh-CN.md) / [User Guide (English)](user-guide/en.md) | 安装、首次运行、挑片流程与快捷键、分析、人物、最佳表情、编辑、美化、修复、导出、AI 助手、局域网、XMP、设置、排错 |
 | [完成度评审与收尾计划](09-完成度评审与收尾计划.md) | 2026-10-09 各需求实现状态（以代码与测试为准）、文档矛盾、缺口与验收标准、并行工作包、测试计划、发布门槛 |
 | [待办与已知问题](backlog.md) | 校准项、功能缺口、许可审计待办 |
-| API 契约（前后端对接，反映**已实现**的接口） | [M1 联调基准（导入与浏览）](api-contract-m1.md) · [M2 智能分析](api-contract-m2.md) · [M3 修图引擎](api-contract-m3.md) · [M4 人像美化](api-contract-m4.md) · [M5 最佳表情与生成式修复](api-contract-m5.md) · [M6 助手、局域网、XMP、设置](api-contract-m6.md) · [M8 Android（相册、lite 端侧分析、远程 AI、移动端）](api-contract-m8.md) |
+| API 契约（前后端对接，反映**已实现**的接口） | [M1 联调基准（导入与浏览）](api-contract-m1.md) · [M2 智能分析](api-contract-m2.md) · [M3 修图引擎](api-contract-m3.md) · [M4 人像美化](api-contract-m4.md) · [M5 最佳表情与生成式修复](api-contract-m5.md) · [M6 助手、局域网、XMP、设置](api-contract-m6.md) · [M8 Android（相册、lite 端侧分析、远程 AI、移动端）](api-contract-m8.md) · [M9 精修（纹理、减淡加深、效果、细节、范围蒙版）](api-contract-m9.md) |
 | 构建与发布 | [发布流程、签名与 Android APK](release.md) · [Android 交叉编译](android-build.md) · [性能基准与评测脚本](../bench/README.md) · [变更日志](../CHANGELOG.md) |
 | 评审与核对报告 | [`reports/`](reports/)：[文档一致性核对（P0-13）](reports/2026-10-14-docs-consistency.md) · [链接与 i18n 核对](reports/2026-10-13-links-i18n.md) · [未使用 i18n 键清理](reports/2026-10-14-unused-i18n.md) |
 | 截图 | [`images/`](images/)（mock 后端生成，不含真实照片；脚本 `web/scripts/docs-screenshots.mjs`） |
