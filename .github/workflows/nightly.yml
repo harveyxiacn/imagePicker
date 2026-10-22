@@ -44,7 +44,7 @@ jobs:
         id: rust_ignored
       - name: Rust tests (default set must pass)
         run: cargo test --workspace --exclude ip-desktop
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
       - uses: actions/setup-node@v7
