@@ -17,7 +17,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
-use ip_worker_client::{HairComposeRequest, HairMetrics, HairRankFace, HairRankRequest};
+use ip_worker_client::{
+    HairComposeRequest, HairIdentity, HairMetrics, HairRankFace, HairRankRequest,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -41,10 +43,11 @@ pub const HAIR_MAX_ROLL: f64 = 20.0;
 /// Donor face width / target face width below this: the donor hair would be upscaled more than
 /// 2x (`donor_too_small`).
 pub const MIN_DONOR_SCALE: f64 = 0.5;
-/// Least identity cosine for a donor that is linked to the target by neither person nor face
-/// track (an unclustered face). Stricter than [`MIN_IDENTITY_COS`], which only guards linked
-/// faces against clustering mistakes: AuraFace scores the same person 0.43-0.66.
-pub const HAIR_MIN_COS: f32 = 0.40;
+/// Least identity cosine for two faces that are both unassigned (no person, different tracks).
+/// Stricter than [`MIN_IDENTITY_COS`], which only guards linked faces against clustering mistakes:
+/// AuraFace scores the same person 0.43-0.66 and close relatives can reach the mid 0.4s, so an
+/// unlinked donor needs 0.5.
+pub const HAIR_MIN_COS: f32 = 0.50;
 /// Most candidates one donor listing returns, and how many of them the worker measures.
 pub const MAX_DONORS: usize = 40;
 pub const MAX_RANKED: usize = 16;
@@ -154,45 +157,50 @@ pub fn pose_reason(d: &PoseDelta, scale: Option<f64>) -> Option<&'static str> {
     }
 }
 
-/// The guard of `POST /api/photos/{id}/hair`: the donor face must be the target's person. 422s:
-/// - `hair_person_mismatch`: the faces belong to different people (person ids differ and they are
-///   not in one face track), or nothing links them and there is no identity embedding to compare;
-/// - `hair_low_similarity`: both have identity embeddings and the cosine is below
-///   [`MIN_IDENTITY_COS`] (linked faces) or [`HAIR_MIN_COS`] (unlinked faces).
-pub fn check_hair_identity(t: &FaceIdentity, d: &FaceIdentity) -> Result<()> {
+/// The guard of `POST /api/photos/{id}/hair`, Best Take's rule without the burst condition: the
+/// donor face must be in the target face's track or person. 422s:
+/// - `hair_person_mismatch`: neither the same track nor the same person; a face that belongs to a
+///   person never matches an unassigned one;
+/// - `hair_low_similarity`: linked faces whose identity embeddings disagree (cosine below
+///   [`MIN_IDENTITY_COS`]: a clustering mistake), or two unassigned faces below [`HAIR_MIN_COS`].
+///
+/// The only path without a link: **both** faces unassigned (no person yet, e.g. a person seen in a
+/// single photo per burst) and both embeddings at cosine >= [`HAIR_MIN_COS`] (0.5, above sibling
+/// similarity). Returns the cosine when both embeddings exist (passed on to the worker).
+pub fn check_hair_identity(t: &FaceIdentity, d: &FaceIdentity) -> Result<Option<f32>> {
     let (tf, df) = (t.face_id, d.face_id);
     let same_track = t.track_id.is_some() && t.track_id == d.track_id;
     let same_person = t.person_id.is_some() && t.person_id == d.person_id;
+    let linked = same_track || same_person;
     let mismatch = || {
         CoreError::UnprocessableCode(
             "hair_person_mismatch",
             format!("face {df} is not the same person as face {tf}"),
         )
     };
-    if !same_track && t.person_id.is_some() && d.person_id.is_some() && !same_person {
+    let unassigned = t.person_id.is_none() && d.person_id.is_none();
+    if !linked && !unassigned {
         return Err(mismatch());
     }
-    let linked = same_track || same_person;
-    match (&t.embedding, &d.embedding) {
-        (Some(x), Some(y)) => {
-            let cos = cosine(x, y);
-            let need = if linked {
-                MIN_IDENTITY_COS
-            } else {
-                HAIR_MIN_COS
-            };
-            if cos < need {
-                return Err(CoreError::UnprocessableCode(
-                    "hair_low_similarity",
-                    format!(
-                        "face {df} does not look like face {tf} (identity similarity {cos:.2}, at least {need:.2} needed)"
-                    ),
-                ));
-            }
-            Ok(())
-        }
-        _ if linked => Ok(()),
-        _ => Err(mismatch()),
+    let cos = match (&t.embedding, &d.embedding) {
+        (Some(x), Some(y)) => Some(cosine(x, y)),
+        _ => None,
+    };
+    let need = if linked {
+        MIN_IDENTITY_COS
+    } else {
+        HAIR_MIN_COS
+    };
+    match cos {
+        Some(c) if c < need => Err(CoreError::UnprocessableCode(
+            "hair_low_similarity",
+            format!(
+                "face {df} does not look like face {tf} (identity similarity {c:.2}, at least {need:.2} needed)"
+            ),
+        )),
+        Some(c) => Ok(Some(c)),
+        None if linked => Ok(None),
+        None => Err(mismatch()),
     }
 }
 
@@ -354,52 +362,69 @@ fn gather(c: &rusqlite::Connection, photo_id: i64, face_id: i64) -> Result<Gathe
     let session_photos = st
         .query_map([photo_id], |r| r.get::<_, i64>(0))?
         .collect::<rusqlite::Result<HashSet<i64>>>()?;
-    // same person / same track; an unclustered face: same-session faces with an embedding
-    let linked = tid.person_id.is_some() || tid.track_id.is_some();
+    // same person / same track; when the target has no person, also the unassigned same-session
+    // faces with an embedding (accepted by `check_hair_identity` only at cosine >= HAIR_MIN_COS)
+    let unassigned = tid.person_id.is_none();
     let mut st = c.prepare(
-        "SELECT f.id, f.embedding, p.file_name, p.taken_at, p.width
+        "SELECT f.id, f.embedding, p.file_name, p.taken_at, p.width, f.person_id, f.track_id, f.photo_id
          FROM face f JOIN photo p ON p.id=f.photo_id
          WHERE f.photo_id<>?1 AND COALESCE(p.missing,0)=0 AND (
            (?2 IS NOT NULL AND f.person_id=?2) OR (?3 IS NOT NULL AND f.track_id=?3)
-           OR (?4=0 AND f.embedding IS NOT NULL AND f.photo_id IN
+           OR (?4=1 AND f.person_id IS NULL AND f.embedding IS NOT NULL AND f.photo_id IN
                (SELECT b.photo_id FROM session_photo a JOIN session_photo b ON b.session_id=a.session_id WHERE a.photo_id=?1)))",
     )?;
+    type Row = (
+        i64,
+        Option<Vec<u8>>,
+        String,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        i64,
+    );
     let rows = st
         .query_map(
-            rusqlite::params![photo_id, tid.person_id, tid.track_id, i64::from(linked)],
-            |r| {
+            rusqlite::params![photo_id, tid.person_id, tid.track_id, i64::from(unassigned)],
+            |r| -> rusqlite::Result<Row> {
                 Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, Option<Vec<u8>>>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, Option<i64>>(3)?,
-                    r.get::<_, Option<i64>>(4)?,
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
                 ))
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    // one face per photo (a person is in a photo once): the most similar one passing the guard
+    let mut best: HashMap<i64, (f32, i64, String, Option<i64>, Option<i64>)> = HashMap::new();
+    for (fid, emb, file_name, taken_at, width, person_id, track_id, fphoto) in rows {
+        let fi = FaceIdentity {
+            face_id: fid,
+            photo_id: fphoto,
+            burst_id: None,
+            track_id,
+            person_id,
+            embedding: emb.filter(|b| !b.is_empty()).map(|b| decode_f16(&b)),
+        };
+        let Ok(cos) = check_hair_identity(&tid, &fi) else {
+            continue; // a clustering mistake, or somebody else
+        };
+        let key = cos.unwrap_or(-1.0);
+        if best.get(&fphoto).is_none_or(|b| key > b.0) {
+            best.insert(fphoto, (key, fid, file_name, taken_at, width));
+        }
+    }
     let mut candidates = Vec::new();
-    let mut seen_photos = HashSet::new();
-    for (fid, emb, file_name, taken_at, width) in rows {
-        let emb = emb.filter(|b| !b.is_empty()).map(|b| decode_f16(&b));
-        if let (Some(x), Some(y)) = (&tid.embedding, &emb) {
-            let need = if linked {
-                MIN_IDENTITY_COS
-            } else {
-                HAIR_MIN_COS
-            };
-            if cosine(x, y) < need {
-                continue; // a clustering mistake, or somebody else
-            }
-        } else if !linked {
-            continue;
-        }
-        let face = astore::get_face(c, fid)?;
-        if !seen_photos.insert(face.photo_id) {
-            continue; // one face per photo (the person can only be in a photo once)
-        }
+    let mut picked: Vec<_> = best.into_values().collect();
+    picked.sort_by_key(|b| b.1);
+    for (_, fid, file_name, taken_at, width) in picked {
         candidates.push(Candidate {
-            face,
+            face: astore::get_face(c, fid)?,
             file_name,
             taken_at,
             width,
@@ -575,13 +600,28 @@ impl Core {
             ));
         }
         let b = body.clone();
-        let (target_ref, donor_ref, tf, df) = self
+        let (target_ref, donor_ref, tf, df, cos) = self
             .db
             .call(move |c| {
                 let tr = catalog::photo_ref(c, photo_id)?;
-                let dr = catalog::photo_ref(c, b.donor_photo_id)?;
+                // a donor that is gone (deleted, or its file missing) is a bad request, not a 404
+                let gone = |what: String| CoreError::Unprocessable(format!("{what} not found"));
+                let dr = catalog::photo_ref(c, b.donor_photo_id)
+                    .map_err(|_| gone(format!("donor photo {}", b.donor_photo_id)))?;
+                let missing: i64 = c.query_row(
+                    "SELECT COALESCE(missing, 0) FROM photo WHERE id=?1",
+                    [b.donor_photo_id],
+                    |r| r.get(0),
+                )?;
+                if missing != 0 {
+                    return Err(gone(format!(
+                        "the file of donor photo {}",
+                        b.donor_photo_id
+                    )));
+                }
                 let tf = astore::get_face(c, b.face_id)?;
-                let df = astore::get_face(c, b.donor_face_id)?;
+                let df = astore::get_face(c, b.donor_face_id)
+                    .map_err(|_| gone(format!("donor face {}", b.donor_face_id)))?;
                 if tf.photo_id != photo_id {
                     return Err(CoreError::Unprocessable(format!(
                         "face {} is not in photo {photo_id}",
@@ -594,14 +634,59 @@ impl Core {
                         b.donor_face_id, b.donor_photo_id
                     )));
                 }
-                check_hair_identity(
+                let cos = check_hair_identity(
                     &astore::face_identity(c, b.face_id)?,
                     &astore::face_identity(c, b.donor_face_id)?,
                 )?;
-                Ok((tr, dr, tf, df))
+                Ok((tr, dr, tf, df, cos))
             })
             .await?;
-        let pd = pose_delta(angles(&tf), angles(&df));
+        // every angle must be known on both sides before a task starts: the catalog's, else the
+        // worker's landmark pose (`hair.rank`); still unknown -> 422
+        let (mut ta, mut da) = (angles(&tf), angles(&df));
+        if ta.iter().chain(da.iter()).any(Option::is_none) {
+            self.preflight_models("hair", &[]).await?;
+            let resp = self
+                .worker
+                .hair_rank(&HairRankRequest {
+                    faces: vec![
+                        HairRankFace {
+                            photo: mkphoto(&target_ref),
+                            face: tf.bbox,
+                        },
+                        HairRankFace {
+                            photo: mkphoto(&donor_ref),
+                            face: df.bbox,
+                        },
+                    ],
+                    allow_download: false,
+                })
+                .await
+                .map_err(map_worker_err)?;
+            let measured = |i: usize| {
+                resp.results
+                    .get(i)
+                    .filter(|m| m.ok)
+                    .map(metric_angles)
+                    .unwrap_or([None; 3])
+            };
+            let (mt, md) = (measured(0), measured(1));
+            for k in 0..3 {
+                if ta[k].is_none() || da[k].is_none() {
+                    (ta[k], da[k]) = (mt[k], md[k]);
+                }
+            }
+            if ta.iter().chain(da.iter()).any(Option::is_none) {
+                return Err(CoreError::UnprocessableCode(
+                    "hair_pose_unknown",
+                    format!(
+                        "the head pose of face {} or {} cannot be measured",
+                        tf.id, df.id
+                    ),
+                ));
+            }
+        }
+        let pd = pose_delta(ta, da);
         let scale = match (
             face_px(&tf, target_ref.width.map(i64::from)),
             face_px(&df, donor_ref.width.map(i64::from)),
@@ -634,7 +719,7 @@ impl Core {
         tokio::spawn(async move {
             let out = task
                 .cancel
-                .scope(core.run_hair(&task, &target_ref, &donor_ref, &tf, &df, strength))
+                .scope(core.run_hair(&task, &target_ref, &donor_ref, &tf, &df, strength, cos))
                 .await;
             let (state, ok, warnings, reason) = match out {
                 Ok(Some(warnings)) => (DONE, true, warnings, None),
@@ -673,6 +758,7 @@ impl Core {
         tf: &Face,
         df: &Face,
         strength: f32,
+        cos: Option<f32>,
     ) -> Result<Option<Vec<String>>> {
         let dir = self.gen_dir(&task.id);
         std::fs::create_dir_all(&dir)?;
@@ -683,6 +769,10 @@ impl Core {
                 donor: mkphoto(donor),
                 target_face: tf.bbox,
                 donor_face: df.bbox,
+                identity: HairIdentity {
+                    verified: true,
+                    cosine: cos,
+                },
                 out_dir: dir.join("out").to_string_lossy().into_owned(),
                 allow_download: false,
             })
@@ -748,9 +838,9 @@ mod tests {
         }
     }
 
-    fn code(r: Result<()>) -> &'static str {
+    fn code(r: Result<Option<f32>>) -> &'static str {
         match r {
-            Ok(()) => "ok",
+            Ok(_) => "ok",
             Err(CoreError::UnprocessableCode(c, _)) => c,
             Err(e) => panic!("{e}"),
         }
@@ -760,77 +850,99 @@ mod tests {
     fn identity_guard() {
         let a = Some(vec![1.0, 0.0, 0.0]);
         let a2 = Some(vec![0.8, 0.6, 0.0]); // cos 0.8
-        let mid = Some(vec![0.35, 0.94, 0.0]); // cos ~0.35
+        let sib = Some(vec![0.45, 0.893, 0.0]); // cos 0.45: a sibling
+        let mid = Some(vec![0.35, 0.937, 0.0]); // cos 0.35
         let b = Some(vec![0.0, 1.0, 0.0]); // cos 0
-                                           // same person (clustered), across sessions / bursts: fine
+        let check = |t: FaceIdentity, d: FaceIdentity| code(check_hair_identity(&t, &d));
+        // same person (clustered), across sessions / bursts
         assert_eq!(
-            code(check_hair_identity(
-                &ident(1, Some(7), None, a.clone()),
-                &ident(2, Some(7), None, a2.clone())
-            )),
+            check(
+                ident(1, Some(7), None, a.clone()),
+                ident(2, Some(7), None, a2.clone())
+            ),
             "ok"
         );
         assert_eq!(
-            code(check_hair_identity(
-                &ident(1, Some(7), None, None),
-                &ident(2, Some(7), None, None)
-            )),
+            check(ident(1, Some(7), None, None), ident(2, Some(7), None, None)),
             "ok"
         );
-        // another person
         assert_eq!(
-            code(check_hair_identity(
-                &ident(1, Some(7), None, a.clone()),
-                &ident(2, Some(8), None, a2.clone())
-            )),
+            check(
+                ident(1, Some(7), None, a.clone()),
+                ident(2, Some(7), None, mid.clone())
+            ),
+            "ok"
+        );
+        // another person, even when they look alike
+        assert_eq!(
+            check(
+                ident(1, Some(7), None, a.clone()),
+                ident(2, Some(8), None, a2.clone())
+            ),
             "hair_person_mismatch"
         );
-        // same person id, but the faces do not look alike: a clustering mistake
+        // same person id, faces that do not look alike: a clustering mistake
         assert_eq!(
-            code(check_hair_identity(
-                &ident(1, Some(7), None, a.clone()),
-                &ident(2, Some(7), None, b.clone())
-            )),
+            check(
+                ident(1, Some(7), None, a.clone()),
+                ident(2, Some(7), None, b.clone())
+            ),
             "hair_low_similarity"
         );
-        // unclustered: needs the stricter similarity
+        // a target without a person never takes a person's face, and vice versa
         assert_eq!(
-            code(check_hair_identity(
-                &ident(1, None, None, a.clone()),
-                &ident(2, None, None, a2.clone())
-            )),
-            "ok"
-        );
-        assert_eq!(
-            code(check_hair_identity(
-                &ident(1, None, None, a.clone()),
-                &ident(2, None, None, mid.clone())
-            )),
-            "hair_low_similarity"
-        );
-        assert_eq!(
-            code(check_hair_identity(
-                &ident(1, Some(7), None, a.clone()),
-                &ident(2, Some(7), None, mid)
-            )),
-            "ok"
-        );
-        // nothing links them, nothing to compare
-        assert_eq!(
-            code(check_hair_identity(
-                &ident(1, None, None, None),
-                &ident(2, Some(3), None, None)
-            )),
+            check(
+                ident(1, None, None, a.clone()),
+                ident(2, Some(3), None, a2.clone())
+            ),
             "hair_person_mismatch"
         );
-        // same track wins over (stale) differing person ids
         assert_eq!(
-            code(check_hair_identity(
-                &ident(1, Some(7), Some(4), a.clone()),
-                &ident(2, Some(8), Some(4), a2)
-            )),
+            check(
+                ident(1, Some(3), None, a.clone()),
+                ident(2, None, None, a2.clone())
+            ),
+            "hair_person_mismatch"
+        );
+        // two unassigned faces: only when they clearly look alike (siblings do not pass)
+        assert_eq!(
+            check(
+                ident(1, None, None, a.clone()),
+                ident(2, None, None, a2.clone())
+            ),
             "ok"
         );
+        assert_eq!(
+            check(ident(1, None, None, a.clone()), ident(2, None, None, sib)),
+            "hair_low_similarity"
+        );
+        assert_eq!(
+            check(ident(1, None, None, None), ident(2, None, None, None)),
+            "hair_person_mismatch"
+        );
+        // the same track wins over (stale) differing person ids
+        assert_eq!(
+            check(
+                ident(1, Some(7), Some(4), a.clone()),
+                ident(2, Some(8), Some(4), a2.clone())
+            ),
+            "ok"
+        );
+        // the verdict carries the cosine for the worker's re-check
+        let cos =
+            check_hair_identity(&ident(1, Some(7), None, a), &ident(2, Some(7), None, a2)).unwrap();
+        assert!((cos.unwrap() - 0.8).abs() < 1e-4);
+    }
+
+    #[test]
+    fn hair_patches_go_on_top_of_the_other_patches() {
+        let p = |kind: &str| json!({"type": "patch", "kind": kind, "asset": kind, "rect": [0, 0, 1, 1], "base_face_id": 1});
+        let ops = crate::generate::replace_patches(
+            vec![p("hair"), p("best_take")],
+            vec![p("deshine"), p("denoise")],
+        );
+        let kinds: Vec<&str> = ops.iter().map(|o| o["kind"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["denoise", "deshine", "best_take", "hair"]);
     }
 
     #[test]

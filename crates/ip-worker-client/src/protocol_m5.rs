@@ -142,8 +142,20 @@ pub struct HairComposeRequest {
     pub donor: MaskPhoto,
     pub target_face: [f64; 4],
     pub donor_face: [f64; 4],
+    /// The core's same-person verdict (defence in depth: the worker refuses unverified pairs).
+    pub identity: HairIdentity,
     pub out_dir: String,
     pub allow_download: bool,
+}
+
+/// What the core verified about the two faces of a `hair.compose` request.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct HairIdentity {
+    /// `check_hair_identity` accepted the pair (same person / track, or two unassigned faces
+    /// that look alike).
+    pub verified: bool,
+    /// Identity-embedding cosine of the two faces, when both have one.
+    pub cosine: Option<f32>,
 }
 
 /// The donor -> target similarity transform `hair.compose` used (shift as a fraction of the

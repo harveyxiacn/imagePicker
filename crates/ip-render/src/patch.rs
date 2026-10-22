@@ -127,7 +127,7 @@ fn taps(scale: f32) -> u32 {
 /// when nothing would change (no patches, disabled, assets missing or degenerate), so the
 /// caller keeps using the original source without a copy.
 pub fn composite(req: &RenderRequest<'_>) -> Result<Option<RgbImage>> {
-    let patches: Vec<&Patch> = req
+    let mut patches: Vec<&Patch> = req
         .stack
         .ops
         .iter()
@@ -136,6 +136,8 @@ pub fn composite(req: &RenderRequest<'_>) -> Result<Option<RgbImage>> {
             _ => None,
         })
         .collect();
+    // kind order first (`PatchKind::layer_order`), stack order within a kind (stable sort)
+    patches.sort_by_key(|p| p.kind.layer_order());
     if patches.is_empty() {
         return Ok(None);
     }

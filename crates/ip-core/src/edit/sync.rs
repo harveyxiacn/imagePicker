@@ -53,16 +53,22 @@ pub fn op_type(op: &Value) -> Option<&str> {
 /// Canonical pipeline position of an op type; unknown (future) ops keep to the end.
 pub(crate) fn rank(op: &Value) -> u8 {
     match op_type(op) {
-        // generated patches go onto the upright source before anything else (M5)
-        Some("patch") => 0,
-        Some("crop") => 1,
-        Some("warp") => 2,
-        Some("global") => 3,
-        Some("local") => 4,
-        Some("beauty") => 5,
-        Some("lut") => 6,
-        Some("output_sharpen") => 7,
-        _ => 8,
+        // generated patches go onto the upright source before anything else (M5), in the
+        // renderer's compositing order of their kinds (`PatchKind::layer_order`)
+        Some("patch") => op
+            .get("kind")
+            .cloned()
+            .and_then(|k| serde_json::from_value::<ip_render::PatchKind>(k).ok())
+            .unwrap_or(ip_render::PatchKind::Other)
+            .layer_order(),
+        Some("crop") => 10,
+        Some("warp") => 11,
+        Some("global") => 12,
+        Some("local") => 13,
+        Some("beauty") => 14,
+        Some("lut") => 15,
+        Some("output_sharpen") => 16,
+        _ => 17,
     }
 }
 

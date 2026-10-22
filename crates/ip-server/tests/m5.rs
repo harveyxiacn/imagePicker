@@ -1034,14 +1034,12 @@ async fn hair_donors_rank_the_same_person_and_gate_the_pose() {
     let (good, turned) = (&c[0], &c[1]);
     assert_eq!(good["composable"], true);
     assert!(good["score"].as_f64().unwrap() > 0.0);
-    if !good["minutes_from_target"].is_null() {
-        assert_eq!(good["minutes_from_target"], -120);
-        assert!(good["cues"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|x| x == "earlier"));
-    }
+    assert_eq!(good["minutes_from_target"], -120);
+    assert!(good["cues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|x| x == "earlier"));
     for cue in ["same_session", "similar_pose"] {
         assert!(
             good["cues"].as_array().unwrap().iter().any(|x| x == cue),
@@ -1124,11 +1122,7 @@ async fn hair_transfer_refuses_other_people_and_writes_one_patch() {
     // somebody else's hair: refused before any task starts
     let r = post(h4, json!(1.0)).await;
     assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(
-        ["hair_person_mismatch", "hair_low_similarity"].contains(&r.code().as_str()),
-        "{}",
-        r.code()
-    );
+    assert_eq!(r.code(), "hair_person_mismatch");
     // the head turned too far
     let r = post(h3, json!(1.0)).await;
     assert_eq!(
@@ -1291,4 +1285,90 @@ async fn sweat_cleanup_layers_take_the_strength_as_amount() {
     )
     .await;
     assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn hair_post_guards_unlinked_faces_gone_donors_and_unknown_pose() {
+    let e = env();
+    let (ids, faces) = hair_scene(&e).await;
+    let (h1, h2) = (ids["h1.jpg"], ids["h2.jpg"]);
+    let post = |donor: i64, donor_face: i64| {
+        let app = e.app.clone();
+        let body =
+            json!({"face_id": faces[&h1], "donor_photo_id": donor, "donor_face_id": donor_face});
+        async move {
+            call(
+                &app,
+                Method::POST,
+                &format!("/api/photos/{h1}/hair"),
+                Some(body),
+            )
+            .await
+        }
+    };
+    let sql = |q: String| {
+        let core = e.core.clone();
+        async move {
+            core.db
+                .call(move |c| {
+                    c.execute_batch(&q)?;
+                    Ok(())
+                })
+                .await
+                .unwrap()
+        }
+    };
+    // a donor photo that does not exist / whose file is gone: 422, not 404
+    let r = post(999_999, faces[&h2]).await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "unprocessable")
+    );
+    sql(format!("UPDATE photo SET missing=1 WHERE id={h2}")).await;
+    let r = post(h2, faces[&h2]).await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "unprocessable")
+    );
+    sql(format!("UPDATE photo SET missing=0 WHERE id={h2}")).await;
+    // angles the catalog does not have are measured by the worker before any task starts ...
+    sql(format!(
+        "UPDATE face SET roll=NULL WHERE photo_id IN ({h1},{h2})"
+    ))
+    .await;
+    let calls = e.worker.hair_rank_calls.load(Ordering::SeqCst);
+    let mut rx = e.core.events.subscribe();
+    let r = post(h2, faces[&h2]).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert_eq!(e.worker.hair_rank_calls.load(Ordering::SeqCst), calls + 1);
+    wait_event(&mut rx, |ev| matches!(ev, Event::HairDone { .. })).await;
+    let req = e.worker.last_hair_request.lock().unwrap().clone().unwrap();
+    assert!(req.identity.verified && req.identity.cosine.is_some_and(|c| c > 0.9));
+    // ... and when it cannot measure them either: 422 before any task
+    e.worker.hair_metrics.lock().unwrap().insert(
+        h2,
+        ip_worker_client::HairMetrics {
+            photo_id: h2,
+            ok: false,
+            reason: Some("face_not_found".into()),
+            ..Default::default()
+        },
+    );
+    let tasks = e.core.tasks_list(None).await.unwrap().len();
+    let r = post(h2, faces[&h2]).await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "hair_pose_unknown")
+    );
+    assert_eq!(e.core.tasks_list(None).await.unwrap().len(), tasks);
+    // a target without a person never takes the hair of a face that has one
+    sql(format!(
+        "UPDATE face SET person_id=NULL, track_id=NULL WHERE photo_id={h1}"
+    ))
+    .await;
+    let r = post(h2, faces[&h2]).await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "hair_person_mismatch")
+    );
 }

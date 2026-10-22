@@ -124,6 +124,17 @@ def head_rect(pts: np.ndarray, iw: int, ih: int) -> tuple[int, int, int, int]:
     )
 
 
+def donor_cropped(pts: np.ndarray, iw: int, ih: int) -> bool:
+    """The donor's hair can reach past the frame: the head (1.0 face width to each side, 1.2 face
+    heights above the centre) is cut by the image edge."""
+    oval = pts[lmk.FACE_OVAL]
+    x0, y0 = oval.min(0)
+    x1, y1 = oval.max(0)
+    ow, oh = x1 - x0, y1 - y0
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    return bool(cx - 1.0 * ow < 0 or cx + 1.0 * ow > iw or cy - 1.2 * oh < 0)
+
+
 def _hair_binary(prob: np.ndarray, oval: np.ndarray, fw: float) -> np.ndarray:
     """Binary hair mask: the components touching the head (other people's hair is dropped)."""
     hb = (prob > 0.5).astype(np.uint8)
@@ -325,6 +336,23 @@ def hair_compose_arrays(
         np.rint(t_crop * (1 - alpha[..., None]) + src_u8 * alpha[..., None]), 0, 255
     ).astype(np.uint8)
 
+    # ---- the layer covers only what it changes. Patches are composited in kind order, the hair
+    # last (`PatchKind::layer_order`), and every patch is computed from the original photo: where
+    # the hair transfer leaves the pixels alone, a sweat-cleanup / denoise layer below must show.
+    # So the patch alpha is the effective weight of the new pixels, w = alpha x max(hair matte,
+    # fill), and the patch colour P solves t (1 - w) + P w = the composite above.
+    changed = (np.abs(base.astype(np.int16) - t_crop).max(axis=2) > 0).astype(np.uint8)
+    fill_w = np.maximum(
+        changed.astype(np.float32),
+        cv2.GaussianBlur(cv2.dilate(changed, _ell(1)).astype(np.float32), (0, 0), 1.0),
+    )
+    w_eff = alpha * np.clip(np.maximum(a_hair, fill_w), 0.0, 1.0)
+    w_eff[w_eff < 0.02] = 0.0
+    tf32 = t_crop.astype(np.float32)
+    lift = alpha / np.maximum(w_eff, 1e-6)
+    patch_rgb = np.where((w_eff > 0)[..., None], tf32 + (src - tf32) * lift[..., None], tf32)
+    patch_rgb = np.clip(np.rint(patch_rgb), 0, 255).astype(np.uint8)
+
     # ---- 7. quality
     ring = boundary_ring((alpha > 0.5).astype(np.uint8), max(2, round(0.03 * fw))) & (prot == 0)
     seam_grad, misfit = seam_metrics(t_crop, src_u8, comp_img, ring)
@@ -341,6 +369,8 @@ def hair_compose_arrays(
         warnings.append("seam")
     if not measured:
         warnings.append("lighting_unmatched")
+    if donor_cropped(od.pts, dw, dh):
+        warnings.append("donor_cropped")
     f_pose = 1 - 0.5 * float(
         smoothstep(max(delta["yaw"] / HAIR_MAX_YAW, delta["pitch"] / HAIR_MAX_PITCH), 0.3, 1.0)
     )
@@ -364,17 +394,18 @@ def hair_compose_arrays(
         fill=fill_m,
         protect=prot,
         alpha=alpha,
+        weight=w_eff,
         composite=comp_img,
         aligned_donor=d_cm,
     )
 
-    ys, xs = np.nonzero(alpha > 0.004)
+    ys, xs = np.nonzero(w_eff > 0.004)
     if len(ys) == 0:
         return _fail("donor_no_hair", **dbg)
     py0, py1 = max(0, ys.min() - 1), min(ch, ys.max() + 2)
     px0, px1 = max(0, xs.min() - 1), min(cw, xs.max() + 2)
-    a8 = np.clip(np.rint(alpha[py0:py1, px0:px1] * 255), 0, 255).astype(np.uint8)
-    rgba = np.dstack([src_u8[py0:py1, px0:px1], a8])
+    a8 = np.clip(np.rint(w_eff[py0:py1, px0:px1] * 255), 0, 255).astype(np.uint8)
+    rgba = np.dstack([patch_rgb[py0:py1, px0:px1], a8])
     rect = (x0 + px0, y0 + py0, px1 - px0, py1 - py0)
     return HairOut(rgba, rect, None, quality, al, dbg)
 

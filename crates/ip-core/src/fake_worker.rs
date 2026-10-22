@@ -1071,6 +1071,14 @@ impl AiWorker for FakeWorker {
     async fn hair_compose(&self, req: &HairComposeRequest) -> Result<HairComposeResponse> {
         self.hair_calls.fetch_add(1, Ordering::SeqCst);
         *self.last_hair_request.lock().unwrap() = Some(req.clone());
+        if !req.identity.verified || req.identity.cosine.is_some_and(|c| c < 0.30) {
+            return Err(WorkerError::Rpc {
+                code: -32602,
+                message: "identity not verified".into(),
+                kind: Some("bad_params".into()),
+                detail: None,
+            });
+        }
         self.gen_nap().await?;
         self.gen_models(&[BESTTAKE_MODEL], req.allow_download)?;
         if let Some(reason) = self.hair_refusals.lock().unwrap().get(&req.donor.photo_id) {

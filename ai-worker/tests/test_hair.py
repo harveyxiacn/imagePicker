@@ -213,8 +213,8 @@ def test_flyaway_target_hair_outside_the_donor_hair_is_filled(pair, composed):
 def test_hair_transfer_seam_is_soft(pair, composed):
     target, _, _, _ = pair
     out, comp = composed
-    a = out.patch[..., 3].astype(np.float32) / 255
-    # alpha changes gradually (no 0 -> 1 step between neighbours)
+    a = out.debug["alpha"]
+    # the region alpha changes gradually (no 0 -> 1 step between neighbours)
     step = max(np.abs(np.diff(a, axis=0)).max(), np.abs(np.diff(a, axis=1)).max())
     assert step < 0.5
     assert out.debug["seam_grad"] < hm.WARN_SEAM_GRAD
@@ -314,7 +314,12 @@ def test_hair_rpc_registered_validated_and_needs_models(tmp_path):
             "target_face": [0.4, 0.4, 0.2, 0.3],
             "donor_face": [0.4, 0.4, 0.2, 0.3],
             "out_dir": str(tmp_path / "out"),
+            "identity": {"verified": True, "cosine": 0.62},
         }
+        # the worker refuses a pair the core has not verified (defence in depth)
+        for bad in (None, {"verified": False}, {"verified": True, "cosine": 0.12}):
+            with pytest.raises(InvalidParams):
+                asyncio.run(s.hair.compose({**req, "identity": bad}))
         with pytest.raises(ModelUnavailable) as e:
             asyncio.run(s.hair.compose(req))
         assert set(s.hair.required_models()) <= set(e.value.extra["models"])
@@ -333,3 +338,90 @@ def test_hair_rpc_registered_validated_and_needs_models(tmp_path):
         s.beauty.shutdown()
         s.masks.shutdown()
         s.analyzer.shutdown()
+
+
+def test_hair_layer_covers_only_what_it_changes_so_a_sweat_layer_below_survives(pair):
+    """Render order: deshine first, hair on top (`PatchKind::layer_order`). Both are computed from the
+    original photo; the hair keeps the donor hair, the deshine keeps the face below the brows."""
+    from imagepicker_ai.beauty import sweat
+
+    from .test_sweat import comps as sweat_comps
+    from .test_sweat import sweaty_face
+
+    _, donor, t_hair, d_hair = pair
+    target = sweaty_face()  # the messy head + sweat shine on the skin
+    ds = sweat.deshine_arrays(target, face_box(*T_C, T_FW), sweat_comps())
+    hr = hm.hair_compose_arrays(target, donor, face_box(*T_C, T_FW), face_box(*D_C, D_FW), comps())
+    assert ds.patch is not None and hr.patch is not None
+    after_ds = paste(target, ds)
+    both = paste(after_ds, hr)
+    # the donor hair is there, as in the hair-only composite
+    inner = (cv2.erode(donor_hair_in_target(d_hair), np.ones((9, 9), np.uint8)) > 0) & (
+        oval_px(*T_C, T_FW) == 0
+    )
+    hair_only = paste(target, hr)
+    assert np.abs(both.astype(int) - hair_only)[inner].mean() < 1.0
+    # the deshined face below the brows is untouched by the hair layer
+    oval = cv2.erode(oval_px(*T_C, T_FW), np.ones((5, 5), np.uint8)) > 0
+    face = oval & (np.arange(H)[:, None] > T_C[1] + (BROW_Y + 0.05) * T_FW)
+    assert np.abs(both.astype(int) - after_ds)[face].max() == 0
+    assert np.abs(after_ds.astype(int) - target)[face].max() > 10  # (the shine really was reduced)
+    # applying the layer reproduces the composite the compositor computed
+    x0, y0, x1, y1 = hr.debug["crop"]
+    ref = hr.debug["composite"].astype(int)
+    assert np.abs(hair_only[y0:y1, x0:x1].astype(int) - ref).max() <= 2
+
+
+def test_hair_rank_keeps_going_when_one_item_fails(tmp_path, monkeypatch):
+    import asyncio  # noqa: F401
+
+    from imagepicker_ai.besttake import hair_service
+    from imagepicker_ai.imgio import PhotoRef
+    from imagepicker_ai.service import WorkerService
+
+    target, donor = make_head(3, T_C, T_FW, messy=True)[0], make_head(4, D_C, D_FW, messy=False)[0]
+    pa, pb = tmp_path / "a.png", tmp_path / "b.png"
+    cv2.imwrite(str(pa), target[..., ::-1])
+    cv2.imwrite(str(pb), donor[..., ::-1])
+    real = hair_service.hair_metrics
+
+    def flaky(rgb, box, comp):
+        if rgb.shape[1] != W:  # never
+            raise AssertionError
+        if box[2] > 0.235 * W:  # the donor face (240 px wide): blow up
+            raise ValueError("bad landmarks")  # (not an out-of-memory message)
+        return real(rgb, box, comp)
+
+    monkeypatch.setattr(hair_service, "hair_metrics", flaky)
+    s = WorkerService(models_dir=str(tmp_path / "models"), idle_unload_s=0)
+    try:
+        s.hair._components = comps  # type: ignore[method-assign]
+        tb = [v / s_ for v, s_ in zip(face_box(*T_C, T_FW), (W, H, W, H), strict=True)]
+        db = [v / s_ for v, s_ in zip(face_box(*D_C, D_FW), (W, H, W, H), strict=True)]
+        out = s.hair._rank(
+            {
+                "faces": [
+                    (PhotoRef(1, str(pa), None), tb),
+                    (PhotoRef(2, str(pb), None), db),
+                    (PhotoRef(3, str(tmp_path / "nope.png"), None), db),
+                ]
+            }
+        )["results"]
+        assert [r["photo_id"] for r in out] == [1, 2, 3]
+        assert out[0]["ok"] is True
+        assert (out[1]["ok"], out[1]["reason"]) == (False, "error")
+        assert (out[2]["ok"], out[2]["reason"]) == (False, "decode_failed")
+    finally:
+        s.besttake.shutdown()
+        s.enhance.shutdown()
+        s.gen.shutdown()
+        s.beauty.shutdown()
+        s.masks.shutdown()
+        s.analyzer.shutdown()
+
+
+def test_donor_cropped_by_the_frame_edge():
+    pts = landmarks_for(face_box(500, 450, 200))
+    assert not hm.donor_cropped(pts, 1000, 900)
+    assert hm.donor_cropped(pts, 640, 900)  # right side cut
+    assert hm.donor_cropped(landmarks_for(face_box(500, 200, 200)), 1000, 900)  # top cut

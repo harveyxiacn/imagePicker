@@ -328,6 +328,26 @@ pub enum PatchKind {
     Other,
 }
 
+impl PatchKind {
+    /// Compositing order of the patch kinds (lower first; equal kinds keep their stack order).
+    /// Every patch is computed from the original pixels, so a later layer replaces an earlier
+    /// one where both cover the same pixels: whole-frame / per-face cleanups first, then object
+    /// removal, then face replacement, and the hair transfer last (its alpha only covers pixels it
+    /// actually changes, so the sweat cleanup below it survives everywhere else).
+    pub fn layer_order(self) -> u8 {
+        match self {
+            Self::Denoise => 0,
+            Self::FaceRestore => 1,
+            Self::Deshine => 2,
+            Self::Flyaway => 3,
+            Self::Inpaint => 4,
+            Self::Other => 5,
+            Self::BestTake => 6,
+            Self::Hair => 7,
+        }
+    }
+}
+
 /// A generated layer. The asset is an RGBA image whose alpha is the blend mask, placed
 /// over `rect` (normalised upright pre-crop coordinates) and resampled to fit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

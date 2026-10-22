@@ -36,6 +36,18 @@ MAX_RANK_FACES = 24
 RANK_SIDE = 2048  # photos are decoded at most this large for ranking (cues are scale-normalised)
 
 
+MIN_IDENTITY_COS = 0.30  # the core's floor for linked faces (`ip_core::generate::MIN_IDENTITY_COS`)
+
+
+def check_identity(v: Any) -> None:
+    """Defence in depth: compose only a pair the core verified as the same person."""
+    if not isinstance(v, dict) or v.get("verified") is not True:
+        raise InvalidParams("identity: the core has not verified that both faces are one person")
+    cos = v.get("cosine")
+    if cos is not None and (not isinstance(cos, (int, float)) or cos < MIN_IDENTITY_COS):
+        raise InvalidParams(f"identity: similarity {cos} is below {MIN_IDENTITY_COS}")
+
+
 class HairTransfer:
     def __init__(self, besttake: BestTake, inpainter: Any | None = None):
         self.bt = besttake
@@ -122,10 +134,17 @@ class HairTransfer:
             try:
                 rgb = load_rgb(ref, RANK_SIDE)
             except Exception as e:  # noqa: BLE001
-                results.append({"photo_id": ref.photo_id, "ok": False, "reason": f"decode: {e}"})
+                log.warning("hair.rank cannot decode photo %s: %s", ref.photo_id, e)
+                results.append({"photo_id": ref.photo_id, "ok": False, "reason": "decode_failed"})
                 continue
             h, w = rgb.shape[:2]
-            m = hair_metrics(rgb, box_px(box, w, h), comp)
+            try:
+                m = hair_metrics(rgb, box_px(box, w, h), comp)
+            except Exception as e:  # noqa: BLE001
+                if _is_oom(e):
+                    raise
+                log.warning("hair.rank failed for photo %s: %s", ref.photo_id, e)
+                m = {"ok": False, "reason": "error"}
             m["photo_id"] = ref.photo_id
             results.append(m)
         return {"results": results}
@@ -196,6 +215,7 @@ class HairTransfer:
             "donor_face": parse_box(params.get("donor_face"), "donor_face"),
             "out_dir": parse_out_dir(params),
         }
+        check_identity(params.get("identity"))
         await self._ensure(bool(params.get("allow_download", False)))
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self.masks.pool, self._retry, self._compose, req)
