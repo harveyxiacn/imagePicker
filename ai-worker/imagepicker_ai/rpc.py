@@ -26,6 +26,7 @@ from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
 from . import errors
+from .cancel import Cancel, Cancelled
 from .errors import RpcError
 
 log = logging.getLogger(__name__)
@@ -39,6 +40,9 @@ class Ctx:
     def __init__(self, req_id: Any, conn: _Conn):
         self.req_id = req_id
         self._conn = conn
+        # Set when the request is cancelled; pass `cancel.check` into the thread-pool work so it
+        # stops instead of running to the end behind an already-answered request.
+        self.cancel = Cancel()
 
     def progress(self, **fields: Any) -> None:
         self._conn.enqueue(
@@ -54,6 +58,7 @@ class _Conn:
         self.ws = ws
         self.queue: asyncio.Queue[str | None] = asyncio.Queue()
         self.tasks: dict[Any, asyncio.Task[None]] = {}
+        self.ctxs: dict[Any, Ctx] = {}
         self.cancelled_ids: set[Any] = set()
 
     def enqueue(self, obj: Any) -> None:
@@ -108,6 +113,8 @@ class RpcServer:
             return
         self._server.close()  # stop listening and close all connections (1001)
         for c in list(self._conns):
+            for ctx in list(c.ctxs.values()):
+                ctx.cancel.set()
             for t in list(c.tasks.values()):
                 t.cancel()
         await self._server.wait_closed()
@@ -210,6 +217,10 @@ class RpcServer:
             t = conn.tasks.get(target)
             if t is not None:
                 conn.cancelled_ids.add(target)
+                # the token reaches the thread-pool work, which the asyncio cancel cannot
+                ctx = conn.ctxs.get(target)
+                if ctx is not None:
+                    ctx.cancel.set()
                 t.cancel()
             if has_id:
                 respond({"jsonrpc": "2.0", "id": rid, "result": {"cancelled": t is not None}})
@@ -230,7 +241,8 @@ class RpcServer:
                 )
             return None
 
-        task = asyncio.create_task(self._call(conn, handler, rid, params, has_id, respond))
+        ctx = Ctx(rid, conn)
+        task = asyncio.create_task(self._call(conn, handler, rid, params, has_id, respond, ctx))
         if has_id:
             if rid in conn.tasks:
                 task.cancel()
@@ -241,7 +253,13 @@ class RpcServer:
                 )
                 return None
             conn.tasks[rid] = task
-            task.add_done_callback(lambda _t, k=rid: conn.tasks.pop(k, None))
+            conn.ctxs[rid] = ctx
+
+            def done(_t: asyncio.Task[None], k: Any = rid) -> None:
+                conn.tasks.pop(k, None)
+                conn.ctxs.pop(k, None)
+
+            task.add_done_callback(done)
         return task
 
     async def _call(
@@ -252,13 +270,15 @@ class RpcServer:
         params: Any,
         has_id: bool,
         respond: Callable[[Any], None],
+        ctx: Ctx,
     ) -> None:
-        ctx = Ctx(rid, conn)
         try:
             result = await handler(params if params is not None else {}, ctx)
             if has_id:
                 respond({"jsonrpc": "2.0", "id": rid, "result": result})
         except asyncio.CancelledError:
+            # also on shutdown, where no `cancel` notification arrives: the pool work must stop too
+            ctx.cancel.set()
             if has_id and rid in conn.cancelled_ids:
                 conn.cancelled_ids.discard(rid)
                 respond(
@@ -266,6 +286,13 @@ class RpcServer:
                 )
                 return
             raise
+        except Cancelled:
+            # the pool stopped on the token rather than on the asyncio cancel that races it
+            if has_id:
+                conn.cancelled_ids.discard(rid)
+                respond(
+                    _err_response(rid, RpcError(errors.CANCELLED, "request cancelled", "cancelled"))
+                )
         except RpcError as e:
             if has_id:
                 respond(_err_response(rid, e))

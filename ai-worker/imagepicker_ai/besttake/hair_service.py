@@ -10,6 +10,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from ..cancel import Check
 from ..errors import InvalidParams, ModelUnavailable, OutOfMemory
 from ..imgio import (
     box_px,
@@ -205,7 +206,7 @@ class HairTransfer:
             "align": out.align,
         }
 
-    async def compose(self, params: Any) -> dict[str, Any]:
+    async def compose(self, params: Any, check: Check | None = None) -> dict[str, Any]:
         if not isinstance(params, dict):
             raise InvalidParams("params must be an object")
         req = {
@@ -218,4 +219,10 @@ class HairTransfer:
         check_identity(params.get("identity"))
         await self._ensure(bool(params.get("allow_download", False)))
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self.masks.pool, self._retry, self._compose, req)
+
+        def work() -> dict[str, Any]:
+            if check is not None:
+                check()  # do not even start a cancelled transfer
+            return self._retry(self._compose, req)
+
+        return await loop.run_in_executor(self.masks.pool, work)

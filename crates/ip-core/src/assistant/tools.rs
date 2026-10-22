@@ -12,7 +12,7 @@ pub type VResult<T> = std::result::Result<T, String>;
 pub const MAX_STEPS: usize = 8;
 const MAX_IDS: usize = 20_000;
 
-pub const TOOL_NAMES: [&str; 14] = [
+pub const TOOL_NAMES: [&str; 15] = [
     "filter",
     "set_rating",
     "set_flag",
@@ -21,6 +21,7 @@ pub const TOOL_NAMES: [&str; 14] = [
     "scene_keep_top",
     "apply_preset",
     "auto_adjust",
+    "adjust_sliders",
     "apply_profiles",
     "besttake_auto",
     "remove_bystanders",
@@ -28,6 +29,34 @@ pub const TOOL_NAMES: [&str; 14] = [
     "describe",
     "suggest_edits",
 ];
+
+/// The global sliders `adjust_sliders` may set, with their valid ranges (the same ranges the
+/// editor's sliders and `Adjust` use).
+pub const SLIDERS: [(&str, f64, f64); 15] = [
+    ("exposure", -5.0, 5.0),
+    ("contrast", -100.0, 100.0),
+    ("highlights", -100.0, 100.0),
+    ("shadows", -100.0, 100.0),
+    ("whites", -100.0, 100.0),
+    ("blacks", -100.0, 100.0),
+    ("temp", -3000.0, 3000.0),
+    ("tint", -100.0, 100.0),
+    ("vibrance", -100.0, 100.0),
+    ("saturation", -100.0, 100.0),
+    ("clarity", -100.0, 100.0),
+    ("dehaze", -100.0, 100.0),
+    ("texture", -100.0, 100.0),
+    ("dodge", 0.0, 100.0),
+    ("burn", 0.0, 100.0),
+];
+
+/// Valid range of one `adjust_sliders` key.
+pub fn slider_range(key: &str) -> Option<(f64, f64)> {
+    SLIDERS
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map(|(_, lo, hi)| (*lo, *hi))
+}
 
 /// The `preset` enum of the `export` tool: the ids of the one export preset table.
 pub const EXPORT_PRESETS: [&str; 4] = crate::export::EXPORT_PRESET_IDS;
@@ -57,6 +86,18 @@ pub const FILTER_KEYS: [&str; 18] = [
     "faces_max",
     "has_edits",
 ];
+
+/// `values` of `adjust_sliders`: one number per slider, with its range.
+fn slider_props() -> Value {
+    let mut props = Map::new();
+    for (k, lo, hi) in SLIDERS {
+        props.insert(
+            k.to_string(),
+            json!({"type":"number","minimum":lo,"maximum":hi}),
+        );
+    }
+    Value::Object(props)
+}
 
 fn selection_schema() -> Value {
     json!({
@@ -146,6 +187,11 @@ pub fn registry() -> Vec<ToolSpec> {
             name: "auto_adjust",
             description: "AI one-click adjustment, saved per photo.",
             parameters: obj(json!({"selection":sel,"mode":{"type":"string","enum":["auto","portrait","landscape"]}}), &["selection"]),
+        },
+        ToolSpec {
+            name: "adjust_sliders",
+            description: "Set or change individual sliders (exposure in EV, contrast, highlights, shadows, whites, blacks, temp in kelvin, tint, vibrance, saturation, clarity, dehaze, texture, dodge, burn) of the selected photos. Use this for a numeric instruction such as \"increase exposure by 0.5\"; auto_adjust is only for \"fix them all\" with no numbers.",
+            parameters: obj(json!({"selection":sel,"values":{"type":"object","minProperties":1,"additionalProperties":false,"properties":slider_props()},"relative":{"type":"boolean","default":false,"description":"true adds to the current values, false replaces them"}}), &["selection","values"]),
         },
         ToolSpec {
             name: "apply_profiles",
@@ -667,6 +713,31 @@ pub fn validate_call(tool: &str, args: &Value) -> VResult<Value> {
             }
             out.insert("preset_id".into(), json!(p));
         }
+        "adjust_sliders" => {
+            only_keys(o, &["selection", "values", "relative"])?;
+            with_selection(&mut out, true)?;
+            let rel = match o.get("relative") {
+                Some(v) if !v.is_null() => as_bool(v, "relative")?,
+                _ => false,
+            };
+            let vals = match o.get("values") {
+                Some(Value::Object(m)) if !m.is_empty() => m,
+                _ => return Err("values must be a non-empty object of sliders".into()),
+            };
+            let mut clean = Map::new();
+            for (k, v) in vals {
+                let (lo, hi) = slider_range(k).ok_or_else(|| format!("unknown slider {k:?}"))?;
+                let n = as_num(v, k)?;
+                // a relative value is a delta, so it may cross zero ("lower dodge by 10")
+                let (lo, hi) = if rel { (lo - hi, hi - lo) } else { (lo, hi) };
+                if !(lo..=hi).contains(&n) {
+                    return Err(format!("{k} must be within {lo}..{hi}"));
+                }
+                clean.insert(k.clone(), json!(n));
+            }
+            out.insert("values".into(), Value::Object(clean));
+            out.insert("relative".into(), json!(rel));
+        }
         "auto_adjust" => {
             only_keys(o, &["selection", "mode"])?;
             with_selection(&mut out, true)?;
@@ -708,7 +779,12 @@ pub fn validate_call(tool: &str, args: &Value) -> VResult<Value> {
 pub fn edits_tool(tool: &str) -> bool {
     matches!(
         tool,
-        "apply_preset" | "auto_adjust" | "apply_profiles" | "besttake_auto" | "remove_bystanders"
+        "apply_preset"
+            | "auto_adjust"
+            | "adjust_sliders"
+            | "apply_profiles"
+            | "besttake_auto"
+            | "remove_bystanders"
     )
 }
 
@@ -724,7 +800,7 @@ mod tests {
             assert!(is_tool(t.name));
             assert_eq!(t.parameters["type"], "object", "{}", t.name);
         }
-        assert_eq!(llm_tools().len(), 14);
+        assert_eq!(llm_tools().len(), 15);
     }
 
     #[test]
@@ -803,6 +879,27 @@ mod tests {
             ("describe", json!({"photo_id":0})),
             ("suggest_edits", json!({"photo_id":"x"})),
             ("accept_ai", json!({"selection": 5})),
+            ("adjust_sliders", json!({"selection":"current_filter"})),
+            (
+                "adjust_sliders",
+                json!({"selection":"current_filter","values":{}}),
+            ),
+            (
+                "adjust_sliders",
+                json!({"selection":"current_filter","values":{"glow":10}}),
+            ),
+            (
+                "adjust_sliders",
+                json!({"selection":"current_filter","values":{"contrast":500}}),
+            ),
+            (
+                "adjust_sliders",
+                json!({"selection":"current_filter","values":{"exposure":"high"}}),
+            ),
+            (
+                "adjust_sliders",
+                json!({"selection":"current_filter","values":{"exposure":1},"relative":"yes"}),
+            ),
         ];
         for (tool, args) in bad {
             assert!(
@@ -836,6 +933,19 @@ mod tests {
         assert_eq!(v["selection"]["query"], "rating_gte=4&limit=3&sort=ai");
         let v = validate_call("auto_adjust", &json!({"selection":"current_filter"})).unwrap();
         assert_eq!(v["mode"], "auto");
+        // a relative delta may cross zero on one-sided sliders; an absolute value may not
+        let v = validate_call(
+            "adjust_sliders",
+            &json!({"selection":"current_filter","values":{"dodge":"-10"},"relative":true}),
+        )
+        .unwrap();
+        assert_eq!(v["values"]["dodge"], -10.0);
+        assert_eq!(v["relative"], true);
+        assert!(validate_call(
+            "adjust_sliders",
+            &json!({"selection":"current_filter","values":{"dodge":-10}}),
+        )
+        .is_err());
         let v = validate_call(
             "export",
             &json!({"selection":"current_filter","preset":"wechat"}),

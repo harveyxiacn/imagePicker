@@ -264,19 +264,19 @@ class WorkerService:
         return await self.beauty.prepare(params, lambda p: ctx.progress(**p))
 
     async def besttake_compose(self, params: Any, ctx: Ctx) -> dict[str, Any]:
-        return await self.besttake.compose(params, lambda p: ctx.progress(**p))
+        return await self.besttake.compose(params, lambda p: ctx.progress(**p), ctx.cancel.check)
 
     async def hair_rank(self, params: Any, _ctx: Ctx) -> dict[str, Any]:
         return await self.hair.rank(params)
 
-    async def hair_compose(self, params: Any, _ctx: Ctx) -> dict[str, Any]:
-        return await self.hair.compose(params)
+    async def hair_compose(self, params: Any, ctx: Ctx) -> dict[str, Any]:
+        return await self.hair.compose(params, ctx.cancel.check)
 
     async def inpaint_run(self, params: Any, ctx: Ctx) -> dict[str, Any]:
-        return await self.inpaint.run(params, lambda p: ctx.progress(**p))
+        return await self.inpaint.run(params, lambda p: ctx.progress(**p), ctx.cancel.check)
 
     async def enhance_run(self, params: Any, ctx: Ctx) -> dict[str, Any]:
-        return await self.enhance.run(params, lambda p: ctx.progress(**p))
+        return await self.enhance.run(params, lambda p: ctx.progress(**p), ctx.cancel.check)
 
     async def llm_plan(self, params: Any, ctx: Ctx) -> dict[str, Any]:
         return await self.assistant.plan(params, lambda p: ctx.progress(**p))

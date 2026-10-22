@@ -166,6 +166,10 @@ struct Rx {
     bystanders: Regex,
     besttake: Regex,
     profiles: Regex,
+    slider_zh: Regex,
+    slider_zh_num: Regex,
+    slider_en: Regex,
+    slider_en_num: Regex,
     auto_adjust: Regex,
     accept_ai: Regex,
     apply_verb: Regex,
@@ -217,6 +221,120 @@ struct Rx {
     original: Regex,
 }
 
+/// The slider names the rules engine understands (Chinese), longest first so "自然饱和度" is not
+/// read as "饱和度".
+const SLIDER_ZH: &str =
+    "自然饱和度|饱和度|曝光|亮度|对比度|高光|阴影|白色|黑色|色温|色调|清晰度|去朦胧|纹理|减淡|加深";
+
+/// The `Adjust` field behind a slider name; `None` for a word that is not a slider.
+fn slider_key(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "曝光" | "亮度" | "exposure" | "brightness" => "exposure",
+        "对比度" | "contrast" => "contrast",
+        "高光" | "highlights" | "highlight" => "highlights",
+        "阴影" | "shadows" | "shadow" => "shadows",
+        "白色" | "whites" | "white" => "whites",
+        "黑色" | "blacks" | "black" => "blacks",
+        "色温" | "temperature" => "temp",
+        "色调" | "tint" => "tint",
+        "自然饱和度" | "vibrance" => "vibrance",
+        "饱和度" | "saturation" => "saturation",
+        "清晰度" | "clarity" => "clarity",
+        "去朦胧" | "dehaze" => "dehaze",
+        "纹理" | "texture" => "texture",
+        "减淡" | "dodge" => "dodge",
+        "加深" | "burn" => "burn",
+        _ => return None,
+    })
+}
+
+/// "set ... to", "设为", "调到": the number is the new value, not a delta.
+fn slider_absolute(s: &str) -> bool {
+    ["设为", "调到", "调成", "改为", "set to", " to "]
+        .iter()
+        .any(|v| s.contains(v))
+}
+
+/// "lower / reduce / 降低": the delta goes down.
+fn slider_down(s: &str) -> bool {
+    [
+        "降低", "调低", "减少", "减去", "decrease", "lower", "reduce", "cut",
+    ]
+    .iter()
+    .any(|v| s.contains(v))
+}
+
+/// Numeric slider instructions in `text`, as `(field, value)` deltas; the flag is true when the
+/// numbers are deltas rather than absolute values. `None` when no slider is named.
+fn parse_sliders(text: &str) -> Option<(Vec<(String, f64)>, bool)> {
+    let x = rx();
+    let mut out: Vec<(String, f64)> = Vec::new();
+    let mut relative = false;
+    fn push(out: &mut Vec<(String, f64)>, key: &str, n: f64) {
+        if !out.iter().any(|(k, _)| k == key) {
+            out.push((key.to_string(), n));
+        }
+    }
+    // the verb-first patterns run first: they know the direction ("lower the contrast by 10")
+    for c in x.slider_zh_num.captures_iter(text) {
+        let (Some(verb), Some(n), Some(name)) = (c.get(1), c.get(2), c.get(3)) else {
+            continue;
+        };
+        let Some(key) = slider_key(name.as_str()) else {
+            continue;
+        };
+        let Ok(n) = n.as_str().parse::<f64>() else {
+            continue;
+        };
+        relative = true;
+        let n = if slider_down(verb.as_str()) {
+            -n.abs()
+        } else {
+            n
+        };
+        push(&mut out, key, n);
+    }
+    for c in x.slider_en_num.captures_iter(text) {
+        let (Some(verb), Some(name), Some(n)) = (c.get(1), c.get(2), c.get(3)) else {
+            continue;
+        };
+        let Some(key) = slider_key(name.as_str()) else {
+            continue;
+        };
+        let Ok(n) = n.as_str().parse::<f64>() else {
+            continue;
+        };
+        relative = true;
+        let n = if slider_down(verb.as_str()) {
+            -n.abs()
+        } else {
+            n
+        };
+        push(&mut out, key, n);
+    }
+    // noun first: "曝光 +0.5", "把曝光提高0.5", "exposure by 0.5", "set exposure to 0.5"
+    for (re, name_i, num_i) in [(&x.slider_zh, 1, 2), (&x.slider_en, 1, 2)] {
+        for c in re.captures_iter(text) {
+            let (Some(name), Some(n)) = (c.get(name_i), c.get(num_i)) else {
+                continue;
+            };
+            let Some(key) = slider_key(name.as_str()) else {
+                continue;
+            };
+            let Ok(n) = n.as_str().parse::<f64>() else {
+                continue;
+            };
+            let whole = c.get(0).map(|m| m.as_str()).unwrap_or_default();
+            if !slider_absolute(whole) {
+                relative = true;
+            }
+            let n = if slider_down(whole) { -n.abs() } else { n };
+            push(&mut out, key, n);
+        }
+    }
+    (!out.is_empty()).then_some((out, relative))
+}
+
 fn rx() -> &'static Rx {
     static RX: OnceLock<Rx> = OnceLock::new();
     RX.get_or_init(|| {
@@ -246,6 +364,11 @@ fn rx() -> &'static Rx {
             besttake: r(r"最佳表情|最佳合成|全员最佳|一键.{0,3}最佳|换脸最佳|\bbest[- ]?take\b|\bbest expressions?\b"),
             profiles: r(r"美颜档案|应用.{0,3}档案|人物档案|套用.{0,3}档案|\b(apply|use)\b.{0,12}\b(beauty |retouch(ing)? )?profiles?\b|\bbeauty profiles?\b"),
             auto_adjust: r(r"一键(修图|修片|美化|调整|调色|优化|增强)|自动(修图|修片|调色|调整|美化|优化)|智能(修图|调色|美化)|修图|\bauto[- ]?(adjust|enhance|edit|fix|correct|retouch)\b|\bone[- ]?click\b|\b(enhance|retouch|improve)\b"),
+            // a slider and a number, in either order: "曝光 +0.5", "把曝光提高0.5", "增加0.5曝光"
+            slider_zh: r(&format!(r"({SLIDER_ZH})\s*(?:调高|调低|提高|降低|增加|减少|加上|减去|加|减|设为|调到|调成|改为|到|为)?\s*([+-]?\d+(?:\.\d+)?)")),
+            slider_zh_num: r(&format!(r"(增加|提高|调高|降低|调低|减少|减去|加|减)\s*([+-]?\d+(?:\.\d+)?)\s*(?:档|个?点|级|ev|ev值)?\s*(?:的)?\s*({SLIDER_ZH})")),
+            slider_en: r(r"\b(exposure|brightness|contrast|highlights?|shadows?|whites|blacks|temperature|tint|vibrance|saturation|clarity|dehaze|texture|dodge|burn)\b\s*(?:(?:by|to)\s*)?([+-]?\d+(?:\.\d+)?)\s*(?:ev|evs|stops?)?\b"),
+            slider_en_num: r(r"\b(increase|raise|boost|decrease|lower|reduce|cut|add|subtract)\b[^.\d]{0,20}?\b(exposure|brightness|contrast|highlights?|shadows?|whites|blacks|temperature|tint|vibrance|saturation|clarity|dehaze|texture)\b[^.\d]{0,12}?\b([+-]?\d+(?:\.\d+)?)"),
             accept_ai: r(r"(接受|采纳|采用|使用|应用|确认).{0,4}(ai|智能)\s*(评分|星级|评星|打分|分数)|(ai|智能)\s*(评分|星级|评星|打分).{0,4}(接受|采纳|采用|确认)|\baccept\b.{0,12}\bai\b|\b(use|adopt|take)\b.{0,6}\bai (rating|score)s?\b"),
             apply_verb: r(r"应用|套用|加上|加个|加|用|使用|换成|改成|改为|设为|调成|变成|转成|转为|做成|\b(apply|use|add|give|set|make|switch|change|turn|convert|put|grade)\b"),
             look_noun: r(r"滤镜|风格|调色|预设|色调|效果|\b(preset|filter|look|style|tone|grade|grading|effect)\b"),
@@ -1082,6 +1205,8 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         });
     let keep = x.keep.is_match(&verb_text);
     let auto_adjust = x.auto_adjust.is_match(&verb_text);
+    // "increase exposure by 0.5" is a slider instruction, not a one-click adjustment
+    let sliders = parse_sliders(&verb_text);
 
     // ratings: a "set rating" phrase is never also a threshold
     let set_rating = if clear_rating {
@@ -1103,6 +1228,7 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         || reject
         || set_rating.is_some()
         || preset.is_some()
+        || sliders.is_some()
         || auto_adjust;
     extract(&text_no_names, &mut ents, view || !action_present);
     if pick {
@@ -1285,6 +1411,20 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         let mut extra = Map::new();
         extra.insert("preset_id".into(), json!(p));
         action(ctx, "apply_preset", extra, &ents, &mut acc, un, &mut calls);
+    } else if let Some((values, relative)) = &sliders {
+        let mut extra = Map::new();
+        let vals: Map<String, Value> = values.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
+        extra.insert("values".into(), Value::Object(vals));
+        extra.insert("relative".into(), json!(relative));
+        action(
+            ctx,
+            "adjust_sliders",
+            extra,
+            &ents,
+            &mut acc,
+            un,
+            &mut calls,
+        );
     } else if auto_adjust && !view {
         let mode = match ents.scene {
             Some("portrait") | Some("group") => "portrait",

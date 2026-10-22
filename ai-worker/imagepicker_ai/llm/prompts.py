@@ -94,6 +94,21 @@ EXAMPLES: list[Example] = [
     ),
     Example(
         "zh",
+        "把曝光提高0.5，对比度降低10",
+        [
+            {
+                "tool": "adjust_sliders",
+                "args": {
+                    "selection": _CF,
+                    "values": {"exposure": 0.5, "contrast": -10},
+                    "relative": True,
+                },
+            }
+        ],
+        "好的，把曝光提高0.5、对比度降低10。",
+    ),
+    Example(
+        "zh",
         "每个连拍组只留最好的2张，其余淘汰",
         [{"tool": "group_keep_top", "args": {"selection": _CF, "n": 2, "reject_rest": True}}],
         "每个连拍组保留前2张，其余标为淘汰。",
@@ -293,6 +308,11 @@ def build_system_prompt(
         "burst group; 场景 = scene; 小红书 = xiaohongshu; 微信/朋友圈 = wechat; 筛选/找出/显示 = filter; "
         "导出 = export; AI评分 = AI rating; 一键合成最佳表情 = Best Take.\n"
         "- Ratings are 0-5 stars (null clears). Flags: 1 = pick, -1 = reject, 0 = clear.\n"
+        "- An edit request that names a slider and a number is `adjust_sliders`: 提高/增加/降低/减少/"
+        "reduce/raise/lower/increase = `relative: true` with the signed amount; 设为/调到/set to = "
+        "`relative: false` with the absolute value. Use `auto_adjust` only when the user asks for "
+        "automatic correction without naming values. Slider ranges: exposure -5..5, temp -3000..3000 "
+        "kelvin shift, everything else -100..100, dodge/burn 0..100.\n"
         "- If the request cannot be done with these tools, or is not about photos, return an empty "
         '"calls" array and use "reply" to say so briefly with one example of something you can do.\n'
         f'- The user may write Chinese or English. Write "reply" in the language of the request '

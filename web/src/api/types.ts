@@ -1425,6 +1425,7 @@ export type AssistantTool =
   | 'scene_keep_top'
   | 'apply_preset'
   | 'auto_adjust'
+  | 'adjust_sliders'
   | 'apply_profiles'
   | 'besttake_auto'
   | 'remove_bystanders'

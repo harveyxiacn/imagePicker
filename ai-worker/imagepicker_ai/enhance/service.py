@@ -11,6 +11,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from ..cancel import Check
 from ..errors import DownloadFailed, InvalidParams, ModelUnavailable, RpcError
 from ..facemesh import PoseFaceMesh
 from ..imgio import (
@@ -86,7 +87,9 @@ class Enhancer:
         return self._mesh[path]
 
     # ------------------------------------------------------------------ ops
-    def _denoise(self, req: dict[str, Any], rgb: np.ndarray, notify: ProgressFn) -> dict[str, Any]:
+    def _denoise(
+        self, req: dict[str, Any], rgb: np.ndarray, notify: ProgressFn, check: Check | None = None
+    ) -> dict[str, Any]:
         s = req["strength"] if req["strength"] is not None else auto_strength(rgb)
 
         def work(h: OrtHandle, tile: int) -> np.ndarray:
@@ -94,6 +97,8 @@ class Enhancer:
                 return h.run({"image": x})
 
             def prog(i: int, n: int) -> None:
+                if check is not None:
+                    check()  # between tiles: a cancelled request frees the pool thread
                 notify({"kind": "enhance", "done": i, "total": n})
 
             return denoise_tiled(rgb, net, tile, s, prog)
@@ -103,7 +108,9 @@ class Enhancer:
         write_rgba_png(path, out, np.full(out.shape[:2], 255, np.uint8))
         return {"patch": str(path), "rect": [0, 0, 1, 1]}
 
-    def _upscale(self, req: dict[str, Any], rgb: np.ndarray, notify: ProgressFn) -> dict[str, Any]:
+    def _upscale(
+        self, req: dict[str, Any], rgb: np.ndarray, notify: ProgressFn, check: Check | None = None
+    ) -> dict[str, Any]:
         scale = req["scale"]
         mid = self.upscale_model(scale)
         s = 1.0 if req["strength"] is None else req["strength"]
@@ -113,6 +120,8 @@ class Enhancer:
                 return h.run({h.input_name: x})
 
             def prog(i: int, n: int) -> None:
+                if check is not None:
+                    check()  # between tiles: a cancelled request frees the pool thread
                 notify({"kind": "enhance", "done": i, "total": n})
 
             return upscale_tiled(rgb, net, scale, tile, s, prog)
@@ -136,7 +145,11 @@ class Enhancer:
         return [f["bbox"] for f in fa.detect(img)]
 
     def _face_restore(
-        self, req: dict[str, Any], rgb: np.ndarray, notify: ProgressFn
+        self,
+        req: dict[str, Any],
+        rgb: np.ndarray,
+        notify: ProgressFn,
+        check: Check | None = None,
     ) -> dict[str, Any]:
         h, w = rgb.shape[:2]
         faces = req["faces"]
@@ -148,6 +161,8 @@ class Enhancer:
         patches: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for i, fb in enumerate(faces):
+            if check is not None:
+                check()  # one face at a time; the rest of the batch is abandoned when cancelled
             obs = mesh.observe(rgb, box_px(fb, w, h))
             if obs is None:
                 skipped.append({"face_index": i, "reason": "face_not_found"})
@@ -178,7 +193,9 @@ class Enhancer:
             out["skipped"] = skipped
         return out
 
-    def _sweat(self, req: dict[str, Any], rgb: np.ndarray, notify: ProgressFn) -> dict[str, Any]:
+    def _sweat(
+        self, req: dict[str, Any], rgb: np.ndarray, notify: ProgressFn, check: Check | None = None
+    ) -> dict[str, Any]:
         """deshine / flyaway: one full-strength patch per face (the stack's `amount` is the strength)."""
         from ..beauty.sweat import deshine_arrays, flyaway_arrays
         from ..besttake.compose import Components
@@ -223,6 +240,8 @@ class Enhancer:
         skipped: list[dict[str, Any]] = []
         stats: list[dict[str, Any]] = []
         for i, fb in enumerate(faces):
+            if check is not None:
+                check()
             box = box_px(fb, w, h)
             if req["op"] == "deshine":
                 res = deshine_arrays(rgb, box, comp)
@@ -241,7 +260,11 @@ class Enhancer:
             out["skipped"] = skipped
         return out
 
-    def _run(self, req: dict[str, Any], notify: ProgressFn) -> dict[str, Any]:
+    def _run(
+        self, req: dict[str, Any], notify: ProgressFn, check: Check | None = None
+    ) -> dict[str, Any]:
+        if check is not None:
+            check()
         Path(req["out_dir"]).mkdir(parents=True, exist_ok=True)
         rgb = load_rgb(req["photo"])
         op = req["op"]
@@ -251,15 +274,17 @@ class Enhancer:
                 raise InvalidParams(
                     f"upscale x{req['scale']} of {w}x{h} exceeds {MAX_OUTPUT_PIXELS // 10**6} MP"
                 )
-            return self._upscale(req, rgb, notify)
+            return self._upscale(req, rgb, notify, check)
         if op == "denoise":
-            return self._denoise(req, rgb, notify)
+            return self._denoise(req, rgb, notify, check)
         if op in SWEAT_OPS:
-            return self._sweat(req, rgb, notify)
-        return self._face_restore(req, rgb, notify)
+            return self._sweat(req, rgb, notify, check)
+        return self._face_restore(req, rgb, notify, check)
 
     # ------------------------------------------------------------------ entry
-    async def run(self, params: Any, progress: ProgressFn | None = None) -> dict[str, Any]:
+    async def run(
+        self, params: Any, progress: ProgressFn | None = None, check: Check | None = None
+    ) -> dict[str, Any]:
         if not isinstance(params, dict):
             raise InvalidParams("params must be an object")
         op = params.get("op")
@@ -326,7 +351,7 @@ class Enhancer:
                 await loop.run_in_executor(self.rt.pool, lambda: self.manager.ensure(YUNET))
             except Exception:  # noqa: BLE001
                 pass
-        return await loop.run_in_executor(self.rt.pool, self._run, req, notify)
+        return await loop.run_in_executor(self.rt.pool, self._run, req, notify, check)
 
 
 def _lama_run(h: OrtHandle, img: np.ndarray, mask: np.ndarray) -> np.ndarray:

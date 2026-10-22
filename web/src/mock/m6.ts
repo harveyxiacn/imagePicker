@@ -372,6 +372,52 @@ function plan(sessionId: number, message: string, ctx: AssistantContext): Assist
     const n = count(s)
     push('apply_preset', { selection: s, preset_id: pw[1] }, L(`为 ${n} 张照片套用预设「${pw[2]}」，统一色调`, `Apply preset "${pw[3]}" to ${n} photos for a consistent look`), n)
   }
+  // numeric slider edits: "把曝光提高 0.5", "lower the contrast by 10", "把对比度设为 20"
+  {
+    const words: Array<[RegExp, string, string, string]> = [
+      [/曝光|exposure/, 'exposure', '曝光', 'exposure'],
+      [/对比度|contrast/, 'contrast', '对比度', 'contrast'],
+      [/高光|highlights?/, 'highlights', '高光', 'highlights'],
+      [/阴影|shadows?/, 'shadows', '阴影', 'shadows'],
+      [/白色|whites?/, 'whites', '白色', 'whites'],
+      [/黑色|blacks?/, 'blacks', '黑色', 'blacks'],
+      [/色温|temperature/, 'temp', '色温', 'temperature'],
+      [/色调|tint/, 'tint', '色调', 'tint'],
+      [/自然饱和度|vibrance/, 'vibrance', '自然饱和度', 'vibrance'],
+      [/饱和度|saturation/, 'saturation', '饱和度', 'saturation'],
+      [/清晰度|clarity/, 'clarity', '清晰度', 'clarity'],
+      [/去朦胧|dehaze/, 'dehaze', '去朦胧', 'dehaze'],
+      [/纹理|texture/, 'texture', '纹理', 'texture'],
+      [/减淡|dodge/, 'dodge', '减淡', 'dodge'],
+      [/加深|burn/, 'burn', '加深', 'burn'],
+    ]
+    const absolute = has(text, /设为|调到|调成|set (it )?to/)
+    const down = has(text, /降低|减少|调低|减去|lower|reduce|decrease|cut/)
+    const values: Record<string, number> = {}
+    const labels: string[] = []
+    for (const [re, key, zh, en] of words) {
+      const src = re.source
+      const v =
+        num(text, new RegExp(`(?:${src})[^\\d-]{0,8}(-?\\d+(?:\\.\\d+)?)`)) ??
+        num(text, new RegExp(`(-?\\d+(?:\\.\\d+)?)[^\\d]{0,4}(?:${src})`))
+      if (v === null) continue
+      const signed = absolute || !down ? v : -Math.abs(v)
+      values[key] = signed
+      labels.push(`${L(zh, en)} ${signed > 0 && !absolute ? '+' : ''}${signed}`)
+    }
+    if (Object.keys(values).length) {
+      const s = sel()
+      const n = count(s)
+      const what = labels.join(L('、', ', '))
+      push(
+        'adjust_sliders',
+        { selection: s, values, relative: !absolute },
+        L(`${absolute ? '设置' : '调整'} ${n} 张照片：${what}`, `${absolute ? 'Set' : 'Adjust'} ${what} on ${n} photos`),
+        n,
+        true,
+      )
+    }
+  }
   if (has(text, /一键(修图|调整|优化)|自动(调整|修图|优化)|auto[- ]?(adjust|enhance|edit)|enhance all/)) {
     const s = sel()
     const n = count(s)

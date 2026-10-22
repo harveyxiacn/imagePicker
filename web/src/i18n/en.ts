@@ -1444,6 +1444,7 @@ export const en: Messages = {
     tool_scene_keep_top: 'Keep per scene',
     tool_apply_preset: 'Apply preset',
     tool_auto_adjust: 'AI auto-adjust',
+    tool_adjust_sliders: 'Adjust sliders',
     tool_apply_profiles: 'Beauty profiles',
     tool_besttake_auto: 'Best take',
     tool_remove_bystanders: 'Remove bystanders',

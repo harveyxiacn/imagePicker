@@ -599,6 +599,7 @@ Example commands (these work as written; the rules engine understands both langu
 | Rating / flags | "rate all photos 3 stars", "reject all photos with closed eyes", "accept AI ratings for all photos" |
 | Keep per group / scene | "keep 2 per scene and reject the rest", "rate the 2 best 5 stars", "pick the best of each group" |
 | Editing | "auto adjust", "unify the tone", "apply warm film to all photos" |
+| Sliders by number | "increase exposure by 0.5", "lower the contrast by 10", "set temperature to 500" |
 | Portraits & best take | "apply beauty profiles", "best take for everyone" |
 | Repair | "remove bystanders" |
 | Export | "export the picks for Instagram" |

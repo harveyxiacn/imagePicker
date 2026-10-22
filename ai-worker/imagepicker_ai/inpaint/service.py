@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from ..cancel import Check
 from ..errors import InvalidParams, ModelUnavailable, OutOfMemory
 from ..imgio import (
     load_rgb,
@@ -84,13 +85,15 @@ class Inpainter:
         return FillEngine(sdxl.SIZE, fn, min_context=128), None
 
     # ------------------------------------------------------------------ run
-    def _run(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _run(self, req: dict[str, Any], check: Check | None = None) -> dict[str, Any]:
+        if check is not None:
+            check()
         req["out_dir"].mkdir(parents=True, exist_ok=True)
         img = load_rgb(req["photo"])
         h, w = img.shape[:2]
         mask = read_mask(req["mask"], w, h)
         engine = self._sdxl_engine()[0] if req["model"] == "sdxl" else self._lama_engine()[0]
-        out = inpaint_arrays(img, mask, engine)
+        out = inpaint_arrays(img, mask, engine, check=check)
         if out is None:
             return {"patch": None, "reason": "empty_mask"}
         digest = hashlib.sha1(Path(req["mask"]).read_bytes()).hexdigest()[:8]  # noqa: S324
@@ -102,7 +105,9 @@ class Inpainter:
             "model": MODELS[req["model"]],
         }
 
-    async def run(self, params: Any, progress: ProgressFn | None = None) -> dict[str, Any]:
+    async def run(
+        self, params: Any, progress: ProgressFn | None = None, check: Check | None = None
+    ) -> dict[str, Any]:
         if not isinstance(params, dict):
             raise InvalidParams("params must be an object")
         model = params.get("model", "lama")
@@ -144,4 +149,4 @@ class Inpainter:
                 if isinstance(e, RpcError):
                     raise
                 raise DownloadFailed(f"{mid}: {e}") from e
-        return await loop.run_in_executor(self.rt.pool, self._run, req)
+        return await loop.run_in_executor(self.rt.pool, self._run, req, check)

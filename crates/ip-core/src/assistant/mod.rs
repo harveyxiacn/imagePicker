@@ -856,7 +856,7 @@ fn is_destructive(tool: &str, args: &Value, affects: usize) -> bool {
         "set_flag" => args["flag"].as_i64() == Some(-1),
         "set_rating" | "accept_ai" => affects > 1,
         // batch edits / generative changes: undoable, but confirm before touching many photos
-        "auto_adjust" | "apply_preset" | "apply_profiles" | "besttake_auto"
+        "auto_adjust" | "adjust_sliders" | "apply_preset" | "apply_profiles" | "besttake_auto"
         | "remove_bystanders" => affects > 1,
         "group_keep_top" | "scene_keep_top" => args["reject_rest"].as_bool() == Some(true),
         "export" => true,
@@ -1171,6 +1171,58 @@ fn confirm_text(steps: &[PlanStep], session_photos: usize, l: Locale) -> String 
     lines.join("\n")
 }
 
+fn slider_label(key: &str, zh: bool) -> String {
+    let s = match (key, zh) {
+        ("exposure", true) => "曝光",
+        ("exposure", false) => "exposure",
+        ("contrast", true) => "对比度",
+        ("contrast", false) => "contrast",
+        ("highlights", true) => "高光",
+        ("highlights", false) => "highlights",
+        ("shadows", true) => "阴影",
+        ("shadows", false) => "shadows",
+        ("whites", true) => "白色",
+        ("whites", false) => "whites",
+        ("blacks", true) => "黑色",
+        ("blacks", false) => "blacks",
+        ("temp", true) => "色温",
+        ("temp", false) => "temperature",
+        ("tint", true) => "色调",
+        ("tint", false) => "tint",
+        ("vibrance", true) => "自然饱和度",
+        ("vibrance", false) => "vibrance",
+        ("saturation", true) => "饱和度",
+        ("saturation", false) => "saturation",
+        ("clarity", true) => "清晰度",
+        ("clarity", false) => "clarity",
+        ("dehaze", true) => "去朦胧",
+        ("dehaze", false) => "dehaze",
+        ("texture", true) => "纹理",
+        ("texture", false) => "texture",
+        ("dodge", true) => "减淡",
+        ("dodge", false) => "dodge",
+        ("burn", true) => "加深",
+        ("burn", false) => "burn",
+        _ => return key.to_string(),
+    };
+    s.to_string()
+}
+
+/// A relative slider number with its sign: 0.5 -> "+0.5", -10 -> "-10".
+fn signed_num(x: f64) -> String {
+    if x > 0.0 {
+        format!("+{}", trim_num(x))
+    } else {
+        trim_num(x)
+    }
+}
+
+/// A slider number without trailing zeros: 0.5 -> "0.5", 20 -> "20".
+fn trim_num(x: f64) -> String {
+    let s = format!("{x:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 fn summarize(tool: &str, args: &Value, affects: usize, l: Locale, names: &Names) -> String {
     let zh = l == Locale::Zh;
     let n = affects;
@@ -1227,6 +1279,35 @@ fn summarize(tool: &str, args: &Value, affects: usize, l: Locale, names: &Names)
                 format!("对 {n} 张照片一键修图")
             } else {
                 format!("Auto adjust {n} photo(s)")
+            }
+        }
+        "adjust_sliders" => {
+            let rel = args["relative"].as_bool() == Some(true);
+            let mut parts: Vec<String> = args["values"]
+                .as_object()
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|(k, v)| Some((slider_label(k, zh), v.as_f64()?)))
+                        .map(|(label, x)| {
+                            if rel {
+                                format!("{label} {}", signed_num(x))
+                            } else {
+                                format!("{label} {}", trim_num(x))
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            parts.sort();
+            let what = parts.join(if zh { "、" } else { ", " });
+            if zh {
+                let verb = if rel { "调整" } else { "设置" };
+                format!("{verb} {n} 张照片：{what}")
+            } else {
+                format!(
+                    "{} {what} on {n} photo(s)",
+                    if rel { "Adjust" } else { "Set" }
+                )
             }
         }
         "apply_profiles" => {
@@ -1306,11 +1387,14 @@ fn reply_for(steps: &[PlanStep], hints: &[String], l: Locale, confirm: bool) -> 
 mod destructive_tests {
     use serde_json::json;
 
+    use super::rules::Locale;
+
     #[test]
     fn batch_edits_on_many_photos_need_confirmation() {
         let a = json!({});
         for tool in [
             "auto_adjust",
+            "adjust_sliders",
             "apply_preset",
             "apply_profiles",
             "besttake_auto",
@@ -1321,6 +1405,25 @@ mod destructive_tests {
         }
         assert!(!super::is_destructive("filter", &a, 100));
         assert!(super::is_destructive("set_flag", &json!({"flag": -1}), 1));
+    }
+
+    #[test]
+    fn slider_summary_names_the_values() {
+        let names = super::Names {
+            people: &[],
+            presets: &[],
+        };
+        let args = json!({"values": {"exposure": 0.5}, "relative": true});
+        let zh = super::summarize("adjust_sliders", &args, 3, Locale::Zh, &names);
+        assert_eq!(zh, "调整 3 张照片：曝光 +0.5");
+        let en = super::summarize("adjust_sliders", &args, 3, Locale::En, &names);
+        assert_eq!(en, "Adjust exposure +0.5 on 3 photo(s)");
+
+        let args = json!({"values": {"contrast": 20.0, "temp": -300.0}});
+        let zh = super::summarize("adjust_sliders", &args, 1, Locale::Zh, &names);
+        assert!(zh.contains("设置 1 张照片"), "{zh}");
+        assert!(zh.contains("对比度 20"), "{zh}");
+        assert!(zh.contains("色温 -300"), "{zh}");
     }
 
     #[test]

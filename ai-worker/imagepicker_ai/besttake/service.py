@@ -10,6 +10,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from ..cancel import Check
 from ..errors import InvalidParams, ModelUnavailable, OutOfMemory
 from ..facemesh import PoseFaceMesh
 from ..imgio import (
@@ -126,7 +127,9 @@ class BestTake:
             "quality": out.quality,
         }
 
-    def _run_retry(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _run_retry(self, req: dict[str, Any], check: Check | None = None) -> dict[str, Any]:
+        if check is not None:
+            check()
         try:
             return self._run(req)
         except Exception as e:  # noqa: BLE001
@@ -134,12 +137,19 @@ class BestTake:
                 raise
             if self.masks.force_cpu:
                 raise OutOfMemory(str(e)) from e
+            if check is not None:
+                check()  # a cancelled request does not get a second, CPU retry
             log.warning("OOM in besttake.compose; retrying on CPU")
             self.manager.unload()
             self.masks.force_cpu = True
             return self._run(req)
 
-    async def compose(self, params: Any, progress: ProgressFn | None = None) -> dict[str, Any]:
+    async def compose(
+        self,
+        params: Any,
+        progress: ProgressFn | None = None,
+        check: Check | None = None,
+    ) -> dict[str, Any]:
         if not isinstance(params, dict):
             raise InvalidParams("params must be an object")
         req = {
@@ -179,4 +189,4 @@ class BestTake:
                 await loop.run_in_executor(self.masks.pool, lambda: self.manager.ensure(YUNET))
             except Exception:  # noqa: BLE001
                 pass
-        return await loop.run_in_executor(self.masks.pool, self._run_retry, req)
+        return await loop.run_in_executor(self.masks.pool, self._run_retry, req, check)

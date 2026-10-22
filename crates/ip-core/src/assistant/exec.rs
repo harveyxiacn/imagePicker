@@ -295,6 +295,16 @@ impl Core {
                 let n = self.apply_preset_to(&ids, &preset_id, undo).await?;
                 done(n)
             }
+            "adjust_sliders" => {
+                let ids = ids(self).await?;
+                within_plan(step, ids.len())?;
+                let values = args["values"].as_object().cloned().unwrap_or_default();
+                let relative = args["relative"].as_bool() == Some(true);
+                let n = self
+                    .adjust_sliders_save(&ids, &values, relative, undo)
+                    .await?;
+                done(n)
+            }
             "auto_adjust" => {
                 let ids = ids(self).await?;
                 within_plan(step, ids.len())?;
@@ -420,6 +430,61 @@ impl Core {
             let merged = sync::merge_ops(&cur, fitted.as_ref().unwrap_or(&preset_ops), &include);
             if merged != cur {
                 writes.push((r, merged));
+            }
+        }
+        let touched: Vec<i64> = writes.iter().map(|(r, _)| r.id).collect();
+        self.snapshot_edits(&touched, undo).await?;
+        let n = writes.len();
+        self.persist_stacks(writes).await?;
+        Ok(n)
+    }
+
+    /// `adjust_sliders`: set (or add to) named sliders of each photo's global op. Everything else
+    /// in the op — curves, HSL, grading — is kept; a photo without one gets a new global op.
+    async fn adjust_sliders_save(
+        self: &Arc<Self>,
+        ids: &[i64],
+        values: &serde_json::Map<String, Value>,
+        relative: bool,
+        undo: &mut Undo,
+    ) -> Result<usize> {
+        let mut writes: Vec<(PhotoRef, Vec<Value>)> = Vec::new();
+        for id in ids {
+            let id = *id;
+            let vals = values.clone();
+            let (r, cur) = self
+                .db
+                .call(move |c| {
+                    let r = catalog::photo_ref(c, id)?;
+                    let cur = store::current(c, id)?
+                        .map(|s| ops_of(&s.stack))
+                        .unwrap_or_default();
+                    Ok((r, cur))
+                })
+                .await?;
+            let mut ops = cur.clone();
+            let pos = ops.iter().position(|o| sync::op_type(o) == Some("global"));
+            let mut g = match pos.and_then(|i| ops[i].as_object()).cloned() {
+                Some(g) => g,
+                None => serde_json::Map::new(),
+            };
+            g.insert("type".into(), json!("global"));
+            g.entry("source").or_insert(json!("assistant@1"));
+            for (k, v) in &vals {
+                let add = v.as_f64().unwrap_or(0.0);
+                let before = g.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+                let after = if relative { before + add } else { add };
+                let (lo, hi) = super::tools::slider_range(k).unwrap_or((-100.0, 100.0));
+                g.insert(k.clone(), json!(after.clamp(lo, hi)));
+            }
+            let gv = Value::Object(g);
+            match pos {
+                Some(i) => ops[i] = gv,
+                None => ops.push(gv),
+            }
+            ops.sort_by_key(sync::rank);
+            if ops != cur {
+                writes.push((r, ops));
             }
         }
         let touched: Vec<i64> = writes.iter().map(|(r, _)| r.id).collect();
