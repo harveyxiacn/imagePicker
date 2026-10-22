@@ -88,9 +88,11 @@ export function AiPanel() {
 
 const LIGHT: AdjustKey[] = ['exposure', 'contrast', 'highlights', 'shadows', 'whites', 'blacks']
 const COLOR: AdjustKey[] = ['temp', 'tint', 'vibrance', 'saturation']
-const PRESENCE: AdjustKey[] = ['clarity', 'dehaze']
+const PRESENCE: AdjustKey[] = ['clarity', 'dehaze', 'texture']
+/** Dodge & burn: the darkroom's two moves, each with a rolloff that protects the end it aims at. */
+const DARKROOM: AdjustKey[] = ['dodge', 'burn']
 
-/** Basic: 12 Lightroom-like sliders on the global op. */
+/** Basic: the global op's sliders. */
 export function BasicPanel() {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -134,6 +136,8 @@ export function BasicPanel() {
         <AdjustSliders keys={COLOR} adjust={adjust} onSet={onSet} onCommit={onCommit} flash={flash} />
         <div className="my-1 border-t border-line/60" />
         <AdjustSliders keys={PRESENCE} adjust={adjust} onSet={onSet} onCommit={onCommit} flash={flash} />
+        <div className="my-1 border-t border-line/60" />
+        <AdjustSliders keys={DARKROOM} adjust={adjust} onSet={onSet} onCommit={onCommit} flash={flash} />
       </div>
     </Section>
   )

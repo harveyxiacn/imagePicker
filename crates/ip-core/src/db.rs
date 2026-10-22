@@ -527,22 +527,37 @@ impl Db {
         &self.path
     }
 
-    fn acquire(&self) -> Guard<'_> {
+    /// How long a caller waits for a pooled connection. A connection is only borrowed for the
+    /// length of one [`Db::with`] call, so a wait this long means a closure is blocked inside
+    /// the pool (or every connection is stuck in its own long statement). Failing with an
+    /// error beats waiting forever: an unbounded wait here hangs a request — or a whole test
+    /// run — with no trace of why.
+    const POOL_WAIT: Duration = Duration::from_secs(60);
+
+    fn acquire(&self) -> Result<Guard<'_>> {
         let mut g = self.pool.conns.lock().unwrap();
+        let deadline = Instant::now() + Self::POOL_WAIT;
         loop {
             if let Some(c) = g.pop() {
-                return Guard {
+                return Ok(Guard {
                     pool: &self.pool,
                     conn: Some(c),
-                };
+                });
             }
-            g = self.pool.cv.wait(g).unwrap();
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(CoreError::Internal(anyhow::anyhow!(
+                    "catalog connection pool: no connection free after {} s ({POOL_SIZE} in use)",
+                    Self::POOL_WAIT.as_secs()
+                )));
+            }
+            g = self.pool.cv.wait_timeout(g, left).unwrap().0;
         }
     }
 
     /// Blocking access; do not call from async context directly.
     pub fn with<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
-        let mut guard = self.acquire();
+        let mut guard = self.acquire()?;
         let conn = guard.conn.as_mut().expect("connection present");
         let before = conn.total_changes();
         let out = f(conn);

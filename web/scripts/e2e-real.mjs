@@ -225,13 +225,21 @@ try {
     expect(multi.every((b) => b.best_photo_id !== null), 'every burst has a best shot');
     await until('stack badges', async () => (await page.getByTestId('stack-badge').count()) > 0);
     const badge = page.getByTestId('stack-badge').first();
-    const before = await page.locator('[data-testid="grid"] [data-id]').count();
+    const coverId = Number(await badge.locator('xpath=ancestor::*[@data-id][1]').getAttribute('data-id'));
+    const burst = multi.find((b) => b.photo_ids.includes(coverId));
+    expect(burst, `no burst contains stack cover ${coverId}`);
+    const memberId = burst.photo_ids.find((id) => id !== coverId);
+    const member = page.locator(`[data-testid="grid"] [data-id="${memberId}"]`);
+    expect((await member.count()) === 0, 'collapsed stack hides its other members');
     await badge.click();
-    await until('stack expanded', async () => (await page.getByTestId('stack-badge').first().getAttribute('aria-expanded')) === 'true');
-    const after = await page.locator('[data-testid="grid"] [data-id]').count();
-    expect(after > before, `expanding a stack should show more cells (${before} -> ${after})`);
-    await page.getByTestId('stack-badge').first().click();
-    await until('stack collapsed', async () => (await page.getByTestId('stack-badge').first().getAttribute('aria-expanded')) === 'false');
+    // The grid is virtualized: expanding can unmount unrelated rows, so its total
+    // mounted cell count is not a measure of whether this stack opened.
+    const coverBadge = page.locator(`[data-id="${coverId}"]`).getByTestId('stack-badge');
+    await until('stack expanded', async () => (await coverBadge.getAttribute('aria-expanded')) === 'true');
+    await member.waitFor({ state: 'visible' });
+    await coverBadge.click();
+    await until('stack collapsed', async () => (await coverBadge.getAttribute('aria-expanded')) === 'false');
+    await member.waitFor({ state: 'detached' });
     expect((await page.getByTestId('scene-header').count()) > 0, 'scene headers are shown');
     await shot('04-stacks');
   });

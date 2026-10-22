@@ -803,6 +803,12 @@ export interface Adjust {
   saturation?: number
   clarity?: number
   dehaze?: number
+  /** Mid-scale detail emphasis, -100..100. Leaves flat areas and noise alone. */
+  texture?: number
+  /** Dodge: lift the mids while protecting highlights, 0..100. */
+  dodge?: number
+  /** Burn: deepen the mids while protecting the deepest shadows, 0..100. */
+  burn?: number
   curve?: Curves
   hsl?: Partial<Record<HslBand, Partial<Hsl>>>
   grading?: Partial<Grading>
@@ -823,8 +829,13 @@ export const ADJUST_NUMERIC_KEYS = [
   'saturation',
   'clarity',
   'dehaze',
+  'texture',
+  'dodge',
+  'burn',
 ] as const
 export type AdjustKey = (typeof ADJUST_NUMERIC_KEYS)[number]
+/** Sliders that only move one way (0..100) instead of the usual -100..100. */
+export const ONE_WAY_KEYS: readonly AdjustKey[] = ['dodge', 'burn']
 
 export type MaskTarget = 'subject' | 'background' | 'sky' | 'person' | 'skin' | 'hair' | 'clothes'
 export const MASK_TARGETS: MaskTarget[] = ['subject', 'background', 'sky', 'person', 'skin', 'hair', 'clothes']
@@ -837,6 +848,36 @@ export type MaskRef =
 export interface GlobalOp extends Adjust {
   type: 'global'
 }
+/**
+ * A range mask: narrow a mask to pixels whose own luminance or colour falls in a band.
+ * Applied after the spatial mask, before `amount`.
+ */
+export interface LuminanceRange {
+  kind: 'luminance'
+  /** 0..100 sRGB-encoded luminance */
+  min: number
+  max: number
+  /** 0..100 width of each shoulder */
+  softness?: number
+}
+export interface ColorRange {
+  kind: 'color'
+  /** OKLab hue angle, degrees 0..360 */
+  hue: number
+  /** half-width of the wedge, degrees 0..180 */
+  width: number
+  /** chroma band, 0..100 */
+  sat_min?: number
+  sat_max?: number
+  softness?: number
+}
+/** A range kind this build does not know (ip-render skips it, so it renders as no range). */
+export interface UnknownRange {
+  kind: 'unknown'
+  [k: string]: unknown
+}
+export type MaskRange = LuminanceRange | ColorRange | UnknownRange
+
 export interface LocalOp {
   type: 'local'
   mask: MaskRef
@@ -844,6 +885,7 @@ export interface LocalOp {
   amount?: number
   invert?: boolean
   adjust: Adjust
+  range?: MaskRange | null
 }
 export interface LutOp {
   type: 'lut'
@@ -853,6 +895,68 @@ export interface LutOp {
 export interface OutputSharpenOp {
   type: 'output_sharpen'
   amount: number
+}
+// ---- M9: retouch ops (mirrors ip-render `Effects`, `Detail`) ----
+
+export type VignetteStyle = 'highlight_priority' | 'color_priority' | 'paint_overlay'
+export const VIGNETTE_STYLES: VignetteStyle[] = ['highlight_priority', 'color_priority', 'paint_overlay']
+
+/** Post-crop vignette: a falloff applied in post-crop coordinates. */
+export interface Vignette {
+  /** -100 (darken the corners) .. 100 (brighten them); 0 = off */
+  amount?: number
+  /** where the falloff starts, 0..100; 50 = default */
+  midpoint?: number
+  /** -100 (rectangular) .. 100 (oval) */
+  roundness?: number
+  /** 0 (hard edge) .. 100 (very gradual); 50 = default */
+  feather?: number
+  /** hold the effect back where the pixels are already bright, 0..100 */
+  highlight_contrast?: number
+  style?: VignetteStyle
+}
+
+/** Film grain: stable per position, cell size anchored to the source pixels. */
+export interface Grain {
+  /** 0..100 */
+  amount?: number
+  /** 0 (fine) .. 100 (coarse); 25 = default */
+  size?: number
+  /** 0 (only the coarse octave) .. 100 (mostly the fine one); 50 = default */
+  frequency?: number
+}
+
+export interface EffectsOp {
+  type: 'effects'
+  vignette?: Vignette
+  grain?: Grain
+}
+
+/** Capture sharpening: unsharp masking with halo limiting and an edge mask. */
+export interface SharpenDetail {
+  /** 0..150; 0 = off */
+  amount?: number
+  /** 0.5..3.0 output pixels; 1.0 = default */
+  radius?: number
+  /** 0..100; 25 = default */
+  detail?: number
+  /** 0..100 — restrict sharpening to edges */
+  masking?: number
+}
+
+/** Noise reduction; the luminance pass adapts to the noise actually present in the frame. */
+export interface NoiseReduction {
+  luminance?: number
+  luminance_detail?: number
+  luminance_contrast?: number
+  color?: number
+  color_detail?: number
+}
+
+export interface DetailOp {
+  type: 'detail'
+  sharpen?: SharpenDetail
+  noise?: NoiseReduction
 }
 // ---- M4: portrait ops (mirrors ip-render `Level`, `Beauty`, `Warp::{Face,Body}`) ----
 
@@ -1129,7 +1233,7 @@ export interface UnknownOp {
   type: string
   [k: string]: unknown
 }
-export type KnownOp = CropOp | GlobalOp | LocalOp | LutOp | OutputSharpenOp
+export type KnownOp = CropOp | GlobalOp | LocalOp | LutOp | OutputSharpenOp | EffectsOp | DetailOp
 export type Op = KnownOp | PortraitOp | PatchOp | UnknownOp
 
 export interface EditStack {
@@ -1137,8 +1241,8 @@ export interface EditStack {
   ops: Op[]
 }
 
-export type EditSection = 'crop' | 'global' | 'local' | 'lut' | 'output_sharpen'
-export const EDIT_SECTIONS: EditSection[] = ['crop', 'global', 'local', 'lut', 'output_sharpen']
+export type EditSection = 'crop' | 'global' | 'local' | 'lut' | 'effects' | 'detail' | 'output_sharpen'
+export const EDIT_SECTIONS: EditSection[] = ['crop', 'global', 'local', 'lut', 'effects', 'detail', 'output_sharpen']
 
 export interface EditsResponse {
   photo_id: number

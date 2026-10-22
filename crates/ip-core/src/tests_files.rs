@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use ip_render::Backend;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 
 use crate::fake_worker::FakeWorker;
 use crate::files::{pair_all, Trasher};
+use crate::tests_common::{count, sha256};
 use crate::testutil::{write_jpeg, FakeImaging, FakeRenderer};
 use crate::*;
 
@@ -96,17 +96,6 @@ async fn photos(core: &Arc<Core>, sid: i64) -> HashMap<String, Photo> {
     .into_iter()
     .map(|p| (p.file_name.clone(), p))
     .collect()
-}
-
-async fn count(core: &Arc<Core>, sql: &'static str) -> i64 {
-    core.db
-        .call(move |c| Ok(c.query_row(sql, [], |r| r.get::<_, i64>(0))?))
-        .await
-        .unwrap()
-}
-
-fn sha256(p: &Path) -> String {
-    format!("{:x}", Sha256::digest(std::fs::read(p).unwrap()))
 }
 
 fn names(dir: &Path) -> Vec<String> {

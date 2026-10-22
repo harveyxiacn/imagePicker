@@ -3,6 +3,8 @@ import { AiPanel, BasicPanel, SharpenPanel } from './BasicPanels'
 import { GradingPanel, HslPanel } from './ColorPanels'
 import { CropPanel } from './CropPanel'
 import { CurvesPanel } from './CurvesPanel'
+import { DetailPanel } from './DetailPanel'
+import { EffectsPanel } from './EffectsPanel'
 import { LocalPanel } from './LocalPanel'
 import { PortraitPanel } from './PortraitPanel'
 import { RepairPanel } from './RepairPanel'
@@ -21,7 +23,9 @@ export function EditPanel({ photo }: { photo: Photo }) {
       <PortraitPanel key={photo.id} photo={photo} />
       <RepairPanel key={`r${photo.id}`} photo={photo} />
       <CropPanel photo={photo} />
+      <EffectsPanel />
       <PresetsPanel photoId={photo.id} />
+      <DetailPanel />
       <SharpenPanel />
     </div>
   )

@@ -1,9 +1,9 @@
 name: Nightly
 
 # Full test suites + perf scripts on a schedule. Never publishes anything; results are workflow artifacts.
+# Manual only (2026-10-21): the scheduled run was the main source of the stall tracked in
+# issue #78, and the default CI job already covers the same suites.
 on:
-  schedule:
-    - cron: "17 2 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -26,7 +26,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      # Same GTK/WebKit headers as ci.yml: without them glib-sys cannot find glib-2.0.pc
+      # and the ubuntu job fails before a single test runs.
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev libxdo-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -37,7 +44,7 @@ jobs:
         id: rust_ignored
       - name: Rust tests (default set must pass)
         run: cargo test --workspace --exclude ip-desktop
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
       - uses: actions/setup-node@v7
@@ -76,7 +83,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -113,7 +120,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           # Perf numbers on shared runners are informational: record failures but do not hide results.
           exit "$status"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: perf-${{ runner.os }}

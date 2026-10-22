@@ -1,7 +1,7 @@
 import { delay, http, HttpResponse } from 'msw'
 import type { Adjust, AutoCropBody, AutoCropResult, AutoMode, EditSection, EditStack, MaskTarget, Photo, Preset, SyncBody } from '@/api/types'
 import { MASK_TARGETS } from '@/api/types'
-import { applySections, emptyStack, inscribedRect, isEmptyStack, normalizeStack, PRESET_AMOUNT_MAX, scalePresetStack, stackKey } from '@/lib/edit'
+import { applySections, emptyStack, inscribedRect, isEmptyStack, normalizeStack, PRESET_AMOUNT_MAX, PRESET_SECTIONS, scalePresetStack, stackKey } from '@/lib/edit'
 import { missingModelIds } from './ai'
 import { emit } from './bus'
 import { findPhoto, hashString } from './db'
@@ -263,8 +263,8 @@ export const editHandlers = [
     await lat()
     const { name, stack } = (await request.json()) as { name: string; stack: EditStack }
     if (!name?.trim()) return err(400, 'bad_request', 'name required')
-    // only global/local(non-person)/lut/output_sharpen are kept; crop is dropped
-    const kept = applySections(emptyStack(), stack, ['global', 'local', 'lut', 'output_sharpen'])
+    // only the look sections are kept; crop (and any portrait op) is dropped
+    const kept = applySections(emptyStack(), stack, PRESET_SECTIONS)
     const preset: Preset = { id: `user-${++presetSeq}`, name: name.trim(), builtin: false, stack: kept }
     userPresets.push(preset)
     return HttpResponse.json({ preset }, { status: 201 })

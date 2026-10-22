@@ -246,6 +246,10 @@ pub fn random_adjust(r: &mut Rng, strength: f32) -> Adjust {
         saturation: s(50.0),
         clarity: s(60.0),
         dehaze: s(50.0),
+        texture: s(70.0),
+        // Dodge and burn are 0..100, not signed.
+        dodge: r.range(0.0, 80.0) * strength,
+        burn: r.range(0.0, 80.0) * strength,
         ..Default::default()
     };
     if r.f() < 0.5 {
@@ -328,6 +332,11 @@ pub fn random_stack(seed: u64) -> EditStack {
         amount: r.range(0.5, 1.0),
         invert: r.f() < 0.3,
         adjust: random_adjust(&mut r, 0.6),
+        range: if r.f() < 0.4 {
+            Some(random_range(&mut r))
+        } else {
+            None
+        },
     }));
     ops.push(Op::Local(LocalAdjust {
         mask: MaskRef::Linear {
@@ -337,6 +346,11 @@ pub fn random_stack(seed: u64) -> EditStack {
         amount: 1.0,
         invert: false,
         adjust: random_adjust(&mut r, 0.5),
+        range: if r.f() < 0.4 {
+            Some(random_range(&mut r))
+        } else {
+            None
+        },
     }));
     if r.f() < 0.6 {
         ops.push(Op::Lut(Lut {
@@ -346,12 +360,70 @@ pub fn random_stack(seed: u64) -> EditStack {
             amount: r.range(0.3, 1.0),
         }));
     }
+    if r.f() < 0.5 {
+        ops.push(Op::Effects(Effects {
+            vignette: Vignette {
+                amount: r.range(-80.0, 80.0),
+                midpoint: r.range(10.0, 90.0),
+                roundness: r.range(-80.0, 80.0),
+                feather: r.range(10.0, 90.0),
+                highlight_contrast: r.range(0.0, 80.0),
+                style: match r.next_u64() % 3 {
+                    0 => VignetteStyle::HighlightPriority,
+                    1 => VignetteStyle::ColorPriority,
+                    _ => VignetteStyle::PaintOverlay,
+                },
+            },
+            grain: Grain {
+                amount: r.range(0.0, 70.0),
+                size: r.range(0.0, 80.0),
+                frequency: r.range(0.0, 100.0),
+            },
+        }));
+    }
     if r.f() < 0.6 {
         ops.push(Op::OutputSharpen(OutputSharpen {
             amount: r.range(5.0, 60.0),
         }));
     }
+    if r.f() < 0.4 {
+        ops.push(Op::Detail(Detail {
+            sharpen: SharpenDetail {
+                amount: r.range(0.0, 120.0),
+                radius: r.range(0.5, 3.0),
+                detail: r.range(0.0, 100.0),
+                masking: r.range(0.0, 100.0),
+            },
+            noise: NoiseReduction {
+                luminance: r.range(0.0, 80.0),
+                luminance_detail: r.range(0.0, 100.0),
+                luminance_contrast: r.range(0.0, 60.0),
+                color: r.range(0.0, 80.0),
+                color_detail: r.range(0.0, 100.0),
+            },
+        }));
+    }
     EditStack { version: 1, ops }
+}
+
+/// A random range mask, for parity and behaviour tests.
+pub fn random_range(r: &mut Rng) -> MaskRange {
+    if r.f() < 0.5 {
+        let a = r.range(0.0, 60.0);
+        MaskRange::Luminance {
+            min: a,
+            max: a + r.range(10.0, 40.0),
+            softness: r.range(1.0, 60.0),
+        }
+    } else {
+        MaskRange::Color {
+            hue: r.range(0.0, 360.0),
+            width: r.range(5.0, 120.0),
+            sat_min: r.range(0.0, 30.0),
+            sat_max: r.range(40.0, 100.0),
+            softness: r.range(1.0, 60.0),
+        }
+    }
 }
 
 /// Mask provider that serves one synthetic soft mask for every AI target.

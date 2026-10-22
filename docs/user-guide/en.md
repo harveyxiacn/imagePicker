@@ -429,14 +429,18 @@ Press `D` in Grid/Loupe (or right-click → *Edit*) to open the edit page. Every
 
 | Panel | Contents |
 |---|---|
-| **Basic** | Exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, vibrance, saturation, clarity, dehaze |
+| **Basic** | Exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, vibrance, saturation, clarity, dehaze, texture, dodge, burn |
 | **Curves** | Click to add a point, drag to adjust, double-click or right-click to delete |
 | **HSL** | Hue, saturation, luminance for 8 bands (red, orange, yellow, green, aqua, blue, purple, magenta) |
 | **Colour grading** | Shadows / midtones / highlights wheels + balance |
 | **Crop & straighten** (`R`) | Aspect (original / free / …), angle; *Auto straighten* and *Auto crop* (see below) |
-| **Presets** | Built-in presets (Natural, Vivid, Warm film, Cool film, Japanese clean, Cinematic, Classic B&W, High-contrast B&W, Soft portrait, Landscape pop) that adapt to each photo, a *Strength* slider, and *Save as preset* (see below) |
+| **Effects** | Post-crop vignette (amount, midpoint, roundness, feather, highlight contrast, three styles) and grain (amount, size, frequency) |
+| **Presets** | Built-in presets that adapt to each photo, a *Strength* slider, and *Save as preset* (see below) |
 | **LUT** | Built-in LUTs; import your own `.cube` (type the file path, must be inside an allowed folder), with an amount slider |
-| **Output sharpen** | Sharpening applied on output |
+| **Detail** | Sharpening (amount, radius, detail, masking) and noise reduction (luminance, luminance detail, luminance contrast, colour, colour detail) |
+| **Output sharpen** | Sharpening applied on output (a light edge sharpen, separate from *Detail*) |
+
+**Texture** works one octave finer than clarity: it lifts mid-scale detail such as pores, fabric and foliage while leaving flat areas and hard edges alone, so it neither amplifies noise nor leaves halos on contrast edges. Negative values even texture out along the same weighting. **Dodge** and **burn** only move one way and each protects the end it aims at, leaving hue untouched. In the **Detail** panel noise reduction always runs before sharpening, and its strength adapts to the noise actually present in the frame, so a clean photo is not flattened.
 
 Each section has *Reset section*; *Reset all* is at the top; *History* lists every step.
 
@@ -461,7 +465,9 @@ Both only change the crop in the edit stack (one undo step, the original is neve
 
 ### Local adjustments & masks
 
-Under *Local adjustments* choose an **AI target**: Subject, Sky, Background, Person (a specific person or any), Skin, Hair, Clothes; or add a **Radial / Linear gradient** (drag the handles on the photo). Each local adjustment has its own exposure, contrast, highlights, shadows, temperature, saturation, clarity, dehaze, plus amount, invert and feather. `O` toggles the mask overlay.
+Under *Local adjustments* choose an **AI target**: Subject, Sky, Background, Person (a specific person or any), Skin, Hair, Clothes; or add a **Radial / Linear gradient** (drag the handles on the photo). Each local adjustment has its own exposure, contrast, highlights, shadows, temperature, saturation, clarity, dehaze, texture, dodge, burn, plus amount, invert and feather. `O` toggles the mask overlay.
+
+Expanding a local adjustment also offers a **range mask**: pick *Luminance* or *Colour* to narrow that mask to pixels whose own brightness or hue already falls in a band — for example "sky mask + colour range" darkens only the blue part of it. A range mask only ever narrows the mask; *Softness* sets how gradual the boundary is.
 
 ![Local masks](../images/edit-masks.png)
 
@@ -470,7 +476,7 @@ The first AI mask asks to download a segmentation model. Without a sky model the
 ### Before/after, copy & paste, sync
 
 - `\` temporarily shows the original; *Split* at the top does a split comparison;
-- **Copy settings** (`Ctrl+Shift+C`, choose categories: crop, global, local, LUT, output sharpen) → **Paste settings** (`Ctrl+Shift+V`; multi-select in the grid to paste onto all);
+- **Copy settings** (`Ctrl+Shift+C`, choose categories: crop, global, local, LUT, effects, detail, output sharpen) → **Paste settings** (`Ctrl+Shift+V`; multi-select in the grid to paste onto all);
 - **Sync to group** copies the current adjustments to the burst's other photos and adapts them to their exposure / white-balance differences.
 
 ## 11. Portrait retouching

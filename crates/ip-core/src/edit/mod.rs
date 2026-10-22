@@ -106,9 +106,13 @@ fn check_adjust(a: &Adjust) -> Result<()> {
         ("saturation", a.saturation),
         ("clarity", a.clarity),
         ("dehaze", a.dehaze),
+        ("texture", a.texture),
     ] {
         range(n, v, -100.0, 100.0)?;
     }
+    // Dodge and burn only have a direction: they lift or deepen, never the reverse.
+    range("dodge", a.dodge, 0.0, 100.0)?;
+    range("burn", a.burn, 0.0, 100.0)?;
     if let Some(c) = &a.curve {
         check_curve("rgb", &c.rgb)?;
         check_curve("r", &c.r)?;
@@ -175,6 +179,9 @@ fn check_op(op: &Op) -> Result<()> {
                         return Err(bad("linear mask start and end must differ"));
                     }
                 }
+            }
+            if let Some(r) = &l.range {
+                check_range(r)?;
             }
             check_adjust(&l.adjust)?;
         }
@@ -258,7 +265,75 @@ fn check_op(op: &Op) -> Result<()> {
                 return Err(bad("patch source_photo_id must be a positive id or null"));
             }
         }
+        Op::Effects(e) => {
+            range("vignette amount", e.vignette.amount, -100.0, 100.0)?;
+            range("vignette midpoint", e.vignette.midpoint, 0.0, 100.0)?;
+            range("vignette roundness", e.vignette.roundness, -100.0, 100.0)?;
+            range("vignette feather", e.vignette.feather, 0.0, 100.0)?;
+            range(
+                "vignette highlight_contrast",
+                e.vignette.highlight_contrast,
+                0.0,
+                100.0,
+            )?;
+            for (n, v) in [
+                ("grain amount", e.grain.amount),
+                ("grain size", e.grain.size),
+                ("grain frequency", e.grain.frequency),
+            ] {
+                range(n, v, 0.0, 100.0)?;
+            }
+        }
+        Op::Detail(d) => {
+            range("sharpen amount", d.sharpen.amount, 0.0, 150.0)?;
+            range("sharpen radius", d.sharpen.radius, 0.5, 3.0)?;
+            range("sharpen detail", d.sharpen.detail, 0.0, 100.0)?;
+            range("sharpen masking", d.sharpen.masking, 0.0, 100.0)?;
+            for (n, v) in [
+                ("noise luminance", d.noise.luminance),
+                ("noise luminance_detail", d.noise.luminance_detail),
+                ("noise luminance_contrast", d.noise.luminance_contrast),
+                ("noise color", d.noise.color),
+                ("noise color_detail", d.noise.color_detail),
+            ] {
+                range(n, v, 0.0, 100.0)?;
+            }
+        }
         Op::Warp(Warp::Unknown) | Op::Unknown => {}
+    }
+    Ok(())
+}
+
+/// Range masks are checked here rather than in [`check_op`] so the same rules apply to a
+/// local adjustment wherever it comes from.
+fn check_range(r: &ip_render::MaskRange) -> Result<()> {
+    use ip_render::MaskRange as R;
+    match r {
+        R::Luminance { min, max, softness } => {
+            range("range luminance min", *min, 0.0, 100.0)?;
+            range("range luminance max", *max, 0.0, 100.0)?;
+            range("range luminance softness", *softness, 0.0, 100.0)?;
+            if min > max {
+                return Err(bad("range luminance min must not exceed max"));
+            }
+        }
+        R::Color {
+            hue,
+            width,
+            sat_min,
+            sat_max,
+            softness,
+        } => {
+            range("range color hue", *hue, 0.0, 360.0)?;
+            range("range color width", *width, 0.0, 180.0)?;
+            range("range color sat_min", *sat_min, 0.0, 100.0)?;
+            range("range color sat_max", *sat_max, 0.0, 100.0)?;
+            range("range color softness", *softness, 0.0, 100.0)?;
+            if sat_min > sat_max {
+                return Err(bad("range color sat_min must not exceed sat_max"));
+            }
+        }
+        R::Unknown => {}
     }
     Ok(())
 }
@@ -278,6 +353,8 @@ pub fn op_is_noop(op: &Op) -> bool {
     match op {
         Op::Unknown | Op::Warp(Warp::Unknown) => true,
         Op::Patch(p) => !p.enabled || p.amount <= 0.0,
+        Op::Effects(e) => e.is_neutral(),
+        Op::Detail(d) => d.is_neutral(),
         Op::Beauty(b) => {
             !b.blemish
                 && [

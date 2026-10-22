@@ -18,7 +18,7 @@ interface Props {
   prefix?: string
 }
 
-/** A list of Lightroom-style sliders bound to an `Adjust` block (global or local). */
+/** A list of sliders bound to an `Adjust` block (global or local). */
 export function AdjustSliders({ keys, adjust, onSet, onCommit, flash, prefix = 'adj' }: Props) {
   const { t } = useTranslation()
   return (

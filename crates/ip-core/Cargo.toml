@@ -49,4 +49,4 @@ libc = "0.2"
 [dev-dependencies]
 tempfile.workspace = true
 # tests_safety.rs: originals are compared by SHA-256 before and after every operation
-sha2 = "0.10"
+sha2 = "0.11"

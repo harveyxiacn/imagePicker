@@ -22,7 +22,7 @@ function CopyBody({ onDone }: { onDone: () => void }) {
   const { t } = useTranslation()
   const stack = useEdit.getState().stack
   const present = sectionsPresent(stack)
-  // Like Lightroom, geometry is opt-in.
+  // Geometry is opt-in.
   const [picked, setPicked] = useState<EditSection[]>(present.filter((s) => s !== 'crop'))
 
   const toggle = (s: EditSection) => setPicked((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]))

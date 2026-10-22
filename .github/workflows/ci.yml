@@ -1,9 +1,10 @@
 name: CI
 
+# Manual only: the same checks run locally before each push (CONTRIBUTING.md, "Before you
+# push"), which is both faster and free of the runner flakiness tracked in issue #78. Run it
+# with `gh workflow run ci.yml` before a release or after touching platform-specific code.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -17,8 +18,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # A normal run is ~15 min on windows-latest. The suite occasionally stalls (issue #78);
+    # without this the job waits out GitHub's 6-hour default before anyone sees it.
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -40,7 +44,7 @@ jobs:
         target: [aarch64-linux-android, x86_64-linux-android]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -56,8 +60,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
       - uses: actions/setup-node@v7
@@ -81,7 +85,7 @@ jobs:
       run:
         working-directory: ai-worker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - run: uv sync --extra cpu --dev
       - run: uv run ruff check .
@@ -95,13 +99,13 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Linux system dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libgtk-3-dev libxdo-dev patchelf
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
       - uses: actions/setup-node@v7
@@ -121,7 +125,7 @@ jobs:
     name: Version consistency
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Cargo workspace, Cargo.lock, tauri.conf.json, both package.json files and pyproject.toml must agree.
       - run: bash scripts/bump-version.sh --check
 
@@ -129,7 +133,7 @@ jobs:
     name: Android (debug APK)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,x86_64-linux-android
@@ -147,7 +151,7 @@ jobs:
         run: |
           sdkmanager --install "ndk;27.2.12479018" "platforms;android-36" "build-tools;36.0.0"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
       - uses: actions/setup-node@v7
@@ -164,7 +168,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm tauri android build --debug --apk --target x86_64
           (cd src-tauri/gen/android && ./gradlew :tauri-plugin-imagepicker-media:testDebugUnitTest)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: imagepicker-android-debug-apk
           path: apps/desktop/src-tauri/gen/android/app/build/outputs/apk/**/*.apk

@@ -21,17 +21,29 @@ import {
   mergeAuto,
   normalizeCropRect,
   normalizeStack,
+  orderOps,
   removeLocal,
   setCrop,
   setCurve,
   setGlobalField,
+  setGrain,
   setHsl,
   setLocalField,
+  setLocalRange,
   setSharpen,
+  setSharpenDetail,
+  setVignette,
   stackKey,
   stacksEqual,
   updateGlobal,
   updateLocal,
+  getEffects,
+  getDetail,
+  grainOf,
+  isNeutralDetail,
+  isNeutralEffects,
+  rangeOf,
+  vignetteOf,
 } from './edit'
 
 const global = (s: EditStack) => getGlobal(s) as GlobalOp
@@ -256,5 +268,71 @@ describe('sections, presets, auto', () => {
     expect(stacksEqual(a, emptyStack())).toBe(false)
     expect(stacksEqual({ version: 1, ops: [{ type: 'global', exposure: 0 }] }, emptyStack())).toBe(true)
     expect(normalizeStack(a).ops[0]).toEqual({ type: 'global', exposure: 0.5 })
+  })
+})
+
+describe('M9 effects and detail', () => {
+  it('texture / dodge / burn are ordinary global sliders with their own ranges', () => {
+    let s = setGlobalField(emptyStack(), 'texture', 40)
+    expect(global(s).texture).toBe(40)
+    s = setGlobalField(s, 'dodge', -20)
+    expect(global(s).dodge).toBeUndefined() // clamps to 0, and 0 normalises away
+    s = setGlobalField(s, 'burn', 500)
+    expect(global(s).burn).toBe(100)
+  })
+
+  it('vignette defaults fill in and a neutral vignette leaves no op', () => {
+    let s = setVignette(emptyStack(), { amount: -40 })
+    const v = vignetteOf(getEffects(s))
+    expect(v).toMatchObject({ amount: -40, midpoint: 50, roundness: 0, feather: 50, style: 'highlight_priority' })
+    s = setVignette(s, { amount: 0 })
+    expect(getEffects(s)).toBeUndefined()
+  })
+
+  it('grain alone keeps the effects op; both at zero removes it', () => {
+    const s = setGrain(emptyStack(), { amount: 30 })
+    expect(grainOf(getEffects(s))).toMatchObject({ amount: 30, size: 25, frequency: 50 })
+    expect(isNeutralEffects(getEffects(s)!)).toBe(false)
+    expect(getEffects(setGrain(s, { amount: 0 }))).toBeUndefined()
+  })
+
+  it('detail keeps sharpening and noise as separate sub-objects', () => {
+    let s = setSharpenDetail(emptyStack(), { amount: 80, masking: 40 })
+    expect(getDetail(s)?.noise).toBeUndefined()
+    expect(getDetail(s)?.sharpen).toMatchObject({ amount: 80, radius: 1, detail: 25, masking: 40 })
+    s = setSharpenDetail(s, { amount: 0 })
+    expect(getDetail(s)).toBeUndefined()
+  })
+
+  it('a neutral detail op is not an edit', () => {
+    const d = { type: 'detail' as const, sharpen: { amount: 0 }, noise: { luminance: 0, color: 0 } }
+    expect(isNeutralDetail(d)).toBe(true)
+    expect(isEmptyStack({ version: 1, ops: [d] })).toBe(true)
+  })
+
+  it('effects sorts before the LUT and detail after it', () => {
+    let s = setSharpen(emptyStack(), 20)
+    s = setVignette(s, { amount: -30 })
+    s = setSharpenDetail(s, { amount: 50 })
+    s = { version: 1, ops: [...s.ops, { type: 'lut', file: 'film_warm' }] }
+    expect(orderOps(normalizeStack(s).ops).map((o) => o.type)).toEqual(['effects', 'lut', 'detail', 'output_sharpen'])
+  })
+
+  it('a range mask is stored on the local op and cleared with null', () => {
+    let s = addLocal(emptyStack(), { kind: 'linear', start: [0, 0], end: [0, 1] })
+    s = setLocalRange(s, 0, { kind: 'color', hue: 200, width: 30 })
+    expect(rangeOf(localOps(s)[0].op)).toMatchObject({ kind: 'color', hue: 200, width: 30, sat_min: 10, sat_max: 100 })
+    s = setLocalRange(s, 0, null)
+    expect(localOps(s)[0].op.range).toBeUndefined()
+  })
+
+  it('copies and clears the new sections without touching the others', () => {
+    let s = setVignette(emptyStack(), { amount: -30 })
+    s = setSharpenDetail(s, { amount: 50 })
+    s = setGlobalField(s, 'exposure', 0.4)
+    const e = extractSections(s, ['effects', 'detail'])
+    expect(e.ops.map((o) => o.type)).toEqual(['effects', 'detail'])
+    const cleared = applySections(s, emptyStack(), ['effects'])
+    expect(cleared.ops.map((o) => o.type)).toEqual(['global', 'detail'])
   })
 })

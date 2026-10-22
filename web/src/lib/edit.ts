@@ -7,21 +7,31 @@ import {
   ADJUST_NUMERIC_KEYS,
   EDIT_SECTIONS,
   HSL_BANDS,
+  ONE_WAY_KEYS,
   type Adjust,
   type AdjustKey,
   type CropOp,
   type CurveChannel,
   type EditSection,
+  type DetailOp,
   type EditStack,
+  type EffectsOp,
   type GlobalOp,
   type Grading,
+  type Grain,
   type HslBand,
   type KnownOp,
   type LocalOp,
+  type ColorRange,
   type LutOp,
+  type LuminanceRange,
   type MaskRef,
+  type MaskRange,
+  type NoiseReduction,
   type Op,
   type OutputSharpenOp,
+  type SharpenDetail,
+  type Vignette,
   type BeautyOp,
   type WarpBodyOp,
   type WarpFaceOp,
@@ -47,6 +57,8 @@ export const isWarpFace = (o: Op): o is WarpFaceOp => o.type === 'warp' && (o as
 export const isWarpBody = (o: Op): o is WarpBodyOp => o.type === 'warp' && (o as { kind?: unknown }).kind === 'body'
 export const isPortrait = (o: Op): o is PortraitOp => isBeauty(o) || isWarpFace(o) || isWarpBody(o)
 export const isPatch = (o: Op): o is PatchOp => o.type === 'patch'
+export const isEffects = (o: Op): o is EffectsOp => o.type === 'effects'
+export const isDetail = (o: Op): o is DetailOp => o.type === 'detail'
 export const isKnown = (o: Op): o is KnownOp => EDIT_SECTIONS.includes(o.type as EditSection)
 
 // ---------------------------------------------------------------- ranges
@@ -63,6 +75,7 @@ export interface SliderSpec {
 export const SLIDERS: SliderSpec[] = ADJUST_NUMERIC_KEYS.map((key) => {
   if (key === 'exposure') return { key, min: -5, max: 5, step: 0.05, decimals: 2 }
   if (key === 'temp') return { key, min: -3000, max: 3000, step: 50, decimals: 0 }
+  if (ONE_WAY_KEYS.includes(key)) return { key, min: 0, max: 100, step: 1, decimals: 0 }
   return { key, min: -100, max: 100, step: 1, decimals: 0 }
 })
 export const SLIDER_SPEC = Object.fromEntries(SLIDERS.map((s) => [s.key, s])) as Record<AdjustKey, SliderSpec>
@@ -155,6 +168,12 @@ export function normalizeStack(stack: EditStack): EditStack {
       ops.push({ ...op, adjust: normalizeAdjust(op.adjust, false) })
     } else if (isPortrait(op)) {
       if (!isNeutralPortrait(op)) ops.push(op)
+    } else if (isEffects(op)) {
+      const e = normalizeEffects(op)
+      if (e) ops.push(e)
+    } else if (isDetail(op)) {
+      const d = normalizeDetail(op)
+      if (d) ops.push(d)
     } else ops.push(op)
   }
   return { version: stack.version ?? 1, ops }
@@ -169,13 +188,68 @@ export function isNeutralPortrait(o: PortraitOp): boolean {
   return zero(o.arms) && zero(o.legs) && zero(o.waist) && zero(o.lengthen_legs)
 }
 
+// ---- M9: effects / detail
+
+/** Neutral settings, spelled out so the UI and the Rust defaults agree (`ip-render` `Default`). */
+export type VignetteValues = Required<Omit<Vignette, 'style'>>
+export const VIGNETTE_DEFAULTS: VignetteValues = { amount: 0, midpoint: 50, roundness: 0, feather: 50, highlight_contrast: 0 }
+export const GRAIN_DEFAULTS: Required<Grain> = { amount: 0, size: 25, frequency: 50 }
+export const SHARPEN_DEFAULTS: Required<SharpenDetail> = { amount: 0, radius: 1, detail: 25, masking: 0 }
+export const NOISE_DEFAULTS: Required<NoiseReduction> = { luminance: 0, luminance_detail: 50, luminance_contrast: 0, color: 0, color_detail: 50 }
+
+const filled = <T extends object>(defaults: T, v: Partial<T> | undefined): T => ({ ...defaults, ...(v ?? {}) })
+
+/** The vignette with defaults filled in; `amount` 0 means off. */
+export const vignetteOf = (o: EffectsOp | undefined): VignetteValues & { style: NonNullable<Vignette['style']> } => ({
+  ...filled(VIGNETTE_DEFAULTS, o?.vignette),
+  style: o?.vignette?.style ?? 'highlight_priority',
+})
+export const grainOf = (o: EffectsOp | undefined): Required<Grain> => filled(GRAIN_DEFAULTS, o?.grain)
+export const sharpenOf = (o: DetailOp | undefined): Required<SharpenDetail> => filled(SHARPEN_DEFAULTS, o?.sharpen)
+export const noiseOf = (o: DetailOp | undefined): Required<NoiseReduction> => filled(NOISE_DEFAULTS, o?.noise)
+
+export const isNeutralEffects = (o: EffectsOp): boolean => grainOf(o).amount <= 0 && vignetteOf(o).amount === 0
+export const isNeutralDetail = (o: DetailOp): boolean => sharpenOf(o).amount <= 0 && noiseOf(o).luminance <= 0 && noiseOf(o).color <= 0
+
+/** Drop sub-objects that are still at their neutral defaults. */
+export function normalizeEffects(o: EffectsOp): EffectsOp | null {
+  const out: EffectsOp = { type: 'effects' }
+  const v = o.vignette
+  if (v && (v.amount ?? 0) !== 0) out.vignette = { ...VIGNETTE_DEFAULTS, ...v }
+  if (grainOf(o).amount > 0) out.grain = { ...GRAIN_DEFAULTS, ...(o.grain ?? {}) }
+  return out.vignette || out.grain ? out : null
+}
+
+export function normalizeDetail(o: DetailOp): DetailOp | null {
+  const out: DetailOp = { type: 'detail' }
+  if (sharpenOf(o).amount > 0) out.sharpen = { ...SHARPEN_DEFAULTS, ...(o.sharpen ?? {}) }
+  const n = noiseOf(o)
+  if (n.luminance > 0 || n.color > 0) out.noise = { ...NOISE_DEFAULTS, ...(o.noise ?? {}) }
+  return out.sharpen || out.noise ? out : null
+}
+
 /** A disabled patch renders nothing (ip-render `is_identity`), so it does not make a stack "edited". */
-export const isEmptyStack = (s: EditStack): boolean => normalizeStack(s).ops.every((o) => !isKnown(o) && !isPortrait(o) && !(isPatch(o) && o.enabled !== false))
+export const isEmptyStack = (s: EditStack): boolean =>
+  normalizeStack(s).ops.every((o) => !isKnown(o) && !isPortrait(o) && !(isPatch(o) && o.enabled !== false))
 
 // ---------------------------------------------------------------- ordering
 
-// Render order (docs/api-contract-m5.md A): patch -> crop -> warp -> global -> local -> beauty -> LUT -> sharpen.
-const RANK: Record<string, number> = { patch: -1, crop: 0, warp: 0.5, global: 1, local: 3, beauty: 3.5, lut: 4, output_sharpen: 5 }
+// Render order (docs/api-contract-m9.md A): patch -> crop -> warp -> global -> local -> beauty
+// -> effects -> LUT -> detail -> output sharpen. `detail` is a whole-image stage that always
+// runs last but one, whatever its position in the array; the order here keeps the stack
+// canonical so equal looks share a cache key.
+const RANK: Record<string, number> = {
+  patch: -1,
+  crop: 0,
+  warp: 0.5,
+  global: 1,
+  local: 3,
+  beauty: 3.5,
+  effects: 3.8,
+  lut: 4,
+  detail: 4.5,
+  output_sharpen: 5,
+}
 const rankOf = (o: Op) => RANK[o.type] ?? 2
 
 export function orderOps(ops: Op[]): Op[] {
@@ -328,6 +402,25 @@ export function updateLocal(s: EditStack, index: number, fn: (op: LocalOp) => Lo
 export const setLocalField = (s: EditStack, index: number, key: AdjustKey, value: number): EditStack =>
   updateLocal(s, index, (op) => ({ ...op, adjust: setField(op.adjust, key, value) }))
 
+/** Replace (or clear, with `null`) the range mask of one local adjustment. */
+export const setLocalRange = (s: EditStack, index: number, range: MaskRange | null): EditStack =>
+  updateLocal(s, index, (op) => ({ ...op, range: range ?? undefined }))
+
+export const LUMINANCE_RANGE_DEFAULTS = { min: 0, max: 100, softness: 30 } as const
+export const COLOR_RANGE_DEFAULTS = { hue: 30, width: 40, sat_min: 10, sat_max: 100, softness: 40 } as const
+
+/** The range with its defaults filled in, or `null` when there is none. */
+export function rangeOf(op: LocalOp): LuminanceRange | ColorRange | null {
+  const r = op.range
+  if (!r) return null
+  if (r.kind === 'luminance') {
+    const x = r as LuminanceRange
+    return { ...LUMINANCE_RANGE_DEFAULTS, ...x }
+  }
+  if (r.kind === 'color') return { ...COLOR_RANGE_DEFAULTS, ...(r as ColorRange) }
+  return null
+}
+
 // ---------------------------------------------------------------- crop
 
 export const getCrop = (s: EditStack): CropOp | undefined => s.ops.find(isCrop)
@@ -469,6 +562,38 @@ export function setSharpen(s: EditStack, amount: number): EditStack {
   return withOps(s, [...rest, { type: 'output_sharpen', amount: clamp(amount, 0, 100) }])
 }
 
+// ---------------------------------------------------------------- effects / detail
+
+export const getEffects = (s: EditStack): EffectsOp | undefined => s.ops.find(isEffects)
+/** Replace (or clear) the effects op. Neutral settings normalise away to "no op". */
+export function setEffects(s: EditStack, e: EffectsOp | null): EditStack {
+  const rest = s.ops.filter((o) => !isEffects(o))
+  return withOps(s, e ? [...rest, e] : rest)
+}
+export const updateEffects = (s: EditStack, fn: (e: EffectsOp) => EffectsOp): EditStack =>
+  setEffects(s, fn(getEffects(s) ?? { type: 'effects' }))
+
+export const getDetail = (s: EditStack): DetailOp | undefined => s.ops.find(isDetail)
+export function setDetail(s: EditStack, d: DetailOp | null): EditStack {
+  const rest = s.ops.filter((o) => !isDetail(o))
+  return withOps(s, d ? [...rest, d] : rest)
+}
+export const updateDetail = (s: EditStack, fn: (d: DetailOp) => DetailOp): EditStack =>
+  setDetail(s, fn(getDetail(s) ?? { type: 'detail' }))
+
+export function setVignette(s: EditStack, patch: Partial<Vignette>): EditStack {
+  return updateEffects(s, (e) => ({ ...e, vignette: { ...vignetteOf(e), ...patch } }))
+}
+export function setGrain(s: EditStack, patch: Partial<Grain>): EditStack {
+  return updateEffects(s, (e) => ({ ...e, grain: { ...grainOf(e), ...patch } }))
+}
+export function setSharpenDetail(s: EditStack, patch: Partial<SharpenDetail>): EditStack {
+  return updateDetail(s, (d) => ({ ...d, sharpen: { ...sharpenOf(d), ...patch } }))
+}
+export function setNoiseReduction(s: EditStack, patch: Partial<NoiseReduction>): EditStack {
+  return updateDetail(s, (d) => ({ ...d, noise: { ...noiseOf(d), ...patch } }))
+}
+
 // ---------------------------------------------------------------- sections (copy / paste / presets)
 
 const opSection = (o: Op): EditSection | null => (isKnown(o) ? (o.type as EditSection) : null)
@@ -497,7 +622,7 @@ export function applySections(target: EditStack, source: EditStack, sections: Ed
   return withOps(target, [...keep, ...add])
 }
 
-export const PRESET_SECTIONS: EditSection[] = ['global', 'local', 'lut', 'output_sharpen']
+export const PRESET_SECTIONS: EditSection[] = ['global', 'local', 'effects', 'lut', 'detail', 'output_sharpen']
 export const applyPreset = (s: EditStack, preset: EditStack): EditStack => applySections(s, preset, PRESET_SECTIONS)
 
 // ---------------------------------------------------------------- preset strength (mirrors ip-render adapt.rs)

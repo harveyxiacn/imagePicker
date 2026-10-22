@@ -199,6 +199,113 @@ async fn full_image_errors() {
     }
 }
 
+/// Reproduce opening the grid while import has inserted rows but has not committed EXIF.
+/// Use real pixels and every EXIF transform, including mirrors/180 degrees (dimensions alone
+/// cannot detect those). Also seed a legacy sideways cache as an existing user would have.
+#[tokio::test]
+async fn images_requested_before_metadata_are_upright_and_skip_legacy_cache() {
+    let data = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir().unwrap();
+    let core = open(Arc::new(RealImaging), data.path());
+    let img = image::RgbImage::from_fn(600, 400, |x, y| {
+        if x < 300 && y < 200 {
+            image::Rgb([230, 20, 20])
+        } else {
+            image::Rgb([20, 20, 230])
+        }
+    });
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 95)
+        .encode_image(&img)
+        .unwrap();
+    for orientation in 1..=8 {
+        std::fs::write(
+            src.path().join(format!("o{orientation}.jpg")),
+            with_orientation(&jpeg, orientation),
+        )
+        .unwrap();
+    }
+    let photos = import_dir(&core, src.path()).await;
+    for (index, p) in photos.iter().enumerate() {
+        let orientation = (index + 1) as u8;
+        let r = core
+            .db
+            .with(|c| crate::catalog::photo_ref(c, p.id))
+            .unwrap();
+        core.thumbs.purge(std::slice::from_ref(&r.fast_key));
+        let legacy = ip_imaging::ThumbCache::new(data.path().join("cache/thumbs"))
+            .path_for(&r.fast_key, 256);
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, &jpeg).unwrap();
+        core.db
+            .with(|c| {
+                c.execute(
+                    "UPDATE photo SET meta_done=0, orientation=1, thumb_state=0 WHERE id=?1",
+                    [p.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let stale = core
+            .db
+            .with(|c| crate::catalog::photo_ref(c, p.id))
+            .unwrap();
+        // Check the background grid worker as well as direct preview/full requests.
+        let tracker = crate::thumbs::Tracker::new();
+        core.thumbs.enqueue(&[p.id], Some(&tracker), true);
+        tracker.wait_idle().await;
+        for size in [256, 1024, 0] {
+            let path = core.thumbs.ensure_ref(stale.clone(), size).await.unwrap();
+            assert_ne!(path, legacy);
+            let out = image::open(path).unwrap().to_rgb8();
+            let edge = if size == 0 { 65535 } else { size };
+            let expected =
+                ip_imaging::generate_thumbnail(&r.path, r.format, orientation, edge, 90).unwrap();
+            let reference = image::load_from_memory(&expected.bytes).unwrap().to_rgb8();
+            assert_eq!(
+                out.dimensions(),
+                reference.dimensions(),
+                "orientation {orientation}, size {size}"
+            );
+            for (x, y) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+                let (x, y) = (
+                    (out.width() as f64 * x) as u32,
+                    (out.height() as f64 * y) as u32,
+                );
+                let a = out.get_pixel(x, y);
+                let b = reference.get_pixel(x, y);
+                assert_eq!(
+                    a[0] > a[2],
+                    b[0] > b[2],
+                    "orientation {orientation}, size {size}, pixel {x},{y}"
+                );
+            }
+        }
+        assert_ne!(
+            p.thumb_version,
+            r.fast_key.chars().take(8).collect::<String>()
+        );
+        // Metadata finished after the caller read its PhotoRef: use the current row.
+        core.thumbs.purge(std::slice::from_ref(&r.fast_key));
+        core.db
+            .with(|c| {
+                c.execute(
+                    "UPDATE photo SET meta_done=1, orientation=?2 WHERE id=?1",
+                    rusqlite::params![p.id, orientation],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let path = core.thumbs.ensure_ref(stale, 256).await.unwrap();
+        let want = if orientation >= 5 {
+            (171, 256)
+        } else {
+            (256, 171)
+        };
+        assert_eq!(dims(&path), want);
+    }
+}
+
 fn mean_of_file(p: &Path) -> f64 {
     let img = image::open(p).unwrap().to_rgb8();
     img.as_raw().iter().map(|&v| v as f64).sum::<f64>() / img.as_raw().len() as f64

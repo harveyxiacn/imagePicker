@@ -246,7 +246,8 @@ fn gen(dir: &Path, count: usize, megapixels: u32, seed: u64) -> Result<()> {
     let mut plan: Vec<(usize, usize, i64, u64)> = Vec::with_capacity(times.len());
     let (mut last_t, mut base) = (i64::MIN, 0usize);
     for (i, &t) in times.iter().enumerate() {
-        if t - last_t >= 1200 {
+        // The initial sentinel cannot be subtracted from a positive timestamp.
+        if i == 0 || t - last_t >= 1200 {
             let r = rng.below(100);
             base = if r < 8 {
                 4
@@ -491,4 +492,20 @@ fn seed_catalog(
                            "seconds": started.elapsed().as_secs_f64()})
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn generate_first_frame_without_timestamp_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        // Zero megapixels uses the generator's minimum 64px dimensions.
+        super::gen(dir.path(), 2, 0, 1).unwrap();
+        let files: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(files.len(), 2);
+        for entry in files {
+            let image = image::open(entry.unwrap().path()).unwrap();
+            assert!(image.width() >= 64 && image.height() >= 64);
+        }
+    }
 }
