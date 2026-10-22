@@ -777,6 +777,33 @@ async fn llm_engine_is_validated_and_falls_back() {
         assert_eq!(p.steps[0].tool, "auto_adjust", "{bad}");
         assert_ne!(p.reply, "trust me");
     }
+    // a model plan that drops an intent the rules engine recognised loses to the rules
+    for (msg, wrong_tool, wrong_args, want) in [
+        (
+            "给所有照片应用暖调胶片预设",
+            "apply_profiles",
+            json!({"selection":"current_filter"}),
+            "apply_preset",
+        ),
+        (
+            "把曝光提高0.5",
+            "auto_adjust",
+            json!({"selection":"current_filter"}),
+            "adjust_sliders",
+        ),
+    ] {
+        e.worker.enable_llm(LlmPlanResponse {
+            reply: "done".into(),
+            calls: vec![LlmCall {
+                tool: wrong_tool.into(),
+                args: wrong_args,
+            }],
+        });
+        let p = e.core.assistant_plan(plan_req(sid, msg)).await.unwrap();
+        assert_eq!(p.engine, "rules", "{msg}");
+        assert_eq!(p.steps[0].tool, want, "{msg}");
+        assert_eq!(p.fallback.unwrap().code, "llm_tool_mismatch", "{msg}");
+    }
     // too many steps
     e.worker.enable_llm(LlmPlanResponse {
         reply: "x".into(),
