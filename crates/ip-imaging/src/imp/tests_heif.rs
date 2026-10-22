@@ -662,6 +662,51 @@ fn wic_decodes_through_com_and_names_the_missing_codec() {
     assert!(err.contains("Windows"), "{err}");
 }
 
+/// WIC applies `irot`/`imir` itself, also the size-preserving mirror and 180° turn that a width
+/// comparison cannot see; it then returns the display size.
+#[cfg(windows)]
+#[test]
+fn wic_output_counts_as_oriented_only_at_the_display_size() {
+    use super::container::HeifInfo;
+    use super::thumb::Rgb;
+    let info = |orientation: Option<u8>| HeifInfo {
+        width: 64,
+        height: 48,
+        crop: None,
+        exif_tiff: None,
+        orientation,
+        primary_jpeg: None,
+        jpeg_previews: Vec::new(),
+        colr: None,
+        undecodable: false,
+    };
+    let rgb = |w, h| Rgb {
+        w,
+        h,
+        data: vec![0; (w * h * 3) as usize],
+    };
+    // a mirror keeps the stored size: WIC applied it, the caller must not apply it again
+    assert!(super::heif::os_applied_orientation(
+        &info(Some(2)),
+        &rgb(64, 48)
+    ));
+    // 90°: the display size is swapped
+    assert!(super::heif::os_applied_orientation(
+        &info(Some(6)),
+        &rgb(48, 64)
+    ));
+    // a codec that returns the coded size did not apply it
+    assert!(!super::heif::os_applied_orientation(
+        &info(Some(6)),
+        &rgb(64, 48)
+    ));
+    // no `irot`/`imir` in the file: nothing to apply
+    assert!(!super::heif::os_applied_orientation(
+        &info(None),
+        &rgb(64, 48)
+    ));
+}
+
 /// pillow-heif writes the EXIF orientation as `irot`/`imir` over unchanged pixels; libheif's
 /// own (transformed) decode is the reference for the upright result.
 const GEN_HEIC: &str = r#"
