@@ -8,11 +8,15 @@
 //! 3. libheif loaded at runtime (see `libheif.rs`), never on Android;
 //! 4. (thumbnails only) a smaller embedded JPEG: a soft thumbnail beats a broken tile.
 //!
+//! On Windows libheif goes first when it is installed: WIC's HEVC pipeline decodes the same file
+//! with colours tens of levels away from libheif (measured on a Display P3 file by
+//! `real_heic_files_match_libheif_display`), so WIC is only the fallback there.
+//!
 //! libheif applies the container's crop (`clap`) and `irot`/`imir` itself; the other decoders
 //! return stored pixels, cropped here, and the caller applies the orientation `read_metadata`
-//! derived from `irot`/`imir`. Colours: libheif and WIC return the file's own colour space (the
-//! primary item's `colr`, e.g. Display P3 on iPhones), ImageIO returns sRGB; [`load`] reports
-//! which, and `thumb.rs` converts with `color.rs` after resizing.
+//! derived from `irot`/`imir`. Colours: libheif returns the file's own colour space (the primary
+//! item's `colr`, e.g. Display P3 on iPhones) and ImageIO returns sRGB; [`load`] reports which,
+//! and `thumb.rs` converts with `color.rs` after resizing.
 use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
@@ -102,26 +106,34 @@ pub fn load(path: &Path, long_edge: u32, embedded: bool) -> Result<Loaded> {
     if info.undecodable {
         why.push("no decodable image in the file (damaged or incomplete)".to_string());
     } else {
+        // Windows: WIC's HEVC pipeline and libheif disagree on colours by far more than the
+        // tolerance of `real_heic_files_match_libheif_display` (a Display P3 file shifts by
+        // dozens of levels in green), so libheif decodes first when it is installed and WIC
+        // stays the fallback. Everywhere else the OS codec is tried first.
+        #[cfg(not(target_os = "android"))]
+        let libheif_first = cfg!(windows);
+        #[cfg(not(target_os = "android"))]
+        if libheif_first {
+            match via_libheif(&info, &data, long_edge, embedded) {
+                Ok(l) => return Ok(l),
+                Err(e) => why.push(e),
+            }
+        }
         match os_decode(path, long_edge) {
             Some(Ok(rgb)) => {
                 let rgb = crop(&info, rgb);
-                let rotated = rotated(&info, &rgb);
+                let rotated = os_applied_orientation(&info, &rgb);
                 return Ok(loaded(rgb, ThumbSource::FullDecode, rotated, Via::Os));
             }
             Some(Err(e)) => why.push(e),
             None => {}
         }
         #[cfg(not(target_os = "android"))]
-        match super::libheif::decode(&data, long_edge, embedded, display_size(&info)) {
-            Ok((rgb, thumb)) => {
-                let src = if thumb {
-                    ThumbSource::Embedded
-                } else {
-                    ThumbSource::FullDecode
-                };
-                return Ok(loaded(rgb, src, true, Via::Libheif));
+        if !libheif_first {
+            match via_libheif(&info, &data, long_edge, embedded) {
+                Ok(l) => return Ok(l),
+                Err(e) => why.push(e),
             }
-            Err(e) => why.push(e),
         }
     }
     if let Some((rgb, j)) = previews
@@ -139,6 +151,27 @@ pub fn load(path: &Path, long_edge: u32, embedded: bool) -> Result<Loaded> {
         path.display(),
         why.join("; ")
     ))
+}
+
+/// The primary image through libheif, which applies `clap` and `irot`/`imir` itself.
+#[cfg(not(target_os = "android"))]
+fn via_libheif(
+    info: &HeifInfo,
+    data: &[u8],
+    long_edge: u32,
+    embedded: bool,
+) -> std::result::Result<Loaded, String> {
+    let (rgb, thumb) = super::libheif::decode(data, long_edge, embedded, display_size(info))?;
+    Ok(Loaded {
+        rgb,
+        source: if thumb {
+            ThumbSource::Embedded
+        } else {
+            ThumbSource::FullDecode
+        },
+        oriented: true,
+        space: PixelSpace::Known(pixel_space(info.colr, Via::Libheif)),
+    })
 }
 
 /// Embedded JPEGs with the primary image's aspect ratio (2%), smallest first, with long edge.
@@ -188,6 +221,20 @@ fn crop(info: &HeifInfo, rgb: Rgb) -> Rgb {
 /// the container rotation itself (a 180° turn or a mirror would go unnoticed).
 fn rotated(info: &HeifInfo, rgb: &Rgb) -> bool {
     info.width != info.height && rgb.w != rgb.h && (info.width > info.height) != (rgb.w > rgb.h)
+}
+
+/// Whether the OS codec already applied the container's `irot`/`imir`.
+///
+/// WIC's HEIF decoder applies every container transform, including the 180° turn and the mirror
+/// whose size equals the stored size; it then returns the display size, which is how we tell.
+/// ImageIO is only known to swap the axes for 90°/270° (see [`rotated`]).
+pub(super) fn os_applied_orientation(info: &HeifInfo, rgb: &Rgb) -> bool {
+    if cfg!(windows) {
+        let (w, h) = display_size(info);
+        (w, h) != (0, 0) && (rgb.w, rgb.h) == (w, h)
+    } else {
+        rotated(info, rgb)
+    }
 }
 
 /// The OS codec; `None` when the platform has none.
