@@ -176,6 +176,9 @@ fn scale_adjust(a: &Adjust, k: f32) -> Adjust {
         saturation: clamp100(a.saturation * k),
         clarity: clamp100(a.clarity * k),
         dehaze: clamp100(a.dehaze * k),
+        texture: clamp100(a.texture * k),
+        dodge: (a.dodge * k).clamp(0.0, 100.0),
+        burn: (a.burn * k).clamp(0.0, 100.0),
         curve: a.curve.as_ref().map(|c| Curves {
             rgb: scale_curve(&c.rgb, k),
             r: scale_curve(&c.r, k),
@@ -226,6 +229,9 @@ fn adjust_is_neutral(a: &Adjust) -> bool {
         a.saturation,
         a.clarity,
         a.dehaze,
+        a.texture,
+        a.dodge,
+        a.burn,
     ];
     let curve_id = a.curve.as_ref().is_none_or(|c| {
         [&c.rgb, &c.r, &c.g, &c.b]
