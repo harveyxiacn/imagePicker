@@ -16,6 +16,7 @@
 | `scene_keep_top` | `{selection?, n, reject_rest: bool}` | 每个场景保留前 n |
 | `apply_preset` | `{selection, preset_id}` | |
 | `auto_adjust` | `{selection, mode}` | 逐张 AI 一键并保存 |
+| `adjust_sliders` | `{selection, values: {滑块: 数值, ...}, relative?: bool}` | 按数值调滑块（曝光 −5..5，色温 −3000..3000，减淡/加深 0..100，其余 −100..100）；`relative:true` 在当前值上增减，否则直接设为该值；只改所指滑块，现有曲线/HSL/分级与其它滑块保留 |
 | `apply_profiles` | `{selection}` | 人物美颜档案 |
 | `besttake_auto` | `{selection}` | 对所选连拍组一键全员最佳 |
 | `remove_bystanders` | `{selection}` | |
@@ -35,6 +36,7 @@
 | POST | `/api/assistant/describe` | `{"photo_id"}` | `{"caption", "keywords": string[]}`（VLM；不可用 → 409/503） |
 
 - **规则引擎（T0 必备）**：中英文意图模板 + 实体抽取（人物名、星级、数量、场景词、问题词、预设名、"每个场景/每组"、"闭眼/模糊"等），覆盖常用指令；无法理解时 `unsupported` 给出原因与示例。
+- **数值型修图指令**：提到具体滑块与数值的中英文请求（“把曝光提高 0.5”“lower the contrast by 10”“把对比度设为 20”）由规则引擎直接生成 `adjust_sliders`；没有数值的“一键修图”才走 `auto_adjust`。
 - **LLM 引擎（可选）**：worker `llm.plan` 产出同一工具 JSON；Core **校验**工具名/参数后才返回计划，绝不直接执行模型输出。
 - `filter` 步骤只回传给前端应用；破坏性步骤（淘汰、批量改星、导出）`destructive:true`，必须确认。
 

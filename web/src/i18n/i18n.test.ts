@@ -78,7 +78,7 @@ describe('i18n', () => {
       ['settings', ['taste'].map((k) => `nav.${k}`)],
       ['history', ['portrait', 'portraitLevel', 'applyProfile', 'portraitReset', 'applyProfiles']],
       ['people', ['view_cards', 'view_best']],
-      ['assistant', ['filter', 'set_rating', 'set_flag', 'accept_ai', 'group_keep_top', 'scene_keep_top', 'apply_preset', 'auto_adjust', 'apply_profiles', 'besttake_auto', 'remove_bystanders', 'export', 'describe', 'suggest_edits'].map((k) => `tool_${k}`)],
+      ['assistant', ['filter', 'set_rating', 'set_flag', 'accept_ai', 'group_keep_top', 'scene_keep_top', 'apply_preset', 'auto_adjust', 'adjust_sliders', 'apply_profiles', 'besttake_auto', 'remove_bystanders', 'export', 'describe', 'suggest_edits'].map((k) => `tool_${k}`)],
       ['assistant', ['best', 'tone', 'picked', 'bystanders'].flatMap((k) => [`chip_${k}`, `chip_${k}_prompt`])],
       ['settings', ['hardware', 'analysis', 'faces', 'cache', 'render', 'lan', 'xmp', 'keys', 'appearance'].map((k) => `nav.${k}`)],
       ['settings', ['auto', 'hf', 'hf-mirror', 'modelscope'].map((k) => `models.source_${k}`)],

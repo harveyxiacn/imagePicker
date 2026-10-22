@@ -716,6 +716,10 @@ pub fn validate_call(tool: &str, args: &Value) -> VResult<Value> {
         "adjust_sliders" => {
             only_keys(o, &["selection", "values", "relative"])?;
             with_selection(&mut out, true)?;
+            let rel = match o.get("relative") {
+                Some(v) if !v.is_null() => as_bool(v, "relative")?,
+                _ => false,
+            };
             let vals = match o.get("values") {
                 Some(Value::Object(m)) if !m.is_empty() => m,
                 _ => return Err("values must be a non-empty object of sliders".into()),
@@ -724,16 +728,14 @@ pub fn validate_call(tool: &str, args: &Value) -> VResult<Value> {
             for (k, v) in vals {
                 let (lo, hi) = slider_range(k).ok_or_else(|| format!("unknown slider {k:?}"))?;
                 let n = as_num(v, k)?;
+                // a relative value is a delta, so it may cross zero ("lower dodge by 10")
+                let (lo, hi) = if rel { (lo - hi, hi - lo) } else { (lo, hi) };
                 if !(lo..=hi).contains(&n) {
                     return Err(format!("{k} must be within {lo}..{hi}"));
                 }
                 clean.insert(k.clone(), json!(n));
             }
             out.insert("values".into(), Value::Object(clean));
-            let rel = match o.get("relative") {
-                Some(v) if !v.is_null() => as_bool(v, "relative")?,
-                _ => false,
-            };
             out.insert("relative".into(), json!(rel));
         }
         "auto_adjust" => {
@@ -777,7 +779,12 @@ pub fn validate_call(tool: &str, args: &Value) -> VResult<Value> {
 pub fn edits_tool(tool: &str) -> bool {
     matches!(
         tool,
-        "apply_preset" | "auto_adjust" | "apply_profiles" | "besttake_auto" | "remove_bystanders"
+        "apply_preset"
+            | "auto_adjust"
+            | "adjust_sliders"
+            | "apply_profiles"
+            | "besttake_auto"
+            | "remove_bystanders"
     )
 }
 
@@ -793,7 +800,7 @@ mod tests {
             assert!(is_tool(t.name));
             assert_eq!(t.parameters["type"], "object", "{}", t.name);
         }
-        assert_eq!(llm_tools().len(), 14);
+        assert_eq!(llm_tools().len(), 15);
     }
 
     #[test]
@@ -872,6 +879,27 @@ mod tests {
             ("describe", json!({"photo_id":0})),
             ("suggest_edits", json!({"photo_id":"x"})),
             ("accept_ai", json!({"selection": 5})),
+            ("adjust_sliders", json!({"selection":"current_filter"})),
+            (
+                "adjust_sliders",
+                json!({"selection":"current_filter","values":{}}),
+            ),
+            (
+                "adjust_sliders",
+                json!({"selection":"current_filter","values":{"glow":10}}),
+            ),
+            (
+                "adjust_sliders",
+                json!({"selection":"current_filter","values":{"contrast":500}}),
+            ),
+            (
+                "adjust_sliders",
+                json!({"selection":"current_filter","values":{"exposure":"high"}}),
+            ),
+            (
+                "adjust_sliders",
+                json!({"selection":"current_filter","values":{"exposure":1},"relative":"yes"}),
+            ),
         ];
         for (tool, args) in bad {
             assert!(
@@ -905,6 +933,19 @@ mod tests {
         assert_eq!(v["selection"]["query"], "rating_gte=4&limit=3&sort=ai");
         let v = validate_call("auto_adjust", &json!({"selection":"current_filter"})).unwrap();
         assert_eq!(v["mode"], "auto");
+        // a relative delta may cross zero on one-sided sliders; an absolute value may not
+        let v = validate_call(
+            "adjust_sliders",
+            &json!({"selection":"current_filter","values":{"dodge":"-10"},"relative":true}),
+        )
+        .unwrap();
+        assert_eq!(v["values"]["dodge"], -10.0);
+        assert_eq!(v["relative"], true);
+        assert!(validate_call(
+            "adjust_sliders",
+            &json!({"selection":"current_filter","values":{"dodge":-10}}),
+        )
+        .is_err());
         let v = validate_call(
             "export",
             &json!({"selection":"current_filter","preset":"wechat"}),

@@ -1442,6 +1442,7 @@ export const zhCN = {
     tool_scene_keep_top: '场景保留',
     tool_apply_preset: '套用预设',
     tool_auto_adjust: 'AI 一键修图',
+    tool_adjust_sliders: '调整滑块',
     tool_apply_profiles: '美颜档案',
     tool_besttake_auto: '全员最佳',
     tool_remove_bystanders: '消除路人',

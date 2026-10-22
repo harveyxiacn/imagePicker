@@ -223,7 +223,8 @@ struct Rx {
 
 /// The slider names the rules engine understands (Chinese), longest first so "自然饱和度" is not
 /// read as "饱和度".
-const SLIDER_ZH: &str = "自然饱和度|饱和度|曝光|亮度|对比度|高光|阴影|白色|黑色|色温|色调|清晰度|去朦胧|纹理|减淡|加深";
+const SLIDER_ZH: &str =
+    "自然饱和度|饱和度|曝光|亮度|对比度|高光|阴影|白色|黑色|色温|色调|清晰度|去朦胧|纹理|减淡|加深";
 
 /// The `Adjust` field behind a slider name; `None` for a word that is not a slider.
 fn slider_key(name: &str) -> Option<&'static str> {
@@ -256,9 +257,11 @@ fn slider_absolute(s: &str) -> bool {
 
 /// "lower / reduce / 降低": the delta goes down.
 fn slider_down(s: &str) -> bool {
-    ["降低", "调低", "减少", "减去", "decrease", "lower", "reduce", "cut"]
-        .iter()
-        .any(|v| s.contains(v))
+    [
+        "降低", "调低", "减少", "减去", "decrease", "lower", "reduce", "cut",
+    ]
+    .iter()
+    .any(|v| s.contains(v))
 }
 
 /// Numeric slider instructions in `text`, as `(field, value)` deltas; the flag is true when the
@@ -284,7 +287,11 @@ fn parse_sliders(text: &str) -> Option<(Vec<(String, f64)>, bool)> {
             continue;
         };
         relative = true;
-        let n = if slider_down(verb.as_str()) { -n.abs() } else { n };
+        let n = if slider_down(verb.as_str()) {
+            -n.abs()
+        } else {
+            n
+        };
         push(&mut out, key, n);
     }
     for c in x.slider_en_num.captures_iter(text) {
@@ -298,7 +305,11 @@ fn parse_sliders(text: &str) -> Option<(Vec<(String, f64)>, bool)> {
             continue;
         };
         relative = true;
-        let n = if slider_down(verb.as_str()) { -n.abs() } else { n };
+        let n = if slider_down(verb.as_str()) {
+            -n.abs()
+        } else {
+            n
+        };
         push(&mut out, key, n);
     }
     // noun first: "曝光 +0.5", "把曝光提高0.5", "exposure by 0.5", "set exposure to 0.5"
@@ -1402,13 +1413,18 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         action(ctx, "apply_preset", extra, &ents, &mut acc, un, &mut calls);
     } else if let Some((values, relative)) = &sliders {
         let mut extra = Map::new();
-        let vals: Map<String, Value> = values
-            .iter()
-            .map(|(k, v)| (k.clone(), json!(v)))
-            .collect();
+        let vals: Map<String, Value> = values.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
         extra.insert("values".into(), Value::Object(vals));
         extra.insert("relative".into(), json!(relative));
-        action(ctx, "adjust_sliders", extra, &ents, &mut acc, un, &mut calls);
+        action(
+            ctx,
+            "adjust_sliders",
+            extra,
+            &ents,
+            &mut acc,
+            un,
+            &mut calls,
+        );
     } else if auto_adjust && !view {
         let mode = match ents.scene {
             Some("portrait") | Some("group") => "portrait",

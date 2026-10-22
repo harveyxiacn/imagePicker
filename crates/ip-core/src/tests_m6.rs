@@ -415,6 +415,88 @@ async fn execute_preset_and_undo_edit_stacks() {
 }
 
 #[tokio::test]
+async fn execute_slider_steps_merge_into_the_global_op() {
+    let (e, sid) = scene_session().await;
+    let id = by_name(&e, sid).await["a1.jpg"].id;
+    // another op type stays where it is; the global op's other keys survive a slider change
+    e.core
+        .put_edit(
+            id,
+            json!({"ops": [
+                {"type": "global", "source": "user@1", "contrast": 12, "curves": {"rgb": [[0, 0], [255, 255]]}},
+                {"type": "output_sharpen", "amount": 30}
+            ]}),
+        )
+        .await
+        .unwrap();
+
+    let plan = e
+        .core
+        .assistant_plan(plan_req(sid, "把曝光提高0.5"))
+        .await
+        .unwrap();
+    assert_eq!(plan.steps[0].tool, "adjust_sliders");
+    assert_eq!(plan.steps[0].args["values"]["exposure"], 0.5);
+    assert_eq!(plan.steps[0].args["relative"], true);
+    assert_eq!(plan.steps[0].affects, 7);
+    assert!(
+        plan.steps[0].summary.contains("曝光"),
+        "{:?}",
+        plan.steps[0]
+    );
+    let (ok, results, undo) = run_plan(&e, &plan).await;
+    assert!(ok, "{results:?}");
+    assert_eq!(results[0]["affected"], 7);
+
+    let stack = e.core.get_edit(id).await.unwrap().stack;
+    let ops = stack["ops"].as_array().unwrap();
+    let g = ops.iter().find(|o| o["type"] == "global").unwrap();
+    assert_eq!(g["exposure"], 0.5);
+    assert_eq!(g["contrast"], 12, "the other sliders are kept");
+    assert_eq!(g["curves"]["rgb"][1][1], 255, "curves are kept");
+    assert_eq!(g["source"], "user@1", "an existing source is kept");
+    assert!(ops.iter().any(|o| o["type"] == "output_sharpen"));
+    // undo puts the user's stack back, unchanged
+    let before = &undo["edits"][0]["before"];
+    e.core.put_edit(id, before.clone()).await.unwrap();
+    let stack = e.core.get_edit(id).await.unwrap().stack;
+    let g = stack["ops"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["type"] == "global")
+        .unwrap();
+    assert!(g.get("exposure").is_none());
+
+    // relative adds to the current value, absolute replaces it and is clamped to the range
+    let plan = e
+        .core
+        .assistant_plan(plan_req(sid, "increase exposure by 0.5"))
+        .await
+        .unwrap();
+    assert_eq!(plan.steps[0].tool, "adjust_sliders");
+    let (ok, _, _) = run_plan(&e, &plan).await;
+    assert!(ok);
+    let plan = e
+        .core
+        .assistant_plan(plan_req(sid, "把曝光设为0.2"))
+        .await
+        .unwrap();
+    assert_eq!(plan.steps[0].args["relative"], false);
+    let (ok, _, _) = run_plan(&e, &plan).await;
+    assert!(ok);
+    let stack = e.core.get_edit(id).await.unwrap().stack;
+    let g = stack["ops"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["type"] == "global")
+        .unwrap();
+    assert_eq!(g["exposure"], 0.2);
+    assert_eq!(g["contrast"], 12);
+}
+
+#[tokio::test]
 async fn export_steps_and_dest_required() {
     let (e, sid) = scene_session().await;
     let out = tempfile::tempdir().unwrap();
@@ -656,7 +738,7 @@ async fn llm_engine_is_validated_and_falls_back() {
     assert_eq!(plan.steps[0].tool, "set_flag");
     assert!(plan.steps[0].destructive);
     let req = e.worker.last_llm_request.lock().unwrap().clone().unwrap();
-    assert_eq!(req.tools.len(), 14, "all tool schemas are offered");
+    assert_eq!(req.tools.len(), 15, "all tool schemas are offered");
     assert!(req
         .tools
         .iter()

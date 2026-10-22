@@ -298,12 +298,11 @@ impl Core {
             "adjust_sliders" => {
                 let ids = ids(self).await?;
                 within_plan(step, ids.len())?;
-                let values = args["values"]
-                    .as_object()
-                    .cloned()
-                    .unwrap_or_default();
+                let values = args["values"].as_object().cloned().unwrap_or_default();
                 let relative = args["relative"].as_bool() == Some(true);
-                let n = self.adjust_sliders_save(&ids, &values, relative, undo).await?;
+                let n = self
+                    .adjust_sliders_save(&ids, &values, relative, undo)
+                    .await?;
                 done(n)
             }
             "auto_adjust" => {
