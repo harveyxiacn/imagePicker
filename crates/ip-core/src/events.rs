@@ -66,6 +66,15 @@ pub enum Event {
         ok: bool,
         reason: Option<String>,
     },
+    /// A hair transfer finished (`POST /api/photos/{id}/hair`).
+    #[serde(rename = "hair.done")]
+    HairDone {
+        photo_id: i64,
+        face_id: i64,
+        ok: bool,
+        warnings: Vec<String>,
+        reason: Option<String>,
+    },
     #[serde(rename = "enhance.done")]
     EnhanceDone {
         photo_id: i64,
@@ -284,6 +293,7 @@ impl Coalescer {
             ev @ (Event::BestTakeDone { .. }
             | Event::InpaintDone { .. }
             | Event::EnhanceDone { .. }
+            | Event::HairDone { .. }
             | Event::AssistantDone { .. }
             | Event::XmpConflict { .. }) => {
                 self.note(Key::Done);

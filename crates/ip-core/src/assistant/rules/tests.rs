@@ -312,6 +312,31 @@ fn english_commands() {
         &[("accept_ai", json!({"selection":{"query":""}}))],
     );
     check("auto adjust", &[("auto_adjust", json!({"mode":"auto"}))]);
+    // a number names a slider: the instruction is a slider change, not a one-click adjustment
+    check(
+        "增加 0.5 曝光",
+        &[("adjust_sliders", json!({"values":{"exposure":0.5},"relative":true}))],
+    );
+    check(
+        "把曝光提高0.5",
+        &[("adjust_sliders", json!({"values":{"exposure":0.5},"relative":true}))],
+    );
+    check(
+        "曝光调低 1",
+        &[("adjust_sliders", json!({"values":{"exposure":-1.0},"relative":true}))],
+    );
+    check(
+        "把对比度设为 20",
+        &[("adjust_sliders", json!({"values":{"contrast":20.0},"relative":false}))],
+    );
+    check(
+        "increase exposure by 0.5",
+        &[("adjust_sliders", json!({"values":{"exposure":0.5},"relative":true}))],
+    );
+    check(
+        "lower the contrast by 10",
+        &[("adjust_sliders", json!({"values":{"contrast":-10.0},"relative":true}))],
+    );
     check("remove bystanders", &[("remove_bystanders", json!({}))]);
     check(
         "export the picks for Instagram",

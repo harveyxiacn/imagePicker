@@ -6,7 +6,7 @@ use axum::http::{header, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use ip_core::{BestTakeAutoBody, BestTakeRequest, EnhanceBody, InpaintBody};
+use ip_core::{BestTakeAutoBody, BestTakeRequest, EnhanceBody, HairBody, InpaintBody};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -79,6 +79,33 @@ pub async fn enhance(
     ApiJson(body): ApiJson<EnhanceBody>,
 ) -> ApiResult<Response> {
     Ok(accepted(st.core.enhance_start(id, body).await?))
+}
+
+#[derive(Deserialize)]
+pub struct DonorParams {
+    face_id: i64,
+    /// `0` skips the worker's hair measurement (pose gate and order only).
+    #[serde(default)]
+    rank: Option<u8>,
+}
+
+/// `GET /api/photos/{id}/hair/donors?face_id=&rank=`: candidate hair donors (same person).
+pub async fn hair_donors(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+    ApiQuery(p): ApiQuery<DonorParams>,
+) -> ApiResult<Json<Value>> {
+    let rank = p.rank.is_none_or(|r| r != 0);
+    Ok(Json(json!(st.core.hair_donors(id, p.face_id, rank).await?)))
+}
+
+/// `POST /api/photos/{id}/hair`: hair transfer from a donor face -> `202 {task_id}`.
+pub async fn hair(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+    ApiJson(body): ApiJson<HairBody>,
+) -> ApiResult<Response> {
+    Ok(accepted(st.core.hair_start(id, body).await?))
 }
 
 #[derive(Deserialize)]

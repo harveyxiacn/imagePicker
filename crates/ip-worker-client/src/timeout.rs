@@ -34,6 +34,8 @@ impl Default for WorkerTimeouts {
             ("faces.embed", secs(60)),
             ("text.embed", secs(120)),
             ("besttake.compose", secs(120)),
+            ("hair.rank", secs(120)),
+            ("hair.compose", secs(180)),
             ("inpaint.run", secs(300)),
             ("enhance.run", secs(300)),
             ("llm.plan", secs(120)),
@@ -206,6 +208,13 @@ impl AiWorker for TimeoutWorker {
         req: &BestTakeComposeRequest,
     ) -> Result<BestTakeComposeResponse> {
         self.limited("besttake.compose", self.inner.besttake_compose(req))
+            .await
+    }
+    async fn hair_rank(&self, req: &HairRankRequest) -> Result<HairRankResponse> {
+        self.limited("hair.rank", self.inner.hair_rank(req)).await
+    }
+    async fn hair_compose(&self, req: &HairComposeRequest) -> Result<HairComposeResponse> {
+        self.limited("hair.compose", self.inner.hair_compose(req))
             .await
     }
     async fn inpaint_run(&self, req: &InpaintRequest) -> Result<InpaintResponse> {

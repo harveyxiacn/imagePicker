@@ -51,8 +51,16 @@ export interface ErrorCtx {
   retry: () => void
 }
 
-/** 422 codes of `POST /api/besttake` for a face that must not replace another (docs/api-contract-m5.md). */
-const BESTTAKE_PAIRING_CODES = ['besttake_cross_burst', 'besttake_person_mismatch', 'besttake_low_similarity']
+/** 422 codes of `POST /api/besttake` and `POST /api/photos/{id}/hair` for a face that must not replace another (docs/api-contract-m5.md). */
+const BESTTAKE_PAIRING_CODES = [
+  'besttake_cross_burst',
+  'besttake_person_mismatch',
+  'besttake_low_similarity',
+  'hair_person_mismatch',
+  'hair_low_similarity',
+  'hair_pose_too_different',
+  'hair_donor_too_small',
+]
 
 /** 409 models_missing -> consent dialog then retry; 503 / timeouts / everything else -> toast. */
 export function reportGenError(err: unknown, ctx: ErrorCtx): void {
@@ -193,9 +201,9 @@ export function genOnTask(qc: QueryClient, e: TaskEvent): void {
   }
 }
 
-type DoneEvent = Extract<ServerEvent, { type: 'besttake.done' | 'inpaint.done' | 'enhance.done' }>
+type DoneEvent = Extract<ServerEvent, { type: 'besttake.done' | 'inpaint.done' | 'enhance.done' | 'hair.done' }>
 
-/** `besttake.done` / `inpaint.done` / `enhance.done`: per-person results, failure reasons, finalise the matching task. */
+/** `besttake.done` / `inpaint.done` / `enhance.done` / `hair.done`: per-person results, failure reasons, finalise the matching task. */
 export function genOnDone(qc: QueryClient, ev: DoneEvent): void {
   const st = useGen.getState()
   let ok: boolean
@@ -214,6 +222,14 @@ export function genOnDone(qc: QueryClient, ev: DoneEvent): void {
       if (!ok) toast('error', tr('besttake.failedFor', { n: failed.length, reason: reason ? tr(`besttake.reason_${reason}`, { defaultValue: reason }) : tr('gen.failed') }))
       const warned = ev.results.filter((r) => r.ok && r.warnings.length > 0).length
       if (warned > 0) toast('info', tr('besttake.warnedToast', { n: warned }), 4500)
+    }
+  } else if (ev.type === 'hair.done') {
+    kind = 'hair'
+    ok = ev.ok
+    // a refusal comes as a reason code (pose_too_different, donor_no_hair, ...): show it in words
+    reason = ev.reason && ev.reason !== CANCELLED ? tr(`hair.reason_${ev.reason}`, { defaultValue: ev.reason }) : ev.reason
+    if (ev.ok && ev.warnings.length > 0) {
+      toast('info', tr('hair.warnedToast', { list: ev.warnings.map((w) => tr(`hair.warn_${w}`, { defaultValue: w })).join(' · ') }), 6000)
     }
   } else {
     kind = ev.type === 'inpaint.done' ? 'inpaint' : 'enhance'

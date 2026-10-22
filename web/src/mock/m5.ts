@@ -19,6 +19,9 @@ import type {
   BestTakeWarning,
   EditStack,
   EnhanceBody,
+  HairBody,
+  HairCue,
+  HairDonor,
   InpaintBody,
   PatchOp,
   Photo,
@@ -28,7 +31,7 @@ import { addPatch, replaceByKind } from '@/lib/patches'
 import { aiOf, burstRecOf, faceRecOf, missingModelIds, mockPeopleOfPhoto } from './ai'
 import { assetBlob, putAsset } from './assets'
 import { emit } from './bus'
-import { findPhoto } from './db'
+import { findPhoto, getSession, hashString } from './db'
 import { savedStack, store } from './edits'
 import { photoSvg } from './svg'
 import { endTask, isCancelled, taskProgress, trackTask } from './tasks'
@@ -216,6 +219,23 @@ async function faceRestorePatch(photo: Photo, box: Box, n: number): Promise<{ as
   return { asset, rect: [r4(rect[0]), r4(rect[1]), r4(rect[2]), r4(rect[3])] }
 }
 
+/** The donor's head region (around its face) pasted over the target's hair region, softly feathered. */
+async function hairPatch(target: Photo, donor: Photo, rect: Box, donorFace: Box): Promise<{ asset: string; rect: Box }> {
+  const img = await photoImage(donor, 1400)
+  const { W, H } = dims(target)
+  const aw = 320
+  const ah = Math.max(16, Math.round((aw * (rect[3] * H)) / (rect[2] * W)))
+  const [x, y, w, h] = donorFace
+  const src: Box = [x - 0.25 * w, y - 0.55 * h, 1.5 * w, 0.9 * h]
+  const cv = new OffscreenCanvas(aw, ah)
+  const ctx = cv.getContext('2d')!
+  ctx.drawImage(img, src[0] * img.naturalWidth, src[1] * img.naturalHeight, src[2] * img.naturalWidth, src[3] * img.naturalHeight, 0, 0, aw, ah)
+  featherEllipse(ctx, aw, ah, 0.55)
+  const asset = newAssetId('hair', target.id, 0)
+  await savePng(target.id, asset, cv)
+  return { asset, rect: [r4(rect[0]), r4(rect[1]), r4(rect[2]), r4(rect[3])] }
+}
+
 // ---------------------------------------------------------------- tasks
 
 let taskSeq = 0
@@ -231,7 +251,7 @@ interface TaskSpec {
  * Emit `task.progress` steps, run `work` at the end, then broadcast. Mirrors the real task lifecycle, including the
  * task history and `POST /api/tasks/:id/cancel` (checked between steps; a cancelled task writes nothing).
  */
-function startTask(kind: 'besttake' | 'inpaint' | 'enhance', steps: number, work: () => Promise<void>, spec: TaskSpec): string {
+function startTask(kind: 'besttake' | 'inpaint' | 'enhance' | 'hair', steps: number, work: () => Promise<void>, spec: TaskSpec): string {
   const task_id = `${kind}-${++taskSeq}`
   const total = steps + 1
   trackTask(task_id, kind, spec.params, total)
@@ -506,8 +526,9 @@ export const m5Handlers = [
     if (!p) return err(404, 'not_found', 'photo not found')
     if (takeFail('503')) return err(503, 'worker_unavailable', 'worker unavailable')
     const body = (await request.json()) as EnhanceBody
-    if (body.op !== 'denoise' && body.op !== 'face_restore') return err(400, 'bad_request', 'unknown op')
-    const miss = missingModelIds([body.op === 'denoise' ? 'scunet' : 'gfpgan-v1.4'])
+    const sweatOp = body.op === 'deshine' || body.op === 'flyaway'
+    if (body.op !== 'denoise' && body.op !== 'face_restore' && !sweatOp) return err(422, 'unprocessable', 'unknown op')
+    const miss = missingModelIds([body.op === 'denoise' ? 'scunet' : sweatOp ? 'mediapipe-face-landmarker' : 'gfpgan-v1.4'])
     if (miss.length) return missing409(miss)
     const strength = clamp01(Number(body.strength ?? 0.6))
     const spec: TaskSpec = {
@@ -516,7 +537,24 @@ export const m5Handlers = [
     }
     const task_id = startTask('enhance', 3, async () => {
       let stack = savedStack(p.id)
-      if (body.op === 'denoise') {
+      if (sweatOp) {
+        // sweat cleanup: full-strength patch per subject face, the strength is the layer amount
+        const kind = body.op as 'deshine' | 'flyaway'
+        const faces = mockPeopleOfPhoto(p).filter((x) => x.is_subject)
+        if (faces.length === 0) {
+          emit({ type: 'enhance.done', photo_id: p.id, op: body.op, ok: false, reason: 'no_faces' })
+          return
+        }
+        const next: PatchOp[] = []
+        let n = 10
+        for (const f of faces) {
+          const [x, y, w, h] = f.face_box
+          const box: Box = kind === 'flyaway' ? [clamp01(x - 0.3 * w), clamp01(y - 0.5 * h), 1.6 * w, 1.2 * h] : f.face_box
+          const { asset, rect } = await faceRestorePatch(p, box, n++)
+          next.push({ type: 'patch', kind, asset, rect, feather: 0.08, amount: strength, enabled: true })
+        }
+        stack = replaceByKind(stack, kind, next)
+      } else if (body.op === 'denoise') {
         const { asset, rect } = await denoisePatch(p)
         stack = replaceByKind(stack, 'denoise', [{ type: 'patch', kind: 'denoise', asset, rect, feather: 0, amount: strength, enabled: true }])
       } else {
@@ -536,6 +574,70 @@ export const m5Handlers = [
       saveStack(p, stack)
       emit({ type: 'enhance.done', photo_id: p.id, op: body.op, ok: true, reason: null })
     }, spec)
+    return HttpResponse.json({ task_id }, { status: 202 })
+  }),
+
+  // ---- hair transfer (docs/api-contract-m5.md H): same person in the session's other photos, deterministic cues
+  http.get('/api/photos/:id/hair/donors', async ({ params, request }) => {
+    await lat()
+    const p = findPhoto(Number(params.id))
+    if (!p) return err(404, 'not_found', 'photo not found')
+    const faceId = Number(new URL(request.url).searchParams.get('face_id'))
+    if (!faceId) return err(400, 'bad_request', 'face_id is required')
+    const me = mockPeopleOfPhoto(p).find((f) => f.face_id === faceId)
+    if (!me) return err(422, 'unprocessable', `face ${faceId} is not in photo ${p.id}`)
+    await delay(400) // the worker rates the hair
+    return HttpResponse.json(hairDonorsOf(p, me.face_id, me.person_id))
+  }),
+
+  http.post('/api/photos/:id/hair', async ({ params, request }) => {
+    await lat()
+    const p = findPhoto(Number(params.id))
+    if (!p) return err(404, 'not_found', 'photo not found')
+    if (takeFail('503')) return err(503, 'worker_unavailable', 'worker unavailable')
+    const body = (await request.json()) as HairBody
+    const strength = body.strength ?? 1
+    if (!(strength >= 0 && strength <= 1)) return err(400, 'bad_request', 'strength must be within 0..1')
+    const me = mockPeopleOfPhoto(p).find((f) => f.face_id === body.face_id)
+    const dp = findPhoto(body.donor_photo_id)
+    const them = dp ? mockPeopleOfPhoto(dp).find((f) => f.face_id === body.donor_face_id) : undefined
+    if (!me || !dp || !them || dp.id === p.id) return err(422, 'unprocessable', 'face / donor not found')
+    if (me.person_id === null || me.person_id !== them.person_id) return err(422, 'hair_person_mismatch', 'not the same person')
+    const d = hairDonorsOf(p, me.face_id, me.person_id).candidates.find((c) => c.face_id === them.face_id)
+    if (d && !d.composable) return err(422, d.reason === 'donor_too_small' ? 'hair_donor_too_small' : 'hair_pose_too_different', d.reason ?? '')
+    const miss = missingModelIds(['mediapipe-face-landmarker'])
+    if (miss.length) return missing409(miss)
+    const spec: TaskSpec = {
+      params: { photo_id: p.id, face_id: me.face_id, donor_photo_id: dp.id, strength },
+      onCancel: () => emit({ type: 'hair.done', photo_id: p.id, face_id: me.face_id, ok: false, warnings: [], reason: 'cancelled' }),
+    }
+    const task_id = startTask(
+      'hair',
+      3,
+      async () => {
+        const [x, y, w, h] = me.face_box
+        const hairBox: Box = [clamp01(x - 0.25 * w), clamp01(y - 0.55 * h), Math.min(1.5 * w, 1 - clamp01(x - 0.25 * w)), Math.min(0.9 * h, 1 - clamp01(y - 0.55 * h))]
+        const { asset, rect } = await hairPatch(p, dp, hairBox, them.face_box)
+        const op: PatchOp = {
+          type: 'patch',
+          kind: 'hair',
+          asset,
+          rect,
+          feather: 0.08,
+          amount: strength,
+          enabled: true,
+          person_id: me.person_id ?? undefined,
+          source_photo_id: dp.id,
+          base_face_id: me.face_id,
+          source_face_id: them.face_id,
+          align: { scale: 1.03, rotation_deg: 1.2, dx: 0.004, dy: -0.006, landmark_rms: 0.005 },
+        }
+        saveStack(p, replaceByKind(savedStack(p.id), 'hair', [op], (o) => o.base_face_id === me.face_id))
+        const warnings = d && d.pose_delta.yaw > 12 ? ['pose_differs'] : []
+        emit({ type: 'hair.done', photo_id: p.id, face_id: me.face_id, ok: true, warnings, reason: null })
+      },
+      spec,
+    )
     return HttpResponse.json({ task_id }, { status: 202 })
   }),
 
@@ -563,4 +665,48 @@ function strokesBoundsNorm(strokes: Stroke[], p: Photo): Box {
   x0 = clamp01(x0)
   y0 = clamp01(y0)
   return [x0, y0, Math.max(0.02, clamp01(x1) - x0), Math.max(0.02, clamp01(y1) - y0)]
+}
+
+/** Mock donor list: the same person in the other photos of the session, with deterministic cues and pose gate. */
+function hairDonorsOf(p: Photo, faceId: number, personId: number | null) {
+  const s = getSession(p.session_id)
+  const candidates: HairDonor[] = []
+  if (s && personId !== null) {
+    for (const q of s.photos) {
+      if (q.id === p.id || candidates.length >= 40) continue
+      const f = mockPeopleOfPhoto(q).find((x) => x.person_id === personId)
+      if (!f) continue
+      const h = hashString(`hair:${q.id}`)
+      const yaw = (h % 30) - 5
+      const tooTurned = Math.abs(yaw) > 20
+      const score = tooTurned ? null : Math.round((0.45 + ((h >> 5) % 50) / 100) * 1000) / 1000
+      const minutes = p.taken_at !== null && q.taken_at !== null ? Math.round((q.taken_at - p.taken_at) / 60_000) : null
+      const cues: HairCue[] = []
+      if (!tooTurned) {
+        if ((h >> 3) % 3 === 0) cues.push('fuller')
+        if ((h >> 4) % 2 === 0) cues.push('less_shine')
+        if ((h >> 6) % 4 === 0) cues.push('tidier')
+        if (Math.abs(yaw) <= 8) cues.push('similar_pose')
+      }
+      if (minutes !== null && minutes < 0) cues.push('earlier')
+      cues.push('same_session')
+      candidates.push({
+        photo_id: q.id,
+        face_id: f.face_id,
+        file_name: q.file_name,
+        taken_at: q.taken_at,
+        minutes_from_target: minutes,
+        same_session: true,
+        composable: !tooTurned,
+        reason: tooTurned ? 'pose_too_different' : null,
+        pose_delta: { yaw: Math.abs(yaw), pitch: 2, roll: 1 },
+        scale: 1,
+        score,
+        cues,
+        metrics: null,
+      })
+    }
+  }
+  candidates.sort((a, b) => Number(b.composable) - Number(a.composable) || (b.score ?? -1) - (a.score ?? -1) || a.photo_id - b.photo_id)
+  return { photo_id: p.id, face_id: faceId, person_id: personId, ranked: true, rank_error: null, target: null, candidates }
 }

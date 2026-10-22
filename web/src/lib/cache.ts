@@ -38,6 +38,7 @@ export const qk = {
   collectionCount: (sid: number, query: string) => ['collectionCount', sid, query] as const,
   taste: ['taste'] as const,
   bystanders: (photoId: number) => ['bystanders', photoId] as const,
+  hairDonors: (photoId: number, faceId: number) => ['hairDonors', photoId, faceId] as const,
   besttake: (burstId: number) => ['besttake', burstId] as const,
   best: (sid: number, ids: number[], n: number) => ['best', sid, ids, n] as const,
   settings: ['settings'] as const,
@@ -106,8 +107,8 @@ export interface ApplyDeps {
   /** M6: assistant.done / xmp.conflict */
   onAssistant?: (e: Extract<ServerEvent, { type: 'assistant.done' }>) => void
   onXmpConflict?: (e: Extract<ServerEvent, { type: 'xmp.conflict' }>) => void
-  /** M5: besttake.done / inpaint.done / enhance.done */
-  onGen?: (e: Extract<ServerEvent, { type: 'besttake.done' | 'inpaint.done' | 'enhance.done' }>) => void
+  /** M5: besttake.done / inpaint.done / enhance.done / hair.done */
+  onGen?: (e: Extract<ServerEvent, { type: 'besttake.done' | 'inpaint.done' | 'enhance.done' | 'hair.done' }>) => void
 }
 
 /** Up to this many `analysis.updated` ids are re-fetched individually; more triggers a throttled list refetch. */
@@ -170,7 +171,7 @@ export function applyEvents(
   let peopleChanged = false
   let collectionsChanged = false
   const beautyReady = new Set<number>()
-  const genDone: Extract<ServerEvent, { type: 'besttake.done' | 'inpaint.done' | 'enhance.done' }>[] = []
+  const genDone: Extract<ServerEvent, { type: 'besttake.done' | 'inpaint.done' | 'enhance.done' | 'hair.done' }>[] = []
   const assistantDone: Extract<ServerEvent, { type: 'assistant.done' }>[] = []
   const xmpConflicts: Extract<ServerEvent, { type: 'xmp.conflict' }>[] = []
   let settings: Settings | null = null
@@ -223,6 +224,7 @@ export function applyEvents(
       case 'besttake.done':
       case 'inpaint.done':
       case 'enhance.done':
+      case 'hair.done':
         genDone.push(ev)
         break
       case 'beauty.ready':

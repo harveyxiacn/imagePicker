@@ -206,6 +206,13 @@ pub struct FakeWorker {
     pub compose_refusals: Mutex<HashMap<i64, String>>,
     /// Warnings attached to every successful composition.
     pub compose_warnings: Mutex<Vec<String>>,
+    /// `hair.rank` calls and the scripted cues per photo id (default: derived from the id).
+    pub hair_rank_calls: AtomicUsize,
+    pub hair_metrics: Mutex<HashMap<i64, HairMetrics>>,
+    /// `hair.compose` calls, the last request, and donor photo ids it refuses (with the reason).
+    pub hair_calls: AtomicUsize,
+    pub last_hair_request: Mutex<Option<HairComposeRequest>>,
+    pub hair_refusals: Mutex<HashMap<i64, String>>,
     pub inpaint_calls: AtomicUsize,
     pub last_inpaint_request: Mutex<Option<InpaintRequest>>,
     /// The mask PNG of the last `inpaint.run`, decoded at call time (the core deletes its
@@ -283,6 +290,11 @@ impl Default for FakeWorker {
             last_compose_request: Mutex::new(None),
             compose_refusals: Mutex::new(HashMap::new()),
             compose_warnings: Mutex::new(Vec::new()),
+            hair_rank_calls: AtomicUsize::new(0),
+            hair_metrics: Mutex::new(HashMap::new()),
+            hair_calls: AtomicUsize::new(0),
+            last_hair_request: Mutex::new(None),
+            hair_refusals: Mutex::new(HashMap::new()),
             inpaint_calls: AtomicUsize::new(0),
             last_inpaint_request: Mutex::new(None),
             last_inpaint_mask: Mutex::new(None),
@@ -587,7 +599,7 @@ impl AiWorker for FakeWorker {
             m("yunet", 0.3, &["faces"]),
             m("siglip2-base", 178.0, &["embed"]),
             beauty,
-            m(BESTTAKE_MODEL, 20.0, &["besttake"]),
+            m(BESTTAKE_MODEL, 20.0, &["besttake", "hair"]),
             m(INPAINT_MODEL, 200.0, &["inpaint"]),
             m(ENHANCE_MODEL, 300.0, &["enhance"]),
             sdxl,
@@ -1024,6 +1036,93 @@ impl AiWorker for FakeWorker {
             reason: None,
         })
     }
+    async fn hair_rank(&self, req: &HairRankRequest) -> Result<HairRankResponse> {
+        self.hair_rank_calls.fetch_add(1, Ordering::SeqCst);
+        self.nap().await?;
+        self.gen_models(&[BESTTAKE_MODEL], req.allow_download)?;
+        let scripted = self.hair_metrics.lock().unwrap().clone();
+        let results = req
+            .faces
+            .iter()
+            .map(|f| {
+                let id = f.photo.photo_id;
+                scripted.get(&id).cloned().unwrap_or_else(|| {
+                    // deterministic, different per photo
+                    let k = (id % 7) as f64;
+                    HairMetrics {
+                        photo_id: id,
+                        ok: true,
+                        yaw: Some(0.0),
+                        pitch: Some(0.0),
+                        roll: Some(0.0),
+                        face_px: Some(200.0),
+                        hair_ratio: Some(0.5 + 0.05 * k),
+                        sharpness: Some(10.0 + k),
+                        shine: Some(0.01 * (7.0 - k) / 7.0),
+                        skin_shine: Some(0.02),
+                        roughness: Some(0.1),
+                        reason: None,
+                    }
+                })
+            })
+            .collect();
+        Ok(HairRankResponse { results })
+    }
+    async fn hair_compose(&self, req: &HairComposeRequest) -> Result<HairComposeResponse> {
+        self.hair_calls.fetch_add(1, Ordering::SeqCst);
+        *self.last_hair_request.lock().unwrap() = Some(req.clone());
+        if !req.identity.verified || req.identity.cosine.is_some_and(|c| c < 0.30) {
+            return Err(WorkerError::Rpc {
+                code: -32602,
+                message: "identity not verified".into(),
+                kind: Some("bad_params".into()),
+                detail: None,
+            });
+        }
+        self.gen_nap().await?;
+        self.gen_models(&[BESTTAKE_MODEL], req.allow_download)?;
+        if let Some(reason) = self.hair_refusals.lock().unwrap().get(&req.donor.photo_id) {
+            return Ok(HairComposeResponse {
+                reason: Some(reason.clone()),
+                ..Default::default()
+            });
+        }
+        let out = std::path::PathBuf::from(&req.out_dir);
+        std::fs::create_dir_all(&out).map_err(|e| WorkerError::Protocol(e.to_string()))?;
+        let shade = (req.donor.photo_id % 200) as u8 + 20;
+        let img = image::RgbaImage::from_fn(20, 20, |x, y| {
+            let edge = x == 0 || y == 0 || x == 19 || y == 19;
+            image::Rgba([shade, 60, 255 - shade, if edge { 60 } else { 255 }])
+        });
+        let p = out.join(format!(
+            "hair_{}_{}.png",
+            req.target.photo_id, req.donor.photo_id
+        ));
+        img.save_with_format(&p, image::ImageFormat::Png)
+            .map_err(|e| WorkerError::Protocol(e.to_string()))?;
+        let b = req.target_face;
+        let x = (b[0] - b[2] * 0.4).max(0.0);
+        let y = (b[1] - b[3] * 0.6).max(0.0);
+        let w = (b[0] + b[2] * 1.4).min(1.0) - x;
+        let h = (b[1] + b[3] * 1.2).min(1.0) - y;
+        Ok(HairComposeResponse {
+            patch: Some(p.to_string_lossy().into_owned()),
+            rect: Some([x as f32, y as f32, w as f32, h as f32]),
+            quality: Some(ComposeQuality {
+                score: 0.8,
+                aligned: true,
+                warnings: vec![],
+            }),
+            align: Some(HairAlign {
+                scale: 1.05,
+                rotation_deg: 1.5,
+                dx: 0.01,
+                dy: -0.02,
+                landmark_rms: 0.004,
+            }),
+            reason: None,
+        })
+    }
     async fn inpaint_run(&self, req: &InpaintRequest) -> Result<InpaintResponse> {
         self.inpaint_calls.fetch_add(1, Ordering::SeqCst);
         *self.last_inpaint_request.lock().unwrap() = Some(req.clone());
@@ -1088,7 +1187,7 @@ impl AiWorker for FakeWorker {
                 rect: Some([0.0, 0.0, 1.0, 1.0]),
                 ..Default::default()
             }),
-            "face_restore" => {
+            "face_restore" | "deshine" | "flyaway" => {
                 let mut patches = Vec::new();
                 for (i, f) in req.faces.clone().unwrap_or_default().iter().enumerate() {
                     patches.push(EnhancePatch {

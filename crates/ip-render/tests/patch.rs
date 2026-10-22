@@ -365,3 +365,46 @@ fn patches_follow_the_portrait_warp() {
     );
     assert_ne!(plain.data, warped.data);
 }
+
+#[test]
+fn patches_composite_in_kind_order_not_stack_order() {
+    // every patch is computed from the original pixels: the hair transfer must land on top of
+    // a sweat cleanup / denoise layer of the same area, whatever order the stack lists them in
+    let img = base();
+    let assets = PatchAssets::default()
+        .with("hair", synth_patch(80, 60, 7, None))
+        .with("shine", synth_patch(80, 60, 8, None));
+    let r = [0.2, 0.2, 0.3, 0.3];
+    let mut hair = patch("hair", r);
+    hair.kind = PatchKind::Hair;
+    let mut shine = patch("shine", [0.25, 0.25, 0.2, 0.2]); // well inside the hair rect
+    shine.kind = PatchKind::Deshine;
+    let only_hair = render_with(
+        cpu().as_ref(),
+        &img,
+        &stack(vec![Op::Patch(hair.clone())]),
+        &assets,
+        None,
+    );
+    for ops in [
+        vec![Op::Patch(hair.clone()), Op::Patch(shine.clone())],
+        vec![Op::Patch(shine.clone()), Op::Patch(hair.clone())],
+    ] {
+        let out = render_with(cpu().as_ref(), &img, &stack(ops), &assets, None);
+        assert_eq!(out.data, only_hair.data);
+    }
+    let order: Vec<u8> = [
+        PatchKind::Denoise,
+        PatchKind::FaceRestore,
+        PatchKind::Deshine,
+        PatchKind::Flyaway,
+        PatchKind::Inpaint,
+        PatchKind::Other,
+        PatchKind::BestTake,
+        PatchKind::Hair,
+    ]
+    .iter()
+    .map(|k| k.layer_order())
+    .collect();
+    assert!(order.windows(2).all(|w| w[0] < w[1]));
+}

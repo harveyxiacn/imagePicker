@@ -32,6 +32,7 @@ export function taskDetail(t: Pick<TaskRecord, 'kind' | 'params'>): { key: strin
   switch (t.kind) {
     case 'besttake':
     case 'inpaint':
+    case 'hair':
       return num('photo_id') !== null ? { key: 'tasks.detail_photo', opts: { id: num('photo_id') } } : null
     case 'enhance': {
       const id = num('photo_id')

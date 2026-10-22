@@ -12,7 +12,7 @@ pub type VResult<T> = std::result::Result<T, String>;
 pub const MAX_STEPS: usize = 8;
 const MAX_IDS: usize = 20_000;
 
-pub const TOOL_NAMES: [&str; 14] = [
+pub const TOOL_NAMES: [&str; 15] = [
     "filter",
     "set_rating",
     "set_flag",
@@ -21,6 +21,7 @@ pub const TOOL_NAMES: [&str; 14] = [
     "scene_keep_top",
     "apply_preset",
     "auto_adjust",
+    "adjust_sliders",
     "apply_profiles",
     "besttake_auto",
     "remove_bystanders",
@@ -28,6 +29,34 @@ pub const TOOL_NAMES: [&str; 14] = [
     "describe",
     "suggest_edits",
 ];
+
+/// The global sliders `adjust_sliders` may set, with their valid ranges (the same ranges the
+/// editor's sliders and `Adjust` use).
+pub const SLIDERS: [(&str, f64, f64); 15] = [
+    ("exposure", -5.0, 5.0),
+    ("contrast", -100.0, 100.0),
+    ("highlights", -100.0, 100.0),
+    ("shadows", -100.0, 100.0),
+    ("whites", -100.0, 100.0),
+    ("blacks", -100.0, 100.0),
+    ("temp", -3000.0, 3000.0),
+    ("tint", -100.0, 100.0),
+    ("vibrance", -100.0, 100.0),
+    ("saturation", -100.0, 100.0),
+    ("clarity", -100.0, 100.0),
+    ("dehaze", -100.0, 100.0),
+    ("texture", -100.0, 100.0),
+    ("dodge", 0.0, 100.0),
+    ("burn", 0.0, 100.0),
+];
+
+/// Valid range of one `adjust_sliders` key.
+pub fn slider_range(key: &str) -> Option<(f64, f64)> {
+    SLIDERS
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .map(|(_, lo, hi)| (*lo, *hi))
+}
 
 /// The `preset` enum of the `export` tool: the ids of the one export preset table.
 pub const EXPORT_PRESETS: [&str; 4] = crate::export::EXPORT_PRESET_IDS;
@@ -57,6 +86,18 @@ pub const FILTER_KEYS: [&str; 18] = [
     "faces_max",
     "has_edits",
 ];
+
+/// `values` of `adjust_sliders`: one number per slider, with its range.
+fn slider_props() -> Value {
+    let mut props = Map::new();
+    for (k, lo, hi) in SLIDERS {
+        props.insert(
+            k.to_string(),
+            json!({"type":"number","minimum":lo,"maximum":hi}),
+        );
+    }
+    Value::Object(props)
+}
 
 fn selection_schema() -> Value {
     json!({
@@ -146,6 +187,11 @@ pub fn registry() -> Vec<ToolSpec> {
             name: "auto_adjust",
             description: "AI one-click adjustment, saved per photo.",
             parameters: obj(json!({"selection":sel,"mode":{"type":"string","enum":["auto","portrait","landscape"]}}), &["selection"]),
+        },
+        ToolSpec {
+            name: "adjust_sliders",
+            description: "Set or change individual sliders (exposure in EV, contrast, highlights, shadows, whites, blacks, temp in kelvin, tint, vibrance, saturation, clarity, dehaze, texture, dodge, burn) of the selected photos. Use this for a numeric instruction such as \"increase exposure by 0.5\"; auto_adjust is only for \"fix them all\" with no numbers.",
+            parameters: obj(json!({"selection":sel,"values":{"type":"object","minProperties":1,"additionalProperties":false,"properties":slider_props()},"relative":{"type":"boolean","default":false,"description":"true adds to the current values, false replaces them"}}), &["selection","values"]),
         },
         ToolSpec {
             name: "apply_profiles",
@@ -666,6 +712,29 @@ pub fn validate_call(tool: &str, args: &Value) -> VResult<Value> {
                 return Err("preset_id must be a short id".into());
             }
             out.insert("preset_id".into(), json!(p));
+        }
+        "adjust_sliders" => {
+            only_keys(o, &["selection", "values", "relative"])?;
+            with_selection(&mut out, true)?;
+            let vals = match o.get("values") {
+                Some(Value::Object(m)) if !m.is_empty() => m,
+                _ => return Err("values must be a non-empty object of sliders".into()),
+            };
+            let mut clean = Map::new();
+            for (k, v) in vals {
+                let (lo, hi) = slider_range(k).ok_or_else(|| format!("unknown slider {k:?}"))?;
+                let n = as_num(v, k)?;
+                if !(lo..=hi).contains(&n) {
+                    return Err(format!("{k} must be within {lo}..{hi}"));
+                }
+                clean.insert(k.clone(), json!(n));
+            }
+            out.insert("values".into(), Value::Object(clean));
+            let rel = match o.get("relative") {
+                Some(v) if !v.is_null() => as_bool(v, "relative")?,
+                _ => false,
+            };
+            out.insert("relative".into(), json!(rel));
         }
         "auto_adjust" => {
             only_keys(o, &["selection", "mode"])?;
