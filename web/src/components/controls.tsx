@@ -5,6 +5,7 @@ import type { ColorLabel, Flag } from '@/api/types'
 
 import { starFills } from '@/lib/ai'
 import { COLOR_NAMES, colorVar } from '@/lib/colors'
+import { aiScoreTip } from '@/lib/score'
 
 /** Clickable 5-star control. `value` null/0 = none. Clicking the current value clears it. */
 export function StarRating({
@@ -61,10 +62,10 @@ function AiStar({ fill, size }: { fill: 'full' | 'half' | 'empty'; size: number 
  * AI rating (0.5 steps): hollow purple stars, visually distinct from the solid amber user stars.
  * `value` null = not analysed yet.
  */
-export function AiStars({ value, size = 14, showValue = true }: { value: number | null; size?: number; showValue?: boolean }) {
+export function AiStars({ value, size = 14, showValue = true, score }: { value: number | null; size?: number; showValue?: boolean; score?: number | null }) {
   const { t } = useTranslation()
   return (
-    <div className="flex items-center gap-1 text-ai" title={value === null ? t('inspector.aiPending') : `${t('inspector.aiRating')} ${value.toFixed(1)}`} data-testid="ai-stars">
+    <div className="flex items-center gap-1 text-ai" title={value === null ? t('inspector.aiPending') : `${t('inspector.aiRating')} ${value.toFixed(1)}${aiScoreTip(t, score)}`} data-testid="ai-stars">
       <span aria-hidden>✨</span>
       <div className="flex gap-0.5">
         {starFills(value).map((f, i) => (

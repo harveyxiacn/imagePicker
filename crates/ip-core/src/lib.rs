@@ -58,7 +58,8 @@ pub use card::{CardImportRequest, CardReport, CardSource};
 pub use collage::CollageRequest;
 pub use edit::{
     AutoCropKind, AutoCropOut, AutoCropRequest, AutoRequest, CheckedStack, EditDoc, EditPut,
-    LutOut, PresetCreate, PresetOut, Preview, PreviewRequest, RenderService, SyncRequest,
+    LutOut, PresetApplied, PresetApplyRequest, PresetCreate, PresetFit, PresetOut, Preview,
+    PreviewRequest, RenderService, SyncRequest,
 };
 pub use error::{CoreError, Result};
 pub use events::{Event, EventBus};

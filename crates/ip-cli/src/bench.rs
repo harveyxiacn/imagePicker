@@ -3,8 +3,9 @@
 //! * `gen`  writes N JPEGs with realistic EXIF (capture times in bursts and scenes, mixed sizes).
 //! * `seed` fills a catalog directly (no image files) with N photo rows, bursts, faces and
 //!   people, to benchmark queries at 20k / 100k rows.
+//! * `preset-sheet` renders every built-in preset on a folder of real photos for a visual check.
 //!
-//! Everything is generated from a seeded PRNG; no real photos are ever used.
+//! `gen`/`seed` generate everything from a seeded PRNG; only `preset-sheet` reads real photos.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -54,6 +55,27 @@ pub enum BenchCmd {
         #[arg(long, default_value_t = 1000)]
         files_count: usize,
     },
+    /// Contact sheet of every built-in preset (fitted to each photo) on a folder of photos:
+    /// `<out>/index.html` with before/after images and the fit numbers (docs/03 §6.1.1).
+    PresetSheet {
+        /// Folder of photos (not recursive).
+        dir: PathBuf,
+        /// Output folder (created).
+        #[arg(long)]
+        out: PathBuf,
+        /// Long edge of each cell image.
+        #[arg(long, default_value_t = 360)]
+        cell: u32,
+        /// Preset strength, 0..1.5.
+        #[arg(long, default_value_t = 1.0)]
+        amount: f32,
+        /// Comma-separated preset ids (default: all built-ins).
+        #[arg(long, value_delimiter = ',')]
+        presets: Option<Vec<String>>,
+        /// At most this many photos.
+        #[arg(long, default_value_t = 40)]
+        limit: usize,
+    },
 }
 
 pub fn run(cmd: BenchCmd) -> Result<()> {
@@ -80,6 +102,21 @@ pub fn run(cmd: BenchCmd) -> Result<()> {
             seed,
             files_dir.map(|d| (d, files_count.max(1))),
         ),
+        BenchCmd::PresetSheet {
+            dir,
+            out,
+            cell,
+            amount,
+            presets,
+            limit,
+        } => crate::preset_sheet::run(crate::preset_sheet::SheetArgs {
+            dir,
+            out,
+            cell: cell.clamp(64, 2048),
+            amount: amount.clamp(0.0, ip_core::ip_render::PRESET_AMOUNT_MAX),
+            presets,
+            limit: limit.max(1),
+        }),
     }
 }
 

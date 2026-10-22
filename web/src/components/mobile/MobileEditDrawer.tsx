@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronUp, Eclipse, Loader2, Mountain, RotateCcw, ScanFace, Sparkles, User, Wand2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { usePresets } from '@/api/queries'
+import { usePhotoPresets } from '@/api/queries'
 import { ADJUST_NUMERIC_KEYS, type AdjustKey, type AutoMode, type Photo, type Preset } from '@/api/types'
 import { applyPreset, getAdjust, SLIDER_SPEC, setGlobalField } from '@/lib/edit'
 import { autoApply, changeStack, commitLive, resetAll, setLive } from '@/lib/editActions'
@@ -58,7 +58,8 @@ export function MobileEditDrawer({ photo }: { photo: Photo }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const stack = useEdit((s) => s.stack)
-  const presets = usePresets()
+  // stacks fitted to this photo (adaptive presets, docs/03 §6.1.1)
+  const presets = usePhotoPresets(photo.id)
   const [tab, setTab] = useState<Tab>('adjust')
   const [key, setKey] = useState<AdjustKey>('exposure')
   const [open, setOpen] = useState(true)

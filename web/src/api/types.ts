@@ -1294,6 +1294,29 @@ export interface Preset {
   stack: EditStack
 }
 
+/** Tone statistics (sRGB-encoded luminance 0..1) measured by the adaptive preset solver. */
+export interface ToneStats {
+  median: number
+  mean: number
+  p01: number
+  p99: number
+  /** share of pixels at or above 250/255 */
+  clipped: number
+  face_median?: number
+  face_clipped?: number
+}
+
+/** `POST /api/edits/{id}/preset`: a preset fitted to the photo at a strength (nothing saved). */
+export interface PresetApplied {
+  preset_id: string
+  /** 0..1.5 */
+  amount: number
+  /** built-ins are fitted to the photo; user presets are only scaled */
+  adaptive: boolean
+  stack: EditStack
+  fit?: { exposure: number; protection: number; satisfied: boolean; before: ToneStats; after: ToneStats }
+}
+
 export interface PreviewBody {
   photo_id: number
   stack?: EditStack

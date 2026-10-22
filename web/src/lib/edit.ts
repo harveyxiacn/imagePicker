@@ -625,6 +625,74 @@ export function applySections(target: EditStack, source: EditStack, sections: Ed
 export const PRESET_SECTIONS: EditSection[] = ['global', 'local', 'effects', 'lut', 'detail', 'output_sharpen']
 export const applyPreset = (s: EditStack, preset: EditStack): EditStack => applySections(s, preset, PRESET_SECTIONS)
 
+// ---------------------------------------------------------------- preset strength (mirrors ip-render adapt.rs)
+
+/** Largest preset strength (150 %), as `ip_render::PRESET_AMOUNT_MAX`. */
+export const PRESET_AMOUNT_MAX = 1.5
+
+const scaleCurve = (pts: Point[] | undefined, k: number): Point[] | undefined => pts?.map(([x, y]) => [x, clamp(x + (y - x) * k, 0, 1)] as Point)
+
+function scaleAdjust(a: Adjust, k: number): Adjust {
+  const out: Adjust = { ...a }
+  for (const key of ADJUST_NUMERIC_KEYS) {
+    const v = a[key]
+    if (typeof v === 'number') out[key] = clamp(v * k, SLIDER_SPEC[key].min, SLIDER_SPEC[key].max)
+  }
+  if (a.curve) out.curve = { rgb: scaleCurve(a.curve.rgb, k), r: scaleCurve(a.curve.r, k), g: scaleCurve(a.curve.g, k), b: scaleCurve(a.curve.b, k) }
+  if (a.hsl) {
+    const hsl: NonNullable<Adjust['hsl']> = {}
+    for (const b of HSL_BANDS) {
+      const v = a.hsl[b]
+      if (v) hsl[b] = { h: clamp((v.h ?? 0) * k, -100, 100), s: clamp((v.s ?? 0) * k, -100, 100), l: clamp((v.l ?? 0) * k, -100, 100) }
+    }
+    out.hsl = hsl
+  }
+  if (a.grading) {
+    const g = a.grading
+    const w = (p: Point | undefined): Point => [p?.[0] ?? 0, clamp((p?.[1] ?? 0) * k, 0, 1)]
+    out.grading = { shadows: w(g.shadows), midtones: w(g.midtones), highlights: w(g.highlights), balance: clamp((g.balance ?? 0) * k, -100, 100) }
+  }
+  if (k === 0) {
+    // 0 % = no look at all (a scaled curve would be a multi-point identity that is not dropped)
+    delete out.curve
+    delete out.hsl
+    delete out.grading
+  }
+  return out
+}
+
+/**
+ * Scale a preset stack's deltas by `amount` (0..1.5): sliders, curve offsets, HSL, grading and the
+ * LUT / local / sharpen amounts. The editor uses it for the live preview while the strength slider
+ * is dragged; on release the server fits the preset again at that strength (`POST /edits/{id}/preset`).
+ */
+export function scalePresetStack(s: EditStack, amount: number): EditStack {
+  const k = clamp(Number.isFinite(amount) ? amount : 1, 0, PRESET_AMOUNT_MAX)
+  if (k === 1) return s
+  const ops: Op[] = []
+  for (const o of s.ops) {
+    if (isGlobal(o)) ops.push({ ...scaleAdjust(o, k), type: 'global' })
+    else if (isLocal(o)) ops.push({ ...o, amount: clamp((o.amount ?? 1) * k, 0, 1) })
+    else if (isLut(o)) ops.push({ ...o, amount: clamp((o.amount ?? 1) * k, 0, 1) })
+    else if (isSharpen(o)) ops.push({ ...o, amount: clamp(o.amount * k, 0, 100) })
+    else ops.push(o)
+  }
+  return normalizeStack({ version: s.version ?? 1, ops })
+}
+
+/** `preset:<id>;amount=<percent>`, the `source` the server writes into a fitted preset's global op. */
+export function parsePresetSource(source: string | undefined): { id: string; amount: number } | null {
+  if (!source?.startsWith('preset:')) return null
+  const rest = source.slice('preset:'.length)
+  const i = rest.indexOf(';amount=')
+  const id = i < 0 ? rest : rest.slice(0, i)
+  const amount = i < 0 ? 1 : Number(rest.slice(i + ';amount='.length)) / 100
+  return id && Number.isFinite(amount) ? { id, amount } : null
+}
+
+/** The preset the stack's global op came from, if any (drives the strength slider). */
+export const appliedPreset = (s: EditStack): { id: string; amount: number } | null => parsePresetSource(getAdjust(s).source)
+
 /** Sections that actually carry data in the stack. */
 export function sectionsPresent(s: EditStack): EditSection[] {
   const set = new Set<EditSection>()

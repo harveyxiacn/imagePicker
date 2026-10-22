@@ -283,7 +283,7 @@ Click **Analyze** in the top bar, choose a profile and press *Start analysis*:
 
 ### AI stars & score breakdown
 
-After analysis every photo gets an AI suggested rating (0–5, half stars possible) and a 0–1 overall score. The inspector's *Score breakdown* lists each factor and its contribution:
+After analysis every photo gets an AI suggested rating (0–5, half stars possible) and an overall **AI score from 0 to 100 (higher is better)**. The inspector's *Score breakdown* lists each factor and its contribution:
 
 | Factor | Meaning |
 |---|---|
@@ -293,6 +293,13 @@ After analysis every photo gets an AI suggested rating (0–5, half stars possib
 | Composition | Rule of thirds, headroom, level horizon, subject not cut off by the frame edge (a small weight in the score; shown only when the photo has a face or a clear subject) |
 
 Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best of 4 burst frames". Issue tags: closed eyes, blurry, overexposed, underexposed, noisy, tilted, bystander, expression not great. *Bystander* means a sharp, reasonably large face that is not one of the photo's subjects; faces on statues, posters, screens and printed matter are recognised by their flat, colourless look and are not counted (a heavily retouched or black-and-white photo, or a colourful smooth poster, can still fool this), and "Remove bystanders" skips them (you can still remove such a face by hand). *Expression not great* marks a subject caught mid-word (mouth open without a smile) or half-blinking; smiling or laughing is never tagged, and it needs the face landmarks (not in the Lite profile). Neither tag changes the rating. *Tilted* means the horizon or the building verticals are 2–10° off level (the reason shows the angle, e.g. "Horizon is tilted by 3.5°"); it is only judged when the photo has clear straight lines, so many tilted photos without them are not tagged, and it never lowers the rating: fix it with *Crop & straighten* (`R`) in the editor.
+
+#### What the AI score means
+
+- **Scale:** 0–100, **higher is better** (100 is best, 0 is worst). The inspector shows it as *82 / 100*; hover a photo's AI star badge in the grid for the score too. *Sort → AI score* lists the highest scores first.
+- **What goes into it:** a weighted mix of sharpness, exposure, low noise, image quality and aesthetic (model estimates), faces (eyes open, smile, looking at the camera) and a small composition term. The weights depend on the scene type (a portrait leans on faces and sharpness, a landscape on aesthetics and technical quality). Serious problems such as closed eyes or heavy blur subtract points, and a photo that is nearly a copy of a better one in its burst loses a few.
+- **Stars:** the AI stars are the 0–5 summary of the same assessment: roughly 0 stars below 20, 1 star from 20, 2 from 35, 3 from 50, 4 from 65 and 5 from 80. The best photo of a burst gets half a star more, and a photo with a serious problem is capped at 2 stars.
+- **My taste:** once it is switched on (see below), the score is the base score blended with your learned taste, so it can move up or down for photos you would rate differently.
 
 - Click *Accept* in the inspector, or press `A`, to write the AI rating into **your** rating; `Ctrl+Shift+A` accepts in bulk.
 - The *AI rating* filter filters by suggested stars.
@@ -428,7 +435,7 @@ Press `D` in Grid/Loupe (or right-click → *Edit*) to open the edit page. Every
 | **Colour grading** | Shadows / midtones / highlights wheels + balance |
 | **Crop & straighten** (`R`) | Aspect (original / free / …), angle; *Auto straighten* and *Auto crop* (see below) |
 | **Effects** | Post-crop vignette (amount, midpoint, roundness, feather, highlight contrast, three styles) and grain (amount, size, frequency) |
-| **Presets** | Built-in presets (Natural, Japanese clean, Cinematic, Classic B&W, Soft portrait, Landscape pop, Warm / Cool film, Vivid, Matte, High-contrast B&W, Teal & orange, Golden hour…); *Save as preset* |
+| **Presets** | Built-in presets that adapt to each photo, a *Strength* slider, and *Save as preset* (see below) |
 | **LUT** | Built-in LUTs; import your own `.cube` (type the file path, must be inside an allowed folder), with an amount slider |
 | **Detail** | Sharpening (amount, radius, detail, masking) and noise reduction (luminance, luminance detail, luminance contrast, colour, colour detail) |
 | **Output sharpen** | Sharpening applied on output (a light edge sharpen, separate from *Detail*) |
@@ -436,6 +443,16 @@ Press `D` in Grid/Loupe (or right-click → *Edit*) to open the edit page. Every
 **Texture** works one octave finer than clarity: it lifts mid-scale detail such as pores, fabric and foliage while leaving flat areas and hard edges alone, so it neither amplifies noise nor leaves halos on contrast edges. Negative values even texture out along the same weighting. **Dodge** and **burn** only move one way and each protects the end it aims at, leaving hue untouched. In the **Detail** panel noise reduction always runs before sharpening, and its strength adapts to the noise actually present in the frame, so a clean photo is not flattened.
 
 Each section has *Reset section*; *Reset all* is at the top; *History* lists every step.
+
+#### Presets adapt to the photo
+
+Built-in presets describe a look and a brightness *goal* rather than fixed slider values. When you click one, the app measures the photo (its brightness, its brightest areas and, if faces were found, the faces) and works out the sliders for that photo:
+
+- **Brightness follows the goal.** *Japanese clean* aims for a bright, airy look: a dark photo is brightened a lot, a normal one moderately, and a photo that is already bright (high-key, snow, beach) is left about as it is or even brought down slightly. *Cinematic* aims a little darker; *Natural*, *Vivid* and the film and B&W looks only nudge clearly under- or over-exposed photos. Colour, contrast style and HSL character stay the same on every photo.
+- **Highlights and faces are protected.** A preset may not blow out more than a tiny share of the photo (about 0.3–0.5 % of new pure-white pixels) or push faces into white; if it would, it pulls back whites, highlights and exposure.
+- **Strength.** After applying a preset, a *Strength* slider (0–150 %) appears under the preset grid. Lower it for a subtler look or raise it for a stronger one; 0 % removes the look. Moving it re-applies the preset at that strength (highlight protection included), so slider changes you made after applying the preset are replaced; set the strength first, then fine-tune.
+- **Your own presets** are applied exactly as saved; the *Strength* slider scales them.
+- The result is ordinary slider values (you can see and change them in *Basic*, *Curves*, *HSL*), so exports match the preview. Preset thumbnails already show the look fitted to the open photo. The AI assistant ("apply Japanese clean to these") fits the preset to each photo the same way.
 
 #### Auto straighten and Auto crop
 

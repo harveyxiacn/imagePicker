@@ -757,9 +757,93 @@ pub fn auto_adjust(source: &RgbImage, ctx: &AutoContext, mode: AutoMode) -> Adju
     imp::auto_adjust(source, ctx, mode)
 }
 
-/// Built-in presets (id, display name key, stack). Stacks contain only global/LUT ops.
+/// Built-in presets (id, display name key, nominal stack). Stacks contain only global / LUT /
+/// output-sharpen ops. The nominal stack is the look at 100 % with exposure 0; apply a preset
+/// to a photo through [`resolve_preset`], which fits its tone to that photo.
 pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
     imp::builtin_presets()
+}
+
+// ------------------------------------------------------------------ adaptive presets
+
+/// Largest preset strength (150 %).
+pub const PRESET_AMOUNT_MAX: f32 = 1.5;
+
+/// What the adaptive preset solver knows about the photo besides its pixels.
+#[derive(Debug, Clone, Default)]
+pub struct PresetContext {
+    /// Normalised `[x, y, w, h]` face boxes (upright image); their level is weighted 60 %
+    /// and kept out of clipping.
+    pub faces: Vec<[f32; 4]>,
+}
+
+/// Tone statistics of an image: sRGB-encoded luminance, 0..1.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct ToneStats {
+    pub median: f32,
+    pub mean: f32,
+    pub p01: f32,
+    pub p99: f32,
+    /// Share of pixels at or above 250/255 luminance.
+    pub clipped: f32,
+    /// Median / clipped share of the central half of the face boxes, when there are faces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub face_median: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub face_clipped: Option<f32>,
+}
+
+/// A preset fitted to one photo.
+#[derive(Debug, Clone, Serialize)]
+pub struct PresetResolution {
+    /// Concrete stack (global op `source: "preset:<id>;amount=<percent>"`).
+    pub stack: EditStack,
+    /// Strength used, 0..=[`PRESET_AMOUNT_MAX`].
+    pub amount: f32,
+    /// Whether the tone was fitted to the photo (built-in presets) or only scaled (user presets).
+    pub adaptive: bool,
+    /// Solved exposure (EV) in the stack.
+    pub exposure: f32,
+    /// How far highlight protection pulled the look back, 0 (not needed) ..1 (fully).
+    pub protection: f32,
+    /// The highlight / face budget holds for the result.
+    pub satisfied: bool,
+    /// Measured on the photo before and after (on the <= 256 px measuring proxy).
+    pub before: ToneStats,
+    pub after: ToneStats,
+}
+
+/// Fit built-in preset `id` to a photo at `amount` (0..=1.5, 1 = 100 %): exposure is solved so
+/// the subject level moves toward the preset's target, then highlight protection keeps the
+/// share of newly clipped pixels (and face clipping) within the preset's budget. Deterministic.
+/// `source` is an upright proxy of the photo (e.g. 1024 px); `None` for an unknown id.
+pub fn resolve_preset(
+    id: &str,
+    source: &RgbImage,
+    ctx: &PresetContext,
+    amount: f32,
+) -> Option<PresetResolution> {
+    adapt::resolve_preset(id, source, ctx, amount)
+}
+
+/// Scale a preset stack's deltas by `amount` (the strength slider; used as-is for user presets).
+pub fn scale_preset_stack(stack: &EditStack, amount: f32) -> EditStack {
+    adapt::scale_preset_stack(stack, amount)
+}
+
+/// Luminance statistics of an image (`faces` as in [`PresetContext`]).
+pub fn measure_tone(img: &RgbImage, faces: &[[f32; 4]]) -> ToneStats {
+    adapt::measure_tone(img, faces)
+}
+
+/// `preset:<id>;amount=<percent>`, the `source` of a resolved preset's global op.
+pub fn preset_source(id: &str, amount: f32) -> String {
+    adapt::preset_source(id, amount)
+}
+
+/// Parse a `source` written by [`preset_source`]: `(preset id, amount)`.
+pub fn parse_preset_source(source: &str) -> Option<(String, f32)> {
+    adapt::parse_preset_source(source)
 }
 
 pub mod crop_assist;
@@ -793,6 +877,7 @@ pub fn gpu_adapter_name() -> Option<String> {
     imp::gpu_adapter_name()
 }
 
+mod adapt;
 mod auto;
 mod color;
 mod cpu;
