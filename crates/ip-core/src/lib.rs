@@ -542,6 +542,8 @@ mod tests;
 #[cfg(test)]
 mod tests_collage;
 #[cfg(test)]
+mod tests_common;
+#[cfg(test)]
 mod tests_crop;
 #[cfg(test)]
 mod tests_diag;
