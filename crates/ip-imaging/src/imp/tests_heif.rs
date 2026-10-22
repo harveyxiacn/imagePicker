@@ -643,7 +643,19 @@ fn wic_decodes_through_com_and_names_the_missing_codec() {
     let rgb = super::wic::decode(&png).unwrap();
     assert_eq!((rgb.w, rgb.h), (64, 48));
     assert_eq!(corners(&rgb.data, rgb.w, rgb.h), "RG..");
-    let p = write(dir.path(), "IMG_0001.HEIC", &phone_like());
+    // Do not use phone_like(): it includes valid JPEG thumbnails, which some
+    // installed WIC codecs successfully return despite the broken HEVC primary.
+    let broken = build_heif(
+        1,
+        &[Item {
+            id: 1,
+            typ: b"hvc1",
+            data: vec![0x5A; 256],
+            props: vec![1],
+        }],
+        &[ispe(64, 48)],
+    );
+    let p = write(dir.path(), "IMG_0001.HEIC", &broken);
     let Err(err) = super::wic::decode(&p) else {
         panic!("WIC decoded a garbage HEVC payload");
     };

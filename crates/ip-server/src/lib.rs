@@ -199,6 +199,8 @@ pub fn build_router_auth(
         )
         .route("/edits/{id}/auto", post(m3::auto_edit))
         .route("/edits/{id}/auto-crop", post(m3::auto_crop))
+        .route("/edits/{id}/presets", get(m3::photo_presets))
+        .route("/edits/{id}/preset", post(m3::apply_preset))
         .route("/edits/sync", post(m3::sync_edits))
         .route("/render/preview", post(m3::render_preview))
         .route("/presets", get(m3::list_presets).post(m3::create_preset))

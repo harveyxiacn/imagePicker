@@ -794,7 +794,9 @@ async fn tasks_are_listed_and_cancelled_over_http() {
     )
     .await;
     assert_eq!(r.status, StatusCode::ACCEPTED);
-    assert_eq!(r.json()["task"]["status"], "cancelling");
+    // On a fast runner the worker may finish cancelling before the response is built.
+    let st = r.json()["task"]["status"].clone();
+    assert!(st == "cancelling" || st == "cancelled", "status {st}");
     let done = wait_event(&mut rx, |ev| matches!(ev, Event::EnhanceDone { .. })).await;
     let v = serde_json::to_value(&done).unwrap();
     assert_eq!(

@@ -513,11 +513,16 @@ impl Device {
                     label: Some("tile"),
                 });
         }
-        Ok(RgbImage {
-            width: ow,
-            height: oh,
-            data,
-        })
+        // The whole-image detail stage is backend-independent (see `detail.rs`); running
+        // the same code here is what keeps the GPU result bit-identical to the CPU one.
+        Ok(crate::detail::apply(
+            plan,
+            RgbImage {
+                width: ow,
+                height: oh,
+                data,
+            },
+        ))
     }
 }
 

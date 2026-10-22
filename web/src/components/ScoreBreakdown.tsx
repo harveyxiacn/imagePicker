@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { faceCropUrl } from '@/api/client'
 import type { Face, PhotoAnalysis } from '@/api/types'
 import { reasonKey } from '@/lib/ai'
+import { formatAiScore } from '@/lib/score'
 import { useFaceMenu } from './FaceMenu'
 
 const BAR_KEYS = ['sharpness', 'exposure', 'noise', 'iqa', 'aesthetic', 'face', 'composition'] as const
@@ -28,7 +29,8 @@ function Bar({ k, value, delta }: { k: (typeof BAR_KEYS)[number]; value: number;
       </div>
       <span className="tnum w-8 shrink-0 text-right text-xs">{pct}</span>
       <span className={`tnum w-10 shrink-0 text-right text-xs ${delta === undefined ? 'text-faint' : delta >= 0 ? 'text-success' : 'text-danger'}`} title={t('score.contribution')}>
-        {delta === undefined ? '' : `${delta >= 0 ? '+' : '−'}${Math.abs(delta).toFixed(2)}`}
+        {/* points on the same 0–100 scale as the total */}
+        {delta === undefined ? '' : `${delta >= 0 ? '+' : '−'}${Math.abs(delta * 100).toFixed(1)}`}
       </span>
     </div>
   )
@@ -41,12 +43,18 @@ export function ScoreBreakdown({ a }: { a: PhotoAnalysis }) {
   return (
     <div className="flex flex-col gap-1.5" data-testid="score-breakdown">
       {a.ai_score !== null && (
-        <div className="flex items-center justify-between">
-          <span className="flex items-center gap-1 text-ai">
-            <Sparkles size={13} />
-            {t('score.total')}
-          </span>
-          <span className="tnum font-medium">{a.ai_score.toFixed(2)}</span>
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center justify-between" title={t('score.tooltip', { score: formatAiScore(a.ai_score) })} data-testid="score-total">
+            <span className="flex items-center gap-1 text-ai">
+              <Sparkles size={13} />
+              {t('score.total')}
+            </span>
+            <span className="tnum font-medium">
+              {formatAiScore(a.ai_score)}
+              <span className="text-xs font-normal text-muted"> / 100</span>
+            </span>
+          </div>
+          <div className="text-[11px] text-faint">{t('score.hint')}</div>
         </div>
       )}
       {BAR_KEYS.map((k) => {

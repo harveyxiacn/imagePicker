@@ -6,7 +6,21 @@ import { emptyStack, type AdjustDiff } from '@/lib/edit'
 export type CompareMode = 'off' | 'original' | 'split'
 export type SaveState = 'idle' | 'saving' | 'error'
 /** Panels of the right column that can be collapsed. */
-export type PanelId = 'ai' | 'basic' | 'curves' | 'hsl' | 'grading' | 'local' | 'portrait' | 'hair' | 'repair' | 'crop' | 'presets' | 'sharpen'
+export type PanelId =
+  | 'ai'
+  | 'basic'
+  | 'curves'
+  | 'hsl'
+  | 'grading'
+  | 'local'
+  | 'portrait'
+  | 'hair'
+  | 'repair'
+  | 'crop'
+  | 'effects'
+  | 'presets'
+  | 'detail'
+  | 'sharpen'
 
 export interface Clipboard {
   stack: EditStack

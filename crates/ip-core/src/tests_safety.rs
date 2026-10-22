@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use ip_render::Backend;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 
 use crate::backup::{CatalogState, KEEP};
 use crate::fake_worker::{person, FakeFace, FakeSpec, FakeWorker};
+use crate::tests_common::{count, sha256};
 use crate::testutil::{grant_face_consent, write_jpeg, FakeImaging, FakeRenderer};
 use crate::xmp::XmpSyncRequest;
 use crate::*;
@@ -125,17 +125,6 @@ async fn export_to(core: &Arc<Core>, ids: Vec<i64>, dest: &Path) {
     })
     .await
     .expect("export finishes");
-}
-
-async fn count(core: &Arc<Core>, sql: &'static str) -> i64 {
-    core.db
-        .call(move |c| Ok(c.query_row(sql, [], |r| r.get::<_, i64>(0))?))
-        .await
-        .unwrap()
-}
-
-fn sha256(p: &Path) -> String {
-    format!("{:x}", Sha256::digest(std::fs::read(p).unwrap()))
 }
 
 /// SHA-256 of every image file under `dir` (not the `.xmp` sidecars the app may write).

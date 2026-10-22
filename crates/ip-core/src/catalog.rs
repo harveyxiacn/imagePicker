@@ -42,18 +42,20 @@ pub fn join_rel(root: &str, rel: &str) -> PathBuf {
     p
 }
 
+/// Bump when original-image cache semantics change. Older imports could cache pixels before
+/// EXIF was ready; both disk keys and browser URLs must stop reusing those sideways images.
+pub(crate) const ORIGINAL_CACHE_REVISION: &str = "upright2";
+
 pub fn thumb_version(fast_key: &str) -> String {
-    fast_key.chars().take(8).collect()
+    blake3::hash(format!("{ORIGINAL_CACHE_REVISION}:{fast_key}").as_bytes()).to_hex()[..8]
+        .to_string()
 }
 
 /// `thumb_version` including the edit-stack hash, so cached URLs change with every edit.
 pub fn thumb_version_for(fast_key: &str, edit_hash: Option<&str>) -> String {
     match edit_hash {
         None => thumb_version(fast_key),
-        Some(h) => crate::edit::edited_key(fast_key, h)
-            .chars()
-            .take(8)
-            .collect(),
+        Some(h) => thumb_version(&crate::edit::edited_key(fast_key, h)),
     }
 }
 

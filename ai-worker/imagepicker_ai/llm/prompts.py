@@ -338,7 +338,7 @@ def repair_messages(
 # ---------------------------------------------------------------------------- vision
 SUGGEST_RULES = (
     "You are an expert photo editor. Look at the photo and the measurements, then suggest global "
-    "Lightroom-style slider changes that make it look better while keeping the photographer's "
+    "slider changes that make it look better while keeping the photographer's "
     "intent.\n"
     "Sliders (0 = unchanged): exposure in EV stops (-3 to 3, positive brightens); contrast, "
     "highlights (negative recovers bright areas), shadows (positive lifts dark areas), whites, "

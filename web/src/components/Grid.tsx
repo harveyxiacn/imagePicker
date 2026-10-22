@@ -8,6 +8,7 @@ import type { Photo } from '@/api/types'
 import { issueBadges } from '@/lib/ai'
 import { formatClock } from '@/lib/format'
 import { useDebouncedEffect, useElementSize } from '@/lib/hooks'
+import { aiScoreTip } from '@/lib/score'
 import { clickSelect } from '@/lib/selection'
 import { buildRows, visiblePhotos, type GridItem, type HeaderItem, type StackInfo } from '@/lib/stacks'
 import { useUi } from '@/stores/ui'
@@ -139,7 +140,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
             ) : photo.ai_rating !== null ? (
               <span
                 className="tnum pointer-events-none absolute bottom-1 left-1 rounded bg-black/65 px-1 text-[11px] leading-4 text-ai"
-                title={t('inspector.aiRating')}
+                title={`${t('inspector.aiRating')}${aiScoreTip(t, photo.ai_score)}`}
                 data-testid="ai-badge"
               >
                 ☆{photo.ai_rating.toFixed(1)}

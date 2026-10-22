@@ -5,7 +5,12 @@
 //! in private modules and may change freely; public items change only in coordination.
 //!
 //! Pipeline order is fixed (docs/02 §5.3): decode -> geometry (crop/rotate) ->
-//! [warp/patch: M4/M5] -> global -> local (masks) -> [beauty: M4] -> LUT -> output sharpen.
+//! [warp/patch: M4/M5] -> global -> local (masks) -> [beauty: M4] -> effects -> LUT ->
+//! detail (whole-image) -> output sharpen.
+//!
+//! Everything up to and including the LUT is per-pixel and runs on the GPU; `detail`
+//! (M9) and `output_sharpen` are whole-image stages that both backends run in `detail.rs`
+//! on the encoded result, which is what keeps the two backends bit-identical there.
 
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
@@ -34,6 +39,8 @@ impl EditStack {
         self.ops.iter().all(|o| {
             matches!(o, Op::Unknown | Op::Warp(Warp::Unknown))
                 || matches!(o, Op::Patch(p) if !p.enabled)
+                || matches!(o, Op::Effects(e) if e.is_neutral())
+                || matches!(o, Op::Detail(d) if d.is_neutral())
         })
     }
 }
@@ -48,6 +55,11 @@ pub enum Op {
     Local(LocalAdjust),
     Lut(Lut),
     OutputSharpen(OutputSharpen),
+    /// Post-crop vignette and film grain. Applied after the local adjustments, in
+    /// post-crop coordinates, before the LUT.
+    Effects(Effects),
+    /// Sharpening and noise reduction. A whole-image stage — see [`Detail`].
+    Detail(Detail),
     /// Portrait retouching on skin (M4). Applied after local adjustments.
     Beauty(Beauty),
     /// Parametric geometric reshaping of a face or body (M4). Applied right after crop.
@@ -73,7 +85,7 @@ pub struct Crop {
 }
 
 /// Slider-style adjustments. Every field defaults to 0 / neutral.
-/// Ranges follow Lightroom conventions so users' intuition transfers.
+/// Ranges follow the conventions photographers already expect, so intuition transfers.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Adjust {
@@ -95,6 +107,17 @@ pub struct Adjust {
     pub clarity: f32,
     /// -100..100 (negative adds haze).
     pub dehaze: f32,
+    /// Mid-scale texture, -100..100. Positive emphasises the
+    /// detail band that sits between "flat" and "edge" (fabric, hair, foliage); negative
+    /// evens it out, which is the skin-friendly direction. Distinct from `clarity`, which
+    /// works on the midtone-weighted *ratio* of a much coarser band.
+    pub texture: f32,
+    /// Dodge (brighten) the masked pixels, 0..100. Luminance
+    /// moves with the hue kept, so dodging skin does not wash the colour out. Usable on
+    /// the global op and — where it matters — inside a local adjustment's mask.
+    pub dodge: f32,
+    /// Burn (darken) the masked pixels, 0..100. See `dodge`.
+    pub burn: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub curve: Option<Curves>,
     /// Per-band hue/saturation/luminance shifts, each -100..100.
@@ -162,10 +185,53 @@ pub struct LocalAdjust {
     #[serde(default)]
     pub invert: bool,
     pub adjust: Adjust,
+    /// Extra gate multiplied into the mask, derived from each pixel's own colour.
+    /// Composes with every mask kind, including AI masks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<MaskRange>,
 }
 
 fn one_f() -> f32 {
     1.0
+}
+
+/// A per-pixel weight computed from the pixel under the mask, used to narrow a local
+/// adjustment to part of the masked area.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MaskRange {
+    /// Keep pixels whose sRGB-encoded luminance lies inside `min..max` (each 0..100),
+    /// with `softness` (0..100) feathering both ends.
+    Luminance {
+        min: f32,
+        max: f32,
+        #[serde(default = "half_100")]
+        softness: f32,
+    },
+    /// Keep pixels whose hue is within `width` degrees of `hue` (0..360) and whose chroma
+    /// lies inside `sat_min..sat_max` (each 0..100). The weight fades over the outer
+    /// `softness` (0..100) of both ranges, so the selection is never a hard cut.
+    Color {
+        hue: f32,
+        width: f32,
+        #[serde(default)]
+        sat_min: f32,
+        #[serde(default = "hundred")]
+        sat_max: f32,
+        #[serde(default = "half_100")]
+        softness: f32,
+    },
+    /// Unrecognised `kind` from a newer version: kept loadable, not applied.
+    #[serde(other)]
+    Unknown,
+}
+
+fn half_100() -> f32 {
+    50.0
+}
+
+fn hundred() -> f32 {
+    100.0
 }
 
 /// Where a local adjustment's mask comes from.
@@ -218,6 +284,184 @@ pub struct Lut {
 pub struct OutputSharpen {
     /// 0..100.
     pub amount: f32,
+}
+
+/// A post-crop vignette plus film grain. Both are pure
+/// functions of the output pixel position and colour, so they need no neighbourhood and
+/// cost the same as any other per-pixel adjustment.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Effects {
+    pub vignette: Vignette,
+    pub grain: Grain,
+}
+
+impl Effects {
+    /// True when the op would not change a single pixel.
+    pub fn is_neutral(&self) -> bool {
+        self.vignette.amount == 0.0 && self.grain.amount == 0.0
+    }
+}
+
+/// Post-crop vignette. The falloff is an analytic super-ellipse centred on the cropped
+/// frame, so it follows the crop instead of the original sensor frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Vignette {
+    /// -100 (darken the corners) .. 100 (brighten them). 0 = off.
+    pub amount: f32,
+    /// Where the falloff starts, 0..100; 50 is the default.
+    pub midpoint: f32,
+    /// -100 (the clear area is a diamond, so the dark frame squares off toward the
+    /// corners) .. 100 (the clear area is an oval, reaching further into the diagonals).
+    pub roundness: f32,
+    /// 0 (hard edge) .. 100 (very gradual); 50 is the default.
+    pub feather: f32,
+    /// 0..100: hold the effect back where the pixels are already bright, so a darkened
+    /// corner does not crush into the highlights.
+    pub highlight_contrast: f32,
+    /// How the vignette is mixed in.
+    pub style: VignetteStyle,
+}
+
+/// The three styles differ in what happens to the pixels underneath, not in the shape of
+/// the falloff.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VignetteStyle {
+    /// Multiply linear light, easing off where the pixels are bright. Keeps colour.
+    #[default]
+    HighlightPriority,
+    /// Multiply, then restore most of the original chroma — darker corners stay coloured
+    /// instead of drifting grey.
+    ColorPriority,
+    /// Blend toward black or white in display space, as if painted over the edge.
+    PaintOverlay,
+}
+
+impl Default for Vignette {
+    fn default() -> Self {
+        // The neutral defaults, so an op created from the UI starts from the same look.
+        Vignette {
+            amount: 0.0,
+            midpoint: 50.0,
+            roundness: 0.0,
+            feather: 50.0,
+            highlight_contrast: 0.0,
+            style: VignetteStyle::HighlightPriority,
+        }
+    }
+}
+
+/// Film grain. Deterministic: the same stack always renders the same grain, and the cell
+/// size is anchored to the *source* image, so a preview and a full-resolution export show
+/// grain at the same physical scale.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Grain {
+    /// 0..100.
+    pub amount: f32,
+    /// 0..100 — larger cells; 25 is the default.
+    pub size: f32,
+    /// 0..100 — cross-fades a second, finer octave in for a less regular, more clumped
+    /// look. 50 is the default.
+    pub frequency: f32,
+}
+
+impl Default for Grain {
+    fn default() -> Self {
+        Grain {
+            amount: 0.0,
+            size: 25.0,
+            frequency: 50.0,
+        }
+    }
+}
+
+/// Capture sharpening plus luminance and colour noise reduction.
+///
+/// Unlike every other op this one is not per-pixel: sharpening and noise reduction are
+/// defined by a blur radius in *output* pixels, so they need the whole image. The
+/// renderers therefore run it as a final stage over the encoded 8-bit sRGB result, after
+/// the per-pixel pipeline and before `output_sharpen` (which moves into this stage when a
+/// `detail` op is present, so that noise reduction always precedes sharpening). Both
+/// backends call the same code, so CPU and GPU stay bit-identical.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Detail {
+    pub sharpen: SharpenDetail,
+    pub noise: NoiseReduction,
+}
+
+impl Detail {
+    pub fn is_neutral(&self) -> bool {
+        self.sharpen.amount == 0.0 && self.noise.is_neutral()
+    }
+}
+
+/// Unsharp masking with a radius, halo limiting and an edge mask: the radius sets the
+/// scale, *Detail* picks how much coarse structure joins in, and *Masking* confines the
+/// effect to edges.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SharpenDetail {
+    /// 0..150; 0 = off.
+    pub amount: f32,
+    /// 0.5..3.0 output pixels; 1.0 is the default.
+    pub radius: f32,
+    /// 0..100 — how much coarse structure is sharpened instead of the finest detail, and
+    /// how hard the halo limiter bites. 25 is the default.
+    pub detail: f32,
+    /// 0..100 — restrict sharpening to edges. 0 sharpens everything (including noise),
+    /// 100 keeps only strong edges.
+    pub masking: f32,
+}
+
+impl Default for SharpenDetail {
+    fn default() -> Self {
+        SharpenDetail {
+            amount: 0.0,
+            radius: 1.0,
+            detail: 25.0,
+            masking: 0.0,
+        }
+    }
+}
+
+/// Luminance and colour noise reduction. The strength of the luminance pass adapts to the
+/// noise actually present in the frame (estimated once per render from the high-frequency
+/// band), so a clean photo is not flattened to remove noise it does not have.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NoiseReduction {
+    /// 0..100 — how hard the luminance pass smooths.
+    pub luminance: f32,
+    /// 0..100 — how much of the removed detail band is added back; 50 is the default.
+    pub luminance_detail: f32,
+    /// 0..100 — re-adds low-frequency contrast that the smoothing removes.
+    pub luminance_contrast: f32,
+    /// 0..100 — how hard the chroma pass smooths.
+    pub color: f32,
+    /// 0..100 — how much colour detail survives the chroma smoothing; 50 is the default.
+    pub color_detail: f32,
+}
+
+impl Default for NoiseReduction {
+    fn default() -> Self {
+        NoiseReduction {
+            luminance: 0.0,
+            luminance_detail: 50.0,
+            luminance_contrast: 0.0,
+            color: 0.0,
+            color_detail: 50.0,
+        }
+    }
+}
+
+impl NoiseReduction {
+    pub fn is_neutral(&self) -> bool {
+        self.luminance == 0.0 && self.color == 0.0
+    }
 }
 
 /// Who a portrait op applies to.
@@ -539,9 +783,93 @@ pub fn auto_adjust(source: &RgbImage, ctx: &AutoContext, mode: AutoMode) -> Adju
     imp::auto_adjust(source, ctx, mode)
 }
 
-/// Built-in presets (id, display name key, stack). Stacks contain only global/LUT ops.
+/// Built-in presets (id, display name key, nominal stack). Stacks contain only global / LUT /
+/// output-sharpen ops. The nominal stack is the look at 100 % with exposure 0; apply a preset
+/// to a photo through [`resolve_preset`], which fits its tone to that photo.
 pub fn builtin_presets() -> Vec<(String, String, EditStack)> {
     imp::builtin_presets()
+}
+
+// ------------------------------------------------------------------ adaptive presets
+
+/// Largest preset strength (150 %).
+pub const PRESET_AMOUNT_MAX: f32 = 1.5;
+
+/// What the adaptive preset solver knows about the photo besides its pixels.
+#[derive(Debug, Clone, Default)]
+pub struct PresetContext {
+    /// Normalised `[x, y, w, h]` face boxes (upright image); their level is weighted 60 %
+    /// and kept out of clipping.
+    pub faces: Vec<[f32; 4]>,
+}
+
+/// Tone statistics of an image: sRGB-encoded luminance, 0..1.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct ToneStats {
+    pub median: f32,
+    pub mean: f32,
+    pub p01: f32,
+    pub p99: f32,
+    /// Share of pixels at or above 250/255 luminance.
+    pub clipped: f32,
+    /// Median / clipped share of the central half of the face boxes, when there are faces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub face_median: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub face_clipped: Option<f32>,
+}
+
+/// A preset fitted to one photo.
+#[derive(Debug, Clone, Serialize)]
+pub struct PresetResolution {
+    /// Concrete stack (global op `source: "preset:<id>;amount=<percent>"`).
+    pub stack: EditStack,
+    /// Strength used, 0..=[`PRESET_AMOUNT_MAX`].
+    pub amount: f32,
+    /// Whether the tone was fitted to the photo (built-in presets) or only scaled (user presets).
+    pub adaptive: bool,
+    /// Solved exposure (EV) in the stack.
+    pub exposure: f32,
+    /// How far highlight protection pulled the look back, 0 (not needed) ..1 (fully).
+    pub protection: f32,
+    /// The highlight / face budget holds for the result.
+    pub satisfied: bool,
+    /// Measured on the photo before and after (on the <= 256 px measuring proxy).
+    pub before: ToneStats,
+    pub after: ToneStats,
+}
+
+/// Fit built-in preset `id` to a photo at `amount` (0..=1.5, 1 = 100 %): exposure is solved so
+/// the subject level moves toward the preset's target, then highlight protection keeps the
+/// share of newly clipped pixels (and face clipping) within the preset's budget. Deterministic.
+/// `source` is an upright proxy of the photo (e.g. 1024 px); `None` for an unknown id.
+pub fn resolve_preset(
+    id: &str,
+    source: &RgbImage,
+    ctx: &PresetContext,
+    amount: f32,
+) -> Option<PresetResolution> {
+    adapt::resolve_preset(id, source, ctx, amount)
+}
+
+/// Scale a preset stack's deltas by `amount` (the strength slider; used as-is for user presets).
+pub fn scale_preset_stack(stack: &EditStack, amount: f32) -> EditStack {
+    adapt::scale_preset_stack(stack, amount)
+}
+
+/// Luminance statistics of an image (`faces` as in [`PresetContext`]).
+pub fn measure_tone(img: &RgbImage, faces: &[[f32; 4]]) -> ToneStats {
+    adapt::measure_tone(img, faces)
+}
+
+/// `preset:<id>;amount=<percent>`, the `source` of a resolved preset's global op.
+pub fn preset_source(id: &str, amount: f32) -> String {
+    adapt::preset_source(id, amount)
+}
+
+/// Parse a `source` written by [`preset_source`]: `(preset id, amount)`.
+pub fn parse_preset_source(source: &str) -> Option<(String, f32)> {
+    adapt::parse_preset_source(source)
 }
 
 pub mod crop_assist;
@@ -575,10 +903,12 @@ pub fn gpu_adapter_name() -> Option<String> {
     imp::gpu_adapter_name()
 }
 
+mod adapt;
 mod auto;
 mod color;
 mod cpu;
 mod cube;
+mod detail;
 mod geom;
 mod gpu;
 mod patch;

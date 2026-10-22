@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ip_imaging::ImageFormat;
-use rusqlite::{params, params_from_iter, Connection};
+use rusqlite::{params, params_from_iter, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -173,7 +173,10 @@ fn diff(sc: &XmpValues, cat: &CatalogValues) -> Option<(Value, Value)> {
 /// Makes the catalog row agree with the sidecar (the sidecar wins). Returns the update when the
 /// row changed.
 fn apply_sidecar(conn: &mut Connection, id: i64, v: &XmpValues) -> Result<Option<PhotoUpdate>> {
-    let tx = conn.transaction()?;
+    // IMMEDIATE: this reads `photo` and then writes it, and a WAL transaction that upgrades
+    // from read to write is refused with SQLITE_BUSY_SNAPSHOT when someone else committed in
+    // between (the busy handler is not consulted for that, so `busy_timeout` does not apply).
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let (rating, flag, label): (Option<i64>, i64, Option<String>) = tx.query_row(
         "SELECT user_rating, COALESCE(flag,0), color_label FROM photo WHERE id=?1",
         [id],

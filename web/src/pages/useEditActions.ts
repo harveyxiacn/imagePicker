@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { ApiError } from '@/api/client'
 import type { Photo } from '@/api/types'
 import { redo, undo } from '@/lib/actions'
+import { PRESET_SECTIONS } from '@/lib/edit'
 import { resetAll, pasteToPhotos, syncToPhotos } from '@/lib/editActions'
 import { useEdit } from '@/stores/edit'
 import { useToasts } from '@/stores/toasts'
@@ -80,7 +81,7 @@ export function useEditActions(photo: Photo | undefined, photos: Photo[], onClos
       return
     }
     try {
-      const n = await syncToPhotos(qc, p.id, ids, ['global', 'local', 'lut', 'output_sharpen'], t('history.sync', { n: ids.length }))
+      const n = await syncToPhotos(qc, p.id, ids, PRESET_SECTIONS, t('history.sync', { n: ids.length }))
       push('success', t('edit.synced', { n }), 2500)
     } catch (err) {
       fail(err)

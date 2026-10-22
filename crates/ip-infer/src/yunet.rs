@@ -1,13 +1,31 @@
 //! YuNet decoding, ported from OpenCV `FaceDetectorYNImpl` (modules/objdetect/src/face_detect.cpp).
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::{anyhow, Context, Result};
+use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::Tensor;
 
 const STRIDES: [usize; 3] = [8, 16, 32];
+
+/// ONNX Runtime allows one environment per process, so it is created here, once, and every
+/// detector shares it. It lives for the whole process because sessions borrow from it.
+fn environment() -> Result<Environment> {
+    static ENV: OnceLock<Mutex<Option<Environment>>> = OnceLock::new();
+    let slot = ENV.get_or_init(|| Mutex::new(None));
+    let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(env) = g.as_ref() {
+        return Ok(env.clone());
+    }
+    let env = ort::init()
+        .with_name("imagepicker")
+        .build()
+        .map_err(|e| anyhow!("ort environment: {e}"))?;
+    *g = Some(env.clone());
+    Ok(env)
+}
 
 /// One detected face. Everything is normalised to the input image (`bbox` = `[x, y, w, h]`).
 #[derive(Debug, Clone, PartialEq)]
@@ -54,8 +72,9 @@ impl FaceDetector {
 
     pub fn load_with(model_path: impl AsRef<Path>, opts: Options) -> Result<Self> {
         let path = model_path.as_ref();
+        let env = environment()?;
         // CPU execution provider only (the ort default). Add NNAPI / XNNPACK here later.
-        let session = Session::builder()
+        let session = Session::builder(&env)
             .map_err(|e| anyhow!("ort session builder: {e}"))?
             .with_intra_threads(1)
             .map_err(|e| anyhow!("ort threads: {e}"))?

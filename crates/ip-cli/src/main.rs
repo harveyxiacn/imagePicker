@@ -13,6 +13,7 @@ use ip_core::{
 use ip_server::ServerConfig;
 
 mod bench;
+mod preset_sheet;
 
 #[derive(Parser, Debug)]
 #[command(name = "imagepicker", version, about = "Local-first AI photo culling")]

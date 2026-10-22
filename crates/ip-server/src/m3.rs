@@ -7,7 +7,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ip_core::ip_render::Backend;
 use ip_core::{
-    AutoCropOut, AutoCropRequest, AutoRequest, PresetCreate, PreviewRequest, SyncRequest,
+    AutoCropOut, AutoCropRequest, AutoRequest, PresetApplied, PresetApplyRequest, PresetCreate,
+    PreviewRequest, SyncRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -97,6 +98,23 @@ pub async fn sync_edits(
 
 pub async fn list_presets(State(st): State<AppState>) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "presets": st.core.presets().await? })))
+}
+
+/// `GET /api/edits/{id}/presets`: presets with stacks fitted to this photo at 100 %.
+pub async fn photo_presets(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(json!({ "presets": st.core.photo_presets(id).await? })))
+}
+
+/// `POST /api/edits/{id}/preset`: one preset fitted to this photo at a strength (not saved).
+pub async fn apply_preset(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+    ApiJson(req): ApiJson<PresetApplyRequest>,
+) -> ApiResult<Json<PresetApplied>> {
+    Ok(Json(st.core.apply_preset_for(id, req).await?))
 }
 
 pub async fn create_preset(

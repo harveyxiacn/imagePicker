@@ -4,10 +4,22 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { fetchMask } from '@/api/client'
 import { usePhotoAnalysis } from '@/api/queries'
-import type { AdjustKey, MaskRef, MaskTarget, Photo } from '@/api/types'
+import type { AdjustKey, ColorRange, LocalOp, LuminanceRange, MaskRef, MaskTarget, Photo } from '@/api/types'
 import { missingModelsOf } from '@/lib/analysis'
 import { qk } from '@/lib/cache'
-import { addLocal, defaultMask, localOps, maskLabelKey, removeLocal, setLocalField, updateLocal } from '@/lib/edit'
+import {
+  addLocal,
+  COLOR_RANGE_DEFAULTS,
+  defaultMask,
+  LUMINANCE_RANGE_DEFAULTS,
+  localOps,
+  maskLabelKey,
+  rangeOf,
+  removeLocal,
+  setLocalField,
+  setLocalRange,
+  updateLocal,
+} from '@/lib/edit'
 import { changeStack, commitLive, setLive } from '@/lib/editActions'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useEdit } from '@/stores/edit'
@@ -17,7 +29,141 @@ import { Section } from './Section'
 import { Slider } from './Slider'
 
 const AI_CHIPS: MaskTarget[] = ['subject', 'sky', 'background', 'person', 'skin', 'hair', 'clothes']
-const LOCAL_KEYS: AdjustKey[] = ['exposure', 'contrast', 'highlights', 'shadows', 'temp', 'saturation', 'clarity', 'dehaze']
+const LOCAL_KEYS: AdjustKey[] = ['exposure', 'contrast', 'highlights', 'shadows', 'temp', 'saturation', 'clarity', 'dehaze', 'texture', 'dodge', 'burn']
+
+type RangeKind = 'none' | 'luminance' | 'color'
+
+/**
+ * Range mask: narrow the mask to the pixels whose own luminance or colour
+ * already falls in a band, so a gradient or an AI mask can be confined to, say, only the
+ * warm tones inside it. It multiplies the spatial mask; it never widens it.
+ */
+function RangeMask({ op, index }: { op: LocalOp; index: number }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const r = rangeOf(op)
+  const kind: RangeKind = r?.kind === 'luminance' ? 'luminance' : r?.kind === 'color' ? 'color' : 'none'
+
+  const pick = (next: RangeKind) => {
+    const range =
+      next === 'luminance'
+        ? ({ kind: 'luminance', ...LUMINANCE_RANGE_DEFAULTS } satisfies LuminanceRange)
+        : next === 'color'
+          ? ({ kind: 'color', ...COLOR_RANGE_DEFAULTS } satisfies ColorRange)
+          : null
+    changeStack(qc, setLocalRange(useEdit.getState().stack, index, range), t('history.rangeMask'))
+  }
+  const live = (range: LuminanceRange | ColorRange) => setLive(setLocalRange(useEdit.getState().stack, index, range))
+  const commit = () => commitLive(qc, t('history.rangeMask'), `local:${index}:range`)
+
+  return (
+    <div className="mt-1 border-t border-line/60 pt-1" data-testid={`local-range-${index}`}>
+      <div className="mb-1 flex gap-1" role="group" aria-label={t('edit.rangeMask')}>
+        {(['none', 'luminance', 'color'] as RangeKind[]).map((k) => (
+          <button key={k} className="chip" aria-pressed={kind === k} data-testid={`range-${k}`} onClick={() => pick(k)}>
+            {t(`edit.range_${k}`)}
+          </button>
+        ))}
+      </div>
+      {r?.kind === 'luminance' && (
+        <>
+          <Slider
+            testId={`range-lum-min`}
+            label={t('edit.rangeMin')}
+            value={r.min}
+            min={0}
+            max={100}
+            step={1}
+            onLive={(v) => live({ ...r, min: Math.min(v, r.max) })}
+            onCommit={commit}
+          />
+          <Slider
+            testId={`range-lum-max`}
+            label={t('edit.rangeMax')}
+            value={r.max}
+            min={0}
+            max={100}
+            step={1}
+            def={100}
+            onLive={(v) => live({ ...r, max: Math.max(v, r.min) })}
+            onCommit={commit}
+          />
+          <Slider
+            testId={`range-lum-softness`}
+            label={t('edit.rangeSoftness')}
+            value={r.softness ?? 30}
+            min={0}
+            max={100}
+            step={1}
+            def={30}
+            onLive={(v) => live({ ...r, softness: v })}
+            onCommit={commit}
+          />
+        </>
+      )}
+      {r?.kind === 'color' && (
+        <>
+          <Slider
+            testId={`range-hue`}
+            label={t('edit.rangeHue')}
+            value={r.hue}
+            min={0}
+            max={360}
+            step={1}
+            unit="°"
+            track="linear-gradient(to right, hsl(0 85% 55%), hsl(60 85% 55%), hsl(120 85% 55%), hsl(180 85% 55%), hsl(240 85% 55%), hsl(300 85% 55%), hsl(360 85% 55%))"
+            onLive={(v) => live({ ...r, hue: v })}
+            onCommit={commit}
+          />
+          <Slider
+            testId={`range-width`}
+            label={t('edit.rangeWidth')}
+            value={r.width}
+            min={0}
+            max={180}
+            step={1}
+            def={40}
+            onLive={(v) => live({ ...r, width: v })}
+            onCommit={commit}
+          />
+          <Slider
+            testId={`range-sat-min`}
+            label={t('edit.rangeSatMin')}
+            value={r.sat_min ?? 10}
+            min={0}
+            max={100}
+            step={1}
+            def={10}
+            onLive={(v) => live({ ...r, sat_min: Math.min(v, r.sat_max ?? 100) })}
+            onCommit={commit}
+          />
+          <Slider
+            testId={`range-sat-max`}
+            label={t('edit.rangeSatMax')}
+            value={r.sat_max ?? 100}
+            min={0}
+            max={100}
+            step={1}
+            def={100}
+            onLive={(v) => live({ ...r, sat_max: Math.max(v, r.sat_min ?? 0) })}
+            onCommit={commit}
+          />
+          <Slider
+            testId={`range-softness`}
+            label={t('edit.rangeSoftness')}
+            value={r.softness ?? 40}
+            min={0}
+            max={100}
+            step={1}
+            def={40}
+            onLive={(v) => live({ ...r, softness: v })}
+            onCommit={commit}
+          />
+        </>
+      )}
+    </div>
+  )
+}
 
 /** Local adjustments: AI masks (target chips), radial / linear gradients, per-mask sliders. */
 export function LocalPanel({ photo }: { photo: Photo }) {
@@ -176,6 +322,7 @@ export function LocalPanel({ photo }: { photo: Photo }) {
                       onSet={(k, v) => setLive(setLocalField(useEdit.getState().stack, index, k, v))}
                       onCommit={(k) => commitLive(qc, t('history.localAdjust', { name: t(`adjust.${k}`) }), `local:${index}:${k}`)}
                     />
+                    <RangeMask op={op} index={index} />
                   </div>
                 )}
               </li>

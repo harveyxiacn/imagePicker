@@ -31,7 +31,7 @@ function fmt(v: number, decimals: number, signed: boolean): string {
   return signed && v > 0 ? `+${s}` : s
 }
 
-/** Lightroom-style slider: double-click resets, wheel / arrows fine-tune, numeric input, Alt-drag clipping stub. */
+/** Slider: double-click resets, wheel / arrows fine-tune, numeric input, Alt-drag clipping stub. */
 export const Slider = memo(function Slider({ label, value, min, max, step, decimals = 0, def = 0, onLive, onCommit, track, flash, testId, unit, disabled }: Props) {
   const [draft, setDraft] = useState<string | null>(null)
   const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null)

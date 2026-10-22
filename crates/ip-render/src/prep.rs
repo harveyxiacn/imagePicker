@@ -7,8 +7,9 @@ use crate::geom::{self, Geo};
 use crate::portrait::{self, WarpField};
 use crate::*;
 
-/// Floats per op record (16 vec4).
-pub const REC: usize = 64;
+/// Floats per op record (20 vec4). The GPU shader indexes records with the matching
+/// stride, so this and `R(k, i)` in render.wgsl change together.
+pub const REC: usize = 80;
 
 pub mod r {
     pub const KIND: usize = 0;
@@ -35,6 +36,18 @@ pub mod r {
     pub const PIVOT: usize = 33;
     pub const GRADE: usize = 34; // 6 floats: shadows a,b; mids a,b; highlights a,b
     pub const HSL: usize = 40; // 8 x (h, s, l)
+    /// Mid-scale texture amount. Sits just past the HSL block, which ends at 64.
+    pub const TEXTURE: usize = 64;
+    /// Dodge / burn amounts.
+    pub const DODGE: usize = 65;
+    pub const BURN: usize = 66;
+
+    /// Range mask: `MR` holds the kind, `MR+1..` the params.
+    /// Multiplied into the mask weight, so it composes with every mask kind.
+    /// 0 (the default, no gating) or one of the `MR_*` kinds below.
+    pub const MR: usize = 68; // 7 floats: kind, then up to 6 parameters
+    pub const MR_LUMINANCE: f32 = 1.0;
+    pub const MR_COLOR: f32 = 2.0;
 
     pub const KIND_GLOBAL: f32 = 0.0;
     pub const KIND_AI: f32 = 1.0;
@@ -42,6 +55,23 @@ pub mod r {
     pub const KIND_LINEAR: f32 = 3.0;
     /// Portrait retouching; the record layout below replaces the adjust fields.
     pub const KIND_BEAUTY: f32 = 4.0;
+    /// Vignette + grain; the record layout below replaces the adjust fields.
+    pub const KIND_EFFECTS: f32 = 5.0;
+
+    // Effects record fields (kind == KIND_EFFECTS).
+    pub const E_V_AMT: usize = 4;
+    pub const E_V_MID: usize = 5;
+    pub const E_V_ROUND: usize = 6;
+    pub const E_V_FEATHER: usize = 7;
+    pub const E_V_HL: usize = 8;
+    /// 0 = highlight priority, 1 = colour priority, 2 = paint overlay.
+    pub const E_V_STYLE: usize = 14;
+    pub const E_G_AMT: usize = 9;
+    pub const E_G_SIZE: usize = 10;
+    pub const E_G_FREQ: usize = 11;
+    /// Grain cells per unit of output coordinate (x, y), anchored to the source image.
+    pub const E_G_SX: usize = 12;
+    pub const E_G_SY: usize = 13;
 
     // Beauty record fields (kind == KIND_BEAUTY). AMOUNT/INVERT/M0.. as for AI masks
     // (the skin plane), LAYER_OFF = first of two layer slots (low-pass, smoothed low band).
@@ -85,6 +115,9 @@ pub mod r {
     pub const F_COLOR: u32 = 256;
     pub const F_HSL: u32 = 512;
     pub const F_GRADE: u32 = 1024;
+    pub const F_TEXTURE: u32 = 2048;
+    pub const F_DODGE: u32 = 4096;
+    pub const F_RANGE: u32 = 8192;
 }
 
 /// Entries per curve channel table.
@@ -115,10 +148,25 @@ pub struct Plan {
     pub planes: Vec<f32>,
     pub luts: Vec<LutUse>,
     pub sharpen: f32,
+    /// Whole-image detail stage (sharpening + noise reduction), applied by both backends
+    /// after their per-pixel loop. `None` leaves the render exactly as it was before M9.
+    pub detail: Option<DetailStage>,
     /// Warp stage: backward displacement field (None = no warp).
     pub warp: Option<WarpField>,
     /// Number of proxy-sized layer slots (beauty ops use two).
     pub layer_slots: usize,
+}
+
+/// The resolved [`Detail`] op plus the output sharpening that must follow it.
+///
+/// Output sharpening normally runs inside the backend's per-pixel loop; when a detail op
+/// is present it is moved here instead, so that noise reduction and sharpening both land
+/// before it. See `detail.rs`.
+#[derive(Debug, Clone)]
+pub struct DetailStage {
+    pub detail: Detail,
+    /// Output sharpen amount, 0..100 (moved out of `Plan::sharpen`).
+    pub sharpen: f32,
 }
 
 impl Plan {
@@ -283,6 +331,12 @@ fn adjust_flags(a: &Adjust) -> u32 {
     if a.dehaze != 0.0 {
         f |= r::F_DEHAZE;
     }
+    if a.texture != 0.0 {
+        f |= r::F_TEXTURE;
+    }
+    if a.dodge != 0.0 || a.burn != 0.0 {
+        f |= r::F_DODGE;
+    }
     if a.curve.as_ref().and_then(curve_tables).is_some() {
         f |= r::F_CURVES;
     }
@@ -307,7 +361,7 @@ fn adjust_flags(a: &Adjust) -> u32 {
 }
 
 fn needs_layers(flags: u32) -> bool {
-    flags & (r::F_HS | r::F_CLARITY | r::F_DEHAZE) != 0
+    flags & (r::F_HS | r::F_CLARITY | r::F_DEHAZE | r::F_TEXTURE) != 0
 }
 
 /// Build the op record for an Adjust (kind/mask fields left for the caller).
@@ -338,6 +392,9 @@ fn adjust_record(a: &Adjust, curves: &mut Vec<f32>) -> [f32; REC] {
     rec[r::DEHAZE_S] = (-d).max(0.0) * 0.3;
     rec[r::VIBRANCE] = a.vibrance.clamp(-100.0, 100.0) / 100.0;
     rec[r::SAT] = a.saturation.clamp(-100.0, 100.0) / 100.0;
+    rec[r::TEXTURE] = a.texture.clamp(-100.0, 100.0) / 100.0 * 0.9;
+    rec[r::DODGE] = a.dodge.clamp(0.0, 100.0) / 100.0 * 0.30;
+    rec[r::BURN] = a.burn.clamp(0.0, 100.0) / 100.0 * 0.30;
     if flags & r::F_CURVES != 0 {
         if let Some(t) = a.curve.as_ref().and_then(curve_tables) {
             rec[r::CURVE_OFF] = curves.len() as f32;
@@ -358,6 +415,72 @@ fn adjust_record(a: &Adjust, curves: &mut Vec<f32>) -> [f32; REC] {
         rec[r::GRADE + i * 2] = hue.cos() * amt;
         rec[r::GRADE + i * 2 + 1] = hue.sin() * amt;
     }
+    rec
+}
+
+/// Pack a [`MaskRange`] into the op record. Unknown kinds stay neutral (no gating), so a
+/// stack written by a newer version still renders something sensible.
+fn range_record(rec: &mut [f32; REC], range: &MaskRange) {
+    let soft = |v: f32| v.clamp(0.0, 100.0) / 100.0;
+    match range {
+        MaskRange::Luminance { min, max, softness } => {
+            let (lo, hi) = (min.clamp(0.0, 100.0) / 100.0, max.clamp(0.0, 100.0) / 100.0);
+            rec[r::FLAGS] += r::F_RANGE as f32;
+            rec[r::MR] = r::MR_LUMINANCE;
+            // An inverted or degenerate band would select nothing; keep it well formed.
+            rec[r::MR + 1] = lo.min(hi);
+            rec[r::MR + 2] = lo.max(hi);
+            rec[r::MR + 3] = soft(*softness);
+        }
+        MaskRange::Color {
+            hue,
+            width,
+            sat_min,
+            sat_max,
+            softness,
+        } => {
+            let (lo, hi) = (
+                sat_min.clamp(0.0, 100.0) / 100.0,
+                sat_max.clamp(0.0, 100.0) / 100.0,
+            );
+            rec[r::FLAGS] += r::F_RANGE as f32;
+            rec[r::MR] = r::MR_COLOR;
+            rec[r::MR + 1] = hue.rem_euclid(360.0).to_radians();
+            rec[r::MR + 2] = width.clamp(0.0, 180.0).to_radians();
+            rec[r::MR + 3] = lo.min(hi);
+            rec[r::MR + 4] = lo.max(hi);
+            rec[r::MR + 5] = soft(*softness);
+        }
+        MaskRange::Unknown => {}
+    }
+}
+
+/// Pack an [`Effects`] op. `sx`/`sy` convert a normalised output coordinate into grain
+/// cells: the cell size is fixed in *source* pixels, so grain does not change scale
+/// between a preview and a full-resolution export.
+fn effects_record(e: &Effects, geo: &Geo) -> [f32; REC] {
+    let mut rec = [0.0f32; REC];
+    rec[r::KIND] = r::KIND_EFFECTS;
+    rec[r::AMOUNT] = 1.0;
+    let v = &e.vignette;
+    rec[r::E_V_AMT] = v.amount.clamp(-100.0, 100.0) / 100.0;
+    rec[r::E_V_MID] = v.midpoint.clamp(0.0, 100.0) / 100.0;
+    rec[r::E_V_ROUND] = v.roundness.clamp(-100.0, 100.0) / 100.0;
+    rec[r::E_V_FEATHER] = v.feather.clamp(0.0, 100.0) / 100.0;
+    rec[r::E_V_HL] = v.highlight_contrast.clamp(0.0, 100.0) / 100.0;
+    rec[r::E_V_STYLE] = match v.style {
+        VignetteStyle::HighlightPriority => 0.0,
+        VignetteStyle::ColorPriority => 1.0,
+        VignetteStyle::PaintOverlay => 2.0,
+    };
+    let g = &e.grain;
+    rec[r::E_G_AMT] = g.amount.clamp(0.0, 100.0) / 100.0;
+    rec[r::E_G_SIZE] = g.size.clamp(0.0, 100.0) / 100.0;
+    rec[r::E_G_FREQ] = g.frequency.clamp(0.0, 100.0) / 100.0;
+    // Grain cell size in source pixels: 1.2 px at Size 0 up to ~14 px at Size 100.
+    let cell = 1.2 + 12.8 * rec[r::E_G_SIZE];
+    rec[r::E_G_SX] = (geo.rect[2] as f32 * geo.sw as f32 / cell).max(1.0);
+    rec[r::E_G_SY] = (geo.rect[3] as f32 * geo.sh as f32 / cell).max(1.0);
     rec
 }
 
@@ -556,6 +679,7 @@ pub fn build(req: &RenderRequest<'_>) -> Result<Plan> {
         planes: vec![],
         luts: vec![],
         sharpen: 0.0,
+        detail: None,
         warp: None,
         layer_slots: 0,
     };
@@ -605,6 +729,9 @@ pub fn build(req: &RenderRequest<'_>) -> Result<Plan> {
                 let mut rec = adjust_record(&l.adjust, &mut plan.curves);
                 rec[r::AMOUNT] = l.amount.clamp(0.0, 1.0);
                 rec[r::INVERT] = if l.invert { 1.0 } else { 0.0 };
+                if let Some(range) = &l.range {
+                    range_record(&mut rec, range);
+                }
                 match &l.mask {
                     MaskRef::Ai { target, person_id } => {
                         let Some(mask) = req.masks.mask(*target, *person_id)? else {
@@ -664,6 +791,21 @@ pub fn build(req: &RenderRequest<'_>) -> Result<Plan> {
                     }
                 }
             }
+            Op::Effects(e) => {
+                if !e.is_neutral() {
+                    let rec = effects_record(e, &plan.geo);
+                    push_op(&mut plan, rec, &mut layer_count);
+                }
+            }
+            Op::Detail(d) => {
+                if !d.is_neutral() {
+                    // Later ops win, matching how a second `output_sharpen` behaves.
+                    plan.detail = Some(DetailStage {
+                        detail: d.clone(),
+                        sharpen: 0.0,
+                    });
+                }
+            }
             Op::OutputSharpen(s) => plan.sharpen = s.amount.clamp(0.0, 100.0),
             Op::Beauty(b) => {
                 if !people.is_empty() {
@@ -677,6 +819,12 @@ pub fn build(req: &RenderRequest<'_>) -> Result<Plan> {
             // this plan is built.
             Op::Crop(_) | Op::Warp(_) | Op::Patch(_) | Op::Unknown => {}
         }
+    }
+    // Output sharpening must land after noise reduction, so when a detail op exists it
+    // moves out of the per-pixel loop and into the detail stage (detail.rs).
+    if let Some(stage) = plan.detail.as_mut() {
+        stage.sharpen = plan.sharpen;
+        plan.sharpen = 0.0;
     }
     Ok(plan)
 }
