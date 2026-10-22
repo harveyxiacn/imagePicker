@@ -594,6 +594,20 @@ impl AiWorker for ManagedWorker {
         parse(v, "besttake.compose")
     }
 
+    async fn hair_rank(&self, req: &HairRankRequest) -> Result<HairRankResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("hair.rank", params, None, None).await?;
+        parse(v, "hair.rank")
+    }
+
+    async fn hair_compose(&self, req: &HairComposeRequest) -> Result<HairComposeResponse> {
+        let params = serde_json::to_value(req)
+            .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;
+        let v = self.rpc("hair.compose", params, None, None).await?;
+        parse(v, "hair.compose")
+    }
+
     async fn inpaint_run(&self, req: &InpaintRequest) -> Result<InpaintResponse> {
         let params = serde_json::to_value(req)
             .map_err(|e| WorkerError::Protocol(format!("cannot encode request: {e}")))?;

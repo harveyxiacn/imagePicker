@@ -49,7 +49,7 @@ pub const MIN_IDENTITY_COS: f32 = crate::analysis::cluster::TRACK_COS;
 /// Long edge of the removal mask handed to `inpaint.run` (analysis resolution).
 pub const INPAINT_MASK_EDGE: u32 = 1024;
 /// Edge feather stored on generated patches (fraction of the rect's short side).
-const PATCH_FEATHER: f32 = 0.08;
+pub(crate) const PATCH_FEATHER: f32 = 0.08;
 /// A person gets a new face only when a composable face of theirs beats the base face by more
 /// than this (expression score 0-1): smaller gains are not worth the compositing risk. The base
 /// choice uses the same margin ("good enough" = within this of the person's best).
@@ -725,7 +725,7 @@ pub fn body_box(face: [f64; 4]) -> [f32; 4] {
 
 // ------------------------------------------------------------------ patch ops
 
-fn mkphoto(r: &PhotoRef) -> MaskPhoto {
+pub(crate) fn mkphoto(r: &PhotoRef) -> MaskPhoto {
     MaskPhoto {
         photo_id: r.id,
         path: r.path.to_string_lossy().into_owned(),
@@ -742,7 +742,7 @@ fn clamp_rect(r: [f32; 4]) -> [f32; 4] {
     [x, y, w, h]
 }
 
-fn patch_op(
+pub(crate) fn patch_op(
     kind: &str,
     asset: &str,
     rect: [f32; 4],
@@ -766,16 +766,16 @@ fn is_patch(op: &Value, kind: &str) -> bool {
         && op.get("kind").and_then(Value::as_str) == Some(kind)
 }
 
-/// Whether `old` is the slot `new` takes over. A best take is tracked by person (or by the base
-/// face when the face has no person); denoise replaces denoise; face restoration replaces all
-/// face restoration; inpainting always appends.
+/// Whether `old` is the slot `new` takes over. A best take and a hair transfer are tracked by
+/// person (or by the base face when the face has no person); denoise replaces denoise; face
+/// restoration replaces all face restoration; inpainting always appends.
 fn same_slot(old: &Value, new: &Value) -> bool {
     let kind = new.get("kind").and_then(Value::as_str).unwrap_or("");
     if !is_patch(old, kind) {
         return false;
     }
     match kind {
-        "best_take" => match new.get("person_id").and_then(Value::as_i64) {
+        "best_take" | "hair" => match new.get("person_id").and_then(Value::as_i64) {
             Some(p) => old.get("person_id").and_then(Value::as_i64) == Some(p),
             None => {
                 old.get("person_id").and_then(Value::as_i64).is_none()
@@ -783,7 +783,7 @@ fn same_slot(old: &Value, new: &Value) -> bool {
                         == new.get("base_face_id").and_then(Value::as_i64)
             }
         },
-        "denoise" | "face_restore" => true,
+        "denoise" | "face_restore" | "deshine" | "flyaway" => true,
         _ => false,
     }
 }
@@ -801,7 +801,7 @@ pub fn replace_patches(old: Vec<Value>, new: Vec<Value>) -> Vec<Value> {
 
 // ------------------------------------------------------------------ Core API
 
-fn reason_of(e: &CoreError) -> String {
+pub(crate) fn reason_of(e: &CoreError) -> String {
     e.to_string()
 }
 
@@ -835,6 +835,26 @@ struct Composed {
     face_id: i64,
     person_id: Option<i64>,
     source_photo_id: i64,
+}
+
+/// The donor-free sweat cleanup ops of `enhance` (docs/03 section 7.5): `deshine` and `flyaway`.
+pub fn is_sweat_op(op: &str) -> bool {
+    matches!(op, "deshine" | "flyaway")
+}
+
+/// Faces an `enhance` op works on: all faces for face restoration, the subjects (all faces when
+/// none is a subject) for the sweat cleanup.
+fn enhance_faces(op: &str, faces: &[Face]) -> Vec<[f64; 4]> {
+    let subjects: Vec<[f64; 4]> = faces
+        .iter()
+        .filter(|f| f.is_subject)
+        .map(|f| f.bbox)
+        .collect();
+    if is_sweat_op(op) && !subjects.is_empty() {
+        subjects
+    } else {
+        faces.iter().map(|f| f.bbox).collect()
+    }
 }
 
 /// Worker failures after which trying the next item of the same task is pointless.
@@ -874,7 +894,7 @@ impl Core {
         }
     }
 
-    fn gen_dir(&self, task_id: &str) -> PathBuf {
+    pub(crate) fn gen_dir(&self, task_id: &str) -> PathBuf {
         self.dirs.gen.join(task_id)
     }
 
@@ -892,7 +912,11 @@ impl Core {
 
     /// Saves `new` patch ops into the photo's stack (replacing the slots they take over) and
     /// sends `edits.updated`.
-    async fn apply_patches(self: &Arc<Self>, photo_id: i64, new: Vec<Value>) -> Result<()> {
+    pub(crate) async fn apply_patches(
+        self: &Arc<Self>,
+        photo_id: i64,
+        new: Vec<Value>,
+    ) -> Result<()> {
         let r = self
             .db
             .call(move |c| catalog::photo_ref(c, photo_id))
@@ -1446,7 +1470,7 @@ impl Core {
         body: EnhanceBody,
     ) -> Result<String> {
         let op = match body.op.as_str() {
-            "denoise" | "face_restore" => body.op.clone(),
+            "denoise" | "face_restore" | "deshine" | "flyaway" => body.op.clone(),
             "upscale" => {
                 return Err(CoreError::Unprocessable(
                     "upscale is only available through export (upscale: 2|4)".into(),
@@ -1454,7 +1478,7 @@ impl Core {
             }
             _ => {
                 return Err(CoreError::Unprocessable(
-                    "op must be denoise or face_restore".into(),
+                    "op must be denoise, face_restore, deshine or flyaway".into(),
                 ))
             }
         };
@@ -1471,7 +1495,7 @@ impl Core {
                 Ok((r, astore::faces_of_photo(c, photo_id)?))
             })
             .await?;
-        if op == "face_restore" && faces.is_empty() {
+        if op != "denoise" && faces.is_empty() {
             return Err(CoreError::Unprocessable("the photo has no faces".into()));
         }
         self.preflight_models("enhance", &[op.as_str()]).await?;
@@ -1516,7 +1540,7 @@ impl Core {
                 op: op.to_string(),
                 strength,
                 scale: None,
-                faces: (op == "face_restore").then(|| faces.iter().map(|f| f.bbox).collect()),
+                faces: (op != "denoise").then(|| enhance_faces(op, faces)),
                 out_dir: dir.to_string_lossy().into_owned(),
                 allow_download: false,
             })
@@ -1538,17 +1562,35 @@ impl Core {
                     pieces.push((p.patch, p.rect));
                 }
                 if pieces.is_empty() {
-                    return Err(CoreError::Conflict("no face could be restored".into()));
+                    return Err(CoreError::Conflict(
+                        match op {
+                            "deshine" => "no skin or hair to de-shine was found",
+                            "flyaway" => "no stray hair to tidy was found",
+                            _ => "no face could be restored",
+                        }
+                        .into(),
+                    ));
                 }
             }
         }
+        // the sweat cleanup patches are full strength: the user's strength is the layer opacity
+        let amount = if is_sweat_op(op) {
+            strength as f32
+        } else {
+            1.0
+        };
         let (svc, id) = (self.render.clone(), r.id);
         let kind = op.to_string();
         let assets = tokio::task::spawn_blocking(move || -> Result<Vec<(String, [f32; 4])>> {
             pieces
                 .into_iter()
                 .map(|(p, rect)| {
-                    let prefix = if kind == "denoise" { "dn" } else { "fr" };
+                    let prefix = match kind.as_str() {
+                        "denoise" => "dn",
+                        "deshine" => "ds",
+                        "flyaway" => "fa",
+                        _ => "fr",
+                    };
                     svc.patches
                         .import(id, prefix, "", Path::new(&p))
                         .map(|(a, _)| (a, rect))
@@ -1559,7 +1601,7 @@ impl Core {
         .map_err(|e| CoreError::Internal(anyhow::anyhow!("patch import failed: {e}")))??;
         let ops: Vec<Value> = assets
             .iter()
-            .map(|(a, rect)| Value::Object(patch_op(op, a, *rect, PATCH_FEATHER, 1.0)))
+            .map(|(a, rect)| Value::Object(patch_op(op, a, *rect, PATCH_FEATHER, amount)))
             .collect();
         self.apply_patches(r.id, ops).await?;
         Ok(true)

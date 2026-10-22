@@ -142,6 +142,19 @@ pub trait AiWorker: Send + Sync {
             "this AI worker does not support besttake.compose".into(),
         ))
     }
+    /// Hair-quality cues of faces (`hair.rank`). Workers without it report `Unavailable`.
+    async fn hair_rank(&self, _req: &HairRankRequest) -> Result<HairRankResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support hair.rank".into(),
+        ))
+    }
+    /// Pastes a person's hair from another photo (`hair.compose`). Workers without it report
+    /// `Unavailable`.
+    async fn hair_compose(&self, _req: &HairComposeRequest) -> Result<HairComposeResponse> {
+        Err(WorkerError::Unavailable(
+            "this AI worker does not support hair.compose".into(),
+        ))
+    }
     /// Generative object removal (`inpaint.run`).
     async fn inpaint_run(&self, _req: &InpaintRequest) -> Result<InpaintResponse> {
         Err(WorkerError::Unavailable(

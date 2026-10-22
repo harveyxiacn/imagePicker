@@ -703,7 +703,8 @@ export type ServerEvent =
   | { type: 'beauty.ready'; photo_id: number }
   | { type: 'besttake.done'; photo_id: number; results: BestTakeResult[] }
   | { type: 'inpaint.done'; photo_id: number; ok: boolean; reason: string | null }
-  | { type: 'enhance.done'; photo_id: number; op: EnhanceOp; ok: boolean; reason: string | null }
+  | { type: 'enhance.done'; photo_id: number; op: EnhanceOp | SweatOp; ok: boolean; reason: string | null }
+  | { type: 'hair.done'; photo_id: number; face_id: number; ok: boolean; warnings: string[]; reason: string | null }
   | { type: 'taste.updated'; labels: number; active: boolean; alpha: number }
   | { type: 'collections.updated' }
   | { type: 'assistant.done'; plan_id: string; ok: boolean; results: AssistantResult[]; undo: AssistantUndo }
@@ -1127,8 +1128,8 @@ export interface TasteExplain {
 
 // ---- M5: patch layers, best take, inpaint, enhance (docs/api-contract-m5.md; mirrors ip-render `Patch`) ----
 
-export type PatchKind = 'best_take' | 'inpaint' | 'denoise' | 'face_restore'
-export const PATCH_KINDS: PatchKind[] = ['best_take', 'inpaint', 'denoise', 'face_restore']
+export type PatchKind = 'best_take' | 'hair' | 'inpaint' | 'denoise' | 'face_restore' | 'deshine' | 'flyaway'
+export const PATCH_KINDS: PatchKind[] = ['best_take', 'hair', 'inpaint', 'denoise', 'face_restore', 'deshine', 'flyaway']
 
 /** A generated raster layer: RGBA PNG `asset` (alpha = blend mask) placed over `rect` of the upright, pre-crop image. */
 export interface PatchOp {
@@ -1142,9 +1143,83 @@ export interface PatchOp {
   /** blend opacity 0..1 */
   amount?: number
   enabled?: boolean
-  /** best take: whose face was replaced and from which photo */
+  /** best take / hair: whose face (hair) was replaced and from which photo */
   person_id?: number
   source_photo_id?: number
+  /** best take / hair: the face that was replaced (additive) */
+  base_face_id?: number
+  /** hair: the donor face and how it was aligned (docs/api-contract-m5.md H) */
+  source_face_id?: number
+  align?: HairAlign
+  warnings?: string[]
+}
+
+// ---- hair transfer (docs/api-contract-m5.md H) ----
+
+/** Donor -> target similarity transform used by the worker (shift as a fraction of the target's width / height). */
+export interface HairAlign {
+  scale: number
+  rotation_deg: number
+  dx: number
+  dy: number
+  landmark_rms: number
+}
+
+/** Hair-quality cues of one face (docs/03 section 5.1). */
+export interface HairMetrics {
+  photo_id: number
+  ok: boolean
+  reason: string | null
+  yaw: number | null
+  pitch: number | null
+  roll: number | null
+  face_px: number | null
+  hair_ratio: number | null
+  sharpness: number | null
+  shine: number | null
+  skin_shine: number | null
+  roughness: number | null
+}
+
+export type HairCue = 'fuller' | 'less_shine' | 'tidier' | 'sharper' | 'similar_pose' | 'earlier' | 'same_session'
+export const HAIR_CUES: HairCue[] = ['fuller', 'less_shine', 'tidier', 'sharper', 'similar_pose', 'earlier', 'same_session']
+
+export interface HairDonor {
+  photo_id: number
+  face_id: number
+  file_name: string
+  taken_at: number | null
+  /** negative = earlier than the target photo */
+  minutes_from_target: number | null
+  same_session: boolean
+  composable: boolean
+  /** pose_too_different | donor_too_small | hair_not_found */
+  reason: string | null
+  pose_delta: { yaw: number; pitch: number; roll: number }
+  scale: number | null
+  /** 0..1, null when not measured */
+  score: number | null
+  cues: HairCue[]
+  metrics: HairMetrics | null
+}
+
+export interface HairDonors {
+  photo_id: number
+  face_id: number
+  person_id: number | null
+  ranked: boolean
+  /** models_missing | worker_unavailable | message */
+  rank_error: string | null
+  target: HairMetrics | null
+  candidates: HairDonor[]
+}
+
+export interface HairBody {
+  face_id: number
+  donor_photo_id: number
+  donor_face_id: number
+  /** 0..1, default 1 */
+  strength?: number
 }
 
 export type BestTakeWarning = 'large_pose_change' | 'camera_moved' | 'occlusion' | 'seam'
@@ -1223,8 +1298,11 @@ export type InpaintBody =
   | { strokes: Stroke[]; model?: 'lama' | 'sdxl' }
 
 export type EnhanceOp = 'denoise' | 'face_restore'
+/** Sweat cleanup (docs/api-contract-m5.md H.5): full-strength patches whose `amount` is the strength. */
+export type SweatOp = 'deshine' | 'flyaway'
+export const SWEAT_OPS: SweatOp[] = ['deshine', 'flyaway']
 export interface EnhanceBody {
-  op: EnhanceOp
+  op: EnhanceOp | SweatOp
   strength: number
 }
 

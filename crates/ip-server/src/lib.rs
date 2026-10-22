@@ -235,6 +235,8 @@ pub fn build_router_auth(
         .route("/photos/{id}/bystanders", get(m5::bystanders))
         .route("/photos/{id}/inpaint", post(m5::inpaint))
         .route("/photos/{id}/enhance", post(m5::enhance))
+        .route("/photos/{id}/hair", post(m5::hair))
+        .route("/photos/{id}/hair/donors", get(m5::hair_donors))
         .route("/assets/{photo_id}/{asset}", get(m5::asset))
         .route("/tasks", get(m5::tasks))
         .route("/tasks/{id}/cancel", post(m5::cancel_task))

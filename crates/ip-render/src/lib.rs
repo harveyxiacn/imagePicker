@@ -559,11 +559,37 @@ fn yes() -> bool {
 #[serde(rename_all = "snake_case")]
 pub enum PatchKind {
     BestTake,
+    /// Hair from another photo of the same person (docs/03 section 5.1).
+    Hair,
     Inpaint,
     Denoise,
     FaceRestore,
+    /// Sweat cleanup: shine compressed on skin and hair (docs/03 section 7.5).
+    Deshine,
+    /// Sweat cleanup: stray strands outside the hair silhouette filled (docs/03 section 7.5).
+    Flyaway,
     #[serde(other)]
     Other,
+}
+
+impl PatchKind {
+    /// Compositing order of the patch kinds (lower first; equal kinds keep their stack order).
+    /// Every patch is computed from the original pixels, so a later layer replaces an earlier
+    /// one where both cover the same pixels: whole-frame / per-face cleanups first, then object
+    /// removal, then face replacement, and the hair transfer last (its alpha only covers pixels it
+    /// actually changes, so the sweat cleanup below it survives everywhere else).
+    pub fn layer_order(self) -> u8 {
+        match self {
+            Self::Denoise => 0,
+            Self::FaceRestore => 1,
+            Self::Deshine => 2,
+            Self::Flyaway => 3,
+            Self::Inpaint => 4,
+            Self::Other => 5,
+            Self::BestTake => 6,
+            Self::Hair => 7,
+        }
+    }
 }
 
 /// A generated layer. The asset is an RGBA image whose alpha is the blend mask, placed
@@ -583,7 +609,7 @@ pub struct Patch {
     pub amount: f32,
     #[serde(default = "yes")]
     pub enabled: bool,
-    /// Best take: whose face was replaced, and from which photo.
+    /// Best take / hair: whose face (hair) was replaced, and from which photo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub person_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

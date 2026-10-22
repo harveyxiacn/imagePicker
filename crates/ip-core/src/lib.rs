@@ -18,6 +18,7 @@ pub mod events;
 pub mod export;
 pub mod files;
 pub mod generate;
+pub mod hair;
 pub mod imaging;
 pub mod import;
 pub mod jpegmeta;
@@ -68,6 +69,7 @@ pub use generate::{
     BaseChoice, BaseFrame, BestTakeAutoBody, BestTakeChoice, BestTakePlan, BestTakeRequest,
     BestTakeResult, EnhanceBody, InpaintBody, Stroke,
 };
+pub use hair::{HairBody, HairDonor, HairDonors, PoseDelta};
 pub use imaging::{Imaging, RealImaging};
 pub use ip_render;
 pub use model::*;

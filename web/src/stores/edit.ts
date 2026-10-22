@@ -14,6 +14,7 @@ export type PanelId =
   | 'grading'
   | 'local'
   | 'portrait'
+  | 'hair'
   | 'repair'
   | 'crop'
   | 'effects'

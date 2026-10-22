@@ -149,6 +149,15 @@ impl AiWorker for SwitchWorker {
     ) -> ip_worker_client::Result<BestTakeComposeResponse> {
         self.pick().besttake_compose(req).await
     }
+    async fn hair_rank(&self, req: &HairRankRequest) -> ip_worker_client::Result<HairRankResponse> {
+        self.pick().hair_rank(req).await
+    }
+    async fn hair_compose(
+        &self,
+        req: &HairComposeRequest,
+    ) -> ip_worker_client::Result<HairComposeResponse> {
+        self.pick().hair_compose(req).await
+    }
     async fn inpaint_run(&self, req: &InpaintRequest) -> ip_worker_client::Result<InpaintResponse> {
         self.pick().inpaint_run(req).await
     }
