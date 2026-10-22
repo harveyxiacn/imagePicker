@@ -329,6 +329,13 @@ pub fn sort_donors(donors: &mut [HairDonor]) {
     });
 }
 
+/// The pair a hair transfer runs on, after `check_hair_identity` let it through.
+struct HairPair<'a> {
+    target: &'a Face,
+    donor: &'a Face,
+    identity: HairIdentity,
+}
+
 // ------------------------------------------------------------------ catalog reads
 
 struct Candidate {
@@ -401,7 +408,14 @@ fn gather(c: &rusqlite::Connection, photo_id: i64, face_id: i64) -> Result<Gathe
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     // one face per photo (a person is in a photo once): the most similar one passing the guard
-    let mut best: HashMap<i64, (f32, i64, String, Option<i64>, Option<i64>)> = HashMap::new();
+    struct Best {
+        cos: f32,
+        face_id: i64,
+        file_name: String,
+        taken_at: Option<i64>,
+        width: Option<i64>,
+    }
+    let mut best: HashMap<i64, Best> = HashMap::new();
     for (fid, emb, file_name, taken_at, width, person_id, track_id, fphoto) in rows {
         let fi = FaceIdentity {
             face_id: fid,
@@ -414,20 +428,29 @@ fn gather(c: &rusqlite::Connection, photo_id: i64, face_id: i64) -> Result<Gathe
         let Ok(cos) = check_hair_identity(&tid, &fi) else {
             continue; // a clustering mistake, or somebody else
         };
-        let key = cos.unwrap_or(-1.0);
-        if best.get(&fphoto).is_none_or(|b| key > b.0) {
-            best.insert(fphoto, (key, fid, file_name, taken_at, width));
+        let cos = cos.unwrap_or(-1.0);
+        if best.get(&fphoto).is_none_or(|b| cos > b.cos) {
+            best.insert(
+                fphoto,
+                Best {
+                    cos,
+                    face_id: fid,
+                    file_name,
+                    taken_at,
+                    width,
+                },
+            );
         }
     }
+    let mut picked: Vec<Best> = best.into_values().collect();
+    picked.sort_by_key(|b| b.face_id);
     let mut candidates = Vec::new();
-    let mut picked: Vec<_> = best.into_values().collect();
-    picked.sort_by_key(|b| b.1);
-    for (_, fid, file_name, taken_at, width) in picked {
+    for b in picked {
         candidates.push(Candidate {
-            face: astore::get_face(c, fid)?,
-            file_name,
-            taken_at,
-            width,
+            face: astore::get_face(c, b.face_id)?,
+            file_name: b.file_name,
+            taken_at: b.taken_at,
+            width: b.width,
         });
     }
     Ok(Gathered {
@@ -717,9 +740,17 @@ impl Core {
         let task = self.task_begin("hair", spec, 1).await?;
         let (core, task_id) = (self.clone(), task.id.clone());
         tokio::spawn(async move {
+            let pair = HairPair {
+                target: &tf,
+                donor: &df,
+                identity: HairIdentity {
+                    verified: true,
+                    cosine: cos,
+                },
+            };
             let out = task
                 .cancel
-                .scope(core.run_hair(&task, &target_ref, &donor_ref, &tf, &df, strength, cos))
+                .scope(core.run_hair(&task, &target_ref, &donor_ref, pair, strength))
                 .await;
             let (state, ok, warnings, reason) = match out {
                 Ok(Some(warnings)) => (DONE, true, warnings, None),
@@ -755,11 +786,14 @@ impl Core {
         task: &TaskHandle,
         target: &PhotoRef,
         donor: &PhotoRef,
-        tf: &Face,
-        df: &Face,
+        pair: HairPair<'_>,
         strength: f32,
-        cos: Option<f32>,
     ) -> Result<Option<Vec<String>>> {
+        let HairPair {
+            target: tf,
+            donor: df,
+            identity,
+        } = pair;
         let dir = self.gen_dir(&task.id);
         std::fs::create_dir_all(&dir)?;
         let resp = self
@@ -769,10 +803,7 @@ impl Core {
                 donor: mkphoto(donor),
                 target_face: tf.bbox,
                 donor_face: df.bbox,
-                identity: HairIdentity {
-                    verified: true,
-                    cosine: cos,
-                },
+                identity,
                 out_dir: dir.join("out").to_string_lossy().into_owned(),
                 allow_download: false,
             })
