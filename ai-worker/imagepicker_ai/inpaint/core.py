@@ -170,6 +170,7 @@ def inpaint_arrays(
     mask: np.ndarray,
     engine: FillEngine,
     grain: bool = True,
+    check: Callable[[], None] | None = None,
 ) -> InpaintOut | None:
     """`img` HxWx3 uint8, `mask` HxW float [0, 1] (> 0.5 = remove). None when the mask is empty."""
     h, w = img.shape[:2]
@@ -189,6 +190,8 @@ def inpaint_arrays(
     patch = np.ascontiguousarray(img[wy0:wy1, wx0:wx1]).copy()
     rng = np.random.default_rng(1234)
     for box in boxes:
+        if check is not None:
+            check()  # a cancelled request must release the pool thread, cluster by cluster
         (x0, y0, x1, y1), filled = fill_cluster(img, mfill, box, engine, grain, rng)
         ix0, iy0, ix1, iy1 = max(x0, wx0), max(y0, wy0), min(x1, wx1), min(y1, wy1)
         if ix1 > ix0 and iy1 > iy0:
