@@ -468,9 +468,12 @@ impl Core {
                     );
                     match target::llm_problem(&calls, &targets, agree, locale) {
                         Some(why) => fallback = Some(Fallback::new("llm_unsafe_target", why)),
-                        None => match self.build_steps(&env, &calls, &targets).await {
-                            Ok(steps) => from_llm = Some((reply, steps)),
-                            Err(why) => fallback = Some(Fallback::new("llm_invalid", why)),
+                        None => match dropped_intent(&rules.calls, &calls, locale) {
+                            Some(why) => fallback = Some(Fallback::new("llm_tool_mismatch", why)),
+                            None => match self.build_steps(&env, &calls, &targets).await {
+                                Ok(steps) => from_llm = Some((reply, steps)),
+                                Err(why) => fallback = Some(Fallback::new("llm_invalid", why)),
+                            },
                         },
                     }
                 }
@@ -849,6 +852,27 @@ struct PlanEnv<'a> {
     session_photos: usize,
     locale: Locale,
     names: &'a Names<'a>,
+}
+
+/// Intents the rules engine recognised with certainty that a model plan must not drop: a preset
+/// the request names ("暖调胶片预设" — real models answered `apply_profiles`) and numeric slider
+/// values ("把曝光提高 0.5" — models answered `auto_adjust`, not what the reply promised).
+fn dropped_intent(rules_calls: &[Call], llm_calls: &[Call], l: Locale) -> Option<String> {
+    let has = |tool: &str| llm_calls.iter().any(|c| c.tool == tool);
+    let missing = |tool: &str| rules_calls.iter().any(|c| c.tool == tool) && !has(tool);
+    if missing("apply_preset") {
+        return Some(match l {
+            Locale::Zh => "模型没有套用请求里点名的预设".into(),
+            Locale::En => "the model did not apply the preset the request names".into(),
+        });
+    }
+    if missing("adjust_sliders") {
+        return Some(match l {
+            Locale::Zh => "模型没有按请求里的数值调整滑块".into(),
+            Locale::En => "the model did not set the slider values the request names".into(),
+        });
+    }
+    None
 }
 
 fn is_destructive(tool: &str, args: &Value, affects: usize) -> bool {
