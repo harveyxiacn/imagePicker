@@ -1398,8 +1398,28 @@ async fn clearing_face_data() {
             .face_count,
         Some(1)
     );
+    // a cached style score is derived from the face features that are about to disappear
+    let id = by_name(&e, sid).await["f1.jpg"].id;
+    e.core
+        .db
+        .call(move |c| {
+            c.execute(
+                "INSERT OR REPLACE INTO taste_score(photo_id, score, model_version) VALUES(?1, 0.9, 1)",
+                [id],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let out = e.core.clear_faces().await.unwrap();
     assert_eq!(out["faces"], 1);
+    let scored: i64 = e
+        .core
+        .db
+        .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM taste_score", [], |r| r.get(0))?))
+        .await
+        .unwrap();
+    assert_eq!(scored, 0, "stale style scores are gone");
     let p = by_name(&e, sid).await.remove("f1.jpg").unwrap();
     assert_eq!(p.face_count, None);
     assert!(p.analyzed, "the rest of the analysis stays");
