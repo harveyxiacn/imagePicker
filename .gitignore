@@ -28,3 +28,6 @@ apps/desktop/src-tauri/binaries/
 
 # per-task cargo target dirs (target-*/)
 target-*/
+
+# native quality step copied into the worker source at bundle time (apps/desktop/scripts/copy-lite-lib.mjs)
+ai-worker/imagepicker_ai/steps/_native/

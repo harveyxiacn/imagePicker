@@ -1,0 +1,14 @@
+== native
+**1000 photos in 87.92 s = 11.37 photos/s** (87.92 ms per photo wall; model warm-up 3.505 s not included).
+| quality | 1000 | 119.866 | 20.2% | 119.87 | 114.65 | 176.24 |
+== python
+**1000 photos in 143.892 s = 6.95 photos/s** (143.89 ms per photo wall; model warm-up 3.414 s not included).
+| quality | 1000 | 479.982 | 48.8% | 479.98 | 422.64 | 869.27 |
+== native
+**1000 photos in 94.144 s = 10.62 photos/s** (94.14 ms per photo wall; model warm-up 3.836 s not included).
+| quality | 1000 | 121.997 | 19.1% | 122.0 | 115.89 | 181.95 |
+== python
+**1000 photos in 131.289 s = 7.62 photos/s** (131.29 ms per photo wall; model warm-up 2.481 s not included).
+| quality | 1000 | 435.585 | 47.5% | 435.58 | 433.53 | 619.26 |
+
+[exited with code 0]

@@ -272,6 +272,26 @@ fn start_server(app: &AppHandle, token: &str) -> anyhow::Result<(RunningServer, 
     #[cfg(not(target_os = "android"))]
     let extra_roots: Vec<PathBuf> = Vec::new();
 
+    // The native `quality` step for the AI worker (crates/ip-lite-ffi, loaded with ctypes).
+    // Bundled as a resource; without it the worker keeps its Python implementation.
+    #[cfg(desktop)]
+    if let Ok(dir) = app.path().resource_dir() {
+        let name = if cfg!(windows) {
+            "ip_lite_ffi.dll"
+        } else if cfg!(target_os = "macos") {
+            "libip_lite_ffi.dylib"
+        } else {
+            "libip_lite_ffi.so"
+        };
+        let lib = dir.join(name);
+        if lib.is_file() {
+            std::env::set_var("IMAGEPICKER_LITE_LIB", &lib);
+            tracing::info!(lib = %lib.display(), "native quality step");
+        } else {
+            tracing::info!(missing = %lib.display(), "native quality step not bundled");
+        }
+    }
+
     let mut cfg = ServerConfig {
         uv_path,
         worker_src,

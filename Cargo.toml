@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ip-lite", "crates/ip-imaging", "crates/ip-worker-client", "crates/ip-core", "crates/ip-server", "crates/ip-cli", "apps/desktop/src-tauri", "apps/desktop/plugins/imagepicker-media", "crates/ip-render", "crates/ip-infer"]
+members = ["crates/ip-lite", "crates/ip-imaging", "crates/ip-worker-client", "crates/ip-core", "crates/ip-server", "crates/ip-cli", "apps/desktop/src-tauri", "apps/desktop/plugins/imagepicker-media", "crates/ip-render", "crates/ip-infer", "crates/ip-lite-ffi"]
 
 [workspace.package]
 version = "0.1.0"

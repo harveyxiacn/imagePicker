@@ -65,6 +65,9 @@ python bench/profile-analysis.py --compare bench/results/profile-gpu.items.json 
 * `ai-worker/scripts/bench_analyze.py` is the older single-step benchmark: it runs each step
   alone over the whole set (images/s per step, SigLIP2 forward without decode). This profiler
   runs the real combination, as the app does, and shows how the steps share the machine.
+* The worker's `quality` step uses `crates/ip-lite-ffi` when the library is built
+  (`target/{release,debug}/ip_lite_ffi*`). `IMAGEPICKER_LITE_LIB=0` switches it off, which is how
+  the A/B numbers in `docs/10` §2.1 were taken (`results/analyze-gpu-standard-1000-ab.txt`).
 
 ## Analysis quality (synthetic photo library)
 

@@ -1,0 +1,13 @@
+[package]
+name = "ip-lite-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "C ABI for ip-lite's quality step, loaded by the AI worker with ctypes"
+
+[lib]
+name = "ip_lite_ffi"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ip-lite.workspace = true
