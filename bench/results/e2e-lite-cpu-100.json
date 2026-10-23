@@ -1,0 +1,56 @@
+{
+ "label": "",
+ "dir": "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\ip-lite-200",
+ "photos": 100,
+ "date": "2026-10-23 09:54",
+ "machine": {
+  "node": "ROG\u53f0\u5f0f",
+  "system": "Windows 11",
+  "cpu": "13th Gen Intel(R) Core(TM) i7-13700K",
+  "cores": 24,
+  "python": "3.12.10"
+ },
+ "e2e": {
+  "analysis_s": 1.0550869999999999,
+  "analyzed": 100,
+  "export_s": 0.0302443,
+  "exported": 100,
+  "import_s": 0.1044519,
+  "photos": 100,
+  "profile": "lite",
+  "stages": [
+   {
+    "stage": "import",
+    "s": 0.104,
+    "ms_per_photo": 1.04
+   },
+   {
+    "s": 1.05,
+    "stage": "analyzing",
+    "ms_per_photo": 10.5
+   },
+   {
+    "s": 0.002,
+    "stage": "grouping",
+    "ms_per_photo": 0.02
+   },
+   {
+    "s": 0.0,
+    "stage": "clustering",
+    "ms_per_photo": 0.0
+   },
+   {
+    "s": 0.003,
+    "stage": "scoring",
+    "ms_per_photo": 0.03
+   },
+   {
+    "stage": "export",
+    "s": 0.03,
+    "ms_per_photo": 0.3
+   }
+  ],
+  "state": "Done",
+  "process_wall_s": 3.433
+ }
+}

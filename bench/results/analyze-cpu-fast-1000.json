@@ -1,0 +1,87 @@
+{
+ "label": "",
+ "dir": "bench\\data\\qwen-photo-library\\jpeg",
+ "photos": 1000,
+ "date": "2026-10-23 09:44",
+ "machine": {
+  "node": "ROG\u53f0\u5f0f",
+  "system": "Windows 11",
+  "cpu": "13th Gen Intel(R) Core(TM) i7-13700K",
+  "cores": 24,
+  "python": "3.12.10"
+ },
+ "worker": {
+  "steps": [
+   "phash",
+   "quality",
+   "faces"
+  ],
+  "skipped_steps": [],
+  "models": {
+   "faces": "yunet+mediapipe-face-landmarker"
+  },
+  "device": {
+   "device": "cpu",
+   "providers": [
+    "CPUExecutionProvider"
+   ]
+  },
+  "warnings": [],
+  "profile": "fast",
+  "photos": 1000,
+  "ok": 1000,
+  "errors": {},
+  "decode_workers": 8,
+  "batch_size": 32,
+  "embed_flush": null,
+  "analysis_size": 1024,
+  "warmup_s": 1.024,
+  "wall_s": 54.185,
+  "photos_per_s": 18.46,
+  "ms_per_photo_wall": 54.19,
+  "steps_per_photo": [
+   {
+    "step": "decode",
+    "photos": 1000,
+    "total_s": 36.106,
+    "share": 0.0878,
+    "mean_ms": 36.11,
+    "p50_ms": 35.81,
+    "p95_ms": 45.43
+   },
+   {
+    "step": "faces",
+    "photos": 1000,
+    "total_s": 74.283,
+    "share": 0.1807,
+    "mean_ms": 74.28,
+    "p50_ms": 63.92,
+    "p95_ms": 158.6
+   },
+   {
+    "step": "quality",
+    "photos": 1000,
+    "total_s": 298.988,
+    "share": 0.7272,
+    "mean_ms": 298.99,
+    "p50_ms": 296.82,
+    "p95_ms": 399.77
+   },
+   {
+    "step": "phash",
+    "photos": 1000,
+    "total_s": 1.76,
+    "share": 0.0043,
+    "mean_ms": 1.76,
+    "p50_ms": 1.5,
+    "p95_ms": 3.44
+   }
+  ],
+  "gpu_batches": 0,
+  "decode_isolated": {
+   "photos": 50,
+   "p50_ms": 22.0,
+   "p95_ms": 23.55
+  }
+ }
+}

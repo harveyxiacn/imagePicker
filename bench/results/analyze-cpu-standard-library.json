@@ -1,0 +1,151 @@
+{
+ "label": "",
+ "dir": "bench\\data\\qwen-photo-library",
+ "photos": 1962,
+ "date": "2026-10-23 09:20",
+ "machine": {
+  "node": "ROG\u53f0\u5f0f",
+  "system": "Windows 11",
+  "cpu": "13th Gen Intel(R) Core(TM) i7-13700K",
+  "cores": 24,
+  "python": "3.12.10"
+ },
+ "worker": {
+  "steps": [
+   "phash",
+   "quality",
+   "faces",
+   "identity",
+   "embed",
+   "aesthetic",
+   "iqa",
+   "scene"
+  ],
+  "skipped_steps": [],
+  "models": {
+   "embed": "siglip2-base",
+   "faces": "yunet+mediapipe-face-landmarker",
+   "identity": "auraface",
+   "aesthetic": "nima-aesthetic",
+   "iqa": "nima-technical+siglip2-zeroshot",
+   "scene": "siglip2-zeroshot"
+  },
+  "device": {
+   "device": "cpu",
+   "providers": [
+    "CPUExecutionProvider"
+   ]
+  },
+  "warnings": [],
+  "profile": "standard",
+  "photos": 1962,
+  "ok": 1962,
+  "errors": {},
+  "decode_workers": 8,
+  "batch_size": 32,
+  "embed_flush": null,
+  "analysis_size": 1024,
+  "warmup_s": 4.298,
+  "wall_s": 1148.155,
+  "photos_per_s": 1.71,
+  "ms_per_photo_wall": 585.2,
+  "steps_per_photo": [
+   {
+    "step": "decode",
+    "photos": 1962,
+    "total_s": 431.953,
+    "share": 0.0782,
+    "mean_ms": 220.16,
+    "p50_ms": 163.13,
+    "p95_ms": 601.21
+   },
+   {
+    "step": "faces",
+    "photos": 1962,
+    "total_s": 612.022,
+    "share": 0.1108,
+    "mean_ms": 311.94,
+    "p50_ms": 238.32,
+    "p95_ms": 807.98
+   },
+   {
+    "step": "identity",
+    "photos": 1962,
+    "total_s": 2002.95,
+    "share": 0.3625,
+    "mean_ms": 1020.87,
+    "p50_ms": 501.87,
+    "p95_ms": 3962.41
+   },
+   {
+    "step": "quality",
+    "photos": 1962,
+    "total_s": 1606.195,
+    "share": 0.2907,
+    "mean_ms": 818.65,
+    "p50_ms": 770.36,
+    "p95_ms": 1742.85
+   },
+   {
+    "step": "phash",
+    "photos": 1962,
+    "total_s": 12.113,
+    "share": 0.0022,
+    "mean_ms": 6.17,
+    "p50_ms": 1.64,
+    "p95_ms": 24.9
+   },
+   {
+    "step": "prep224",
+    "photos": 1962,
+    "total_s": 36.179,
+    "share": 0.0065,
+    "mean_ms": 18.44,
+    "p50_ms": 6.19,
+    "p95_ms": 101.52
+   },
+   {
+    "step": "aesthetic",
+    "photos": 1962,
+    "total_s": 180.748,
+    "share": 0.0327,
+    "mean_ms": 92.12,
+    "p50_ms": 47.72,
+    "p95_ms": 259.9
+   },
+   {
+    "step": "iqa",
+    "photos": 1962,
+    "total_s": 175.863,
+    "share": 0.0318,
+    "mean_ms": 89.63,
+    "p50_ms": 47.56,
+    "p95_ms": 256.45
+   },
+   {
+    "step": "embed (batched)",
+    "photos": 1962,
+    "total_s": 458.003,
+    "share": 0.0829,
+    "mean_ms": 233.44,
+    "p50_ms": 291.07,
+    "p95_ms": 462.86
+   },
+   {
+    "step": "heads (batched)",
+    "photos": 1962,
+    "total_s": 9.245,
+    "share": 0.0017,
+    "mean_ms": 4.71,
+    "p50_ms": 4.13,
+    "p95_ms": 10.74
+   }
+  ],
+  "gpu_batches": 62,
+  "decode_isolated": {
+   "photos": 50,
+   "p50_ms": 22.31,
+   "p95_ms": 24.23
+  }
+ }
+}
