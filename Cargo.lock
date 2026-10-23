@@ -2545,6 +2545,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ip-lite-ffi"
+version = "0.1.0"
+dependencies = [
+ "ip-lite",
+]
+
+[[package]]
 name = "ip-render"
 version = "0.1.0"
 dependencies = [

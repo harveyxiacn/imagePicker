@@ -39,6 +39,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from . import lite_native
 from .composition import saliency_box
 from .tilt import estimate_tilt
 
@@ -162,6 +163,21 @@ def noise_sigma(gray: np.ndarray, block: int = 16, flat_fraction: float = 0.25) 
 def analyze_quality(
     rgb: np.ndarray, face_boxes: list[tuple[float, float, float, float]] | None = None
 ) -> dict[str, float | None]:
+    # The Rust port of this step (crates/ip-lite-ffi) computes everything below in one call,
+    # without the GIL; face sharpness and saliency stay here (a fraction of a millisecond each).
+    fast = lite_native.quality(rgb)
+    if fast is not None:
+        face_scores = [s for b in (face_boxes or []) if (s := face_sharpness(rgb, b)) is not None]
+        s_face = float(np.mean(face_scores)) if face_scores else None
+        out_fast: dict[str, float | None] = dict(fast)
+        out_fast["sharpness"] = s_face if s_face is not None else fast["sharpness_center"]
+        out_fast["sharpness_face"] = s_face
+        res_fast: dict[str, float | list[float] | None] = {
+            k: (None if v is None else round(float(v), 5)) for k, v in out_fast.items()
+        }
+        res_fast["saliency"] = saliency_box(rgb)
+        return res_fast  # type: ignore[return-value]
+
     gray = _norm_gray(rgb)
     lap, ten = focus_measures(center_region(gray))
     s_center = sharpness_score(lap, ten)

@@ -24,6 +24,16 @@ Env fallbacks: `IP_WORKER_ADDR` (`host:port`), `IP_WORKER_TOKEN`, `IMAGEPICKER_M
 Authenticate with `Authorization: Bearer <token>` or `ws://host:port/?token=<token>`.
 `--parent-pid N` makes the worker exit when the parent dies. Default models dir: `<platform data dir>/imagePicker/models`.
 
+## Native quality step (optional)
+
+`steps/quality.py` (sharpness, exposure, noise, tilt) runs the Rust port in `crates/ip-lite-ffi`
+through `steps/lite_native.py` when that library is present: a C ABI loaded with `ctypes`, which
+releases the GIL for the call. Lookup order: `$IMAGEPICKER_LITE_LIB` (`0` / `off` disables it),
+`imagepicker_ai/steps/_native/<lib>`, then `target/{release,debug}/<lib>` of the checkout. Build it
+with `cargo build --release -p ip-lite-ffi`; `apps/desktop/scripts/copy-lite-lib.mjs` copies it into
+the bundled worker source. Without it (or on an ABI mismatch) the pure-Python step runs unchanged,
+and the values agree within the tolerances `crates/ip-lite/tests/parity.rs` already pins.
+
 ## Methods
 
 | method | notes |
