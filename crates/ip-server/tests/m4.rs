@@ -855,6 +855,52 @@ async fn taste_endpoints_and_export_folders() {
         call(&e.app, Method::GET, "/api/taste", None).await.json()["labels"],
         1
     );
+    // forget a session's decisions (202, the refit follows); stars and flags stay
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/taste/forget",
+        Some(json!({"session_id": s.sid})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert_eq!(r.json()["training"], true);
+    assert_eq!(
+        call(&e.app, Method::GET, "/api/taste", None).await.json()["labels"],
+        0
+    );
+    // one new decision, then forget just that photo
+    call(
+        &e.app,
+        Method::PATCH,
+        "/api/photos",
+        Some(json!({"ids":[s.ids["a1.jpg"]],"user_rating":5})),
+    )
+    .await;
+    assert_eq!(
+        call(&e.app, Method::GET, "/api/taste", None).await.json()["labels"],
+        1
+    );
+    let r = call(
+        &e.app,
+        Method::POST,
+        "/api/taste/forget",
+        Some(json!({"photo_id": s.ids["a1.jpg"]})),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED);
+    assert_eq!(
+        call(&e.app, Method::GET, "/api/taste", None).await.json()["labels"],
+        0
+    );
+    // exactly one scope
+    for body in [
+        json!({}),
+        json!({"photo_id": s.ids["a1.jpg"], "session_id": s.sid}),
+    ] {
+        let r = call(&e.app, Method::POST, "/api/taste/forget", Some(body)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    }
     // switch off / on
     let r = call(
         &e.app,

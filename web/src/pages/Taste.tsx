@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { HeaderControls } from '@/components/HeaderControls'
 import { TasteSection } from '@/components/settings/TasteSection'
 
-/** "My taste" (F2.10, docs/03 §3.3): what the personal taste model learned from your picks. */
+/** "My style" (F2.10, docs/03 §3.3): what the personal style model learned from your picks. */
 export function Taste() {
   const { t } = useTranslation()
   const navigate = useNavigate()

@@ -37,7 +37,7 @@ Typical flow: **import → one-click analysis → group & cull (keyboard-driven)
 
 ![Home](../images/home.png)
 
-Home: drop a folder (desktop) or click *Choose folder* to import; *Recent* lists imported sessions. Top right: *My taste*, *Settings*, language and theme.
+Home: drop a folder (desktop) or click *Choose folder* to import; *Recent* lists imported sessions. Top right: *My style*, *Settings*, language and theme.
 
 ![Library grid](../images/grid.png)
 
@@ -299,21 +299,22 @@ Readable reasons are shown, e.g. "Alice has closed eyes", "Sharp focus", "Best o
 - **Scale:** 0–100, **higher is better** (100 is best, 0 is worst). The inspector shows it as *82 / 100*; hover a photo's AI star badge in the grid for the score too. *Sort → AI score* lists the highest scores first.
 - **What goes into it:** a weighted mix of sharpness, exposure, low noise, image quality and aesthetic (model estimates), faces (eyes open, smile, looking at the camera) and a small composition term. The weights depend on the scene type (a portrait leans on faces and sharpness, a landscape on aesthetics and technical quality). Serious problems such as closed eyes or heavy blur subtract points, and a photo that is nearly a copy of a better one in its burst loses a few.
 - **Stars:** the AI stars are the 0–5 summary of the same assessment: roughly 0 stars below 20, 1 star from 20, 2 from 35, 3 from 50, 4 from 65 and 5 from 80. The best photo of a burst gets half a star more, and a photo with a serious problem is capped at 2 stars.
-- **My taste:** once it is switched on (see below), the score is the base score blended with your learned taste, so it can move up or down for photos you would rate differently.
+- **My style:** once it is switched on (see below), the score is the base score blended with your learned style, so it can move up or down for photos you would rate differently.
 
 - Click *Accept* in the inspector, or press `A`, to write the AI rating into **your** rating; `Ctrl+Shift+A` accepts in bulk.
 - The *AI rating* filter filters by suggested stars.
 
-### My taste
+### My style
 
-*My taste* learns which photos **you** keep. Every pick (`P`) or reject (`X`), and every 4–5 star (keep) or 1–2 star (reject) rating you make by hand, is a training example; 3 stars count as neutral. Decisions the app makes (assistant actions, *Accept AI rating*) are never used. It learns across all your sessions and everything stays on this computer.
+*My style* learns which photos **you** keep. Every pick (`P`) or reject (`X`), and every 4–5 star (keep) or 1–2 star (reject) rating you make by hand, is a training example; 3 stars count as neutral. Decisions the app makes (assistant actions, *Accept AI rating*) are never used. It learns across all your sessions and everything stays on this computer.
 
-- **Getting started:** it needs at least 30 kept and 30 rejected analysed photos. Until then *Settings → My taste* (also reachable from Home) shows what is missing, e.g. "12 more picks and 5 more rejects".
+- **Getting started:** it needs at least 30 kept and 30 rejected analysed photos. Until then *Settings → My style* (also reachable from Home) shows what is missing, e.g. "12 more picks and 5 more rejects".
 - **Only when it helps:** each training checks itself with 5-fold cross-validation on your own decisions and compares against the generic AI score (AUC). It only switches on when it is clearly better; the card shows both numbers.
-- **Using it:** choose *Sort → My taste* in the grid to put the photos you're most likely to keep first. The inspector shows the photo's taste score; click *Why?* to see what speaks for and against it (e.g. "Open eyes ↑", "Blur ↑"). While it is on, the AI score is also blended with your taste (weight α up to 0.6).
+- **Using it:** choose *Sort → My style* in the grid to put the photos you're most likely to keep first. The inspector shows the photo's style score; click *Why?* to see what speaks for and against it (e.g. "Open eyes ↑", "Blur ↑"). While it is on, the AI score is also blended with your style (weight α up to 0.6).
 - **Training:** automatic after 50 new decisions, or after 10 new decisions once you pause culling for two minutes; *Retrain* trains right away. Training runs in the background and doesn't block the app or analysis.
-- **Older decisions:** decisions recorded by an earlier version may include the assistant's "keep the best, reject the rest" flags (that version could not tell them apart); the card shows how many, and *Forget my taste* starts fresh. A decision only counts while the photo still has that rating or flag, so changes from the assistant, *Accept AI rating*, XMP sync or Lightroom silence it, and undoing them brings it back.
-- **Privacy:** switch *Learn from my decisions* off to stop recording (picks made while it is off are not recorded later either) and remove the personalisation at once. *Forget my taste* deletes the recorded decisions, the model and its scores (tick *Also stop learning* to opt out at the same time). Your stars and flags are never changed.
+- **Older decisions:** decisions recorded by an earlier version may include the assistant's "keep the best, reject the rest" flags (that version could not tell them apart); the card shows how many, and *Forget my style* starts fresh. A decision only counts while the photo still has that rating or flag, so changes from the assistant, *Accept AI rating*, XMP sync or Lightroom silence it, and undoing them brings it back.
+- **Forget just a part:** when a photo's decision looks wrong, open *Why?* in the inspector and click *Forget this photo's decisions* (or call `POST /api/taste/forget {"session_id": n}` for a whole session); only those training examples go, and the model refits with the rest. Stars and flags are untouched.
+- **Privacy:** switch *Learn from my decisions* off to stop recording (picks made while it is off are not recorded later either) and remove the personalisation at once. *Forget my style* deletes the recorded decisions, the model and its scores (tick *Also stop learning* to opt out at the same time). Your stars and flags are never changed.
 
 > **Honest note:** the issue thresholds were tuned on a 1000-image synthetic test library, not yet on a large set of real photos. Bright or dark frames that keep their detail (white backdrops, paper, neon streets at night) are no longer tagged over- or underexposed; inside a burst, a frame clearly softer than the sharpest one is tagged "blurry". Soft-background portraits can still be tagged blurry. Treat AI stars as suggestions.
 
@@ -731,7 +732,7 @@ Open with the gear icon on Home or in the top bar.
 | Analyze says the AI engine is unavailable / the status dot is red | Install (or reinstall) the AI components in *Settings → Hardware & models*; the install log is `logs/runtime-install.log` in the data directory, worker logs are in `logs/` too |
 | NVIDIA GPU but the tier shows T0 / CPU only | Install with `--extra cuda` (driver >= 580); otherwise it is treated as CPU |
 | Model download fails / is slow | Switch to the HF mirror in *Settings → Hardware & models → Download source* (ModelScope currently behaves like *Auto*); check that *Allow network* is on |
-| AI stars feel "off" | Thresholds are not calibrated yet; treat them as suggestions, let *My taste* adapt, adjust strictness in Settings |
+| AI stars feel "off" | Thresholds are not calibrated yet; treat them as suggestions, let *My style* adapt, adjust strictness in Settings |
 | An analysis stopped with "AI analysis unavailable" / the model download failed | Click *Finish with quick analysis* (or choose *Quick (on device)* in the Analyze menu) to get grouping and sharpness / exposure scores now; install the AI components or retry the download later and run Standard again |
 | Burst grouping too loose / tight | *Settings → Analysis → Burst grouping strictness*, or *Split / Merge* by hand in group view |
 | HEIC photos have no thumbnails | No HEIF decoder is available (the log says what is missing): on Windows install *HEIF Image Extensions* + *HEVC Video Extensions* from the Microsoft Store, or the AI components; on Linux install `libheif` with its HEVC plugin (e.g. `libheif-plugin-libde265`). Restart the app and browse again; blurry small thumbnails can be rebuilt by clearing thumbnails in *Settings → Cache* |
@@ -741,7 +742,7 @@ Open with the gear icon on Home or in the top bar.
 | Login says "too many attempts" | Failed logins are limited to 5 per minute; wait as indicated |
 | A generative task times out | Retry; upscaling and face restore are slow on CPU tiers; reduce load or use a higher tier |
 | Cache too large | Clear kinds one by one or lower the limit in *Settings → Cache*; originals and edits are unaffected |
-| Reset what *My taste* learned | *Settings → My taste → Forget my taste* |
+| Reset what *My style* learned | *Settings → My style → Forget my style* |
 | At start the app says *The catalog cannot be opened* or *The catalog failed its integrity check* | Pick a backup and *Restore* (section 16); the damaged file is kept in `backups/` in the data directory. Without a backup start over with the new empty catalog and import again (originals are not affected; ratings kept in XMP sidecars are read back on import) |
 | No people / closed-eye tags after analysis | Face recognition is off or not agreed to yet: *Settings → Faces & privacy*, show the explanation and agree, then analyse again |
 

@@ -243,6 +243,7 @@ pub fn build_router_auth(
         .route("/taste", get(m4::taste).patch(m4::patch_taste))
         .route("/taste/train", post(m4::taste_train))
         .route("/taste/reset", post(m4::taste_reset))
+        .route("/taste/forget", post(m4::taste_forget))
         .route("/taste/explain/{id}", get(m4::taste_explain))
         .route("/assistant/status", get(m6::assistant_status))
         .route("/assistant/plan", post(m6::assistant_plan))

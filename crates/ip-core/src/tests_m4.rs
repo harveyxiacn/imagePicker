@@ -1718,6 +1718,41 @@ async fn taste_can_be_switched_off_and_forgotten() {
     assert_eq!(e.core.taste().await.unwrap().labels, 0);
 }
 
+#[tokio::test]
+async fn taste_forget_drops_one_photo_or_one_session_and_refits() {
+    let e = env();
+    let (sid, lib) = taste_library(&e, 120).await;
+    rate(&e, &sat_ratings(&lib)).await;
+    assert!(e.core.retrain_taste().await.unwrap().active);
+    assert_eq!(e.core.taste().await.unwrap().labels, 120);
+
+    // one photo: its decision goes, the model is refitted with the other 119
+    let t = e.core.forget_taste(Some(lib[0].0), None).await.unwrap();
+    assert!(t.training);
+    assert_eq!(e.core.taste().await.unwrap().labels, 119);
+    let t = e.core.retrain_taste().await.unwrap();
+    assert!(t.active, "119 labels are still plenty");
+    e.core.rescore_taste().await.unwrap();
+    assert_eq!(taste_rows(&e).await.len(), 120);
+
+    // the whole session: nothing is left, so the personalisation switches itself off
+    let t = e.core.forget_taste(None, Some(sid)).await.unwrap();
+    assert!(t.training);
+    assert_eq!(e.core.taste().await.unwrap().labels, 0);
+    let t = e.core.retrain_taste().await.unwrap();
+    assert!(!t.active);
+    e.core.rescore_taste().await.unwrap();
+    assert!(taste_rows(&e).await.is_empty());
+    assert!(scores(&e)
+        .await
+        .iter()
+        .all(|(_, s, b)| (s - b).abs() < 1e-9));
+
+    // exactly one scope is required
+    assert!(e.core.forget_taste(None, None).await.is_err());
+    assert!(e.core.forget_taste(Some(1), Some(2)).await.is_err());
+}
+
 #[test]
 fn taste_unit_pieces() {
     use crate::taste::{alpha_for, ALPHA_MAX};

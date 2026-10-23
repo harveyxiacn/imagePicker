@@ -336,6 +336,19 @@ export const m4Handlers = [
             ],
     })
   }),
+  http.post('/api/taste/forget', async ({ request }) => {
+    await lat()
+    const b = (await request.json()) as { photo_id?: unknown; session_id?: unknown }
+    const photo = typeof b.photo_id === 'number'
+    const session = typeof b.session_id === 'number'
+    if (photo === session) return err(400, 'bad_request', 'give exactly one of photo_id or session_id')
+    if (!tasteEnabled) return err(400, 'bad_request', 'taste learning is switched off')
+    const n = photo ? 1 : (getSession(Number(b.session_id))?.photos.length ?? 0)
+    tasteLabels = Math.max(0, tasteLabels - n)
+    // 202: the refit follows as `taste.updated`
+    setTimeout(emitTaste, 300)
+    return HttpResponse.json({ ...taste(), training: true }, { status: 202 })
+  }),
   http.post('/api/taste/reset', async ({ request }) => {
     await lat()
     const text = await request.text()
