@@ -4,7 +4,7 @@ Thanks for your interest in imagePicker! 欢迎贡献。
 
 Please follow our [Code of Conduct](CODE_OF_CONDUCT.md) in all project spaces.
 
-User-facing docs: [docs/user-guide](docs/user-guide/README.md). Design docs: [docs/README.md](docs/README.md). Known issues and open work: [docs/backlog.md](docs/backlog.md).
+New to the project? Start with the [handover guide](docs/handover.md) (current state, code map, invariants, local gates, open work) and the [development log](docs/dev-log.md). User-facing docs: [docs/user-guide](docs/user-guide/README.md). Design docs: [docs/README.md](docs/README.md). Known issues and open work: [docs/backlog.md](docs/backlog.md).
 
 ## Repository layout
 
