@@ -270,6 +270,25 @@ pub async fn taste_explain(
 
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
+pub struct ForgetBody {
+    #[serde(default)]
+    pub photo_id: Option<i64>,
+    #[serde(default)]
+    pub session_id: Option<i64>,
+}
+
+/// `POST /api/taste/forget {"photo_id": n}` or `{"session_id": n}`: drops those recorded
+/// decisions and refits in the background (`202`, `taste.updated` follows).
+pub async fn taste_forget(
+    State(st): State<AppState>,
+    ApiJson(b): ApiJson<ForgetBody>,
+) -> ApiResult<Response> {
+    let out = st.core.forget_taste(b.photo_id, b.session_id).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!(out))).into_response())
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct ResetBody {
     #[serde(default)]
     disable: bool,

@@ -24,7 +24,7 @@ function TraitText({ tr }: { tr: TasteTrait }) {
 }
 
 /**
- * "My taste" card (Settings → My taste, and the /taste page): status, cold-start progress,
+ * "My style" card (Settings → My style, and the /taste page): status, cold-start progress,
  * quality against the generic score, what it learned, retrain, forget and the on/off switch.
  */
 export function TasteSection() {

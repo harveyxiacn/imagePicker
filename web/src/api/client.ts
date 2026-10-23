@@ -359,6 +359,8 @@ export const api = {
   taste: () => request<Taste>('GET', '/taste'),
   patchTaste: (enabled: boolean) => request<Taste>('PATCH', '/taste', { enabled }),
   trainTaste: () => request<Taste>('POST', '/taste/train'),
+  /** drop the recorded decisions of one photo or one session and refit (202, `taste.updated` follows) */
+  forgetTaste: (body: { photo_id?: number; session_id?: number }) => request<Taste>('POST', '/taste/forget', body),
   /** `disable` also switches learning off (forget and opt out) */
   resetTaste: (disable = false) => request<void>('POST', '/taste/reset', disable ? { disable: true } : undefined),
   tasteExplain: (photoId: number) => request<TasteExplain>('GET', `/taste/explain/${photoId}`),

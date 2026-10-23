@@ -75,10 +75,11 @@ interface BeautyProfile {           // 不含 person_id；应用时填入
 | POST | `/api/collections` | `{"name","query"}` | `201 {"collection"}` |
 | PATCH/DELETE | `/api/collections/{id}` | `{"name"?,"query"?}` | `{"collection"}` / `204`（内置不可改删 → 400） |
 | GET | `/api/taste` | — | `TasteOut`（见下） |
-| PATCH | `/api/taste` | `{"enabled": bool}` | `TasteOut`。关闭：不再记录新决定、不训练，立即撤销融合与口味分（标签和模型保留）；打开：沿用保留的模型，没有可用模型时后台训练 |
+| PATCH | `/api/taste` | `{"enabled": bool}` | `TasteOut`。关闭：不再记录新决定、不训练，立即撤销融合与风格分（标签和模型保留）；打开：沿用保留的模型，没有可用模型时后台训练 |
 | POST | `/api/taste/train` | — | `202` + 当前 `TasteOut`（`training: true`），训练在后台进行，完成后广播 `taste.updated`；关闭时 `400` |
-| POST | `/api/taste/reset` | 可选 `{"disable": bool}` | `204`。删除全部标签、模型、指标与口味分，AI 分回到基础分；`disable: true` 同时关闭学习（忘记并退出） |
-| GET | `/api/taste/explain/{photo_id}` | — | `{"photo_id","taste_score":number\|null,"base_score":number\|null,"contributions":[{"feature","delta","direction":"high"\|"low"}]}`：对口味分贡献最大的正、负各 ≤3 项（`feature` 为可解释特征名、`scene_<x>` 或 `look` = 整体画面与内容）；没有可用模型时 `taste_score: null`、`contributions: []`；未知照片 `404` |
+| POST | `/api/taste/reset` | 可选 `{"disable": bool}` | `204`。删除全部标签、模型、指标与风格分，AI 分回到基础分；`disable: true` 同时关闭学习（忘记并退出） |
+| POST | `/api/taste/forget` | `{"photo_id": n}` 或 `{"session_id": n}`（恰好一个） | `202` + 当前 `TasteOut`（`training: true`）：删除这些照片记录的决定，后台用剩下的标签重新训练，完成后广播 `taste.updated`；关闭学习时 `400`，两个都给或都不给 `400` |
+| GET | `/api/taste/explain/{photo_id}` | — | `{"photo_id","taste_score":number\|null,"base_score":number\|null,"contributions":[{"feature","delta","direction":"high"\|"low"}]}`：对风格分贡献最大的正、负各 ≤3 项（`feature` 为可解释特征名、`scene_<x>` 或 `look` = 整体画面与内容）；没有可用模型时 `taste_score: null`、`contributions: []`；未知照片 `404` |
 
 `TasteOut`：
 
@@ -92,18 +93,18 @@ interface BeautyProfile {           // 不含 person_id；应用时填入
   "enabled": true,
   "state": "active",          // disabled | collecting（冷启动）| ready | not_better（不优于通用分）| active
   "active": true, "alpha": 0.55,                           // 融合权重 0..0.6
-  "holdout_accuracy": 0.74, "base_accuracy": 0.63,         // 交叉验证准确率：口味模型 / 通用分
+  "holdout_accuracy": 0.74, "base_accuracy": 0.63,         // 交叉验证准确率：风格模型 / 通用分
   "metrics": { "auc": 0.78, "base_auc": 0.64, "accuracy": 0.74, "base_accuracy": 0.63, "margin": 0.04,
                "eval_positives": 92, "eval_negatives": 61, "folds": 5, "lambda": 0.03, "dim": 768,
                "fit_photos": 153, "train_ms": 210 },       // 未训练过时为 null
   "traits": [{ "key": "likes", "params": { "feature": "eyes_open", "strength": 0.8 } }],  // likes | dislikes，仅 active 时
-  "scored": 4210,             // 有口味分的照片数
+  "scored": 4210,             // 有风格分的照片数
   "feature_version": 2,
   "updated_at": 1760000000000
 }
 ```
 
-`PATCH /api/photos` 新增可选 `"source": "user" | "auto" | "undo"`（缺省 `user`）：`auto` = 应用自己的决定（客户端重做助手 / 接受 AI 评分的步骤），`undo` = 撤销这类步骤；两者都不产生口味标签，只让与照片不再一致的旧标签静音、或让恢复一致的标签重新生效。其它值 `400`。
+`PATCH /api/photos` 新增可选 `"source": "user" | "auto" | "undo"`（缺省 `user`）：`auto` = 应用自己的决定（客户端重做助手 / 接受 AI 评分的步骤），`undo` = 撤销这类步骤；两者都不产生风格标签，只让与照片不再一致的旧标签静音、或让恢复一致的标签重新生效。其它值 `400`。
 
 照片列表（`GET /api/photos`、`/api/search` 等）在有可用模型时每项多一个 `taste_score`（0..1，用户留下它的概率；没有时省略），`sort=taste` 按它降序排列（无分的排最后）。
 

@@ -1,11 +1,15 @@
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, HeartHandshake, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { api } from '@/api/client'
 import { useTasteExplain } from '@/api/queries'
-import type { Photo, TasteContribution } from '@/api/types'
+import type { Photo, Taste, TasteContribution } from '@/api/types'
+import { qk } from '@/lib/cache'
 import { splitContributions, tasteFeatureLabel, tastePercent } from '@/lib/taste'
+import { useToasts } from '@/stores/toasts'
 
-/** Small "my taste" score chip (grid / loupe); nothing while no taste model is in use. */
+/** Small "my style" score chip (grid / loupe); nothing while no taste model is in use. */
 export function TasteChip({ score, className = '' }: { score: number | null | undefined; className?: string }) {
   const { t } = useTranslation()
   if (score === null || score === undefined) return null
@@ -40,8 +44,20 @@ function Reason({ c }: { c: TasteContribution }) {
 /** Inspector row: the photo's taste score and, on demand, why (top features for and against). */
 export function TasteBadge({ photo }: { photo: Photo }) {
   const { t } = useTranslation()
+  const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const ex = useTasteExplain(photo.id, open)
+  const forget = useMutation({
+    mutationFn: () => api.forgetTaste({ photo_id: photo.id }),
+    onSuccess: (d: Taste) => {
+      qc.setQueryData(qk.taste, d)
+      void qc.invalidateQueries({ queryKey: qk.taste })
+      void qc.invalidateQueries({ queryKey: qk.photosAll })
+      useToasts.getState().push('success', t('taste.forgotPhoto'), 2500)
+    },
+    onError: (e: unknown) =>
+      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 5000),
+  })
   if (photo.taste_score === null || photo.taste_score === undefined) return null
   const data = ex.data && ex.data.photo_id === photo.id ? ex.data : undefined
   const { pro, con } = splitContributions(data?.contributions ?? [])
@@ -92,6 +108,16 @@ export function TasteBadge({ photo }: { photo: Photo }) {
               </div>
             </div>
           )}
+          <button
+            className="btn mt-2 !h-6 !px-1.5 text-xs"
+            title={t('taste.forgetPhotoHint')}
+            disabled={forget.isPending}
+            onClick={() => forget.mutate()}
+            data-testid="taste-forget-photo"
+          >
+            {forget.isPending && <Loader2 size={12} className="animate-spin" />}
+            {t('taste.forgetPhoto')}
+          </button>
         </div>
       )}
     </div>

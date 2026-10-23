@@ -1658,6 +1658,59 @@ impl Core {
         Ok(())
     }
 
+    /// `POST /api/taste/forget`: drops the recorded decisions of one photo or one session and
+    /// refits in the background with the remaining labels (below the cold-start threshold that
+    /// simply switches the personalisation off). 400 while learning is off, or for both /
+    /// neither of `photo_id` and `session_id`.
+    pub async fn forget_taste(
+        self: &Arc<Self>,
+        photo_id: Option<i64>,
+        session_id: Option<i64>,
+    ) -> Result<TasteOut> {
+        if photo_id.is_some() == session_id.is_some() {
+            return Err(CoreError::bad_request(
+                "give exactly one of photo_id or session_id",
+            ));
+        }
+        if !self.db.call(|c| is_enabled(c)).await? {
+            return Err(CoreError::bad_request("taste learning is switched off"));
+        }
+        let removed = self
+            .db
+            .call(move |c| {
+                let n = match (photo_id, session_id) {
+                    (Some(p), None) => {
+                        c.execute("DELETE FROM preference_label WHERE photo_id=?1", [p])?
+                    }
+                    (None, Some(sid)) => c.execute(
+                        "DELETE FROM preference_label WHERE photo_id IN
+                           (SELECT photo_id FROM session_photo WHERE session_id=?1)",
+                        [sid],
+                    )?,
+                    _ => 0,
+                };
+                if n > 0 {
+                    c.execute("UPDATE taste_state SET rescore_pending=1 WHERE id=1", [])?;
+                }
+                Ok(n)
+            })
+            .await?;
+        if removed > 0 && tokio::runtime::Handle::try_current().is_ok() {
+            // the stored model was fitted on labels that no longer exist: refit right away
+            let weak = Arc::downgrade(self);
+            tokio::spawn(async move {
+                let Some(core) = weak.upgrade() else { return };
+                if let Err(e) = core.retrain_taste_if(0).await {
+                    tracing::warn!(error = %e, "taste retraining after forgetting failed");
+                    core.emit_taste_now().await;
+                }
+            });
+        }
+        let mut out = self.taste().await?;
+        out.training = removed > 0;
+        Ok(out)
+    }
+
     /// At startup: finishes a rescoring that did not complete, and retrains a model of an
     /// older feature version (taste v1) once, so its fused scores are replaced (or reverted).
     pub(crate) fn spawn_taste_upgrade(self_: &Arc<Self>) {
