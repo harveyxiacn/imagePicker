@@ -1433,7 +1433,7 @@ impl Core {
 
     /// Retrains when at least `min` decisions are pending (checked under the training lock,
     /// so a burst of triggers trains once).
-    async fn retrain_taste_if(self: &Arc<Self>, min: i64) -> Result<()> {
+    pub(crate) async fn retrain_taste_if(self: &Arc<Self>, min: i64) -> Result<()> {
         let _g = self.taste_lock.lock().await;
         if self.taste_pending().await >= min {
             let out = self.retrain_locked().await?;

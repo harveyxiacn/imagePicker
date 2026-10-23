@@ -318,7 +318,7 @@ impl Core {
 
     /// `DELETE /api/faces?confirm=true`: removes every detected face, person and the portrait
     /// geometry derived from them. Photos, ratings and edits are untouched.
-    pub async fn clear_faces(&self) -> Result<Value> {
+    pub async fn clear_faces(self: &Arc<Self>) -> Result<Value> {
         let (faces, people, sessions) = self
             .db
             .call(|c| {
@@ -349,6 +349,11 @@ impl Core {
             .await?;
         for s in sessions {
             self.events.emit(Event::PeopleUpdated { session_id: s });
+        }
+        // the style model and its cached scores were fitted on face features that no longer
+        // exist: refit with the remaining ones (no labels → simply nothing to personalise)
+        if let Err(e) = self.retrain_taste_if(0).await {
+            tracing::warn!(error = %e, "style retraining after clearing faces failed");
         }
         Ok(json!({"faces": faces, "people": people}))
     }
