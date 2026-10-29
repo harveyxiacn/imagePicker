@@ -201,4 +201,9 @@ pub trait AiWorker: Send + Sync {
     async fn kill(&self) {
         self.shutdown().await;
     }
+    /// Starts the worker process if it is not running (bounded by its own start timeout), so that
+    /// a per-call limit measures the call and not the start. Default: nothing to start.
+    async fn ensure_started(&self) -> Result<()> {
+        Ok(())
+    }
 }

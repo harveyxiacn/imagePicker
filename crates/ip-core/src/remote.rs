@@ -188,6 +188,9 @@ impl AiWorker for SwitchWorker {
     async fn shutdown(&self) {
         self.local.shutdown().await;
     }
+    async fn ensure_started(&self) -> ip_worker_client::Result<()> {
+        self.pick().ensure_started().await
+    }
     async fn kill(&self) {
         // a remote worker is not ours to kill
         if self.slot.read().unwrap().is_none() {

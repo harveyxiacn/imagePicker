@@ -41,7 +41,7 @@
 2. **Python 与 Rust 两份实现必须同步**：`ip-lite` 是 worker `steps/*.py` 的 Rust 移植（quality、tilt、pHash），一致性由 `crates/ip-lite/tests/parity.rs` 用固定容差（sharpness 0.002、tenengrad 0.4%、tilt 0.05°）守。改任何一边都要改另一边并跑 parity；worker 的 `quality` 优先走原生库（`steps/lite_native.py`），没有库时回退 Python。
 3. **原生库是可选加速**：`crates/ip-lite-ffi` 只在库存在时加载（`IMAGEPICKER_LITE_LIB` → worker 源码 `steps/_native/` → 检出目录的 `target/`）。任何新依赖都不能让它变成硬依赖；改 ABI 要同时改 `ABI_VERSION`、`QualityOut` 与 Python 的 ctypes 结构。
 4. **HEIF 契约**：Windows 上 libheif 优先、WIC 兜底（WIC 的 HEVC 色彩与 libheif 差数十级）；WIC 已自行应用 `irot`/`imir`（含镜像/180°），不要再用长边判断重复旋转。见 docs/02 §5.1 与 `real_heic_files_match_libheif_display`。
-5. **助手的安全网**：模型输出必须先过 `validate_call`；规则引擎的解读作为校验（`llm_unsafe_target`、`llm_tool_mismatch`），必要时整份模型计划退回规则。破坏性/大范围步骤必须确认，计划执行要可一次撤销。
+5. **助手的安全网**：模型输出必须先过 `validate_call`；规则引擎的解读作为校验（`llm_unsafe_target`、`llm_tool_mismatch`、`llm_arg_mismatch`；基准 `bench/eval-assistant.py`），必要时整份模型计划退回规则。破坏性/大范围步骤必须确认，计划执行要可一次撤销。
 6. **生成任务必须可取消**：`inpaint`/`enhance`/`besttake`/`hair` 等 worker 计算在线程池里，必须在循环里检查 `Cancel` 令牌（`ai-worker/imagepicker_ai/cancel.py`），否则请求结束后计算还在跑。
 7. **图层与编辑栈顺序是内容**：`PatchKind::layer_order()`（`ip-render`）与 `edit/sync.rs` 的 `rank()` 决定合成顺序；改动会改变已有照片的渲染结果，必须补一致性测试（`ip-render/tests/correctness.rs` 的不变量）。
 8. **数据库迁移只追加**（当前 `PRAGMA user_version` = **18**）：新增表/列写成新的 migration，不要改历史条目；v17 归风格模型使用，v18 是 `analysis.sharpness_center`（连拍相对模糊），均已被占用。
