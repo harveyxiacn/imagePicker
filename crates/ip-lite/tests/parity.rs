@@ -89,6 +89,42 @@ fn quality_matches_worker_formulas() {
     assert!(bad.is_empty(), "quality differs:\n{}", bad.join("\n"));
 }
 
+/// `faces.face_tone` (the cover choice's face visibility) on the generator's `TONE_BOXES`.
+/// Within 1e-3: OpenCV's RGB -> grey conversion rounds a few pixels one level differently from
+/// `rgb_to_gray` on some image widths (the tiny crops of `scene_40x30` move by 1.6e-4), and the
+/// area resampling adds float noise; the cover choice works at the 0.06 / 0.15 scale.
+#[test]
+fn face_tone_matches_worker() {
+    const BOXES: [[f64; 4]; 3] = [
+        [0.3, 0.25, 0.35, 0.4],
+        [0.05, 0.6, 0.07, 0.09],
+        [0.85, 0.8, 0.3, 0.3],
+    ];
+    let mut bad = Vec::new();
+    for (name, e) in expected() {
+        let (w, h, rgb) = load(&name);
+        let want = e["face_tone"]
+            .as_array()
+            .expect("face_tone in expected.json");
+        for (i, b) in BOXES.iter().enumerate() {
+            let got = ip_lite::face_tone(&rgb, w, h, *b);
+            match (got, want[i].as_array()) {
+                (None, None) => {}
+                (Some((l, c)), Some(v)) => {
+                    let key = format!("face_tone[{i}]");
+                    bad.extend(close(&name, &key, l, v[0].as_f64().unwrap(), 1e-3, 0.0));
+                    bad.extend(close(&name, &key, c, v[1].as_f64().unwrap(), 1e-3, 0.0));
+                }
+                (g, _) => bad.push(format!(
+                    "{name}: face_tone[{i}] rust {g:?} python {}",
+                    want[i]
+                )),
+            }
+        }
+    }
+    assert!(bad.is_empty(), "face_tone differs:\n{}", bad.join("\n"));
+}
+
 /// The tilt estimate (part of the quality step): the angle where the worker found straight
 /// structure (it is arbitrary otherwise), the confidence everywhere.
 #[test]

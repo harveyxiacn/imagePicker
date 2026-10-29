@@ -412,6 +412,24 @@ CREATE TABLE taste_score (
     r#"
 ALTER TABLE analysis ADD COLUMN sharpness_center REAL;
 "#,
+    // v19: people are human (docs/03 §4.3). `face.landmarks`: 1 the MediaPipe landmarker found a
+    // human face in the detection, 0 it ran and found none (YuNet also fires on dogs, the back of
+    // a head, a face lost in the dark), NULL unknown (no landmarker). Backfilled from the
+    // landmark fields and the photo's recorded face models. `face.nonhuman`: set by clustering
+    // for faces of a cluster that is mostly not recognised as human; such faces are no person,
+    // no subject and no bystander. `face.luma` / `face.contrast`: mean and standard deviation of
+    // the grey level inside the face (the worker's `face_tone`), used to pick a visible cover.
+    r#"
+ALTER TABLE face ADD COLUMN landmarks INTEGER;
+ALTER TABLE face ADD COLUMN nonhuman INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE face ADD COLUMN luma REAL;
+ALTER TABLE face ADD COLUMN contrast REAL;
+UPDATE face SET landmarks = CASE
+  WHEN eyes_open IS NOT NULL THEN 1
+  WHEN EXISTS (SELECT 1 FROM analysis a WHERE a.photo_id = face.photo_id
+               AND a.model_versions LIKE '%face-landmarker%') THEN 0
+END;
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.
@@ -804,6 +822,39 @@ mod tests {
         assert!(crate::backup::is_corruption(&e), "{e:?}");
         assert_eq!(count(&db), 2);
         assert!(!dir.path().join("old2.db").exists());
+    }
+
+    #[test]
+    fn v19_backfills_face_landmarks_from_the_recorded_models() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        assert_eq!(migrate_to(&mut conn, 18).unwrap(), 18);
+        conn.execute_batch(
+            "INSERT INTO root_folder(id, path, added_at) VALUES(1, '/r', 0);
+             INSERT INTO photo(id, root_id, rel_path, file_name, fast_key) VALUES(1, 1, 'a.jpg', 'a.jpg', 'a');
+             INSERT INTO photo(id, root_id, rel_path, file_name, fast_key) VALUES(2, 1, 'b.jpg', 'b.jpg', 'b');
+             INSERT INTO analysis(photo_id, profile, model_versions)
+               VALUES(1, 'standard', '{\"faces\":\"yunet+mediapipe-face-landmarker\"}');
+             INSERT INTO analysis(photo_id, profile, model_versions)
+               VALUES(2, 'fast', '{\"faces\":\"yunet\"}');
+             INSERT INTO face(id, photo_id, eyes_open) VALUES(10, 1, 0.9);
+             INSERT INTO face(id, photo_id, eyes_open) VALUES(11, 1, NULL);
+             INSERT INTO face(id, photo_id, eyes_open) VALUES(12, 2, NULL);",
+        )
+        .unwrap();
+        assert_eq!(migrate(&mut conn).unwrap(), MIGRATIONS.len());
+        let rows: Vec<(i64, Option<i64>, i64)> = conn
+            .prepare("SELECT id, landmarks, nonhuman FROM face ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        // found / ran without finding a face / never ran
+        assert_eq!(
+            rows,
+            vec![(10, Some(1), 0), (11, Some(0), 0), (12, None, 0)]
+        );
     }
 
     #[test]

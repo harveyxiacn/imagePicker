@@ -1216,14 +1216,15 @@ impl Core {
     }
 
     /// `GET /api/photos/{id}/bystanders`: the non-subject faces, except those on statues, posters
-    /// and screens (docs/03 §3.3); those can still be removed by naming their `face_ids`.
+    /// and screens and non-human ones (docs/03 §3.3, §4.3); those can still be removed by naming
+    /// their `face_ids`.
     pub async fn bystanders(&self, photo_id: i64) -> Result<Vec<Bystander>> {
         self.db
             .call(move |c| {
                 catalog::photo_ref(c, photo_id)?;
                 Ok(astore::faces_of_photo(c, photo_id)?
                     .into_iter()
-                    .filter(|f| !f.is_subject && !f.likely_artificial)
+                    .filter(|f| !f.is_subject && !f.likely_artificial && !f.nonhuman)
                     .map(|f| Bystander {
                         face_id: f.id,
                         bbox: f.bbox,

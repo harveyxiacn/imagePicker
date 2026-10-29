@@ -13,8 +13,14 @@ Per face the result carries
   sharpness (0-1, see quality.face_sharpness), blendshapes {52 coefficients}
   artificial  0-1 confidence that the face is on a statue / poster / screen / print (steps/liveness.py)
   likely_artificial  artificial >= liveness.ARTIFICIAL_AT; such faces never become bystanders
+  luma / contrast  mean and standard deviation (0-1) of the grey level inside the face box, see
+            `face_tone`; the core prefers a visible face as a person's cover (docs/03 §4.3)
+  landmarks  true: the landmarker found a human face in the crop; false: it ran and found none
+            (animals, objects, the back of a head, a face too blurred or dark to read); null: it
+            did not run (mediapipe or its model missing, or the call failed). The core keeps faces
+            that are mostly not recognised as human out of people (docs/03 §4.3).
 If mediapipe is not installed (or no landmarks were found for a face) the landmark-derived
-fields are null and `landmarks` is false.
+fields are null.
 """
 
 from __future__ import annotations
@@ -56,6 +62,8 @@ log = logging.getLogger(__name__)
 
 CROP_MARGIN = 0.35  # extra context around the YuNet box fed to the landmarker
 MIN_CROP_SIDE = 256
+TONE_INNER = 0.70  # share of the box measured by `face_tone` (skips hair / background corners)
+TONE_SIDE = 64
 
 
 def mediapipe_available() -> bool:
@@ -156,6 +164,31 @@ def expression_flag(
     return None
 
 
+def face_tone(
+    rgb: np.ndarray, bbox: tuple[float, float, float, float]
+) -> tuple[float, float] | None:
+    """(luma, contrast) of the inner face: mean and standard deviation of the grey level (0-1).
+
+    The central TONE_INNER x TONE_INNER of the normalised [x, y, w, h] box, area-resampled to at
+    most TONE_SIDE px. A back-lit or underexposed face is dark AND flat (luma ~0.05, contrast
+    ~0.02 on the library); a well-lit face of any skin tone has contrast >= ~0.08 (the cover
+    choice, `cover_score` in ip-core, uses both). None for a box under 4 px.
+    """
+    h, w = rgb.shape[:2]
+    x, y, bw, bh = bbox
+    cx, cy = (x + bw / 2) * w, (y + bh / 2) * h
+    hw, hh = bw * w * TONE_INNER / 2, bh * h * TONE_INNER / 2
+    x0, x1 = max(0, int(cx - hw)), min(w, int(cx + hw))
+    y0, y1 = max(0, int(cy - hh)), min(h, int(cy + hh))
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return None
+    gray = cv2.cvtColor(np.ascontiguousarray(rgb[y0:y1, x0:x1]), cv2.COLOR_RGB2GRAY)
+    if max(gray.shape) > TONE_SIDE:
+        gray = cv2.resize(gray, (TONE_SIDE, TONE_SIDE), interpolation=cv2.INTER_AREA)
+    g = gray.astype(np.float32) / 255.0
+    return float(g.mean()), float(g.std())
+
+
 class FaceAnalyzer:
     """Thread-safe: detector / landmarker instances are created lazily per thread."""
 
@@ -250,11 +283,15 @@ class FaceAnalyzer:
             art = face_artificial(rgb, tuple(f["bbox"]), image_sat)  # type: ignore[arg-type]
             f["artificial"] = _r(art)
             f["likely_artificial"] = art is not None and art >= ARTIFICIAL_AT
+            tone = face_tone(rgb, tuple(f["bbox"]))  # type: ignore[arg-type]
+            f["luma"], f["contrast"] = (_r(tone[0]), _r(tone[1])) if tone else (None, None)
             f.update(_NULL_LANDMARK_FIELDS)
             if self._landmarker_ok:
+                f["landmarks"] = False  # ran; true below when it finds a face in the crop
                 try:
                     f.update(self._landmark(rgb, f["bbox"]))
                 except Exception as e:  # noqa: BLE001
+                    f.update(_NULL_LANDMARK_FIELDS)  # unknown, not "no face"
                     log.debug("landmarker failed: %s", e)
             f["bad_expression"] = expression_flag(
                 f["eyes_open"], f["smile"], f["mouth_open"], f["sharpness"]
@@ -302,7 +339,7 @@ class FaceAnalyzer:
 
 
 _NULL_LANDMARK_FIELDS: dict[str, Any] = {
-    "landmarks": False,
+    "landmarks": None,
     "eyes_open": None,
     "smile": None,
     "mouth_open": None,

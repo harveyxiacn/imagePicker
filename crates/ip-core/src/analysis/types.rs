@@ -154,6 +154,10 @@ pub struct Face {
     pub artificial: Option<f64>,
     #[serde(default)]
     pub likely_artificial: bool,
+    /// Not recognised as a human face (a pet; docs/03 §4.3): no person, never a subject or a
+    /// bystander.
+    #[serde(default)]
+    pub nonhuman: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

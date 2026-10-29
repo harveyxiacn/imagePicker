@@ -57,6 +57,13 @@ pub struct AnalyzeFace {
     pub artificial: Option<f64>,
     /// jawOpen blendshape, 0 closed ... 1 wide open (the `bad_expression` tag).
     pub mouth_open: Option<f64>,
+    /// `true`: the landmarker found a human face here; `false`: it ran and found none (an
+    /// animal, the back of a head ...); absent / null: it did not run (older workers, YuNet-only).
+    pub landmarks: Option<bool>,
+    /// Mean grey level (0-1) of the inner face box (`steps/faces.py::face_tone`).
+    pub luma: Option<f64>,
+    /// Standard deviation of that grey level (0-1): ~0.02 for a face lost in shadow.
+    pub contrast: Option<f64>,
 }
 
 /// Sub-metrics of the `quality` step.

@@ -35,6 +35,11 @@ pub struct FakeFace {
     pub artificial: Option<f64>,
     /// jawOpen blendshape.
     pub mouth_open: Option<f64>,
+    /// The landmarker found a human face (`Some(false)`: an animal, the back of a head ...).
+    pub landmarks: Option<bool>,
+    /// Grey level mean / standard deviation of the inner face (`face.luma` / `face.contrast`).
+    pub luma: Option<f64>,
+    pub contrast: Option<f64>,
 }
 
 impl FakeFace {
@@ -50,6 +55,9 @@ impl FakeFace {
             sharpness: Some(0.85),
             artificial: None,
             mouth_open: Some(0.05),
+            landmarks: Some(true),
+            luma: Some(0.5),
+            contrast: Some(0.12),
         }
     }
     pub fn eyes(mut self, v: f64) -> Self {
@@ -66,6 +74,22 @@ impl FakeFace {
     }
     pub fn mouth(mut self, v: f64) -> Self {
         self.mouth_open = Some(v);
+        self
+    }
+    /// YuNet fired but the landmarker found no human face (a dog): no landmark fields.
+    pub fn not_human(mut self) -> Self {
+        self.landmarks = Some(false);
+        self.eyes_open = None;
+        self.smile = None;
+        self.gaze = None;
+        self.yaw = None;
+        self.pitch = None;
+        self.mouth_open = None;
+        self
+    }
+    pub fn tone(mut self, luma: f64, contrast: f64) -> Self {
+        self.luma = Some(luma);
+        self.contrast = Some(contrast);
         self
     }
 }
@@ -744,6 +768,9 @@ impl AiWorker for FakeWorker {
                         blendshapes: None,
                         artificial: f.artificial,
                         mouth_open: f.mouth_open,
+                        landmarks: f.landmarks,
+                        luma: f.luma,
+                        contrast: f.contrast,
                     })
                     .collect(),
                 ..Default::default()

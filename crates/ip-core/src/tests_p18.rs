@@ -1,5 +1,5 @@
 //! P1-8 end to end (FakeImaging + FakeWorker): the bystander / bad-expression tags, statues and
-//! posters, and the stored composition score.
+//! posters, the stored composition score, and people that are human with a visible cover.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -243,4 +243,96 @@ async fn composition_is_stored_and_ranks_the_better_framed_photo() {
     // and a photo without one is scored as before (components renormalised)
     let d = e.core.photo_analysis(ph["none.jpg"].id).await.unwrap();
     assert!(d.contributions.iter().all(|c| c.key != "composition"));
+}
+
+/// The dog walked next to the subject: about as big and central as she is.
+const DOG: [f64; 4] = [0.45, 0.5, 0.16, 0.22];
+
+#[tokio::test]
+async fn a_recurring_dog_is_no_person_no_subject_and_no_bystander() {
+    let e = env();
+    let d = e.src.path();
+    let names = [
+        "walk1.jpg",
+        "walk2.jpg",
+        "walk3.jpg",
+        "dog.jpg",
+        "parrot.jpg",
+    ];
+    for (i, n) in names.iter().enumerate() {
+        photo(d, n, i as u64);
+    }
+    // YuNet found the dog, the landmarker did not (one of the 4 dog faces got a mesh anyway, as
+    // on the library: the cluster is still mostly not human)
+    let dog = |mesh: bool| {
+        let f = FakeFace::new(DOG, person(5, 0.0));
+        if mesh {
+            f
+        } else {
+            f.not_human()
+        }
+    };
+    for (i, n) in names[..3].iter().enumerate() {
+        e.worker.set(
+            n,
+            FakeSpec::at(20.0 * i as f32).with_faces(vec![main_face(), dog(i == 0)]),
+        );
+    }
+    e.worker
+        .set("dog.jpg", FakeSpec::at(90.0).with_faces(vec![dog(false)]));
+    // a single unrecognised face: no singleton person, but not marked either
+    e.worker.set(
+        "parrot.jpg",
+        FakeSpec::at(150.0).with_faces(vec![FakeFace::new(MAIN, person(6, 0.0)).not_human()]),
+    );
+    let (sid, ph) = analysed(&e).await;
+
+    let people = e.core.people(Some(sid)).await.unwrap();
+    assert_eq!(people.len(), 1, "{people:?}");
+    assert_eq!(people[0].photo_count, 3);
+    for n in &names[..3] {
+        let a = e.core.photo_analysis(ph[*n].id).await.unwrap();
+        let (her, dog): (Vec<_>, Vec<_>) = a.faces.iter().partition(|f| !f.nonhuman);
+        assert_eq!((her.len(), dog.len()), (1, 1), "{n}");
+        assert!(her[0].is_subject && her[0].person_id == Some(people[0].id));
+        assert!(!dog[0].is_subject && dog[0].person_id.is_none());
+        assert!(!ph[*n].issues.contains(&Issue::Bystander), "{n}");
+        assert!(e.core.bystanders(ph[*n].id).await.unwrap().is_empty());
+    }
+    let parrot = e.core.photo_analysis(ph["parrot.jpg"].id).await.unwrap();
+    assert!(parrot.faces[0].person_id.is_none() && !parrot.faces[0].nonhuman);
+    let all = e.core.people_with(Some(sid), true).await.unwrap();
+    assert_eq!(
+        all.len(),
+        1,
+        "no singleton for the unrecognised face: {all:?}"
+    );
+}
+
+#[tokio::test]
+async fn cover_is_the_visible_face_not_the_biggest_backlit_one() {
+    let e = env();
+    let d = e.src.path();
+    let names = ["backlit.jpg", "lit1.jpg", "lit2.jpg"];
+    for (i, n) in names.iter().enumerate() {
+        photo(d, n, i as u64);
+    }
+    let big = [0.3, 0.2, 0.3, 0.4];
+    e.worker.set(
+        "backlit.jpg",
+        FakeSpec::at(0.0).with_faces(vec![FakeFace::new(big, person(0, 0.0)).tone(0.05, 0.015)]),
+    );
+    for (i, n) in names[1..].iter().enumerate() {
+        e.worker.set(
+            n,
+            FakeSpec::at(40.0 * (i + 1) as f32)
+                .with_faces(vec![main_face().tone(0.5 + 0.05 * i as f64, 0.11)]),
+        );
+    }
+    let (sid, ph) = analysed(&e).await;
+    let people = e.core.people(Some(sid)).await.unwrap();
+    assert_eq!(people.len(), 1);
+    let backlit = e.core.photo_analysis(ph["backlit.jpg"].id).await.unwrap();
+    assert_eq!(backlit.faces[0].person_id, Some(people[0].id));
+    assert_ne!(people[0].cover_face_id, Some(backlit.faces[0].id));
 }

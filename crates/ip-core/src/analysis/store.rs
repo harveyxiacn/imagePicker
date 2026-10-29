@@ -160,8 +160,9 @@ pub fn ingest(
             tx.execute(
                 "INSERT INTO face(photo_id, idx, person_id, person_locked, bbox_x, bbox_y, bbox_w, bbox_h,
                    det_score, embedding, eyes_open, smile, gaze, yaw, pitch, roll, sharpness, expression_score,
-                   is_subject, is_bystander, blendshapes, artificial, mouth_open)
-                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
+                   is_subject, is_bystander, blendshapes, artificial, mouth_open, landmarks, luma, contrast)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,
+                   ?24,?25,?26)",
                 params![
                     pid,
                     i as i64,
@@ -186,6 +187,9 @@ pub fn ingest(
                     f.blendshapes.as_ref().map(|b| b.to_string()),
                     f.artificial,
                     f.mouth_open,
+                    f.landmarks.map(i64::from),
+                    f.luma,
+                    f.contrast,
                 ],
             )?;
         }
@@ -564,6 +568,7 @@ pub(crate) fn load_faces_feat(
                 is_subject: r.get::<_, i64>(13)? != 0,
                 artificial: r.get(14)?,
                 mouth_open: r.get(15)?,
+                nonhuman: r.get::<_, i64>(16)? != 0,
             },
         ))
     })?;
@@ -576,7 +581,8 @@ pub(crate) fn load_faces_feat(
 
 pub(crate) const FACE_FEAT_COLS: &str =
     "f.photo_id, f.id, f.person_id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
-    f.eyes_open, f.smile, f.gaze, f.yaw, f.pitch, f.sharpness, f.is_subject, f.artificial, f.mouth_open";
+    f.eyes_open, f.smile, f.gaze, f.yaw, f.pitch, f.sharpness, f.is_subject, f.artificial, f.mouth_open,
+    f.nonhuman";
 
 /// Scores, ranks and stars every analysed photo of the given bursts and writes the results.
 /// Returns the ids of the photos whose AI fields were written.
@@ -755,7 +761,7 @@ pub fn recompute_subjects(conn: &mut Connection, photo_ids: &[i64]) -> Result<Ve
         let ph = placeholders(chunk.len());
         let mut st = tx.prepare(&format!(
             "SELECT f.photo_id, f.id, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h, f.sharpness, f.gaze,
-                    f.is_subject, pe.name IS NOT NULL, f.artificial
+                    f.is_subject, pe.name IS NOT NULL, f.artificial, f.nonhuman, f.is_bystander
              FROM face f LEFT JOIN person pe ON pe.id=f.person_id
              WHERE f.photo_id IN ({ph}) ORDER BY f.photo_id, f.id"
         ))?;
@@ -764,6 +770,7 @@ pub fn recompute_subjects(conn: &mut Connection, photo_ids: &[i64]) -> Result<Ve
             feat: FaceFeat,
             named: bool,
             was: bool,
+            was_bystander: bool,
         }
         let mut per: BTreeMap<i64, Vec<R>> = BTreeMap::new();
         let rows = st.query_map(params_from_iter(chunk.iter()), |r| {
@@ -776,10 +783,12 @@ pub fn recompute_subjects(conn: &mut Connection, photo_ids: &[i64]) -> Result<Ve
                         sharpness: r.get(6)?,
                         gaze: r.get(7)?,
                         artificial: r.get(10)?,
+                        nonhuman: r.get::<_, i64>(11)? != 0,
                         ..Default::default()
                     },
                     was: r.get::<_, i64>(8)? != 0,
                     named: r.get::<_, i64>(9)? != 0,
+                    was_bystander: r.get::<_, i64>(12)? != 0,
                 },
             ))
         })?;
@@ -797,11 +806,14 @@ pub fn recompute_subjects(conn: &mut Connection, photo_ids: &[i64]) -> Result<Ve
             );
             let mut diff = false;
             for (f, s) in faces.iter().zip(&flags) {
+                let bystander = !*s && !f.feat.not_a_person();
                 if f.was != *s {
                     diff = true;
+                }
+                if f.was != *s || f.was_bystander != bystander {
                     tx.execute(
                         "UPDATE face SET is_subject=?2, is_bystander=?3 WHERE id=?1",
-                        params![f.id, *s as i64, (!*s && !f.feat.likely_artificial()) as i64],
+                        params![f.id, *s as i64, bystander as i64],
                     )?;
                 }
             }
@@ -835,6 +847,9 @@ struct CFace {
     /// Burst id, or `-photo_id` for photos outside any burst.
     group: i64,
     t: i64,
+    /// `face.landmarks`: the landmarker found a human face (None = it did not run).
+    landmarks: Option<bool>,
+    nonhuman: bool,
 }
 
 fn load_cfaces(conn: &Connection, sql: &str, args: &[i64]) -> Result<Vec<CFace>> {
@@ -855,6 +870,8 @@ fn load_cfaces(conn: &Connection, sql: &str, args: &[i64]) -> Result<Vec<CFace>>
                 group: r.get::<_, Option<i64>>(9)?.unwrap_or(-photo_id),
                 t: r.get::<_, Option<i64>>(10)?.unwrap_or(0),
                 is_subject: r.get::<_, i64>(11)? != 0,
+                landmarks: r.get::<_, Option<i64>>(12)?.map(|v| v != 0),
+                nonhuman: r.get::<_, i64>(13)? != 0,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -863,7 +880,7 @@ fn load_cfaces(conn: &Connection, sql: &str, args: &[i64]) -> Result<Vec<CFace>>
 
 const CFACE_COLS: &str =
     "f.id, f.photo_id, f.person_id, f.person_locked, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
-    f.embedding, p.burst_id, COALESCE(p.taken_at, p.mtime), f.is_subject";
+    f.embedding, p.burst_id, COALESCE(p.taken_at, p.mtime), f.is_subject, f.landmarks, f.nonhuman";
 
 /// Track index (within its group) per face; `groups` are the face indices of each burst.
 fn track_groups(faces: &[CFace]) -> (Vec<usize>, BTreeMap<i64, Vec<usize>>) {
@@ -925,6 +942,78 @@ pub fn retrack_burst(conn: &mut Connection, burst_id: i64) -> Result<()> {
 #[derive(Debug, Default)]
 pub struct ClusterOutcome {
     pub changed_photos: Vec<i64>,
+}
+
+/// Who a session face would belong to after clustering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum PersonGroup {
+    Person(i64),
+    New(usize),
+    /// A singleton subject (its track index).
+    Single(usize),
+}
+
+/// The would-be people of a session that are mostly not human faces
+/// ([`cluster::mostly_nonhuman`]), with whether their faces count as non-human (`true`: the
+/// cluster spans at least [`cluster::MIN_PHOTOS_NEW_PERSON`] photos, so it is a recurring
+/// non-human subject such as a pet; `false`: one unrecognised face, only kept out of people).
+/// An existing person is judged on all its faces; named people and groups holding a face the
+/// user assigned are never judged.
+fn nonhuman_groups(
+    conn: &Connection,
+    session_id: i64,
+    faces: &[CFace],
+    face_track: &[usize],
+    group_of: &dyn Fn(usize) -> Option<PersonGroup>,
+) -> Result<HashMap<PersonGroup, bool>> {
+    #[derive(Default)]
+    struct Votes {
+        known: usize,
+        found: usize,
+        photos: HashSet<i64>,
+        /// photos of the person outside the session
+        other_photos: usize,
+        locked: bool,
+    }
+    let mut votes: HashMap<PersonGroup, Votes> = HashMap::new();
+    for (i, f) in faces.iter().enumerate() {
+        let Some(g) = group_of(face_track[i]) else {
+            continue;
+        };
+        let v = votes.entry(g).or_default();
+        v.known += f.landmarks.is_some() as usize;
+        v.found += (f.landmarks == Some(true)) as usize;
+        v.photos.insert(f.photo_id);
+        v.locked |= f.locked;
+    }
+    let mut out = HashMap::new();
+    for (g, mut v) in votes {
+        if let PersonGroup::Person(p) = g {
+            // the person's faces outside this session
+            let (named, known, found, photos, locked): (i64, i64, i64, i64, i64) = conn.query_row(
+                "SELECT COALESCE(MAX(pe.name IS NOT NULL), 0), COUNT(f.landmarks),
+                        COALESCE(SUM(f.landmarks), 0), COUNT(DISTINCT f.photo_id),
+                        COALESCE(MAX(f.person_locked), 0)
+                 FROM person pe LEFT JOIN face f ON f.person_id=pe.id AND NOT EXISTS
+                   (SELECT 1 FROM session_photo sp WHERE sp.photo_id=f.photo_id AND sp.session_id=?2)
+                 WHERE pe.id=?1",
+                params![p, session_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )?;
+            if named != 0 {
+                continue;
+            }
+            v.known += known as usize;
+            v.found += found as usize;
+            v.other_photos = photos as usize;
+            v.locked |= locked != 0;
+        }
+        if !v.locked && cluster::mostly_nonhuman(v.known, v.found) {
+            let photos = v.photos.len() + v.other_photos;
+            out.insert(g, photos >= cluster::MIN_PHOTOS_NEW_PERSON);
+        }
+    }
+    Ok(out)
 }
 
 /// Tracks inside bursts, then people across the whole library (seeded by known people).
@@ -1003,20 +1092,35 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
             .collect()
     };
     let assignment = cluster::cluster_tracks(&tracks, &seeds, cluster::PERSON_COS);
-
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let mut new_ids: HashMap<usize, i64> = HashMap::new();
     // subjects that stayed unassigned for lack of a second photo still get a (singleton) person
     // so they can be picked in the portrait panel; they join a real person later if one matches
     let mut track_subject = vec![false; tracks.len()];
     for (i, f) in faces.iter().enumerate() {
         track_subject[face_track[i]] |= f.is_subject;
     }
+    let group_of = |ti: usize| -> Option<PersonGroup> {
+        match &assignment[ti] {
+            Assignment::Person(p) => Some(PersonGroup::Person(*p)),
+            Assignment::New(k) => Some(PersonGroup::New(*k)),
+            Assignment::None if tracks[ti].emb.is_some() && track_subject[ti] => {
+                Some(PersonGroup::Single(ti))
+            }
+            Assignment::None => None,
+        }
+    };
+    let nonhuman = nonhuman_groups(conn, session_id, &faces, &face_track, &group_of)?;
+
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut new_ids: HashMap<usize, i64> = HashMap::new();
     let mut singles: HashMap<usize, i64> = HashMap::new();
     let mut touched: HashSet<i64> = faces.iter().filter_map(|f| f.person_id).collect();
     let mut changed_photos: HashSet<i64> = HashSet::new();
     for (i, f) in faces.iter().enumerate() {
+        // a cluster that is mostly not a human face: no person; its faces are marked non-human
+        // when the cluster spans several photos (a single unrecognised face is only left out)
+        let verdict = group_of(face_track[i]).and_then(|g| nonhuman.get(&g).copied());
         let new_person = match &assignment[face_track[i]] {
+            _ if verdict.is_some() => None,
             Assignment::Person(p) => Some(*p),
             Assignment::New(k) => Some(match new_ids.get(k) {
                 Some(id) => *id,
@@ -1048,15 +1152,16 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
             }
         };
         let final_person = if f.locked { f.person_id } else { new_person };
+        let is_nonhuman = !f.locked && verdict == Some(true);
         if let Some(p) = final_person {
             touched.insert(p);
         }
-        if final_person != f.person_id {
+        if final_person != f.person_id || is_nonhuman != f.nonhuman {
             changed_photos.insert(f.photo_id);
         }
         tx.execute(
-            "UPDATE face SET track_id=?2, person_id=?3 WHERE id=?1",
-            params![f.id, track_of[i] as i64, final_person],
+            "UPDATE face SET track_id=?2, person_id=?3, nonhuman=?4 WHERE id=?1",
+            params![f.id, track_of[i] as i64, final_person, is_nonhuman as i64],
         )?;
     }
     for p in touched {
@@ -1089,13 +1194,41 @@ pub(crate) struct CoverCandidate {
     pub pitch: Option<f64>,
     /// 0..1, higher = more covered
     pub occlusion: Option<f64>,
-    /// mean luminance of the whole photo, 0..1 (the face itself is not measured)
+    /// mean luminance of the whole photo, 0..1 (the fallback when the face was not measured)
     pub luminance: Option<f64>,
+    /// grey level mean / standard deviation inside the face, 0..1 (`face.luma` / `face.contrast`)
+    pub face_luma: Option<f64>,
+    pub face_contrast: Option<f64>,
 }
 
-/// Cover quality: a big, confidently detected, sharp, frontal, unoccluded face in a well-exposed
-/// photo beats a huge but turned-away, back-lit or blurry one. Size is capped so that a close-up
-/// does not win on size alone. Higher is better; never negative.
+/// `face.luma` at or above this is fully lit for the cover choice. Faces of every skin tone are
+/// well above it when lit (darkest actor on the library: p0 0.25); an underexposed one is ~0.05.
+pub const COVER_LUMA_FULL: f64 = 0.15;
+/// `face.contrast` at or above this is fully visible. Lit faces on the library: p5 0.09, a blurred
+/// one 0.05; a back-lit / underexposed face is a flat ~0.02.
+pub const COVER_CONTRAST_FULL: f64 = 0.06;
+
+/// How visible the face is, 0.02..1: `0.02 + 0.98 * t^3` with
+/// `t = min(luma / COVER_LUMA_FULL, contrast / COVER_CONTRAST_FULL, 1)`. The cube makes a face
+/// lost in shadow (contrast 0.016: 0.04) lose to one a quarter its size that can be seen, while
+/// staying strictly increasing, so among faces that are all dark the least dark wins. Without face
+/// measurements (analysed before v19) the photo's mean luminance stands in: `l / 0.3` in
+/// [0.25, 1].
+pub(crate) fn cover_visibility(c: &CoverCandidate) -> f64 {
+    match (c.face_luma, c.face_contrast) {
+        (Some(l), Some(k)) => {
+            let t = (l / COVER_LUMA_FULL)
+                .min(k / COVER_CONTRAST_FULL)
+                .clamp(0.0, 1.0);
+            0.02 + 0.98 * t * t * t
+        }
+        _ => c.luminance.map_or(1.0, |l| (l / 0.3).clamp(0.25, 1.0)),
+    }
+}
+
+/// Cover quality: a big, confidently detected, sharp, frontal, unoccluded, visible face beats a
+/// huge but turned-away, back-lit or blurry one. Size is capped so that a close-up does not win
+/// on size alone. Higher is better; never negative.
 pub(crate) fn cover_score(c: &CoverCandidate) -> f64 {
     let size = (c.w * c.h).max(0.0).sqrt().min(0.3);
     let det = c.det.unwrap_or(0.5).clamp(0.05, 1.0);
@@ -1107,15 +1240,14 @@ pub(crate) fn cover_score(c: &CoverCandidate) -> f64 {
             * (1.0 - c.pitch.unwrap_or(0.0).abs() / 60.0).max(0.1)
     };
     let open = 1.0 - 0.8 * c.occlusion.unwrap_or(0.0).clamp(0.0, 1.0);
-    let light = c.luminance.map_or(1.0, |l| (l / 0.3).clamp(0.25, 1.0));
-    size * det * sharp * frontal * open * light
+    size * det * sharp * frontal * open * cover_visibility(c)
 }
 
 /// Refreshes centre and cover of a person; deletes it when it has no faces left and no name.
 pub fn recompute_person(conn: &Connection, person_id: i64) -> Result<()> {
     let mut st = conn.prepare(
         "SELECT f.id, f.embedding, f.bbox_w, f.bbox_h, f.det_score, f.sharpness, f.yaw, f.pitch,
-                f.occlusion, a.mean_luminance
+                f.occlusion, a.mean_luminance, f.luma, f.contrast
          FROM face f LEFT JOIN analysis a ON a.photo_id=f.photo_id WHERE f.person_id=?1",
     )?;
     let faces = st
@@ -1129,6 +1261,8 @@ pub fn recompute_person(conn: &Connection, person_id: i64) -> Result<()> {
                 pitch: r.get(7)?,
                 occlusion: r.get(8)?,
                 luminance: r.get(9)?,
+                face_luma: r.get(10)?,
+                face_contrast: r.get(11)?,
             };
             Ok((
                 r.get::<_, i64>(0)?,
@@ -1182,7 +1316,7 @@ pub fn recompute_person(conn: &Connection, person_id: i64) -> Result<()> {
 // ====================================================================== reads: faces, analysis, groups
 
 const FACE_SELECT: &str = "SELECT f.id, f.photo_id, f.person_id, pe.name, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
-    f.eyes_open, f.smile, f.gaze, f.yaw, f.pitch, f.roll, f.sharpness, f.expression_score, f.is_subject, f.track_id, f.artificial
+    f.eyes_open, f.smile, f.gaze, f.yaw, f.pitch, f.roll, f.sharpness, f.expression_score, f.is_subject, f.track_id, f.artificial, f.nonhuman
     FROM face f LEFT JOIN person pe ON pe.id=f.person_id";
 
 fn face_row(r: &rusqlite::Row) -> rusqlite::Result<(Face, Option<i64>)> {
@@ -1206,6 +1340,7 @@ fn face_row(r: &rusqlite::Row) -> rusqlite::Result<(Face, Option<i64>)> {
             likely_artificial: r
                 .get::<_, Option<f64>>(18)?
                 .is_some_and(|a| a >= scoring::ARTIFICIAL_AT),
+            nonhuman: r.get::<_, i64>(19)? != 0,
         },
         r.get(17)?,
     ))
@@ -2162,7 +2297,62 @@ mod cover_tests {
             pitch: Some(0.0),
             occlusion: Some(0.0),
             luminance: Some(0.5),
+            face_luma: None,
+            face_contrast: None,
         }
+    }
+
+    fn toned(luma: f64, contrast: f64) -> CoverCandidate {
+        CoverCandidate {
+            face_luma: Some(luma),
+            face_contrast: Some(contrast),
+            ..face()
+        }
+    }
+
+    #[test]
+    fn backlit_face_loses_to_a_smaller_visible_one() {
+        // the library's 「未命名 13」: a big underexposed face vs small lit ones
+        let backlit = CoverCandidate {
+            w: 0.23,
+            h: 0.33,
+            sharpness: Some(0.9),
+            luminance: Some(0.13),
+            ..toned(0.054, 0.016)
+        };
+        let lit = CoverCandidate {
+            w: 0.05,
+            h: 0.07,
+            sharpness: Some(0.3),
+            ..toned(0.52, 0.107)
+        };
+        assert!(cover_score(&lit) > cover_score(&backlit));
+    }
+
+    #[test]
+    fn face_tone_wins_over_photo_luminance_and_skin_tone_is_not_darkness() {
+        // a lit face in a dark concert photo, a dark-skinned face: both fully visible
+        let stage = CoverCandidate {
+            luminance: Some(0.05),
+            ..toned(0.45, 0.10)
+        };
+        assert_eq!(cover_visibility(&stage), 1.0);
+        assert_eq!(cover_visibility(&toned(0.25, 0.094)), 1.0);
+        // without face measurements the photo's luminance still counts
+        let old = CoverCandidate {
+            luminance: Some(0.06),
+            ..face()
+        };
+        assert_eq!(cover_visibility(&old), 0.25);
+    }
+
+    #[test]
+    fn among_dark_faces_the_least_dark_wins() {
+        let a = cover_visibility(&toned(0.02, 0.005));
+        let b = cover_visibility(&toned(0.054, 0.016));
+        let c = cover_visibility(&toned(0.167, 0.035));
+        assert!(0.02 <= a && a < b && b < c && c < 1.0, "{a} {b} {c}");
+        assert!(cover_score(&toned(0.167, 0.035)) > cover_score(&toned(0.054, 0.016)));
     }
 
     #[test]

@@ -3,7 +3,8 @@
     cd ai-worker && uv run python scripts/gen_lite_fixtures.py
 
 Writes deterministic synthetic PNGs plus `expected.json` (the worker's phash / quality output for
-each, quality including the tilt estimate) into `crates/ip-lite/tests/fixtures/`.
+each, quality including the tilt estimate, and `faces.face_tone` on fixed boxes) into
+`crates/ip-lite/tests/fixtures/`.
 `crates/ip-lite/tests/parity.rs` checks the Rust implementation against them (pHash bit-exact,
 quality within float32 tolerance).
 """
@@ -19,6 +20,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from imagepicker_ai.steps.faces import face_tone  # noqa: E402
 from imagepicker_ai.steps.phash import phash_hex  # noqa: E402
 from imagepicker_ai.steps.quality import analyze_quality  # noqa: E402
 
@@ -123,6 +125,19 @@ def build() -> dict[str, np.ndarray]:
     }
 
 
+# normalised [x, y, w, h] boxes measured by `face_tone` on every fixture (a large one, a small
+# one, one past the image corner)
+TONE_BOXES = [[0.3, 0.25, 0.35, 0.4], [0.05, 0.6, 0.07, 0.09], [0.85, 0.8, 0.3, 0.3]]
+
+
+def tones(rgb: np.ndarray) -> list[list[float] | None]:
+    out: list[list[float] | None] = []
+    for b in TONE_BOXES:
+        t = face_tone(rgb, tuple(b))  # type: ignore[arg-type]
+        out.append(None if t is None else [round(t[0], 6), round(t[1], 6)])
+    return out
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     expected: dict[str, dict] = {}
@@ -133,6 +148,7 @@ def main() -> None:
             "height": rgb.shape[0],
             "phash": phash_hex(rgb),
             "quality": analyze_quality(rgb),
+            "face_tone": tones(rgb),
         }
     text = json.dumps(expected, indent=1, sort_keys=True) + "\n"
     (OUT / "expected.json").write_text(text, encoding="utf-8", newline="\n")

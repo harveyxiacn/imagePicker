@@ -415,6 +415,7 @@ fn plan_from_tracks_handles_missing_faces_and_unknown_poses() {
         is_subject: true,
         artificial: None,
         likely_artificial: false,
+        nonhuman: false,
     };
     let mut cells = std::collections::BTreeMap::new();
     cells.insert("10".to_string(), Some(f(1, 10, Some(0.0), Some(0.5))));
@@ -1008,6 +1009,7 @@ fn burst(rows: &[&[Option<f64>]], sides: &[f64]) -> BurstFacesOut {
                         is_subject: true,
                         artificial: None,
                         likely_artificial: false,
+                        nonhuman: false,
                     });
                     (pid.to_string(), face)
                 })

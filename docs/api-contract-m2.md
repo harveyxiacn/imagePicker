@@ -16,6 +16,7 @@
 | `iqa` | `iqa: number`（0–1，越高越好） | 无参考技术质量；`iqa_model` 注明模型 id。（M0 中 `iqa` 为 `quality` 的别名，M2 起为独立步骤） |
 | `scene` | `scene_type: string`；`scene_scores: {[k]: number}` | SigLIP2 零样本，类别固定：`portrait` `group` `landscape` `food` `architecture` `night` `pet` `other` |
 | `faces`（增强） | 每张人脸新增 `gaze: number \| null`（0–1，看镜头程度，虹膜相对眼眶位置 + 头部姿态） | |
+| `faces`（增强，v19） | 每张人脸新增 `landmarks: boolean \| null`（`true` 关键点模型在框里找到了人脸，`false` 跑过但没找到——狗、后脑勺、黑到看不清的脸；`null` 没跑：未装 MediaPipe 或调用失败）、`luma` / `contrast: number \| null`（框内中央 70% 的灰度均值 / 标准差，0–1，`face_tone`；lite 档 `ip-lite::face_tone` 同法） | Core 用 `landmarks` 把「多数脸不被认作人脸」的聚类排除在人物之外，用 `luma` / `contrast` 选封面（03 §4.3）。旧 worker 缺这些字段时视为未知 |
 
 `standard` 档默认步骤：`phash, quality, faces, identity, embed, aesthetic, iqa, scene`；`fast` 档：`phash, quality, faces`。某步骤缺模型时，worker 在 `skipped_steps` 中列出，Core 用其余分项继续评分。
 
@@ -98,6 +99,8 @@ interface Face {
   eyes_open: number | null; smile: number | null; gaze: number | null;
   yaw: number | null; pitch: number | null; roll: number | null;
   sharpness: number | null; expression_score: number | null; is_subject: boolean;
+  artificial?: number | null; likely_artificial?: boolean;   // 雕像/海报/屏幕（03 §3.1.2）
+  nonhuman?: boolean;   // v19：所在聚类多数脸不被认作人脸（宠物等），无人物、非主体、非路人（03 §4.3）
 }
 ```
 

@@ -224,8 +224,13 @@ fn round5(x: f64) -> f64 {
     (x * 1e5).round() / 1e5
 }
 
+fn round4(x: f64) -> f64 {
+    (x * 1e4).round() / 1e4
+}
+
 /// The worker's faces step on an upright RGB8 image: boxes clamped to the image (normalised
-/// `[x, y, w, h]`), largest first, with the crop sharpness; eyes / smile / pose stay `None`.
+/// `[x, y, w, h]`), largest first, with the crop sharpness and tone; eyes / smile / pose and the
+/// landmarker verdict stay `None`.
 fn detect_faces(det: &FaceDetector, rgb: &[u8], w: usize, h: usize) -> Vec<AnalyzeFace> {
     let mut out: Vec<AnalyzeFace> = Vec::new();
     for d in det.detect(rgb, w, h).iter().take(MAX_FACES) {
@@ -238,10 +243,13 @@ fn detect_faces(det: &FaceDetector, rgb: &[u8], w: usize, h: usize) -> Vec<Analy
             continue;
         }
         let bbox = [round5(x0), round5(y0), round5(x1 - x0), round5(y1 - y0)];
+        let tone = ip_lite::face_tone(rgb, w, h, bbox);
         out.push(AnalyzeFace {
             bbox,
             det_score: Some((d.score as f64 * 1e4).round() / 1e4),
             sharpness: ip_lite::face_sharpness(rgb, w, h, bbox).map(round5),
+            luma: tone.map(|t| round4(t.0)),
+            contrast: tone.map(|t| round4(t.1)),
             ..Default::default()
         });
     }
