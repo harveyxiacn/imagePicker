@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetchSearchPhotos, photosQueryString, searchQueryString } from '@/api/client'
 import { buildPhotosQuery, DEFAULT_FILTER, isFilterActive } from './filter'
 import { makePhoto } from './fixtures'
-import { MAX_QUERY_CHARS, normalizeSearch, orderByHits, scorePercent, showLowConfidence, TEXT_MODEL, textModelState } from './search'
+import { buildGridItems, visiblePhotos } from './stacks'
+import { MAX_QUERY_CHARS, normalizeSearch, orderByHits, scorePercent, searchLayout, showLowConfidence, TEXT_MODEL, textModelState } from './search'
 
 describe('normalizeSearch', () => {
   it('trims and collapses whitespace, in any script', () => {
@@ -178,5 +179,29 @@ describe('low-confidence results', () => {
     expect(showLowConfidence('猫', { low_confidence: false }, 12)).toBe(false)
     expect(showLowConfidence('', { low_confidence: true }, 12)).toBe(false)
     expect(showLowConfidence('猫', undefined, 12)).toBe(false)
+  })
+})
+
+describe('search layout (relevance order)', () => {
+  it('flattens the grid while a search is on, whatever the grouped preference', () => {
+    expect(searchLayout('一只猫', true)).toEqual({ byRelevance: true, grouped: false })
+    expect(searchLayout('一只猫', false)).toEqual({ byRelevance: true, grouped: false })
+  })
+  it('leaves the preference alone without a search (blank text is no search)', () => {
+    expect(searchLayout('', true)).toEqual({ byRelevance: false, grouped: true })
+    expect(searchLayout('   ', true)).toEqual({ byRelevance: false, grouped: true })
+    expect(searchLayout('', false)).toEqual({ byRelevance: false, grouped: false })
+  })
+  it('keeps the hits in score order through the grid, burst mates and scenes included', () => {
+    // 1 and 3 share a burst and a time, 2 is far away: grouped, they would be pulled together
+    const photos = [
+      makePhoto(3, { burst_id: 5, burst_size: 2, rank_in_burst: 1, taken_at: 1000 }),
+      makePhoto(2, { taken_at: 90_000 }),
+      makePhoto(1, { burst_id: 5, burst_size: 2, rank_in_burst: 0, taken_at: 1010 }),
+    ]
+    const { grouped } = searchLayout('猫', true)
+    const items = buildGridItems(photos, { grouped, expandAll: false, expanded: new Set(), collapsedScenes: new Set(), scenes: undefined, withHeaders: true })
+    expect(items.every((i) => i.kind === 'photo' && i.stack === null)).toBe(true)
+    expect(visiblePhotos(items).map((p) => p.id)).toEqual([3, 2, 1])
   })
 })
