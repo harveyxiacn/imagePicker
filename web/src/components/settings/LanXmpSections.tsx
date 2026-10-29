@@ -220,7 +220,7 @@ export function XmpSection() {
       useToasts.getState().push('success', t(`settings.xmp.synced_${direction}`, { n: r.updated ?? 0 }), 3500)
       void qc.invalidateQueries({ queryKey: qk.photosAll })
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+      useToasts.getState().push('error', errorText(e), 6000)
     } finally {
       setBusy(null)
     }

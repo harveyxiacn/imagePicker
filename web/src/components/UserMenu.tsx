@@ -1,13 +1,15 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Eye, LogOut, User } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { useMe } from '@/api/queries'
 import { qk } from '@/lib/cache'
 import { LOGIN_PATH, noteLogout } from '@/lib/auth'
+import { usePopover } from '@/lib/usePopover'
 import { useToasts } from '@/stores/toasts'
+import { errorText } from '@/lib/errors'
 
 /** LAN mode only: "只读访客" badge for guests + account menu with logout. Renders nothing on the desktop. */
 export function UserMenu() {
@@ -17,20 +19,8 @@ export function UserMenu() {
   const me = useMe()
   const [open, setOpen] = useState(false)
   const wrap = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
-    document.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  const panel = useRef<HTMLDivElement>(null)
+  const pop = usePopover({ open, onClose: () => setOpen(false), menu: true, panelRef: panel, wrapRef: wrap })
 
   if (!me.data?.lan || !me.data.role) return null
   const guest = me.data.role === 'guest'
@@ -45,7 +35,7 @@ export function UserMenu() {
       await api.logout()
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'auth' })
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e))
+      useToasts.getState().push('error', errorText(e))
       void qc.invalidateQueries({ queryKey: qk.me })
     }
   }
@@ -60,8 +50,7 @@ export function UserMenu() {
       )}
       <button
         className="btn btn-ghost btn-icon"
-        aria-haspopup="menu"
-        aria-expanded={open}
+        {...pop.triggerProps}
         aria-label={t('auth.menu')}
         title={t('auth.menu')}
         onClick={() => setOpen((o) => !o)}
@@ -70,7 +59,7 @@ export function UserMenu() {
         <User size={15} />
       </button>
       {open && (
-        <div role="menu" className="anim-pop absolute top-full right-0 z-(--z-menu) mt-1 w-48 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]">
+        <div ref={panel} {...pop.panelProps} role="menu" aria-label={t('auth.menu')} className="anim-pop absolute top-full right-0 z-(--z-menu) mt-1 w-48 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]">
           <div className="px-2.5 py-1.5 text-xs text-muted">{guest ? t('auth.role_guest') : t('auth.role_owner')}</div>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left hover:bg-panel" onClick={() => void logout()} data-testid="logout">
             <LogOut size={14} />

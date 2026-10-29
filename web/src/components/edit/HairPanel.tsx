@@ -13,6 +13,8 @@ import { useGen } from '@/stores/gen'
 import { GenTasks } from '../GenTasks'
 import { Section } from './Section'
 import { Slider } from './Slider'
+import { errorText } from '@/lib/errors'
+import { reasonText } from '@/lib/reasons'
 
 /** One donor in the strip: thumbnail + donor face, score, and why (or why not). */
 function DonorCard({ d, chosen, onPick }: { d: HairDonor; chosen: boolean; onPick: () => void }) {
@@ -204,7 +206,7 @@ export function HairPanel({ photo }: { photo: Photo }) {
                 {t('hair.ranking')}
               </div>
             ) : donorsQ.isError ? (
-              <div className="text-xs text-danger">{(donorsQ.error as Error).message}</div>
+              <div className="text-xs text-danger">{errorText(donorsQ.error)}</div>
             ) : donors.length === 0 ? (
               <p className="text-[11px] text-faint" data-testid="hair-no-donors">
                 {t('hair.noDonors')}
@@ -313,7 +315,7 @@ export function HairPanel({ photo }: { photo: Photo }) {
                   onCommit={() => commitLive(qc, t('history.hairStrength', { who: who(faceId) }), `hair:${faceId}`)}
                 />
                 {(layer.warnings?.length ?? 0) > 0 && (
-                  <p className="text-[11px] text-warning">{layer.warnings!.map((w) => t(`hair.warn_${w}`, { defaultValue: w })).join(' · ')}</p>
+                  <p className="text-[11px] text-warning">{layer.warnings!.map((w) => reasonText('hair', w, 'warn')).join(' · ')}</p>
                 )}
               </div>
             )}

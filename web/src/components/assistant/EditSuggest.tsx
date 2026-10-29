@@ -9,6 +9,7 @@ import { applySuggestion, requestSuggestion } from '@/lib/assistantRun'
 import { diffAdjust, getAdjust, mergeAuto } from '@/lib/edit'
 import { useEdit } from '@/stores/edit'
 import { useToasts } from '@/stores/toasts'
+import { errorText } from '@/lib/errors'
 
 /** "✨ 修图建议" (edit page, AI panel): VLM suggestions for the open photo; one click applies them as ONE undoable change. */
 export function EditSuggest() {
@@ -34,7 +35,7 @@ export function EditSuggest() {
     try {
       setSug({ photoId, data: await requestSuggestion(Number(sessionId), photoId) })
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 5000)
+      useToasts.getState().push('error', errorText(e), 5000)
     } finally {
       setBusy(false)
     }

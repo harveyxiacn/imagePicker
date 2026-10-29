@@ -6,6 +6,7 @@ import { useToasts } from '@/stores/toasts'
 import { patchPhotosInCache, qk } from './cache'
 import { applySections, diffAdjust, emptyStack, getAdjust, isEmptyStack, mergeAuto, normalizeStack, stacksEqual } from './edit'
 import { useHistory, type EditChange } from './history'
+import { errorText } from '@/lib/errors'
 
 // ---------------------------------------------------------------- persistence (debounced PUT)
 
@@ -31,7 +32,7 @@ function put(qc: QueryClient, photoId: number, stack: EditStack): Promise<void> 
         if (chains.get(photoId) === next) setSaveState('idle')
       } catch (err) {
         setSaveState('error')
-        useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000)
+        useToasts.getState().push('error', errorText(err), 5000)
       }
     })
   chains.set(photoId, next)
@@ -148,7 +149,7 @@ export async function autoApply(qc: QueryClient, mode: AutoMode, label: string):
     }, 1800)
     return changed
   } catch (err) {
-    useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000)
+    useToasts.getState().push('error', errorText(err), 5000)
     return false
   }
 }

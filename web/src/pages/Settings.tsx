@@ -12,6 +12,7 @@ import { RemoteAiSection, RemoteDevicesSection } from '@/components/settings/Rem
 import { TasksSection } from '@/components/settings/TasksSection'
 import { TasteSection } from '@/components/settings/TasteSection'
 import { can } from '@/lib/auth'
+import { errorText } from '@/lib/errors'
 
 const SETTINGS_SECTIONS = [
   { id: 'hardware', icon: Cpu, view: HardwareSection },
@@ -75,7 +76,7 @@ export function Settings() {
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4 md:p-6">
             <h2 className="text-xl font-semibold">{t(`settings.nav.${current.id}`)}</h2>
-            {settings.isError ? <div className="text-danger">{(settings.error as Error).message}</div> : <View key={current.id} />}
+            {settings.isError ? <div className="text-danger">{errorText(settings.error)}</div> : <View key={current.id} />}
           </div>
         </main>
       </div>

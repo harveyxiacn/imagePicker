@@ -1,5 +1,5 @@
 import { Ban, Check, FolderPlus, ScanSearch, Search, Users } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { faceCropUrl } from '@/api/client'
 import { usePeople } from '@/api/queries'
@@ -16,6 +16,7 @@ import {
   type FacesPreset,
   type PersonFilter,
 } from '@/lib/filter'
+import { usePopover } from '@/lib/usePopover'
 import { useUi } from '@/stores/ui'
 
 const STATES: PersonState[] = ['eyes_open', 'smiling', 'looking', 'subject']
@@ -34,26 +35,21 @@ export function PersonFilterButton({ sessionId, resultCount }: Props) {
   const setOpen = useUi((s) => s.setPersonFilterOpen)
   const filter = useUi((s) => s.filter.person)
   const wrap = useRef<HTMLDivElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
+  const pop = usePopover({ open, onClose: () => setOpen(false), panelRef: panel, wrapRef: wrap })
   const active = isPersonFilterActive(filter)
 
-  // Click outside / Escape / Shift+P close the popover (global shortcuts are paused while a dialog is open).
+  // Shift+P closes it too (click outside / Escape come from usePopover; global shortcuts are paused while a dialog is open).
   useEffect(() => {
     if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false)
-    }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || (e.shiftKey && e.key.toLowerCase() === 'p' && !(e.target instanceof HTMLInputElement))) {
+      if (e.shiftKey && e.key.toLowerCase() === 'p' && !(e.target instanceof HTMLInputElement)) {
         e.preventDefault()
         setOpen(false)
       }
     }
-    document.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
+    return () => window.removeEventListener('keydown', onKey)
   }, [open, setOpen])
 
   return (
@@ -61,8 +57,7 @@ export function PersonFilterButton({ sessionId, resultCount }: Props) {
       <button
         className="btn"
         aria-pressed={active || open}
-        aria-haspopup="dialog"
-        aria-expanded={open}
+        {...pop.triggerProps}
         title={`${t('person.filter')} (Shift+P)`}
         onClick={() => setOpen(!open)}
         data-testid="person-filter-button"
@@ -70,12 +65,12 @@ export function PersonFilterButton({ sessionId, resultCount }: Props) {
         <Users size={14} />
         {t('person.filter')}
       </button>
-      {open && <Popover sessionId={sessionId} resultCount={resultCount} />}
+      {open && <Popover sessionId={sessionId} resultCount={resultCount} panelRef={panel} panelProps={pop.panelProps} />}
     </div>
   )
 }
 
-function Popover({ sessionId, resultCount }: Props) {
+function Popover({ sessionId, resultCount, panelRef, panelProps }: Props & { panelRef: RefObject<HTMLDivElement | null>; panelProps: { id: string; tabIndex: number } }) {
   const { t, i18n } = useTranslation()
   const people = usePeople(sessionId)
   const filter = useUi((s) => s.filter.person)
@@ -97,6 +92,8 @@ function Popover({ sessionId, resultCount }: Props) {
 
   return (
     <div
+      ref={panelRef}
+      {...panelProps}
       role="dialog"
       aria-label={t('person.filter')}
       className="anim-pop absolute top-full left-0 z-(--z-popover) mt-1.5 w-[440px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"

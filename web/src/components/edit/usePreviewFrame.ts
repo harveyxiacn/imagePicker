@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { renderPreview } from '@/api/client'
 import type { EditStack, PreviewBody, PreviewResult } from '@/api/types'
 import { PreviewScheduler, previewLongEdge } from '@/lib/previewScheduler'
+import { errorText } from '@/lib/errors'
 
 export interface FrameInfo {
   photoId: number
@@ -73,7 +74,7 @@ export function usePreviewFrame({ photoId, body, bodyKey, dragging, container, e
         })
         if (old) setTimeout(() => URL.revokeObjectURL(old), 1500)
       },
-      onError: (err) => setState((st) => ({ ...st, error: err instanceof Error ? err.message : String(err) })),
+      onError: (err) => setState((st) => ({ ...st, error: errorText(err) })),
     })
     sched.current = s
     return () => {

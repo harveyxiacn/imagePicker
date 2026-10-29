@@ -5,6 +5,7 @@ import { useTasks } from '@/api/queries'
 import type { TaskRecord } from '@/api/types'
 import { cancelTask, isLive, taskDetail, taskPercent } from '@/lib/tasks'
 import { Card } from './controls'
+import { errorText } from '@/lib/errors'
 
 function StatusIcon({ status }: { status: TaskRecord['status'] }) {
   switch (status) {
@@ -59,7 +60,7 @@ function TaskRow({ task }: { task: TaskRecord }) {
           <span className="tnum">{t('tasks.progress', { done: task.done, total: task.total })}</span>
         </div>
       )}
-      {task.error && task.status !== 'cancelled' && <div className="text-xs break-words text-danger">{task.error}</div>}
+      {task.error && task.status !== 'cancelled' && <div className="text-xs break-words text-danger">{errorText(task.error)}</div>}
     </li>
   )
 }
@@ -80,7 +81,7 @@ export function TasksSection() {
           </button>
         </div>
         {tasks.isError ? (
-          <div className="px-4 py-3 text-danger">{(tasks.error as Error).message}</div>
+          <div className="px-4 py-3 text-danger">{errorText(tasks.error)}</div>
         ) : tasks.isLoading ? (
           <div className="flex justify-center px-4 py-6 text-muted">
             <Loader2 size={16} className="animate-spin" />

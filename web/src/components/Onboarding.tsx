@@ -12,6 +12,7 @@ import { COACH_MARKS, shouldPostDone, visibleOverlay, type CoachMark, type Onboa
 import { useOnboardingUi } from '@/stores/onboarding'
 import { useToasts } from '@/stores/toasts'
 import { Modal } from './Modal'
+import { errorText } from '@/lib/errors'
 
 const mb = (n: number) => (n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : `${Math.round(n)} MB`)
 
@@ -39,7 +40,7 @@ export function Onboarding() {
       void api
         .onboardingDone()
         .then(() => qc.setQueryData(qk.onboarding, info.data ? { ...info.data, first_run: false } : undefined))
-        .catch((e) => useToasts.getState().push('error', e instanceof Error ? e.message : String(e)))
+        .catch((e) => useToasts.getState().push('error', errorText(e)))
     }
     return next
   }
@@ -80,7 +81,7 @@ function HardwareCard({ info, onChoose }: { info: NonNullable<ReturnType<typeof 
       }
       onChoose(true)
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+      useToasts.getState().push('error', errorText(e), 6000)
     } finally {
       setBusy(false)
       setPercent(null)

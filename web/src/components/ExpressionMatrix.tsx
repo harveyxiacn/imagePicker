@@ -5,6 +5,7 @@ import { useBurstFaces } from '@/api/queries'
 import type { Face, Photo } from '@/api/types'
 import { commonBestFrames, expressionTone, type CellTone } from '@/lib/ai'
 import { useFaceMenu } from './FaceMenu'
+import { errorText } from '@/lib/errors'
 
 const TONE_COLOR: Record<CellTone, string> = {
   good: 'var(--success)',
@@ -34,7 +35,7 @@ export function ExpressionMatrix({ burstId, photos, aId, bId, onPick, onCompose 
   const num = new Map(photos.map((p, i) => [p.id, i + 1]))
 
   if (q.isPending) return <div className="p-3 text-muted">{t('library.loading')}</div>
-  if (q.isError) return <div className="p-3 text-danger">{(q.error as Error).message}</div>
+  if (q.isError) return <div className="p-3 text-danger">{errorText(q.error)}</div>
   if (!data || data.tracks.length === 0) return <div className="p-3 text-muted" data-testid="matrix-empty">{t('matrix.noFaces')}</div>
 
   const common = commonBestFrames(data.tracks)

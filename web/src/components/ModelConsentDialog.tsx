@@ -12,6 +12,7 @@ import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
 import { LicenseBadge } from './LicenseBadge'
 import { Modal } from './Modal'
+import { errorText } from '@/lib/errors'
 
 const mb = (n: number) => (n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : n >= 10 ? `${Math.round(n)} MB` : `${n} MB`)
 
@@ -34,7 +35,7 @@ export function ModelConsentDialog() {
   const warnings = licenceWarnings(list)
 
   const downloading = ensureTaskId !== null && task?.state !== 'failed' && task?.state !== 'done'
-  const failed = task?.state === 'failed' ? (task.error ?? t('models.failed')) : ensureError
+  const failed = task?.state === 'failed' ? (task.error ? errorText(task.error) : t('models.failed')) : ensureError
 
   // Download finished: retry the analysis the user asked for.
   useEffect(() => {
@@ -59,7 +60,7 @@ export function ModelConsentDialog() {
         setConsent(null)
         return
       }
-      setEnsure(null, err instanceof Error ? err.message : String(err))
+      setEnsure(null, errorText(err))
     } finally {
       setBusy(false)
     }
@@ -130,7 +131,7 @@ export function ModelConsentDialog() {
                 <LicenseBadge model={m} />
               </li>
             ))}
-            {models.isError && <li className="text-danger">{(models.error as Error).message}</li>}
+            {models.isError && <li className="text-danger">{errorText(models.error)}</li>}
           </ul>
         )}
         {warnings.length > 0 && (

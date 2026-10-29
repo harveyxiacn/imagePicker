@@ -23,6 +23,7 @@ import {
   type Scope,
 } from '@/lib/timelineScrub'
 import { useUi } from '@/stores/ui'
+import { errorText } from '@/lib/errors'
 
 /**
  * Timeline scrubber (PRD F1.9): the photos of the library by capture date, zoomable year -> month ->
@@ -150,7 +151,7 @@ export function TimelinePanel({ sessionId }: { sessionId: number }) {
         </div>
       ) : q.isError ? (
         <div className="flex items-center gap-3 py-3 text-sm text-danger">
-          {(q.error as Error).message}
+          {errorText(q.error)}
           <button className="btn hit !h-6" onClick={() => void q.refetch()}>
             {t('common.retry')}
           </button>

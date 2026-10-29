@@ -22,6 +22,7 @@ import { useEdit } from '@/stores/edit'
 import { useGen } from '@/stores/gen'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
+import { errorText } from '@/lib/errors'
 
 const timeOrder = <T extends { taken_at: number | null; id: number }>(a: T, b: T) => (a.taken_at ?? 0) - (b.taken_at ?? 0) || a.id - b.id
 
@@ -66,7 +67,7 @@ export function BestTake() {
       .then((res) => {
         if (alive) useEdit.getState().load(baseId, res.stack)
       })
-      .catch((err: unknown) => useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000))
+      .catch((err: unknown) => useToasts.getState().push('error', errorText(err), 5000))
     useUi.getState().setActive(baseId)
     return () => {
       alive = false
@@ -188,7 +189,7 @@ export function BestTake() {
   if (planQ.isError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3" data-testid="bt-error">
-        <div className="text-danger">{(planQ.error as Error).message}</div>
+        <div className="text-danger">{errorText(planQ.error)}</div>
         <Link to={`/s/${sessionId}`} className="btn">
           {t('common.back')}
         </Link>

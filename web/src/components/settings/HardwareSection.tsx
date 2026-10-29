@@ -13,6 +13,7 @@ import { LicenseBadge } from '../LicenseBadge'
 import { RuntimeCard } from './RuntimeCard'
 import { Card, ConfirmDialog, Row, Select } from './controls'
 import { useSetting } from './useSetting'
+import { errorText } from '@/lib/errors'
 
 const mb = (n: number) => (n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : n >= 10 ? `${Math.round(n)} MB` : `${n} MB`)
 const SOURCES: ModelSource[] = ['auto', 'hf', 'hf-mirror', 'modelscope']
@@ -46,7 +47,7 @@ export function HardwareSection() {
       useToasts.getState().updateTask({ type: 'task.progress', task_id, kind: 'model_download', done: 0, total: Math.round(m.size_mb * 1e6), state: 'running' })
     } catch (e) {
       if (offerRuntimeInstall(e)) return
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+      useToasts.getState().push('error', errorText(e), 6000)
     }
   }
   const remove = async (m: ModelInfo) => {
@@ -55,7 +56,7 @@ export function HardwareSection() {
       void qc.invalidateQueries({ queryKey: ['models'] })
       useToasts.getState().push('success', t('settings.models.deleted', { id: m.id }), 2500)
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+      useToasts.getState().push('error', errorText(e), 6000)
     }
   }
 

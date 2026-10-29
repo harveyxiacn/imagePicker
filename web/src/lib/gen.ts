@@ -20,6 +20,8 @@ import { useHistory } from './history'
 import { missingModelsOf } from './analysis'
 import { mergePatches } from './patches'
 import { CANCELLED, cancelTask } from './tasks'
+import { errorText } from '@/lib/errors'
+import { reasonText } from '@/lib/reasons'
 
 export const GEN_TIMEOUT_MS = 180_000
 
@@ -85,7 +87,7 @@ export function reportGenError(err: unknown, ctx: ErrorCtx): void {
     toast('error', tr('gen.timeout'))
     return
   }
-  toast('error', err instanceof Error ? err.message : String(err))
+  toast('error', errorText(err))
 }
 
 // ---------------------------------------------------------------- run
@@ -181,7 +183,7 @@ export async function finalizeGen(qc: QueryClient, taskId: string, ok: boolean, 
     void qc.invalidateQueries({ queryKey: ['bystanders', photoId] })
     if (task.kind === 'besttake' && ok && resultPhotoId !== undefined && resultPhotoId !== task.photoId) useGen.getState().setAutoBase(resultPhotoId)
   } catch (err) {
-    toast('error', err instanceof Error ? err.message : String(err))
+    toast('error', errorText(err))
   }
 }
 
@@ -219,7 +221,7 @@ export function genOnDone(qc: QueryClient, ev: DoneEvent): void {
     reason = cancelled ? CANCELLED : (failed[0]?.reason ?? null)
     if (!cancelled) {
       st.setResults(ev.photo_id, ev.results)
-      if (!ok) toast('error', tr('besttake.failedFor', { n: failed.length, reason: reason ? tr(`besttake.reason_${reason}`, { defaultValue: reason }) : tr('gen.failed') }))
+      if (!ok) toast('error', tr('besttake.failedFor', { n: failed.length, reason: reason ? reasonText('besttake', reason) : tr('gen.failed') }))
       const warned = ev.results.filter((r) => r.ok && r.warnings.length > 0).length
       if (warned > 0) toast('info', tr('besttake.warnedToast', { n: warned }), 4500)
     }
@@ -227,9 +229,9 @@ export function genOnDone(qc: QueryClient, ev: DoneEvent): void {
     kind = 'hair'
     ok = ev.ok
     // a refusal comes as a reason code (pose_too_different, donor_no_hair, ...): show it in words
-    reason = ev.reason && ev.reason !== CANCELLED ? tr(`hair.reason_${ev.reason}`, { defaultValue: ev.reason }) : ev.reason
+    reason = ev.reason && ev.reason !== CANCELLED ? reasonText('hair', ev.reason) : ev.reason
     if (ev.ok && ev.warnings.length > 0) {
-      toast('info', tr('hair.warnedToast', { list: ev.warnings.map((w) => tr(`hair.warn_${w}`, { defaultValue: w })).join(' · ') }), 6000)
+      toast('info', tr('hair.warnedToast', { list: ev.warnings.map((w) => reasonText('hair', w, 'warn')).join(' · ') }), 6000)
     }
   } else {
     kind = ev.type === 'inpaint.done' ? 'inpaint' : 'enhance'

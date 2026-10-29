@@ -12,6 +12,7 @@ import { useFaceConsent } from '@/stores/faceConsent'
 import { useToasts } from '@/stores/toasts'
 import { Card, CommitInput, ConfirmDialog, Row, Select, Toggle } from './controls'
 import { useSetting } from './useSetting'
+import { errorText } from '@/lib/errors'
 
 const PROFILES = ['fast', 'standard'] as const
 const STRICTNESS: GroupStrictness[] = ['loose', 'normal', 'strict']
@@ -71,7 +72,7 @@ export function FacesSection() {
       setAsk(false)
       setTyped('')
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+      useToasts.getState().push('error', errorText(e), 6000)
     } finally {
       setBusy(false)
     }
@@ -151,7 +152,7 @@ export function CacheSection() {
       await qc.invalidateQueries({ queryKey: qk.cacheInfo })
       useToasts.getState().push('success', t('settings.cache.cleared'), 2500)
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+      useToasts.getState().push('error', errorText(e), 6000)
     } finally {
       setBusy(null)
     }

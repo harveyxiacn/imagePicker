@@ -2,6 +2,7 @@ import { api, ApiError } from '@/api/client'
 import type { RuntimeInfo } from '@/api/types'
 import i18n from '@/i18n'
 import { useToasts } from '@/stores/toasts'
+import { errorText } from '@/lib/errors'
 
 /** True for the `503 worker_unavailable` whose body says the AI runtime is not installed (`runtime: "missing"`). */
 export function isRuntimeMissing(err: unknown): boolean {
@@ -93,7 +94,7 @@ export function offerRuntimeInstall(err: unknown, after?: () => void, alt?: { la
             useToasts.getState().push('info', i18n.t('runtime.installStarted'), 4000)
             if (after) void installRuntimeAndWait().then(after, () => undefined)
           })
-          .catch((e) => useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000))
+          .catch((e) => useToasts.getState().push('error', errorText(e), 6000))
       },
     },
     ...(alt ? [alt] : []),

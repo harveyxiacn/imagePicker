@@ -13,6 +13,7 @@ import { eventLabel, eventStillExists, toggleEvent } from '@/lib/timeline'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { Modal } from './Modal'
+import { errorText } from '@/lib/errors'
 
 /** Display name: built-ins are translated, user collections show their stored name. */
 function useCollectionName(): (c: Collection) => string {
@@ -30,7 +31,7 @@ function Row({ c, sessionId }: { c: Collection; sessionId: number }) {
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const fail = (e: unknown) => useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 5000)
+  const fail = (e: unknown) => useToasts.getState().push('error', errorText(e), 5000)
 
   const rename = useMutation({
     mutationFn: (name: string) => api.patchCollection(c.id, { name }),
@@ -214,7 +215,7 @@ export function CollectionsSidebar({ sessionId }: { sessionId: number }) {
           </button>
         </li>
         {q.isPending && <li className="px-2 py-2 text-xs text-faint">{t('library.loading')}</li>}
-        {q.isError && <li className="px-2 py-2 text-xs text-danger">{(q.error as Error).message}</li>}
+        {q.isError && <li className="px-2 py-2 text-xs text-danger">{errorText(q.error)}</li>}
         {list.map((c) => (
           <Row key={c.id} c={c} sessionId={sessionId} />
         ))}

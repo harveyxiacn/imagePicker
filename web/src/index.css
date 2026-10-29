@@ -580,3 +580,34 @@ input[type='range'].big-slider::-moz-range-thumb {
   background: var(--accent);
   border: 3px solid var(--panel);
 }
+
+/* ---- toast buttons: >=28px on desktop, >=44px on touch (stores/toasts UI) ---- */
+.btn.toast-hit {
+  height: 28px;
+  min-height: 28px;
+}
+.btn.toast-hit.toast-hit-icon {
+  width: 28px;
+  min-width: 28px;
+}
+@media (pointer: coarse) {
+  .btn.toast-hit {
+    height: 44px;
+    min-height: 44px;
+  }
+  .btn.toast-hit.toast-hit-icon {
+    width: 44px;
+    min-width: 44px;
+  }
+}
+/* ---- end toast buttons ---- */
+/* --- popover/mobile pass: viewport-height caps with a vh fallback (dvh follows the browser UI / keyboard) --- */
+.modal-max-h {
+  max-height: 88vh;
+  max-height: 88dvh;
+}
+.palette-max-h {
+  max-height: 70vh;
+  max-height: 70dvh;
+}
+/* --- end popover/mobile pass --- */

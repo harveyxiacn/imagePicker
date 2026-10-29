@@ -1,7 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ApiError } from '@/api/client'
 import type { Photo } from '@/api/types'
 import { redo, undo } from '@/lib/actions'
 import { PRESET_SECTIONS } from '@/lib/edit'
@@ -9,6 +8,7 @@ import { resetAll, pasteToPhotos, syncToPhotos } from '@/lib/editActions'
 import { useEdit } from '@/stores/edit'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
+import { errorText } from '@/lib/errors'
 
 /** Commands of the edit page shared by keyboard shortcuts and toolbar buttons. */
 export function useEditActions(photo: Photo | undefined, photos: Photo[], onClose: () => void) {
@@ -20,7 +20,7 @@ export function useEditActions(photo: Photo | undefined, photos: Photo[], onClos
     latest.current = { photo, photos, onClose }
   })
 
-  const fail = useCallback((err: unknown) => push('error', err instanceof ApiError || err instanceof Error ? err.message : String(err), 5000), [push])
+  const fail = useCallback((err: unknown) => push('error', errorText(err), 5000), [push])
 
   const doUndo = useCallback(async () => {
     const e = await undo(qc)

@@ -5,10 +5,12 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { applyProfilesToPhotos } from '@/lib/editActions'
+import { usePopover } from '@/lib/usePopover'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { RejectFilesDialog } from './FilesUi'
 import { MenuItem } from './MenuItem'
+import { errorText } from '@/lib/errors'
 
 interface MenuState {
   id: number
@@ -24,6 +26,8 @@ export function usePhotoMenu(sessionId: number): { open: (e: { clientX: number; 
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [rejectOpen, setRejectOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  // Escape / click outside / focus into the menu + arrow keys; focus goes back to what had it before the right-click
+  const pop = usePopover({ open: menu !== null, onClose: () => setMenu(null), menu: true, panelRef: ref })
 
   const open = useCallback((e: { clientX: number; clientY: number; preventDefault: () => void }, id: number) => {
     e.preventDefault()
@@ -37,17 +41,9 @@ export function usePhotoMenu(sessionId: number): { open: (e: { clientX: number; 
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close()
-    }
-    document.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey, true)
     window.addEventListener('blur', close)
     window.addEventListener('resize', close)
     return () => {
-      document.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('blur', close)
       window.removeEventListener('resize', close)
     }
@@ -65,7 +61,7 @@ export function usePhotoMenu(sessionId: number): { open: (e: { clientX: number; 
       const n = await applyProfilesToPhotos(qc, ids, t('history.applyProfiles', { n: ids.length }))
       useToasts.getState().push(n > 0 ? 'success' : 'info', n > 0 ? t('beauty.profilesApplied', { n }) : t('beauty.profilesNone'), 3000)
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000)
+      useToasts.getState().push('error', errorText(err), 5000)
     }
   }
 
@@ -74,6 +70,7 @@ export function usePhotoMenu(sessionId: number): { open: (e: { clientX: number; 
     ? createPortal(
         <div
           ref={ref}
+          {...pop.panelProps}
           role="menu"
           aria-label={t('photoMenu.label')}
           className="anim-pop fixed z-(--z-menu) min-w-60 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]"
