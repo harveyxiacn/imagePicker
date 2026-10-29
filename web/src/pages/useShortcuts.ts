@@ -91,10 +91,13 @@ export function useShortcuts(ctrl: Controller) {
 
       // Shift+arrows extend the selection in the grid.
       if (scope === 'grid' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        const d = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -ui.gridCols, ArrowDown: ui.gridCols }[e.key]
-        if (d) {
+        // Up/Down follow the visual rows (scenes are packed side by side in the grouped grid)
+        const d = ({ ArrowLeft: -1, ArrowRight: 1 } as Record<string, 1 | -1>)[e.key]
+        const v = ({ ArrowUp: -1, ArrowDown: 1 } as Record<string, 1 | -1>)[e.key]
+        if (d || v) {
           e.preventDefault()
-          ctrl.move(d, { extend: true })
+          if (v) ctrl.moveRow(v, { extend: true })
+          else ctrl.move(d, { extend: true })
           return
         }
       }

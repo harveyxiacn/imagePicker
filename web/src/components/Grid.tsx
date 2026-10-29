@@ -1,26 +1,26 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Ban, ChevronDown, ChevronRight, Flag as FlagIcon, FilterX, ImageOff, Layers, Unlink } from 'lucide-react'
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Ban, Flag as FlagIcon, FilterX, ImageOff, Layers, Unlink } from 'lucide-react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { api, thumbUrl } from '@/api/client'
 import type { Photo } from '@/api/types'
 import { issueBadges } from '@/lib/ai'
-import { formatClock } from '@/lib/format'
+import { colX, locate, packRows, STRIP_H } from '@/lib/gridPack'
 import { useDebouncedEffect, useElementSize } from '@/lib/hooks'
 import { photoLabel } from '@/lib/photoLabel'
 import { aiScoreTip } from '@/lib/score'
 import { clickSelect } from '@/lib/selection'
-import { buildRows, visiblePhotos, type GridItem, type HeaderItem, type StackInfo } from '@/lib/stacks'
+import { visiblePhotos, type GridItem, type StackInfo } from '@/lib/stacks'
 import { useUi } from '@/stores/ui'
 import { colorVar } from '@/lib/colors'
+import { FoldedTile, SegmentDivider, SegmentHeader } from './GridSegments'
 
 /** DOM id of a photo's cell: the grid points `aria-activedescendant` at it. */
 const cellId = (photoId: number) => `grid-cell-${photoId}`
 
 const GAP = 4
 const PAD = 8
-const HEADER_H = 34
 
 interface CellProps {
   photo: Photo
@@ -149,7 +149,9 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
               </span>
             ) : photo.ai_rating !== null ? (
               <span
-                className="tnum pointer-events-none absolute bottom-1 left-1 rounded bg-black/65 px-1 text-[11px] leading-4 text-ai"
+                // light tint of the AI hue on a near-opaque chip: readable over any photo, in every theme
+                className="tnum pointer-events-none absolute bottom-1 left-1 rounded bg-black/80 px-1 text-[12px] leading-4 font-semibold"
+                style={{ color: 'color-mix(in srgb, var(--ai) 40%, #fff)' }}
                 title={`${t('inspector.aiRating')}${aiScoreTip(t, photo.ai_score)}`}
                 data-testid="ai-badge"
                 aria-hidden="true"
@@ -212,31 +214,6 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
   sameStack(a.stack, b.stack),
 )
 
-function SceneHeader({ h, onToggle }: { h: HeaderItem; onToggle: (id: number) => void }) {
-  const { t, i18n } = useTranslation()
-  const Icon = h.collapsed ? ChevronRight : ChevronDown
-  return (
-    <button
-      type="button"
-      tabIndex={-1} // the grid is one tab stop; pointer / screen-reader activation only
-      className="flex h-full w-full items-center gap-2 border-b border-line/70 px-1 text-left text-muted hover:text-fg"
-      onClick={(e) => {
-        e.stopPropagation()
-        onToggle(h.sceneId)
-      }}
-      aria-expanded={!h.collapsed}
-      data-testid="scene-header"
-    >
-      <Icon size={14} aria-hidden="true" />
-      <span className="font-medium text-fg">{t('scene.title', { n: h.index })}</span>
-      <span className="tnum">
-        {formatClock(h.startAt, i18n.language, h.offsetMin)} – {formatClock(h.endAt, i18n.language, h.offsetMin, false)}
-      </span>
-      <span className="tnum text-faint">{t('scene.counts', { groups: h.groupCount, photos: h.photoCount })}</span>
-    </button>
-  )
-}
-
 interface Props {
   items: GridItem[]
   onOpen: (id: number) => void
@@ -249,7 +226,10 @@ interface Props {
   hiddenCount?: number | null
 }
 
-/** Virtualized thumbnail grid with scene headers and stacks: only visible rows are mounted (20k+ items). */
+/**
+ * Virtualized thumbnail grid with scene headers and stacks: only visible rows are mounted (20k+ items).
+ * Scenes are packed side by side on rows (see `packRows`), each with a compact header above its cells.
+ */
 export function Grid({ items, onOpen, onToggleStack, onToggleScene, onContext, filtered = false, hiddenCount = null }: Props) {
   const { t } = useTranslation()
   const [ref, size] = useElementSize<HTMLDivElement>()
@@ -260,22 +240,19 @@ export function Grid({ items, onOpen, onToggleStack, onToggleScene, onContext, f
   const innerW = Math.max(0, size.w - PAD * 2)
   const cols = Math.max(1, Math.floor((innerW + GAP) / (thumbSize + GAP)))
   const cell = Math.max(32, Math.floor((innerW - GAP * (cols - 1)) / cols))
-  const rows = useMemo(() => buildRows(items, cols), [items, cols])
+  const rows = useMemo(() => packRows(items, cols), [items, cols])
   const photos = useMemo(() => visiblePhotos(items), [items])
   const setGridCols = useUi((s) => s.setGridCols)
   const setGridRows = useUi((s) => s.setGridRows)
   useEffect(() => setGridCols(cols), [cols, setGridCols])
   useEffect(() => setGridRows(rows), [rows, setGridRows])
 
-  const rowSize = useCallback((i: number) => (rows[i]?.kind === 'header' ? HEADER_H : cell + GAP), [rows, cell])
+  const rowSize = useCallback((i: number) => (rows[i]?.heads.length ? STRIP_H : 0) + cell + GAP, [rows, cell])
   const virt = useVirtualizer({
     count: rows.length,
     getScrollElement: () => ref.current,
     estimateSize: rowSize,
-    getItemKey: (i) => {
-      const r = rows[i]
-      return r.kind === 'header' ? r.item.key : `p-${r.items[0].photo.id}`
-    },
+    getItemKey: (i) => rows[i].key,
     overscan: 4,
     paddingStart: PAD,
     paddingEnd: PAD,
@@ -287,10 +264,17 @@ export function Grid({ items, onOpen, onToggleStack, onToggleScene, onContext, f
   }, [cell, rows, virt])
 
   // Keep the active cell visible.
-  const activeRow = useMemo(
-    () => (activeId === null ? -1 : rows.findIndex((r) => r.kind === 'photos' && r.items.some((i) => i.photo.id === activeId))),
-    [rows, activeId],
-  )
+  const activeRow = useMemo(() => locate(rows, activeId)?.row ?? -1, [rows, activeId])
+  // ARIA row numbers: a packed row is one or two `role=row`s (header strip + cells).
+  const ariaRows = useMemo(() => {
+    const first: number[] = []
+    let n = 1
+    for (const r of rows) {
+      first.push(n)
+      n += r.heads.length ? 2 : 1
+    }
+    return { first, count: n - 1 }
+  }, [rows])
   useEffect(() => {
     if (activeRow >= 0) virt.scrollToIndex(activeRow, { align: 'auto' })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -308,9 +292,7 @@ export function Grid({ items, onOpen, onToggleStack, onToggleScene, onContext, f
     () => {
       const ids: number[] = []
       for (let r = first; r <= last; r++) {
-        const row = rowsRef.current[r]
-        if (row?.kind !== 'photos') continue
-        for (const it of row.items) if (!it.photo.thumb_ready) ids.push(it.photo.id)
+        for (const c of rowsRef.current[r]?.cells ?? []) if (c.kind === 'photo' && !c.item.photo.thumb_ready) ids.push(c.item.photo.id)
       }
       if (ids.length) void api.viewport(ids.slice(0, 500)).catch(() => undefined)
     },
@@ -343,7 +325,8 @@ export function Grid({ items, onOpen, onToggleStack, onToggleScene, onContext, f
     if (id !== null) onOpen(id)
   }
 
-  const empty = photos.length === 0
+  // all scenes folded still leaves folded tiles to show
+  const empty = rows.length === 0
   return (
     <div
       ref={ref}
@@ -357,7 +340,7 @@ export function Grid({ items, onOpen, onToggleStack, onToggleScene, onContext, f
       // One tab stop: DOM focus stays on the grid, the current cell is announced via aria-activedescendant.
       role={empty ? 'region' : 'grid'}
       aria-label={t('grid.label')}
-      aria-rowcount={empty ? undefined : rows.length}
+      aria-rowcount={empty ? undefined : ariaRows.count}
       aria-multiselectable={empty ? undefined : true}
       aria-activedescendant={!empty && activeId !== null && activeRow >= 0 ? cellId(activeId) : undefined}
       tabIndex={empty ? undefined : 0}
@@ -381,41 +364,41 @@ export function Grid({ items, onOpen, onToggleStack, onToggleScene, onContext, f
           {vItems.map((v) => {
             const row = rows[v.index]
             if (!row) return null
-            if (row.kind === 'header') {
-              return (
-                <div
-                  key={row.item.key}
-                  role="row"
-                  aria-rowindex={v.index + 1}
-                  className="absolute top-0 left-0 w-full"
-                  style={{ transform: `translateY(${v.start}px)`, height: HEADER_H, paddingLeft: PAD, paddingRight: PAD }}
-                >
-                  <div role="gridcell" aria-colspan={cols} className="h-full">
-                    <SceneHeader h={row.item} onToggle={onToggleScene} />
-                  </div>
-                </div>
-              )
-            }
+            const strip = row.heads.length > 0 ? STRIP_H : 0
             return (
               <div
-                key={`r${v.index}-${row.items[0]?.photo.id}`}
-                role="row"
-                aria-rowindex={v.index + 1}
-                className="absolute top-0 left-0 flex"
-                style={{ transform: `translateY(${v.start}px)`, gap: GAP, paddingLeft: PAD, height: cell }}
+                key={row.key}
+                role="presentation"
+                className="absolute top-0 left-0 w-full"
+                style={{ transform: `translateY(${v.start}px)`, height: strip + cell, paddingLeft: PAD, paddingRight: PAD }}
               >
-                {row.items.map((it) => (
-                  <Cell
-                    key={it.photo.id}
-                    photo={it.photo}
-                    stack={it.stack}
-                    size={cell}
-                    selected={selection.ids.has(it.photo.id)}
-                    active={it.photo.id === activeId}
-                    onToggleStack={onToggleStack}
-                    t={t}
-                  />
-                ))}
+                {strip > 0 && (
+                  <div role="row" aria-rowindex={ariaRows.first[v.index]} className="relative" style={{ height: STRIP_H }}>
+                    {row.heads.map((h) => (
+                      <SegmentHeader key={h.header.key} head={h} cell={cell} gap={GAP} onToggle={onToggleScene} />
+                    ))}
+                  </div>
+                )}
+                <div role="row" aria-rowindex={ariaRows.first[v.index] + (strip > 0 ? 1 : 0)} className="relative flex" style={{ gap: GAP, height: cell }}>
+                  {row.cells.map((c, ci) => (
+                    <Fragment key={c.kind === 'photo' ? c.item.photo.id : `f-${c.header.key}`}>
+                      {c.split && <SegmentDivider x={colX(ci, cell, GAP)} gap={GAP} height={cell} />}
+                      {c.kind === 'folded' ? (
+                        <FoldedTile header={c.header} size={cell} onToggle={onToggleScene} />
+                      ) : (
+                        <Cell
+                          photo={c.item.photo}
+                          stack={c.item.stack}
+                          size={cell}
+                          selected={selection.ids.has(c.item.photo.id)}
+                          active={c.item.photo.id === activeId}
+                          onToggleStack={onToggleStack}
+                          t={t}
+                        />
+                      )}
+                    </Fragment>
+                  ))}
+                </div>
               </div>
             )
           })}

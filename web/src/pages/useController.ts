@@ -5,7 +5,8 @@ import type { ColorLabel, Flag, Photo } from '@/api/types'
 import { acceptAiRatings, editPhotos, redo, undo } from '@/lib/actions'
 import { compareUsesSelection } from '@/lib/compare'
 import { groupViewState } from '@/lib/counts'
-import { jumpGroup, moveVertical, toggleStacks } from '@/lib/stacks'
+import { moveVertical } from '@/lib/gridPack'
+import { jumpGroup, toggleStacks } from '@/lib/stacks'
 import { clickSelect, selectAll } from '@/lib/selection'
 import { useToasts } from '@/stores/toasts'
 import { useUi, type View } from '@/stores/ui'
@@ -170,11 +171,12 @@ export function useController(photos: Photo[], hooks: ControllerHooks = {}) {
   )
 
   const moveRow = useCallback(
-    (dir: 1 | -1) => {
+    (dir: 1 | -1, opts?: { extend?: boolean }) => {
       const ui = useUi.getState()
+      // follow the visual rows of the (packed) grid; outside the grid fall back to a column step
       const id = moveVertical(ui.gridRows, ui.activeId, dir)
-      if (id !== null) setActiveIndex(indexOf(id))
-      else move(dir * ui.gridCols)
+      if (id !== null) setActiveIndex(indexOf(id), opts)
+      else move(dir * ui.gridCols, opts)
     },
     [indexOf, setActiveIndex, move],
   )

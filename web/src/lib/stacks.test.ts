@@ -3,10 +3,8 @@ import type { Photo, Scene } from '@/api/types'
 import { makePhoto } from './fixtures'
 import {
   buildGridItems,
-  buildRows,
   jumpGroup,
   makeSceneLookup,
-  moveVertical,
   toggleStacks,
   visiblePhotos,
   type StackOptions,
@@ -142,31 +140,6 @@ describe('makeSceneLookup', () => {
     expect(of(makePhoto(98, { taken_at: 90_050 }))).toBe(2)
     expect(of(makePhoto(97, { taken_at: 50_000 }))).toBeNull()
     expect(of(makePhoto(96, { taken_at: null }))).toBeNull()
-  })
-})
-
-describe('rows & vertical navigation', () => {
-  const items = buildGridItems(photos, opts({ scenes, withHeaders: true }))
-  const rows = buildRows(items, 2)
-
-  it('starts a new row after every header', () => {
-    expect(rows.map((r) => (r.kind === 'header' ? 'H' : r.items.map((i) => i.photo.id).join(',')))).toEqual(['H', '1,3', 'H', '5,7'])
-  })
-
-  it('moves up/down keeping the column and skipping headers', () => {
-    expect(moveVertical(rows, 1, 1)).toBe(5)
-    expect(moveVertical(rows, 3, 1)).toBe(7)
-    expect(moveVertical(rows, 7, -1)).toBe(3)
-    expect(moveVertical(rows, 1, -1)).toBeNull()
-    expect(moveVertical(rows, 7, 1)).toBeNull()
-    expect(moveVertical(rows, 999, 1)).toBeNull()
-  })
-
-  it('clamps the column on shorter rows', () => {
-    const r = buildRows(buildGridItems(photos, opts({ grouped: false })), 3)
-    // rows: [1,2,3] [4,5,6] [7]
-    expect(moveVertical(r, 6, 1)).toBe(7)
-    expect(moveVertical(r, 7, -1)).toBe(4)
   })
 })
 

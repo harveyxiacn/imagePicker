@@ -462,6 +462,8 @@ export const zhCN = {
   scene: {
     title: '场景 {{n}}',
     counts: '{{groups}} 组 · {{photos}} 张',
+    photos: '{{n}} 张',
+    folded: '已折叠，点击展开',
   },
   stack: {
     collapse: '折叠堆栈',
