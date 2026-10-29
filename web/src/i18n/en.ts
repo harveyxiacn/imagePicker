@@ -106,7 +106,19 @@ export const en: Messages = {
     notAnalysed: '{{n}} photos in this view have not been analysed yet, so they cannot be searched. Run the standard analysis first.',
     someNotAnalysed: '{{n}} photos have not been analysed and cannot be found.',
   },
-  grid: { label: 'Photo grid', empty: 'No photos match the current filters' },
+  grid: {
+    label: 'Photo grid',
+    empty: 'This session has no photos yet',
+    emptyFiltered: 'No photos match the current filters',
+    emptyHidden: '{{n}} photos hidden',
+  },
+  a11y: {
+    sep: ', ',
+    starOne: '1 star',
+    aiRating: 'AI suggestion {{n}}',
+    colorLabel: 'Label: {{c}}',
+    stack: 'Burst stack of {{n}}',
+  },
   filter: {
     aiRating: 'AI rating',
     issues: 'Issues',

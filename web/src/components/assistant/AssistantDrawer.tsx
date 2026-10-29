@@ -10,6 +10,7 @@ import { affectedOf, needsConfirm, selectionOf, summarizeResults, type Transcrip
 import { applyFilterQuery, executePlan, isTopEntry, preview, sendMessage, undoPlan } from '@/lib/assistantRun'
 import { can } from '@/lib/auth'
 import { useHistory } from '@/lib/history'
+import { useKeyboardInset } from '@/lib/useKeyboardInset'
 import { useAssistant } from '@/stores/assistant'
 import { useUi } from '@/stores/ui'
 import { Modal } from '../Modal'
@@ -91,6 +92,7 @@ function AssistantDrawer({ sessionId, photoId }: { sessionId: number; photoId: n
     bottom.current?.scrollIntoView({ block: 'end' })
   }, [items, planning])
   useEffect(() => input.current?.focus(), [])
+  const kb = useKeyboardInset()
 
   const send = (msg: string) => {
     if (!msg.trim() || planning) return
@@ -102,6 +104,7 @@ function AssistantDrawer({ sessionId, photoId }: { sessionId: number; photoId: n
     <aside
       className="anim-pop fixed top-12 right-0 bottom-0 z-40 flex w-[min(400px,100vw)] flex-col border-l border-line bg-panel shadow-[var(--shadow)] max-sm:top-0"
       aria-label={t('assistant.title')}
+      style={kb ? { bottom: kb } : undefined}
       data-testid="assistant-drawer"
       onKeyDown={(e) => {
         if (e.key === 'Escape') setOpen(false)
@@ -156,7 +159,7 @@ function AssistantDrawer({ sessionId, photoId }: { sessionId: number; photoId: n
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-line p-3">
+      <div className="shrink-0 border-t border-line p-3" style={{ paddingBottom: kb ? undefined : 'max(0.75rem, env(safe-area-inset-bottom, 0px))' }}>
         <div className="mb-2 flex flex-wrap gap-1.5" data-testid="assistant-chips">
           {CHIPS.map((c) => (
             <button key={c} className="chip chip-ai" disabled={planning} onClick={() => send(t(`assistant.chip_${c}_prompt`))} data-testid={`chip-${c}`}>

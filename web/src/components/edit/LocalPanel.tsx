@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Circle, Eye, Loader2, Minus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { fetchMask } from '@/api/client'
 import { usePhotoAnalysis } from '@/api/queries'
@@ -21,6 +21,7 @@ import {
   updateLocal,
 } from '@/lib/edit'
 import { changeStack, commitLive, setLive } from '@/lib/editActions'
+import { usePopover } from '@/lib/usePopover'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useEdit } from '@/stores/edit'
 import { useToasts } from '@/stores/toasts'
@@ -176,6 +177,9 @@ export function LocalPanel({ photo }: { photo: Photo }) {
   const flash = useEdit((s) => s.flash)
   const [busy, setBusy] = useState<string | null>(null)
   const [personMenu, setPersonMenu] = useState(false)
+  const personWrap = useRef<HTMLDivElement>(null)
+  const personPanel = useRef<HTMLDivElement>(null)
+  const personPop = usePopover({ open: personMenu, onClose: () => setPersonMenu(false), menu: true, panelRef: personPanel, wrapRef: personWrap })
   const analysis = usePhotoAnalysis(photo.id)
   const people = new Map<number, string>()
   for (const f of analysis.data?.photo_id === photo.id ? analysis.data.faces : [])
@@ -214,15 +218,16 @@ export function LocalPanel({ photo }: { photo: Photo }) {
       <div className="flex flex-wrap gap-1.5" data-testid="local-targets">
         {AI_CHIPS.map((target) =>
           target === 'person' ? (
-            <div key={target} className="relative">
-              <button className="chip chip-ai" onClick={() => setPersonMenu((o) => !o)} aria-expanded={personMenu} data-testid="target-person">
+            <div key={target} className="relative" ref={personWrap}>
+              <button className="chip chip-ai" onClick={() => setPersonMenu((o) => !o)} {...personPop.triggerProps} data-testid="target-person">
                 {busy === 'person' ? <Loader2 size={11} className="animate-spin" /> : null}
                 {t('edit.target_person')}
                 <ChevronDown size={11} />
               </button>
               {personMenu && (
-                <div className="anim-pop absolute top-7 left-0 z-20 min-w-32 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]">
+                <div ref={personPanel} {...personPop.panelProps} role="menu" aria-label={t('edit.target_person')} className="anim-pop absolute top-7 left-0 z-20 min-w-32 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]">
                   <button
+                    role="menuitem"
                     className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-panel"
                     onClick={() => {
                       setPersonMenu(false)
@@ -234,6 +239,7 @@ export function LocalPanel({ photo }: { photo: Photo }) {
                   {[...people].map(([pid, name]) => (
                     <button
                       key={pid}
+                      role="menuitem"
                       className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-panel"
                       onClick={() => {
                         setPersonMenu(false)
