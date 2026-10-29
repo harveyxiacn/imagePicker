@@ -108,6 +108,7 @@ export function TopBar({ sessionId, session, onView }: Props) {
           aria-label={t('top.inspector')}
           title={`${t('top.inspector')} (Tab)`}
           onClick={() => setInspectorOpen(!inspectorOpen)}
+          data-testid="inspector-toggle"
         >
           <PanelRight size={16} />
         </button>

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { BINDINGS, dispatchKey, eventToSpec, findBinding, helpGroups, normalizeChord, specsFor, type Handlers } from './keymap'
+import { BINDINGS, dispatchKey, eventToSpec, findBinding, helpGroups, normalizeChord, specsFor, tabIsShortcut, type Handlers } from './keymap'
 
 const ev = (key: string, extra: Partial<KeyboardEvent> = {}) => ({ key, ...extra })
 
@@ -131,5 +131,19 @@ describe('registry', () => {
     expect(all.some((i) => i.desc === 'help')).toBe(true)
     expect(all.filter((i) => i.desc === 'rate')).toHaveLength(1)
     expect(all.find((i) => i.desc === 'zoomHold')).toBeTruthy()
+  })
+})
+
+describe('tabIsShortcut', () => {
+  const el = (tagName: string, role?: string, focusVisible = false) =>
+    ({ tagName, getAttribute: () => role ?? null, matches: () => focusVisible }) as unknown as EventTarget
+  it('fires with nothing focused or a pointer-focused grid', () => {
+    expect(tabIsShortcut(null)).toBe(true)
+    expect(tabIsShortcut(el('BODY'))).toBe(true)
+    expect(tabIsShortcut(el('DIV', 'grid', false))).toBe(true)
+  })
+  it('lets Tab move focus from a keyboard-focused grid and from other controls', () => {
+    expect(tabIsShortcut(el('DIV', 'grid', true))).toBe(false)
+    expect(tabIsShortcut(el('BUTTON'))).toBe(false)
   })
 })
