@@ -23,6 +23,7 @@ import {
   type Scope,
 } from '@/lib/timelineScrub'
 import { useUi } from '@/stores/ui'
+import { errorText } from '@/lib/errors'
 
 /**
  * Timeline scrubber (PRD F1.9): the photos of the library by capture date, zoomable year -> month ->
@@ -112,7 +113,7 @@ export function TimelinePanel({ sessionId }: { sessionId: number }) {
             <span key={`${c.granularity}-${c.key}`} className="flex items-center gap-0.5">
               {i > 0 && <ChevronRight size={12} className="text-faint" aria-hidden />}
               {c.scope ? (
-                <button className="btn btn-ghost !h-6 !px-1.5" onClick={() => goto(c.scope!)} data-testid="timeline-crumb">
+                <button className="btn hit btn-ghost !h-6 !px-1.5" onClick={() => goto(c.scope!)} data-testid="timeline-crumb">
                   {crumbText(c)}
                 </button>
               ) : (
@@ -124,7 +125,7 @@ export function TimelinePanel({ sessionId }: { sessionId: number }) {
           ))}
         </nav>
         <button
-          className="btn !h-6"
+          className="btn hit !h-6"
           aria-pressed={allSessions}
           title={t('timelineView.scopeHint')}
           onClick={() => {
@@ -150,8 +151,8 @@ export function TimelinePanel({ sessionId }: { sessionId: number }) {
         </div>
       ) : q.isError ? (
         <div className="flex items-center gap-3 py-3 text-sm text-danger">
-          {(q.error as Error).message}
-          <button className="btn !h-6" onClick={() => void q.refetch()}>
+          {errorText(q.error)}
+          <button className="btn hit !h-6" onClick={() => void q.refetch()}>
             {t('common.retry')}
           </button>
         </div>
@@ -232,7 +233,7 @@ export function TimelinePanel({ sessionId }: { sessionId: number }) {
           {data.events.map((ev) => (
             <button
               key={ev.id}
-              className="btn !h-6 max-w-[16rem]"
+              className="btn hit !h-6 max-w-[16rem]"
               aria-pressed={ev.session_id === sessionId && eventId === ev.id}
               aria-label={t('timelineView.eventOpen', { name: ev.name })}
               onClick={() => openEvent(ev)}

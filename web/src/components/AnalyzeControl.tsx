@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Cpu, Loader2, Pause, Sparkles } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAnalysisPlan, useAnalysisStatus, useHardware, useRuntime } from '@/api/queries'
 import type { AnalysisProfile, WorkerState } from '@/api/types'
@@ -8,6 +8,7 @@ import { analysisActive, analysisFraction, startAnalysis } from '@/lib/analysis'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useUi } from '@/stores/ui'
 import { useIsMobile } from '@/lib/useLayout'
+import { usePopover } from '@/lib/usePopover'
 import { AnalyzeSheet } from './mobile/AnalyzeSheet'
 
 /** `lite` runs without the AI components or any model: the way out when those are missing. */
@@ -67,6 +68,7 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
   const runtime = useRuntime(open)
   const plan = useAnalysisPlan(sessionId, profile, open && profile !== 'lite')
   const wrap = useRef<HTMLDivElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
   const onlySelected = useRef(false)
   const running = status.data?.state === 'running'
   const paused = status.data?.state === 'paused'
@@ -74,19 +76,7 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
   const noAi = !!runtime.data && runtime.data.state !== 'ready' && runtime.data.state !== 'installing'
   const isMobile = useIsMobile()
 
-  useEffect(() => {
-    if (!open || isMobile) return
-    const onDown = (e: MouseEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
-    document.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open, setOpen, isMobile])
+  const pop = usePopover({ open: open && !isMobile, onClose: () => setOpen(false), panelRef: panel, wrapRef: wrap })
 
   const start = async () => {
     setOpen(false)
@@ -104,8 +94,7 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
         className="btn btn-ai"
         disabled={photoCount === 0}
         onClick={() => setOpen(!open)}
-        aria-haspopup="dialog"
-        aria-expanded={open}
+        {...pop.triggerProps}
         title={t('top.analyzeHint')}
         data-testid="analyze-button"
       >
@@ -116,9 +105,11 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
       </button>
       {open && (
         <div
+          ref={panel}
+          {...pop.panelProps}
           role="dialog"
           aria-label={t('top.analyze')}
-          className="anim-pop absolute top-full right-0 z-40 mt-1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
+          className="anim-pop absolute top-full right-0 z-(--z-popover) mt-1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
           data-testid="analyze-menu"
         >
           <div className="mb-2 font-medium">{t('analysis.profile')}</div>
@@ -140,7 +131,7 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
           {noAi && profile !== 'lite' && (
             <div className="mt-2 flex items-start gap-2 rounded-control border border-warning/40 bg-warning/10 p-2 text-xs" data-testid="no-ai-note">
               <span className="flex-1">{t('analysis.noAi')}</span>
-              <button className="btn btn-ghost !h-6 shrink-0 !px-1.5 text-xs" onClick={() => setProfile('lite')} data-testid="use-lite">
+              <button className="btn hit btn-ghost !h-6 shrink-0 !px-1.5 text-xs" onClick={() => setProfile('lite')} data-testid="use-lite">
                 {t('analysis.useLite')}
               </button>
             </div>

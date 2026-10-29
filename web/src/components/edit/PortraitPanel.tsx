@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, BookmarkCheck, BookmarkPlus, Loader2, RotateCcw, ScanFace, Star } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, ApiError, faceCropUrl } from '@/api/client'
+import { api, faceCropUrl } from '@/api/client'
 import { usePhotoPeople } from '@/api/queries'
 import { LEVELS, type BeautyKey, type Level, type Photo, type PhotoPerson, type WarpBodyKey, type WarpFaceKey } from '@/api/types'
 import { missingModelsOf } from '@/lib/analysis'
@@ -28,12 +28,14 @@ import {
   type PersonKey,
 } from '@/lib/beauty'
 import { qk } from '@/lib/cache'
+import { usePersonLabel } from '@/lib/usePersonLabel'
 import { changeStack, commitLive, setLive } from '@/lib/editActions'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useEdit } from '@/stores/edit'
 import { useToasts } from '@/stores/toasts'
 import { Section } from './Section'
 import { Slider } from './Slider'
+import { errorText } from '@/lib/errors'
 
 /** One person chip (cover crop + name) or the "everyone" chip. */
 function Chip({ active, onClick, edited, children, testId, title }: { active: boolean; onClick: () => void; edited?: boolean; children: React.ReactNode; testId?: string; title?: string }) {
@@ -56,6 +58,7 @@ function Chip({ active, onClick, edited, children, testId, title }: { active: bo
 /** Portrait beauty section of the edit panel (doc 04 3.5): per-person beauty / face / body ops. */
 export function PortraitPanel({ photo }: { photo: Photo }) {
   const { t } = useTranslation()
+  const personLabel = usePersonLabel()
   const qc = useQueryClient()
   const stack = useEdit((s) => s.stack)
   const [preparing, setPreparing] = useState(false)
@@ -87,14 +90,14 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
       if (missing) {
         // 409 models_missing: the consent dialog downloads the models, then we try again.
         useAnalysisUi.getState().setConsent({ sessionId: photo.session_id, profile: 'fast', models: missing, onReady: () => void prepare() })
-      } else push('error', err instanceof ApiError || err instanceof Error ? err.message : String(err), 5000)
+      } else push('error', errorText(err), 5000)
     }
   }
   const preparingNow = preparing && !ready
 
   const cur = () => useEdit.getState().stack
   const lv = () => getLevel(cur(), person, fallbackLevel[String(person)])
-  const who = person === null ? t('beauty.everyone') : (personInfo?.person_name ?? `#${person}`)
+  const who = person === null ? t('beauty.everyone') : personLabel(person, personInfo?.person_name ?? null)
   const label = (name: string) => t('history.portrait', { name, who })
 
   const setLevelTo = (l: Level) => {
@@ -115,7 +118,7 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
       void qc.invalidateQueries({ queryKey: qk.photoPeopleAll })
       push('success', t('beauty.profileSaved', { who }), 2500)
     } catch (err) {
-      push('error', err instanceof Error ? err.message : String(err), 5000)
+      push('error', errorText(err), 5000)
     }
   }
   const applySaved = async () => {
@@ -128,7 +131,7 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
       }
       changeStack(qc, applyProfile(cur(), profile, person), t('history.applyProfile', { who }))
     } catch (err) {
-      push('error', err instanceof Error ? err.message : String(err), 5000)
+      push('error', errorText(err), 5000)
     }
   }
 
@@ -158,7 +161,7 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
           {t('library.loading')}
         </div>
       ) : peopleQ.isError ? (
-        <div className="text-xs text-danger">{(peopleQ.error as Error).message}</div>
+        <div className="text-xs text-danger">{errorText(peopleQ.error)}</div>
       ) : (data?.people.length ?? 0) === 0 ? (
         <p className="text-[11px] text-faint" data-testid="portrait-none">
           {t('beauty.noPeople')}
@@ -192,8 +195,8 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
                   title={c.has_profile ? t('beauty.hasProfile') : undefined}
                 >
                   <img src={faceCropUrl(c.face_id, 128)} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" draggable={false} />
-                  <span className="max-w-16 truncate">{c.person_name ?? `${t('person.unnamed')} ${c.person_id}`}</span>
-                  {c.has_profile && <Star size={10} className="shrink-0 text-accent" fill="currentColor" />}
+                  <span className="max-w-16 truncate">{personLabel(c.person_id, c.person_name)}</span>
+                  {c.has_profile && <Star size={10} className="shrink-0 text-accent-text" fill="currentColor" />}
                 </Chip>
               ))}
             </div>

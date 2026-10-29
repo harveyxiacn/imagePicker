@@ -14,6 +14,7 @@ import {
   type EditablePatch,
   type HistoryEntry,
 } from './history'
+import { errorText } from '@/lib/errors'
 
 /** Read-only guests (LAN mode) cannot change ratings / flags: tell them instead of failing with a 403. */
 export function guestBlocked(): boolean {
@@ -33,7 +34,7 @@ async function commit(qc: QueryClient, changes: Change[], side: 'before' | 'afte
     // Roll back the optimistic write and resync.
     patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c[other]])))
     void qc.invalidateQueries({ queryKey: qk.photosAll })
-    useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+    useToasts.getState().push('error', errorText(err))
   }
 }
 
@@ -57,7 +58,7 @@ async function runCustom(e: HistoryEntry, dir: 'undo' | 'redo'): Promise<void> {
   try {
     await e.custom[dir]()
   } catch (err) {
-    useToasts.getState().push('error', i18n.t('history.undoFailed', { reason: err instanceof Error ? err.message : String(err) }) as string)
+    useToasts.getState().push('error', i18n.t('history.undoFailed', { reason: errorText(err) }) as string)
   }
 }
 
@@ -111,7 +112,7 @@ export async function acceptAiRatings(qc: QueryClient, ids: number[], label: str
     patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c.before])))
     void qc.invalidateQueries({ queryKey: qk.photosAll })
     useHistory.getState().drop(changes)
-    useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+    useToasts.getState().push('error', errorText(err))
     return 0
   }
   return changes.length

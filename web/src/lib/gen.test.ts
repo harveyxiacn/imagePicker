@@ -77,10 +77,10 @@ describe('generative task results', () => {
       expect(toasts[0].text).toBe(i18n.t(`gen.${code}`))
       expect(toasts[0].text).not.toContain('raw server text')
     }
-    // other 422s keep the server's own message
+    // other 422s get the localized generic line
     useToasts.setState({ toasts: [], tasks: {} })
     reportGenError(new ApiError(422, 'unprocessable', 'face 5 is not in photo 2'), { sessionId: 1, retry: () => {} })
-    expect(useToasts.getState().toasts[0].text).toBe('face 5 is not in photo 2')
+    expect(useToasts.getState().toasts[0].text).toBe(i18n.t('errors.unprocessable'))
   })
 
   it('resolveAfter: server stack wins when the user did not edit meanwhile, else patches are merged into the live stack', () => {

@@ -35,11 +35,11 @@ export function CommandPalette() {
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
-        <Dialog.Overlay className="anim-fade fixed inset-0 z-40 bg-black/60" />
+        <Dialog.Overlay className="anim-fade fixed inset-0 z-(--z-scrim) bg-black/60" />
         <Dialog.Content
           data-palette=""
           aria-describedby={undefined}
-          className="anim-pop fixed top-[14vh] left-1/2 z-50 flex max-h-[70vh] w-[calc(100vw-32px)] max-w-xl -translate-x-1/2 flex-col overflow-hidden rounded-card border border-line bg-panel shadow-[var(--shadow)]"
+          className="anim-pop fixed top-[14vh] left-1/2 z-(--z-modal) flex palette-max-h w-[calc(100vw-32px)] max-w-xl -translate-x-1/2 flex-col overflow-hidden rounded-card border border-line bg-panel shadow-[var(--shadow)]"
           data-testid="command-palette"
         >
           <PaletteBody onClose={() => setOpen(false)} />

@@ -10,6 +10,7 @@ import { ExportDialog } from '@/components/ExportDialog'
 import { FaceSearchDialog } from '@/components/FaceSearchDialog'
 import { Modal } from '@/components/Modal'
 import { HeaderControls } from '@/components/HeaderControls'
+import { personLabel } from '@/lib/ai'
 import { can } from '@/lib/auth'
 import { buildBestSections, sectionsToFolders } from '@/lib/bestN'
 import { qk } from '@/lib/cache'
@@ -19,6 +20,7 @@ import { mergePeopleEntry, personPatchEntry, refreshPeople, type MergedPersonSna
 import { DEFAULT_PERSON_FILTER } from '@/lib/filter'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
+import { errorText } from '@/lib/errors'
 
 function NameField({ person, onSave }: { person: Person; onSave: (name: string | null) => void }) {
   const { t } = useTranslation()
@@ -57,7 +59,7 @@ function NameField({ person, onSave }: { person: Person; onSave: (name: string |
       }}
       data-testid="person-name"
     >
-      <span className={`truncate font-medium ${person.name ? '' : 'text-muted italic'}`}>{person.name ?? `${t('person.unnamed')} ${person.id}`}</span>
+      <span className={`truncate font-medium ${person.name ? '' : 'text-muted italic'}`}>{personLabel(person, t('person.unnamed'))}</span>
       <Pencil size={12} className="shrink-0 text-faint opacity-0 group-hover/name:opacity-100 [@media(hover:none)]:opacity-100" />
     </button>
   )
@@ -105,7 +107,7 @@ function PeopleInner() {
   const sections = useMemo(() => buildBestSections(list, best.data, bestIds, bestN), [list, best.data, bestIds, bestN])
 
   const refresh = () => void qc.invalidateQueries({ queryKey: qk.peopleAll })
-  const fail = (err: unknown) => push('error', err instanceof Error ? err.message : String(err))
+  const fail = (err: unknown) => push('error', errorText(err))
 
   const patch = async (p: Person, body: { name?: string | null; hidden?: boolean }) => {
     // optimistic
@@ -234,13 +236,12 @@ function PeopleInner() {
       </header>
 
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-1.5" data-testid="people-toolbar">
-        <div className="flex rounded-control border border-line p-0.5" role="tablist" aria-label={t('people.view')}>
+        <div className="flex rounded-control border border-line p-0.5" role="group" aria-label={t('people.view')}>
           {(['cards', 'best'] as const).map((v) => (
             <button
               key={v}
-              role="tab"
-              aria-selected={view === v}
-              className={`flex h-6 items-center gap-1.5 rounded px-2 transition-colors ${view === v ? 'bg-accent text-accent-fg' : 'text-muted hover:text-fg'}`}
+              aria-pressed={view === v}
+              className={`flex h-6 items-center [@media(pointer:coarse)]:h-11 gap-1.5 rounded px-2 transition-colors ${view === v ? 'bg-accent text-accent-fg' : 'text-muted hover:text-fg'}`}
               onClick={() => setView(v)}
               data-testid={`people-view-${v}`}
             >
@@ -285,7 +286,7 @@ function PeopleInner() {
           </div>
         ) : people.isError ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-danger">
-            {(people.error as Error).message}
+            {errorText(people.error)}
             <button className="btn" onClick={() => void people.refetch()}>
               {t('common.retry')}
             </button>
@@ -306,14 +307,14 @@ function PeopleInner() {
                 {t('library.loading')}
               </div>
             )}
-            {best.isError && <div className="text-danger">{(best.error as Error).message}</div>}
+            {best.isError && <div className="text-danger">{errorText(best.error)}</div>}
             {best.isSuccess && sections.length === 0 && <div className="py-10 text-center text-muted">{t('best.empty')}</div>}
             {sections.map((sec) => (
               <section key={sec.person.id} data-testid="best-section" aria-label={sec.person.name ?? String(sec.person.id)}>
                 <div className="mb-2 flex items-center gap-3">
                   <img src={faceCropUrl(sec.person.cover_face_id, 128)} alt="" className="h-9 w-9 rounded-full object-cover" draggable={false} />
                   <div className="min-w-0">
-                    <div className="truncate font-medium">{sec.person.name ?? `${t('person.unnamed')} ${sec.person.id}`}</div>
+                    <div className="truncate font-medium">{personLabel(sec.person, t('person.unnamed'))}</div>
                     <div className="tnum text-xs text-muted">{t('best.shown', { n: sec.photos.length, total: sec.person.photo_count })}</div>
                   </div>
                   <button className="btn btn-ghost ml-auto" onClick={() => openLibrary(sec.person)}>
@@ -355,7 +356,7 @@ function PeopleInner() {
                     <img src={faceCropUrl(p.cover_face_id, 256)} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" draggable={false} />
                   </button>
                   <button
-                    className="absolute top-3 left-3 flex h-5 w-5 items-center justify-center rounded border border-white/60 bg-black/55 text-white"
+                    className="absolute top-3 left-3 flex h-5 w-5 items-center justify-center rounded border before:absolute before:-inset-1 before:content-[''] [@media(pointer:coarse)]:before:-inset-3  border-white/60 bg-black/55 text-white"
                     style={{ background: on ? 'var(--accent)' : undefined, color: on ? 'var(--accent-fg)' : undefined }}
                     aria-pressed={on}
                     aria-label={t('people.select')}
@@ -365,7 +366,7 @@ function PeopleInner() {
                     {on && <Check size={13} strokeWidth={3} />}
                   </button>
                   <button
-                    className="btn btn-icon absolute top-3 right-3 !h-6 !w-6 bg-black/55 opacity-0 backdrop-blur group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                    className="btn btn-icon absolute top-3 right-3 !h-6 !w-6 [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:-inset-2.5 [@media(pointer:coarse)]:before:content-[''] bg-black/55 opacity-0 backdrop-blur group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
                     onClick={() => void patch(p, { hidden: !p.hidden })}
                     aria-label={p.hidden ? t('people.unhide') : t('people.hide')}
                     title={p.hidden ? t('people.unhide') : t('people.hide')}
@@ -406,7 +407,7 @@ function PeopleInner() {
             <label key={p.id} className="flex cursor-pointer items-center gap-3 rounded-control border border-line p-2" style={{ borderColor: into === p.id ? 'var(--accent)' : undefined }}>
               <input type="radio" name="merge-into" checked={into === p.id} onChange={() => setInto(p.id)} />
               <img src={faceCropUrl(p.cover_face_id, 128)} alt="" className="h-9 w-9 rounded-full object-cover" />
-              <span className="flex-1 truncate">{p.name ?? `${t('person.unnamed')} ${p.id}`}</span>
+              <span className="flex-1 truncate">{personLabel(p, t('person.unnamed'))}</span>
               <span className="tnum text-xs text-muted">{p.photo_count}</span>
             </label>
           ))}

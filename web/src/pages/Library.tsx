@@ -30,16 +30,20 @@ import { TimelinePanel } from '@/components/TimelinePanel'
 import { TopBar } from '@/components/TopBar'
 import { acceptAiRatings, editPhotos } from '@/lib/actions'
 import { canAccept } from '@/lib/ai'
+import { isFilterActive } from '@/lib/filter'
 import { useHistory } from '@/lib/history'
 import { compareSlots, compareUsesSelection } from '@/lib/compare'
+import { isTypingTarget } from '@/lib/keymap'
+import { overlayOwnsEscape } from '@/lib/panelOverlay'
 import { pruneSelection } from '@/lib/selection'
-import { useIsMobile } from '@/lib/useLayout'
+import { useIsBelowLg, useIsMobile } from '@/lib/useLayout'
 import { buildGridItems, toggleInSet, visiblePhotos } from '@/lib/stacks'
 import { useToasts } from '@/stores/toasts'
 import { useUi, type View } from '@/stores/ui'
 import { useController } from './useController'
 import { useGroup } from './useGroup'
 import { useShortcuts } from './useShortcuts'
+import { errorText } from '@/lib/errors'
 
 export function Library() {
   const { sessionId: raw } = useParams()
@@ -76,6 +80,8 @@ export function Library() {
   const photosQ = usePhotos(sessionId, filter)
   const photos = useMemo(() => photosQ.data?.photos ?? [], [photosQ.data])
   const scenesQ = useGroups(sessionId)
+  const shown = photosQ.data?.total
+  const total = session.data?.photo_count
 
   // Fresh transient state for each session.
   // (The ref makes this idempotent under StrictMode's double effect, which would otherwise discard a pending filter.)
@@ -109,6 +115,55 @@ export function Library() {
   const ctrl = useController(listPhotos, { groupGo: group.go, groupPick: group.pickA, openEdit })
   useShortcuts(ctrl)
 
+  // Below `lg` the sidebar / inspector float over the photos: scrim click and Escape close them, and focus
+  // follows (into the panel when its toggle opened it, back to the toggle when it closes).
+  const belowLg = useIsBelowLg()
+  const floating = !isMobile && belowLg
+  const panelOpen = floating && (sidebarOpen || inspectorOpen)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const inspectorRef = useRef<HTMLElement>(null)
+  const closePanels = () => {
+    const ui = useUi.getState()
+    ui.setSidebarOpen(false)
+    ui.setInspectorOpen(false)
+  }
+  useEffect(() => {
+    if (!panelOpen) return
+    // capture phase: runs before the window-level keymap, so Escape closes the panel and does not also go back
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const owns = overlayOwnsEscape({
+        panelOpen: true,
+        typing: isTypingTarget(e.target),
+        dialogOpen: !!document.querySelector('[role="dialog"]'),
+        menuOpen: !!document.querySelector('[role="menu"], [role="listbox"]'),
+      })
+      if (!owns) return
+      e.stopPropagation()
+      e.preventDefault()
+      closePanels()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [panelOpen])
+  const prevPanels = useRef({ sidebar: sidebarOpen, inspector: inspectorOpen })
+  useEffect(() => {
+    const prev = prevPanels.current
+    prevPanels.current = { sidebar: sidebarOpen, inspector: inspectorOpen }
+    if (!floating) return
+    const follow = (was: boolean, now: boolean, panel: { current: HTMLElement | null }, toggleId: string) => {
+      const toggle = document.querySelector<HTMLElement>(`[data-testid="${toggleId}"]`)
+      const a = document.activeElement
+      if (!was && now) {
+        if (a && a === toggle) panel.current?.focus() // opened with its toggle (not via a shortcut)
+      } else if (was && !now && (!a || a === document.body)) {
+        toggle?.focus() // the panel (and focus with it) is gone
+      }
+    }
+    follow(prev.sidebar, sidebarOpen, sidebarRef, 'sidebar-toggle')
+    follow(prev.inspector, inspectorOpen, inspectorRef, 'inspector-toggle')
+  }, [sidebarOpen, inspectorOpen, floating])
+
   // Keep the cursor valid as the list changes (filters, live updates, collapsed stacks).
   useEffect(() => {
     if (!listPhotos.length) return
@@ -132,6 +187,7 @@ export function Library() {
 
   const selectedIds = useMemo(() => [...selection.ids], [selection])
   const allIds = useMemo(() => gridPhotos.map((p) => p.id), [gridPhotos])
+  const fullIds = useMemo(() => photos.map((p) => p.id), [photos])
   const targetCount = view === 'grid' && selection.ids.size > 1 ? selection.ids.size : 1
 
   const pick = (id: number) => {
@@ -177,8 +233,14 @@ export function Library() {
       {timelineOpen && <TimelinePanel sessionId={sessionId} />}
 
       <div className="relative flex min-h-0 flex-1">
+        {panelOpen && <div className="absolute inset-0 z-(--z-sticky) bg-black/40" onClick={closePanels} aria-hidden="true" data-testid="panel-scrim" />}
         {sidebarOpen && !isMobile && (
-          <aside className="shrink-0 max-lg:absolute max-lg:top-0 max-lg:left-0 max-lg:bottom-0 max-lg:z-30 max-lg:shadow-[var(--shadow)]">
+          <aside
+            ref={sidebarRef}
+            tabIndex={-1}
+            aria-label={t('collections.toggle')}
+            className="shrink-0 outline-none max-lg:absolute max-lg:top-0 max-lg:left-0 max-lg:bottom-0 max-lg:z-(--z-overlay-panel) max-lg:shadow-[var(--shadow)]"
+          >
             <CollectionsSidebar sessionId={sessionId} />
           </aside>
         )}
@@ -190,7 +252,7 @@ export function Library() {
             </div>
           ) : photosQ.isError ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-danger">
-              {(photosQ.error as Error).message}
+              {errorText(photosQ.error)}
               <div className="flex gap-2">
                 <button className="btn" onClick={() => void photosQ.refetch()}>
                   {t('common.retry')}
@@ -207,6 +269,8 @@ export function Library() {
           ) : view === 'grid' ? (
             <Grid
               items={items}
+              filtered={isFilterActive(filter)}
+              hiddenCount={total != null && shown != null && total > shown ? total - shown : null}
               onContext={photoMenu.open}
               onOpen={(id) => {
                 useUi.getState().setActive(id)
@@ -246,6 +310,7 @@ export function Library() {
               photos={listPhotos}
               photo={active}
               index={activeIndex}
+              total={photos.length}
               onMove={(d) => ctrl.move(d)}
               onPick={pick}
               onRate={(n) => ctrl.rate(n ?? 0)}
@@ -280,7 +345,9 @@ export function Library() {
 
         {inspectorOpen && !isMobile && (
           <aside
-            className="w-[300px] shrink-0 overflow-y-auto border-l border-line bg-panel max-lg:absolute max-lg:top-0 max-lg:right-0 max-lg:bottom-0 max-lg:z-30 max-lg:shadow-[var(--shadow)]"
+            ref={inspectorRef}
+            tabIndex={-1}
+            className="w-[300px] shrink-0 overflow-y-auto outline-none border-l border-line bg-panel max-lg:absolute max-lg:top-0 max-lg:right-0 max-lg:bottom-0 max-lg:z-(--z-overlay-panel) max-lg:shadow-[var(--shadow)]"
             aria-label={t('top.inspector')}
           >
             <Inspector
@@ -352,7 +419,7 @@ export function Library() {
       {photoMenu.node}
       <SaveCollectionDialog />
       <FaceSearchDialog sessionId={sessionId} />
-      <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={selectedIds} allIds={allIds} photos={photos} />
+      <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={selectedIds} allIds={allIds} fullIds={fullIds} photos={photos} />
     </div>
   )
 }

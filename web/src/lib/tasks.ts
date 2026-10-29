@@ -7,6 +7,7 @@ import { api, ApiError } from '@/api/client'
 import type { TaskRecord, TaskStatus } from '@/api/types'
 import { useToasts } from '@/stores/toasts'
 import { qk } from './cache'
+import { errorText } from '@/lib/errors'
 
 /** Error / `*.done` reason of a task stopped by the user. */
 export const CANCELLED = 'cancelled'
@@ -66,7 +67,7 @@ export async function cancelTask(qc: QueryClient, id: string): Promise<boolean> 
     return true
   } catch (err) {
     if (!(err instanceof ApiError && (err.status === 409 || err.status === 404))) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+      useToasts.getState().push('error', errorText(err))
     }
     return false
   } finally {

@@ -71,7 +71,7 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor, onAccep
         <div className="truncate font-medium" title={photo.file_name}>
           {photo.file_name}
         </div>
-        {targetCount > 1 && <div className="mt-0.5 text-xs text-accent">{t('inspector.applyingTo', { n: targetCount })}</div>}
+        {targetCount > 1 && <div className="mt-0.5 text-xs text-accent-text">{t('inspector.applyingTo', { n: targetCount })}</div>}
       </div>
 
       <section className="flex flex-col gap-2.5">
@@ -84,7 +84,7 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor, onAccep
           <div className="flex items-center gap-1.5">
             <AiStars value={photo.ai_rating} score={photo.ai_score} />
             <button
-              className="btn !h-6 !px-1.5 text-xs text-ai"
+              className="btn hit !h-6 !px-1.5 text-xs text-ai"
               disabled={photo.ai_rating === null}
               onClick={onAcceptAi}
               title={`${t('ai.accept')} (A)`}
@@ -139,7 +139,7 @@ export function Inspector({ photo, targetCount, onRate, onFlag, onColor, onAccep
                 k={t('exif.path')}
                 v={
                   reveal ? (
-                    <button className="text-left underline decoration-dotted hover:text-accent" title="Reveal in file manager" onClick={() => void reveal(photo.path)}>
+                    <button className="text-left underline decoration-dotted hover:text-accent-text" title="Reveal in file manager" onClick={() => void reveal(photo.path)}>
                       {photo.path}
                     </button>
                   ) : (

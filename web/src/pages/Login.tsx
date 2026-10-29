@@ -54,7 +54,7 @@ export function Login() {
     <div className="flex h-full flex-col" data-testid="login-page">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4">
         <div className="flex items-center gap-2 text-base font-semibold">
-          <Aperture size={20} className="text-accent" />
+          <Aperture size={20} className="text-accent-text" />
           imagePicker
         </div>
         <HeaderControls />
@@ -62,7 +62,7 @@ export function Login() {
       <main className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
         <form onSubmit={(e) => void submit(e)} className="anim-pop flex w-full max-w-sm flex-col gap-4 rounded-card border border-line bg-panel p-6 shadow-[var(--shadow)]">
           <div className="flex flex-col items-center gap-2 text-center">
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-accent/15 text-accent">
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-accent/15 text-accent-text">
               <Lock size={20} />
             </span>
             <h1 className="text-xl font-semibold">{t('login.title')}</h1>

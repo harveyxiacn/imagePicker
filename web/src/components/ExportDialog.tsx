@@ -23,6 +23,8 @@ interface Props {
   onOpenChange: (b: boolean) => void
   selectedIds: number[]
   allIds: number[]
+  /** Every filtered photo including those folded behind a stack cover (`allIds` has only the covers). */
+  fullIds?: number[]
   /** Export by person: sub-folder name -> photo ids (replaces the scope choice; docs/api-contract-m4.md C.2). */
   folders?: Record<string, number[]>
   /** The photos shown (for the collage preview: aspect ratios and thumbnails). */
@@ -38,7 +40,7 @@ const readDest = () => {
   }
 }
 
-export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders, photos }: Props) {
+export function ExportDialog({ open, onOpenChange, selectedIds, allIds, fullIds, folders, photos }: Props) {
   const { t } = useTranslation()
   const [dest, setDest] = useState(readDest)
   const [form, setForm] = useState<ExportForm>(() => ({ ...DEFAULT_FORM, watermark: loadWatermark() }))
@@ -46,7 +48,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders,
   const { edge, custom, quality, format, aspect, stripGps, stripMetadata, watermark } = form
   const setWatermark = (patch: Partial<ExportForm['watermark']>) => setForm((f) => ({ ...f, watermark: { ...f.watermark, ...patch } }))
   const [template, setTemplate] = useState('{name}')
-  const [scope, setScope] = useState<'selected' | 'all'>('selected')
+  const [scope, setScope] = useState<'selected' | 'all' | 'full'>('selected')
   const [browse, setBrowse] = useState(false)
   const [upscale, setUpscale] = useState<0 | 2 | 4>(0)
   const [mode, setMode] = useState<'photos' | 'collage'>('photos')
@@ -79,9 +81,10 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders,
   const updateTask = useToasts((s) => s.updateTask)
 
   const hasSelection = selectedIds.length > 0
-  const effectiveScope = hasSelection ? scope : 'all'
+  const hasFolded = !!fullIds && fullIds.length > allIds.length
+  const effectiveScope = scope === 'full' ? (hasFolded ? 'full' : 'all') : hasSelection ? scope : 'all'
   const byFolder = folders && Object.keys(folders).length > 0 ? folders : undefined
-  const ids = byFolder ? Object.values(byFolder).flat() : effectiveScope === 'selected' ? selectedIds : allIds
+  const ids = byFolder ? Object.values(byFolder).flat() : effectiveScope === 'selected' ? selectedIds : effectiveScope === 'full' && fullIds ? fullIds : allIds
 
   const isCollage = mode === 'collage' && !byFolder
   // the collage preview: the photos in selection order with their aspect ratios
@@ -175,7 +178,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders,
               ))}
             </div>
           </div>
-          <fieldset className={`flex gap-4 ${byFolder ? 'hidden' : ''}`}>
+          <fieldset className={`flex flex-wrap gap-x-4 gap-y-1 ${byFolder ? 'hidden' : ''}`}>
             <legend className="mb-1 text-muted">{t('export.scope')}</legend>
             <label className="flex items-center gap-1.5">
               <input type="radio" name="scope" checked={effectiveScope === 'selected'} disabled={!hasSelection} onChange={() => setScope('selected')} />
@@ -183,8 +186,14 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, folders,
             </label>
             <label className="flex items-center gap-1.5">
               <input type="radio" name="scope" checked={effectiveScope === 'all'} onChange={() => setScope('all')} />
-              {t('export.allShown', { n: allIds.length })}
+              {hasFolded ? t('export.shownCovers', { n: allIds.length }) : t('export.allShown', { n: allIds.length })}
             </label>
+            {fullIds && hasFolded && (
+              <label className="flex items-center gap-1.5">
+                <input type="radio" name="scope" checked={effectiveScope === 'full'} onChange={() => setScope('full')} />
+                {t('export.allWithStacks', { n: fullIds.length })}
+              </label>
+            )}
           </fieldset>
 
           <div className="flex flex-col gap-1">

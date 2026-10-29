@@ -101,7 +101,7 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
   const active = isFilterActive(filter)
   const p = filter.person
   const names = useMemo(() => new Map((people.data ?? []).map((x) => [x.id, personLabel(x, t('person.unnamed'))])), [people.data, t])
-  const nameOf = (id: number) => names.get(id) ?? `${t('person.unnamed')} ${id}`
+  const nameOf = (id: number) => names.get(id) ?? t('person.unnamed')
 
   const setIssue = (v: string) => {
     if (v === 'all') setFilter({ issueMode: 'all', issues: [] })
@@ -119,12 +119,12 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-1.5">
         <div className="flex items-center gap-1" role="group" aria-label={t('filter.rating')}>
           <span className="text-muted">{t('filter.rating')}</span>
-          <Star size={13} className="text-accent" fill="currentColor" />
+          <Star size={13} className="text-accent-text" fill="currentColor" />
           <span className="text-muted">≥</span>
           {[0, 1, 2, 3, 4, 5].map((n) => (
             <button
               key={n}
-              className="btn !h-6 !w-6 justify-center !px-0 tnum"
+              className="btn hit !h-6 !w-6 justify-center !px-0 tnum"
               aria-pressed={filter.ratingGte === n}
               onClick={() => setFilter({ ratingGte: n })}
               title={n === 0 ? t('filter.any') : `≥ ${n}`}
@@ -168,12 +168,12 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
           </select>
         </label>
 
-        <div className="flex items-center gap-1.5" role="group" aria-label={t('filter.color')}>
+        <div className="flex items-center gap-2" role="group" aria-label={t('filter.color')}>
           <span className="text-muted">{t('filter.color')}</span>
           {COLOR_NAMES.map((c) => (
             <button
               key={c}
-              className="h-4 w-4 rounded-full border-2 transition-transform hover:scale-110"
+              className="hit h-4 w-4 rounded-full border-2 transition-transform hover:scale-110"
               style={{ background: colorVar(c), borderColor: filter.color === c ? 'var(--fg)' : 'transparent' }}
               aria-label={t(`color.${c}`)}
               aria-pressed={filter.color === c}

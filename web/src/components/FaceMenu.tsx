@@ -9,10 +9,13 @@ import { qk } from '@/lib/cache'
 import { useHistory } from '@/lib/history'
 import { movedFacesEntry, personPatchEntry, refreshPeople } from '@/lib/structureUndo'
 import { setPersonTri } from '@/lib/filter'
+import { usePersonLabel } from '@/lib/usePersonLabel'
+import { usePopover } from '@/lib/usePopover'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { MenuItem } from './MenuItem'
 import { Modal } from './Modal'
+import { errorText } from '@/lib/errors'
 
 interface MenuState {
   face: Face
@@ -26,11 +29,14 @@ interface MenuState {
  */
 export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; preventDefault: () => void }, face: Face) => void; node: ReactNode } {
   const { t } = useTranslation()
+  const personLabel = usePersonLabel()
   const qc = useQueryClient()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [naming, setNaming] = useState<Face | null>(null)
   const [name, setName] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  // Escape / click outside / focus into the menu + arrow keys; focus goes back to what had it before the right-click
+  const pop = usePopover({ open: menu !== null, onClose: () => setMenu(null), menu: true, panelRef: ref })
 
   const open = useCallback((e: { clientX: number; clientY: number; preventDefault: () => void }, face: Face) => {
     e.preventDefault()
@@ -40,17 +46,9 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close()
-    }
-    document.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey, true)
     window.addEventListener('blur', close)
     window.addEventListener('resize', close)
     return () => {
-      document.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('blur', close)
       window.removeEventListener('resize', close)
     }
@@ -82,7 +80,7 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
       }
       useToasts.getState().push('info', t('face.splitDone'), 2200)
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+      useToasts.getState().push('error', errorText(err))
     }
   }
 
@@ -98,7 +96,7 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
       void qc.invalidateQueries({ queryKey: ['burstFaces'] })
       setNaming(null)
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+      useToasts.getState().push('error', errorText(err))
     }
   }
 
@@ -109,13 +107,14 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
         createPortal(
           <div
             ref={ref}
+            {...pop.panelProps}
             role="menu"
             aria-label={t('face.menu')}
-            className="anim-pop fixed z-[70] min-w-52 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]"
+            className="anim-pop fixed z-(--z-menu) min-w-52 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]"
             style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 245) }}
             data-testid="face-menu"
           >
-            <div className="px-2 py-1 text-xs text-muted">{menu.face.person_name ?? (known ? `${t('person.unnamed')} ${menu.face.person_id}` : t('face.unassigned'))}</div>
+            <div className="px-2 py-1 text-xs text-muted">{known || menu.face.person_name ? personLabel(menu.face.person_id, menu.face.person_name) : t('face.unassigned')}</div>
             <MenuItem icon={<Check size={14} className="text-success" />} disabled={!known} onClick={() => filterBy(menu.face, 'include')}>
               {t('face.filterBy')}
             </MenuItem>

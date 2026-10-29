@@ -30,7 +30,8 @@ export function SegmentHeader({
     <div role="columnheader" aria-colspan={head.span} className="absolute top-0 h-full" style={{ left: colX(head.col, cell, gap), width: spanW(head.span, cell, gap) }}>
       <button
         type="button"
-        className="flex h-full w-full min-w-0 items-center gap-1 border-b border-line/70 text-left text-[12px] leading-4 text-muted hover:text-fg"
+        tabIndex={-1} // the grid is one tab stop; pointer / screen-reader activation only
+        className="hit flex h-full w-full min-w-0 items-center gap-1 border-b border-line/70 text-left text-[12px] leading-4 text-muted hover:text-fg"
         onClick={(e) => {
           e.stopPropagation()
           onToggle(h.sceneId)
@@ -58,6 +59,7 @@ export function FoldedTile({ header, size, onToggle }: { header: HeaderItem; siz
   return (
     <button
       type="button"
+      tabIndex={-1} // the grid is one tab stop; pointer / screen-reader activation only
       className="flex shrink-0 flex-col items-center justify-center gap-1 rounded-[2px] border border-dashed border-line bg-panel text-muted hover:text-fg"
       style={{ width: size, height: size }}
       onClick={(e) => {
@@ -66,9 +68,10 @@ export function FoldedTile({ header, size, onToggle }: { header: HeaderItem; siz
       }}
       onDoubleClick={(e) => e.stopPropagation()}
       aria-expanded={false}
+      aria-label={`${t('scene.title', { n: header.index })} · ${t('scene.folded')} (${header.photoCount})`}
       data-testid="scene-folded"
     >
-      <span className="tnum text-lg font-medium text-fg">+{header.photoCount}</span>
+      <span className="tnum text-lg font-medium text-fg" aria-hidden="true">+{header.photoCount}</span>
       <span className="px-2 text-center text-[12px] leading-4">{t('scene.folded')}</span>
     </button>
   )

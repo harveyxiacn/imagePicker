@@ -13,6 +13,7 @@ import { useEdit } from '@/stores/edit'
 import { useToasts } from '@/stores/toasts'
 import { Section } from './Section'
 import { Slider } from './Slider'
+import { errorText } from '@/lib/errors'
 
 /** Built-in LUT ids understood by the renderer (`{type:"lut", file}`); imported ones are added at runtime. */
 
@@ -79,7 +80,7 @@ function LutBlock() {
       choose(res.id)
       useToasts.getState().push('success', t('edit.lutImported', { name: res.name }), 2500)
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000)
+      useToasts.getState().push('error', errorText(err), 5000)
     } finally {
       setBusy(false)
     }
@@ -163,7 +164,7 @@ function PresetStrength({ photoId, preset, label }: { photoId: number; preset: P
       if (useEdit.getState().photoId !== photoId) return
       setLive(applyPreset(useEdit.getState().stack, res.stack))
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000)
+      useToasts.getState().push('error', errorText(err), 5000)
     }
     setShown(null)
     commitLive(qc, t('history.presetStrength', { name: label }), 'preset:amount')
@@ -213,7 +214,7 @@ export function PresetsPanel({ photoId }: { photoId: number }) {
       void qc.invalidateQueries({ queryKey: qk.presets })
       useToasts.getState().push('success', t('edit.presetSaved', { name: n }), 2200)
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000)
+      useToasts.getState().push('error', errorText(err), 5000)
     }
   }
 
@@ -223,7 +224,7 @@ export function PresetsPanel({ photoId }: { photoId: number }) {
   return (
     <Section id="presets" title={t('edit.presets')}>
       {presets.isError ? (
-        <div className="text-xs text-danger">{(presets.error as Error).message}</div>
+        <div className="text-xs text-danger">{errorText(presets.error)}</div>
       ) : (
         <div className="grid grid-cols-3 gap-1.5" data-testid="preset-grid">
           {list.map((p) => (
@@ -241,7 +242,7 @@ export function PresetsPanel({ photoId }: { photoId: number }) {
                       void api
                         .deletePreset(p.id)
                         .then(() => qc.invalidateQueries({ queryKey: qk.presets }))
-                        .catch((err: unknown) => useToasts.getState().push('error', err instanceof Error ? err.message : String(err)))
+                        .catch((err: unknown) => useToasts.getState().push('error', errorText(err)))
               }
             />
           ))}

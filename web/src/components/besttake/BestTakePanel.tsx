@@ -6,9 +6,11 @@ import { faceCropUrl } from '@/api/client'
 import { sortedWarnings, visibleCandidates, type CandidateView, type PersonView } from '@/lib/besttake'
 import { commitLive, setLive } from '@/lib/editActions'
 import { bestTakeOf, updateBestTake } from '@/lib/patches'
+import { usePersonLabel } from '@/lib/usePersonLabel'
 import { useEdit } from '@/stores/edit'
 import { useGen } from '@/stores/gen'
 import { Slider } from '../edit/Slider'
+import { reasonText } from '@/lib/reasons'
 
 interface Props {
   person: PersonView | undefined
@@ -22,6 +24,7 @@ interface Props {
 /** Right column of the Best Take editor (doc 04 3.4): candidates of the selected person, blend controls, warnings, restore. */
 export function BestTakePanel({ person, retargeted, busy, onChoose, onRestore }: Props) {
   const { t } = useTranslation()
+  const personLabel = usePersonLabel()
   const qc = useQueryClient()
   const stack = useEdit((s) => s.stack)
   const result = useGen((s) => (person ? s.results[person.baseFaceId] : undefined))
@@ -36,7 +39,7 @@ export function BestTakePanel({ person, retargeted, busy, onChoose, onRestore }:
   }
   const shown = visibleCandidates(person, all)
   const patch = person.person_id !== null ? bestTakeOf(stack, person.person_id) : undefined
-  const who = person.name ?? t('person.unnamed')
+  const who = personLabel(person.person_id, person.name)
   const warnings = sortedWarnings(result?.ok ? result.warnings : [])
   const frameOfPatch = patch?.source_photo_id !== undefined ? person.candidates.find((c) => c.photo_id === patch.source_photo_id)?.frame : null
 
@@ -76,7 +79,7 @@ export function BestTakePanel({ person, retargeted, busy, onChoose, onRestore }:
                 aria-disabled={disabled}
                 aria-pressed={c.isCurrent}
                 disabled={busy && !disabled}
-                title={disabled ? `${t('besttake.notComposable')}: ${t(`besttake.reason_${c.reason ?? 'unknown'}`, { defaultValue: c.reason ?? '' })}` : c.isBase ? t('besttake.baseHint') : t('besttake.useHint')}
+                title={disabled ? `${t('besttake.notComposable')}: ${reasonText('besttake', c.reason)}` : c.isBase ? t('besttake.baseHint') : t('besttake.useHint')}
                 onClick={() => (disabled ? undefined : onChoose(person, c))}
                 data-testid="bt-candidate"
                 data-photo={c.photo_id}
@@ -97,8 +100,8 @@ export function BestTakePanel({ person, retargeted, busy, onChoose, onRestore }:
                   <span className="tnum font-medium">#{c.frame ?? '?'}</span>
                   <span className="tnum text-muted">{c.score}</span>
                 </span>
-                {c.isBase && <span className="bg-panel px-1.5 pb-1 text-[10px] text-muted">{t('besttake.base')}</span>}
-                {disabled && <span className="px-1.5 pb-1 text-[10px] leading-tight text-danger">{t(`besttake.reason_${c.reason ?? 'unknown'}`, { defaultValue: c.reason ?? '' })}</span>}
+                {c.isBase && <span className="bg-panel px-1.5 pb-1 text-[11px] text-muted">{t('besttake.base')}</span>}
+                {disabled && <span className="px-1.5 pb-1 text-[11px] leading-tight text-danger">{reasonText('besttake', c.reason)}</span>}
               </button>
             )
           })}
@@ -154,7 +157,7 @@ export function BestTakePanel({ person, retargeted, busy, onChoose, onRestore }:
       {result && !result.ok && (
         <div className="flex items-start gap-1.5 rounded-control bg-danger/10 p-2 text-xs text-danger" data-testid="bt-failure">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          {t('besttake.failed', { reason: t(`besttake.reason_${result.reason ?? 'unknown'}`, { defaultValue: result.reason ?? '' }) })}
+          {t('besttake.failed', { reason: reasonText('besttake', result.reason) })}
         </div>
       )}
 

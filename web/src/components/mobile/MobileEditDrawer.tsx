@@ -1,14 +1,16 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronUp, Eclipse, Loader2, Mountain, RotateCcw, ScanFace, Sparkles, User, Wand2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Columns2, Eclipse, History, Loader2, Mountain, RotateCcw, ScanFace, Sparkles, User, Wand2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePhotoPresets } from '@/api/queries'
 import { ADJUST_NUMERIC_KEYS, type AdjustKey, type AutoMode, type Photo, type Preset } from '@/api/types'
-import { applyPreset, getAdjust, SLIDER_SPEC, setGlobalField } from '@/lib/edit'
+import { applyPreset, getAdjust, isEmptyStack, SLIDER_SPEC, setGlobalField } from '@/lib/edit'
 import { autoApply, changeStack, commitLive, resetAll, setLive } from '@/lib/editActions'
 import { haptic } from '@/lib/haptics'
 import { useEdit } from '@/stores/edit'
+import { HistoryList } from '../edit/HistoryPanel'
 import { PortraitPanel } from '../edit/PortraitPanel'
+import { Sheet } from './Sheet'
 
 const AUTO_MODES: { mode: AutoMode; icon: typeof Wand2 }[] = [
   { mode: 'auto', icon: Wand2 },
@@ -33,7 +35,7 @@ export function HoldCompare() {
   }
   return (
     <button
-      className={`btn absolute bottom-3 left-3 z-20 !h-12 touch-none select-none rounded-full border-white/20 bg-black/60 px-4 text-white backdrop-blur ${compare === 'original' ? '!border-accent' : ''}`}
+      className={`btn absolute bottom-3 left-3 z-(--z-sticky) !h-12 touch-none select-none rounded-full border-white/20 bg-black/60 px-4 text-white backdrop-blur ${compare === 'original' ? '!border-accent' : ''}`}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId)
         on()
@@ -58,6 +60,10 @@ export function MobileEditDrawer({ photo }: { photo: Photo }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const stack = useEdit((s) => s.stack)
+  const compare = useEdit((s) => s.compare)
+  const historyOpen = useEdit((s) => s.historyOpen)
+  const setHistoryOpen = useEdit((s) => s.setHistoryOpen)
+  const edited = !isEmptyStack(stack)
   // stacks fitted to this photo (adaptive presets, docs/03 §6.1.1)
   const presets = usePhotoPresets(photo.id)
   const [tab, setTab] = useState<Tab>('adjust')
@@ -90,6 +96,9 @@ export function MobileEditDrawer({ photo }: { photo: Photo }) {
 
   return (
     <div className="shrink-0 border-t border-line bg-panel" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }} data-testid="edit-drawer">
+      <Sheet open={historyOpen} onOpenChange={setHistoryOpen} title={t('edit.history')} testId="history-sheet">
+        <HistoryList />
+      </Sheet>
       <button className="flex w-full items-center justify-center py-1.5" onClick={() => setOpen(!open)} aria-expanded={open} aria-label={t('mobile.edit.toggle')} data-testid="drawer-toggle">
         {open ? <ChevronDown size={18} className="text-muted" /> : <ChevronUp size={18} className="text-muted" />}
       </button>
@@ -133,10 +142,28 @@ export function MobileEditDrawer({ photo }: { photo: Photo }) {
                 {t(tb === 'adjust' ? 'mobile.edit.adjust' : 'mobile.edit.portrait')}
               </button>
             ))}
-            <button className="btn btn-ghost ml-auto !h-10" onClick={() => resetAll(qc, t('history.resetAll'))} data-testid="m-reset-all">
-              <RotateCcw size={14} />
-              {t('edit.resetAll')}
-            </button>
+            <div className="ml-auto flex items-center gap-0.5">
+              <button
+                className="btn btn-ghost btn-icon !h-10 !w-10"
+                aria-pressed={compare === 'split'}
+                aria-label={t('edit.split')}
+                title={t('edit.split')}
+                onClick={() => {
+                  const st = useEdit.getState()
+                  if (!st.cropMode) st.setCompare(st.compare === 'split' ? 'off' : 'split')
+                }}
+                data-testid="m-compare-split"
+              >
+                <Columns2 size={15} />
+              </button>
+              <button className="btn btn-ghost btn-icon !h-10 !w-10" aria-label={t('edit.history')} title={t('edit.history')} onClick={() => setHistoryOpen(true)} data-testid="m-history">
+                <History size={15} />
+              </button>
+              {/* undoable: it lands in the history as one step (Undo in the top bar, or the history list) */}
+              <button className="btn btn-ghost btn-icon !h-10 !w-10" disabled={!edited} aria-label={t('edit.resetAll')} title={t('edit.resetAll')} onClick={() => resetAll(qc, t('history.resetAll'))} data-testid="m-reset-all">
+                <RotateCcw size={15} />
+              </button>
+            </div>
           </div>
 
           {tab === 'adjust' ? (
@@ -154,7 +181,7 @@ export function MobileEditDrawer({ photo }: { photo: Photo }) {
                       data-testid={`param-${k}`}
                     >
                       <span>{t(`adjust.${k}`)}</span>
-                      {changed && <span className="tnum text-[10px] text-accent">{(adjust[k] ?? 0) > 0 ? '+' : ''}{(adjust[k] ?? 0).toFixed(SLIDER_SPEC[k].decimals)}</span>}
+                      {changed && <span className="tnum text-[11px] text-accent-text">{(adjust[k] ?? 0) > 0 ? '+' : ''}{(adjust[k] ?? 0).toFixed(SLIDER_SPEC[k].decimals)}</span>}
                     </button>
                   )
                 })}
