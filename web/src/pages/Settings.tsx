@@ -51,7 +51,7 @@ export function Settings() {
           <span className="hidden sm:inline">{t('common.back')}</span>
         </Link>
         <h1 className="flex items-center gap-2 text-base font-semibold">
-          <Globe size={16} className="text-accent" />
+          <Globe size={16} className="text-accent-text" />
           {t('settings.title')}
         </h1>
       </header>

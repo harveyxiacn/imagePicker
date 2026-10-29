@@ -43,7 +43,7 @@ export function HistoryList() {
               aria-current={current}
               data-testid="history-item"
             >
-              {e.edits ? <Pencil size={11} className="text-accent" /> : <span className="w-[11px]" />}
+              {e.edits ? <Pencil size={11} className="text-accent-text" /> : <span className="w-[11px]" />}
               <span className="flex-1 truncate">{e.label}</span>
             </button>
           </li>
@@ -61,7 +61,7 @@ export function HistoryPanel() {
   const { t } = useTranslation()
   const close = useEdit((s) => s.setHistoryOpen)
   return (
-    <div className="anim-pop absolute top-2 right-[328px] z-20 flex max-h-[70%] w-72 flex-col rounded-card border border-line bg-elevated shadow-[var(--shadow)]" role="region" aria-label={t('edit.history')} data-testid="history-panel">
+    <div className="anim-pop absolute top-2 right-[328px] z-(--z-sticky) flex max-h-[70%] w-72 flex-col rounded-card border border-line bg-elevated shadow-[var(--shadow)]" role="region" aria-label={t('edit.history')} data-testid="history-panel">
       <div className="flex items-center border-b border-line px-3 py-2">
         <span className="flex-1 font-semibold">{t('edit.history')}</span>
         <button className="btn btn-ghost btn-icon !h-6 !w-6" aria-label={t('common.close')} onClick={() => close(false)}>

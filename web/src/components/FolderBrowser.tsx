@@ -120,7 +120,7 @@ export function FolderBrowser({ open, onOpenChange, onSelect, title, confirmLabe
                       onDoubleClick={() => setPath(full)}
                       onClick={() => setPath(full)}
                     >
-                      <Folder size={15} className="shrink-0 text-accent" />
+                      <Folder size={15} className="shrink-0 text-accent-text" />
                       <span className="truncate">{fileBaseName(full)}</span>
                     </button>
                   </li>

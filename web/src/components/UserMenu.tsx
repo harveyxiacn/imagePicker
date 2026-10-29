@@ -59,7 +59,7 @@ export function UserMenu() {
         <User size={15} />
       </button>
       {open && (
-        <div ref={panel} {...pop.panelProps} role="menu" aria-label={t('auth.menu')} className="anim-pop absolute top-full right-0 z-50 mt-1 w-48 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]">
+        <div ref={panel} {...pop.panelProps} role="menu" aria-label={t('auth.menu')} className="anim-pop absolute top-full right-0 z-(--z-menu) mt-1 w-48 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]">
           <div className="px-2.5 py-1.5 text-xs text-muted">{guest ? t('auth.role_guest') : t('auth.role_owner')}</div>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left hover:bg-panel" onClick={() => void logout()} data-testid="logout">
             <LogOut size={14} />

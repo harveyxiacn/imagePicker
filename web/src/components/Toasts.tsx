@@ -20,7 +20,7 @@ export function Toasts() {
 
   return (
     <div
-      className="pointer-events-none fixed right-4 bottom-10 z-[60] flex w-[min(360px,calc(100vw-32px))] flex-col gap-2 max-md:right-3 max-md:bottom-[calc(72px+env(safe-area-inset-bottom,0px))] max-md:left-3 max-md:w-auto"
+      className="pointer-events-none fixed right-4 bottom-10 z-(--z-toast) flex w-[min(360px,calc(100vw-32px))] flex-col gap-2 max-md:right-3 max-md:bottom-[calc(72px+env(safe-area-inset-bottom,0px))] max-md:left-3 max-md:w-auto"
     >
       {Object.values(tasks)
         .filter((task) => !(task.kind === 'model_download' && consentOpen) && !isGenKind(task.kind) && task.kind !== 'analysis')
@@ -44,7 +44,7 @@ export function Toasts() {
               ) : task.state === 'cancelled' ? (
                 <Ban size={16} className="text-muted" />
               ) : (
-                <Download size={16} className="text-accent" />
+                <Download size={16} className="text-accent-text" />
               )}
               <span className="flex-1 font-medium">{label}</span>
               <span className="tnum text-muted">
@@ -91,7 +91,7 @@ export function Toasts() {
           ) : x.kind === 'success' ? (
             <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-success" />
           ) : (
-            <Info size={16} className="mt-0.5 shrink-0 text-accent" />
+            <Info size={16} className="mt-0.5 shrink-0 text-accent-text" />
           )}
           <span className="flex min-w-0 flex-1 flex-col gap-1.5">
             <span>{x.text}</span>

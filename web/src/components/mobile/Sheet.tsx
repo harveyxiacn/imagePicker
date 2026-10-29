@@ -59,11 +59,11 @@ export function Sheet({ open, onOpenChange, title, children, footer, tall, testI
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="anim-fade fixed inset-0 z-40 bg-black/60" />
+        <Dialog.Overlay className="anim-fade fixed inset-0 z-(--z-scrim) bg-black/60" />
         <Dialog.Content
           data-testid={testId ?? 'sheet'}
           aria-describedby={undefined}
-          className="sheet-in fixed right-0 bottom-0 left-0 z-50 mx-auto flex w-full max-w-2xl flex-col rounded-t-2xl border border-b-0 border-line bg-panel shadow-[var(--shadow)]"
+          className="sheet-in fixed right-0 bottom-0 left-0 z-(--z-modal) mx-auto flex w-full max-w-2xl flex-col rounded-t-2xl border border-b-0 border-line bg-panel shadow-[var(--shadow)]"
           style={{
             bottom: kb || undefined,
             maxHeight: kb ? `calc(${h}dvh - ${kb}px)` : `${h}dvh`,

@@ -194,7 +194,7 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
                 >
                   <img src={faceCropUrl(c.face_id, 128)} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" draggable={false} />
                   <span className="max-w-16 truncate">{c.person_name ?? `${t('person.unnamed')} ${c.person_id}`}</span>
-                  {c.has_profile && <Star size={10} className="shrink-0 text-accent" fill="currentColor" />}
+                  {c.has_profile && <Star size={10} className="shrink-0 text-accent-text" fill="currentColor" />}
                 </Chip>
               ))}
             </div>

@@ -102,7 +102,7 @@ function AssistantDrawer({ sessionId, photoId }: { sessionId: number; photoId: n
 
   return (
     <aside
-      className="anim-pop fixed top-12 right-0 bottom-0 z-40 flex w-[min(400px,100vw)] flex-col border-l border-line bg-panel shadow-[var(--shadow)] max-sm:top-0"
+      className="anim-pop fixed top-12 right-0 bottom-0 z-(--z-popover) flex w-[min(400px,100vw)] flex-col border-l border-line bg-panel shadow-[var(--shadow)] max-sm:top-0"
       aria-label={t('assistant.title')}
       style={kb ? { bottom: kb } : undefined}
       data-testid="assistant-drawer"

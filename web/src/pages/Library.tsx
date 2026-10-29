@@ -232,13 +232,13 @@ export function Library() {
       {timelineOpen && <TimelinePanel sessionId={sessionId} />}
 
       <div className="relative flex min-h-0 flex-1">
-        {panelOpen && <div className="absolute inset-0 z-20 bg-black/40" onClick={closePanels} aria-hidden="true" data-testid="panel-scrim" />}
+        {panelOpen && <div className="absolute inset-0 z-(--z-sticky) bg-black/40" onClick={closePanels} aria-hidden="true" data-testid="panel-scrim" />}
         {sidebarOpen && !isMobile && (
           <aside
             ref={sidebarRef}
             tabIndex={-1}
             aria-label={t('collections.toggle')}
-            className="shrink-0 outline-none max-lg:absolute max-lg:top-0 max-lg:left-0 max-lg:bottom-0 max-lg:z-30 max-lg:shadow-[var(--shadow)]"
+            className="shrink-0 outline-none max-lg:absolute max-lg:top-0 max-lg:left-0 max-lg:bottom-0 max-lg:z-(--z-overlay-panel) max-lg:shadow-[var(--shadow)]"
           >
             <CollectionsSidebar sessionId={sessionId} />
           </aside>
@@ -345,7 +345,7 @@ export function Library() {
           <aside
             ref={inspectorRef}
             tabIndex={-1}
-            className="w-[300px] shrink-0 overflow-y-auto outline-none border-l border-line bg-panel max-lg:absolute max-lg:top-0 max-lg:right-0 max-lg:bottom-0 max-lg:z-30 max-lg:shadow-[var(--shadow)]"
+            className="w-[300px] shrink-0 overflow-y-auto outline-none border-l border-line bg-panel max-lg:absolute max-lg:top-0 max-lg:right-0 max-lg:bottom-0 max-lg:z-(--z-overlay-panel) max-lg:shadow-[var(--shadow)]"
             aria-label={t('top.inspector')}
           >
             <Inspector

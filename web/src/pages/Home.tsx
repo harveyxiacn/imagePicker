@@ -72,7 +72,7 @@ export function Home() {
     <div className="flex h-full flex-col">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4">
         <div className="flex items-center gap-2 text-base font-semibold">
-          <Aperture size={20} className="text-accent" />
+          <Aperture size={20} className="text-accent-text" />
           imagePicker
         </div>
         <div className="flex items-center gap-2">
@@ -231,8 +231,8 @@ function SessionCard({ s }: { s: Session }) {
           <div className="mt-0.5 flex items-center gap-1 text-xs">
             {importing ? (
               <>
-                <Loader2 size={12} className="animate-spin text-accent" />
-                <span className="text-accent">{t(`import.${s.import_state}`)}</span>
+                <Loader2 size={12} className="animate-spin text-accent-text" />
+                <span className="text-accent-text">{t(`import.${s.import_state}`)}</span>
               </>
             ) : (
               <>

@@ -109,7 +109,7 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
           {...pop.panelProps}
           role="dialog"
           aria-label={t('top.analyze')}
-          className="anim-pop absolute top-full right-0 z-40 mt-1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
+          className="anim-pop absolute top-full right-0 z-(--z-popover) mt-1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
           data-testid="analyze-menu"
         >
           <div className="mb-2 font-medium">{t('analysis.profile')}</div>
@@ -131,7 +131,7 @@ export function AnalyzeControl({ sessionId, photoCount }: Props) {
           {noAi && profile !== 'lite' && (
             <div className="mt-2 flex items-start gap-2 rounded-control border border-warning/40 bg-warning/10 p-2 text-xs" data-testid="no-ai-note">
               <span className="flex-1">{t('analysis.noAi')}</span>
-              <button className="btn btn-ghost !h-6 shrink-0 !px-1.5 text-xs" onClick={() => setProfile('lite')} data-testid="use-lite">
+              <button className="btn hit btn-ghost !h-6 shrink-0 !px-1.5 text-xs" onClick={() => setProfile('lite')} data-testid="use-lite">
                 {t('analysis.useLite')}
               </button>
             </div>

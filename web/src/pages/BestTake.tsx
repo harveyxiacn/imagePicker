@@ -209,7 +209,7 @@ export function BestTake() {
 
   return (
     <div className="flex h-full flex-col" data-testid="besttake-page">
-      <header className="relative z-20 flex h-12 shrink-0 items-center gap-2 border-b border-line px-2 sm:gap-3 sm:px-3">
+      <header className="relative z-(--z-sticky) flex h-12 shrink-0 items-center gap-2 border-b border-line px-2 sm:gap-3 sm:px-3">
         <button className="btn btn-ghost" onClick={back} aria-label={t('common.back')} data-testid="bt-back">
           <ChevronLeft size={16} />
           <span className="hidden sm:inline">{t('common.back')}</span>
@@ -226,7 +226,7 @@ export function BestTake() {
               <ChevronDown size={13} />
             </button>
             {baseMenu && (
-              <div className="absolute top-full left-0 z-30 mt-1 flex w-max max-w-[80vw] gap-1.5 overflow-x-auto rounded-card border border-line bg-elevated p-2 shadow-[var(--shadow)]" data-testid="bt-base-menu">
+              <div className="absolute top-full left-0 z-(--z-overlay-panel) mt-1 flex w-max max-w-[80vw] gap-1.5 overflow-x-auto rounded-card border border-line bg-elevated p-2 shadow-[var(--shadow)]" data-testid="bt-base-menu">
                 {photos.map((p, i) => (
                   <button
                     key={p.id}

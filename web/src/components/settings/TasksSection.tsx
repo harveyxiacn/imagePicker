@@ -42,7 +42,7 @@ function TaskRow({ task }: { task: TaskRecord }) {
           <span className="tnum">{when}</span>
           <span className={task.status === 'failed' ? 'text-danger' : task.status === 'interrupted' ? 'text-warning' : ''}>{t(`tasks.status_${task.status}`)}</span>
           {task.cancellable && (
-            <button className="btn btn-ghost !h-6 !px-1.5 text-xs" onClick={() => void cancelTask(qc, task.id)} data-testid="task-cancel">
+            <button className="btn hit btn-ghost !h-6 !px-1.5 text-xs" onClick={() => void cancelTask(qc, task.id)} data-testid="task-cancel">
               <X size={11} />
               {t('common.cancel')}
             </button>

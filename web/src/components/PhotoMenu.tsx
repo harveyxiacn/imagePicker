@@ -73,7 +73,7 @@ export function usePhotoMenu(sessionId: number): { open: (e: { clientX: number; 
           {...pop.panelProps}
           role="menu"
           aria-label={t('photoMenu.label')}
-          className="anim-pop fixed z-[70] min-w-60 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]"
+          className="anim-pop fixed z-(--z-menu) min-w-60 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]"
           style={{ left: Math.min(menu.x, window.innerWidth - 260), top: Math.min(menu.y, window.innerHeight - 140) }}
           data-testid="photo-menu"
         >

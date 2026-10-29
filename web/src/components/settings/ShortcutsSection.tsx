@@ -177,7 +177,7 @@ function RowView(props: {
         <td className="px-4 py-1.5">
           {props.name}
           {props.scopeHint && <span className="ml-1.5 text-xs text-faint">{props.scopeHint}</span>}
-          {r.overridden && <span className="ml-1.5 text-xs text-accent">{t('settings.keys.custom')}</span>}
+          {r.overridden && <span className="ml-1.5 text-xs text-accent-text">{t('settings.keys.custom')}</span>}
         </td>
         <td className="px-4 py-1.5 text-right">
           <span className="inline-flex items-center justify-end gap-2">

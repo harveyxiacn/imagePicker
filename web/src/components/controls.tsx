@@ -25,7 +25,7 @@ export function StarRating({
         <button
           key={n}
           type="button"
-          className="rounded p-0.5 text-accent hover:scale-110 disabled:cursor-default"
+          className="rounded p-0.5 text-accent-text hover:scale-110 disabled:cursor-default"
           style={{ transition: 'transform 120ms' }}
           aria-label={t('inspector.starN', { n })}
           title={`${n} (${n})`}
