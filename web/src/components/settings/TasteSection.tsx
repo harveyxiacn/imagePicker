@@ -26,7 +26,8 @@ function TraitText({ tr }: { tr: TasteTrait }) {
  * "My style" card (Settings → My style, and the /taste page): status, cold-start progress,
  * quality against the generic score, what it learned, retrain, forget and the on/off switch.
  */
-export function TasteSection() {
+/** `level` is the heading rank of its cards: 3 under a Settings section title, 2 when the page only has its h1. */
+export function TasteSection({ level = 3 }: { level?: 2 | 3 }) {
   const { t, i18n } = useTranslation()
   const qc = useQueryClient()
   const q = useTaste()
@@ -85,7 +86,7 @@ export function TasteSection() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="taste-section">
-      <Card title={t('taste.title')} hint={t('taste.intro')} testId="taste-card">
+      <Card title={t('taste.title')} hint={t('taste.intro')} testId="taste-card" level={level}>
         <Row label={t('taste.enable')} hint={t('taste.enableHint')}>
           <Toggle checked={d.enabled} onChange={(v) => toggle.mutate(v)} label={t('taste.enable')} disabled={busy} testId="taste-enable" />
         </Row>
@@ -160,7 +161,7 @@ export function TasteSection() {
         </Row>
       </Card>
 
-      <Card title={t('taste.traits')} testId="taste-traits-card">
+      <Card title={t('taste.traits')} testId="taste-traits-card" level={level}>
         {d.traits.length === 0 ? (
           <p className="px-4 py-3 text-muted" data-testid="taste-no-traits">
             {t('taste.noTraits')}

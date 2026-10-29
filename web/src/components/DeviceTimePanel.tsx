@@ -53,7 +53,7 @@ export function DeviceTimePanel({ sessionId, open }: { sessionId: number; open: 
   return (
     <section className="mt-2 border-t border-line pt-2" aria-label={t('timeAlign.title')} data-testid="time-align-panel">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-xs font-medium text-muted">{t('timeAlign.title')}</h3>
+        <h2 className="text-xs font-medium text-muted">{t('timeAlign.title')}</h2>
         <button className="btn btn-ghost btn-icon" title={t('timeAlign.reestimate')} aria-label={t('timeAlign.reestimate')} disabled={busy} onClick={() => m.mutate({ refresh: true })}>
           <RefreshCw size={13} />
         </button>

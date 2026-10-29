@@ -38,7 +38,6 @@ export function SegmentHeader({
         }}
         onDoubleClick={(e) => e.stopPropagation()}
         aria-expanded={!h.collapsed}
-        aria-label={full}
         title={full}
         data-testid="scene-header"
       >

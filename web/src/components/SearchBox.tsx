@@ -91,7 +91,7 @@ export function SearchBox({ sessionId }: { sessionId: number }) {
       />
       {draft && (
         <button
-          className="absolute top-1/2 right-1 -translate-y-1/2 rounded-full p-1 text-faint hover:text-fg"
+          className="absolute top-1/2 right-1 -translate-y-1/2 rounded-full p-1.5 text-faint hover:text-fg"
           aria-label={t('search.clear')}
           onClick={() => {
             setDraft('')

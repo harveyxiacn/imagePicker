@@ -20,6 +20,7 @@
   --accent-text: #f5a524; /* accent used as text; --accent itself is a fill that carries --accent-fg */
   --accent-fg: #1a1200;
   --ai: #b28cf9;
+  --ai-fg: #12062b; /* text on an --ai fill */
   --success: #3fb950;
   --warning: #d29922;
   --danger: #ff6b63;
@@ -60,6 +61,7 @@
   --accent-text: #7a4f00;
   --accent-fg: #1a1200;
   --ai: #6f3fcb;
+  --ai-fg: #ffffff;
   --success: #17702f;
   --warning: #7d5300;
   --danger: #c4281f;
@@ -83,6 +85,7 @@
   --accent-text: #ffcc33;
   --accent-fg: #000000;
   --ai: #cdb0ff;
+  --ai-fg: #000000;
   --success: #5ee27a;
   --warning: #ffcf40;
   --danger: #ff8a82;
@@ -104,6 +107,7 @@
   --accent-text: #5e3300;
   --accent-fg: #ffffff;
   --ai: #4a1fa8;
+  --ai-fg: #ffffff;
   --success: #095c1a;
   --warning: #6e4a00;
   --danger: #a8071a;
@@ -126,6 +130,7 @@
   --color-accent-text: var(--accent-text);
   --color-accent-fg: var(--accent-fg);
   --color-ai: var(--ai);
+  --color-ai-fg: var(--ai-fg);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
@@ -293,6 +298,9 @@ kbd {
     height: max(100%, 44px);
   }
 }
+.glyph::before {
+  content: attr(data-glyph);
+}
 .btn-ai {
   border-color: color-mix(in srgb, var(--ai) 55%, transparent);
   color: var(--ai);
@@ -301,6 +309,11 @@ kbd {
 .btn[aria-pressed='true'] {
   background: color-mix(in srgb, var(--accent) 18%, var(--elevated));
   border-color: var(--accent);
+}
+/* pressed: the generic amber tint under purple text was 3.4:1; keep the AI tint and show the state with a full-strength border */
+.btn-ai[aria-pressed='true'] {
+  border-color: var(--ai);
+  background: color-mix(in srgb, var(--ai) 10%, var(--bg));
 }
 
 .field {
@@ -322,6 +335,12 @@ kbd {
 
 input[type='range'] {
   accent-color: var(--accent);
+}
+/* native 13px boxes miss the 24px target size (WCAG 2.5.8) wherever two sit close together */
+input[type='checkbox'],
+input[type='radio'] {
+  width: 1.125rem;
+  height: 1.125rem;
 }
 
 /* Skeleton shimmer */
@@ -483,7 +502,8 @@ input[type='range'].lr-slider[data-changed='true']::-webkit-slider-thumb {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.chip[aria-pressed='true'] {
+.chip[aria-pressed='true'],
+.chip[role='tab'][aria-selected='true'] {
   background: color-mix(in srgb, var(--accent) 18%, var(--elevated));
   border-color: var(--accent);
 }

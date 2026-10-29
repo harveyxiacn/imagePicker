@@ -11,9 +11,11 @@ interface Props {
   children: ReactNode
   footer?: ReactNode
   width?: string
+  /** The body scrolls and holds nothing focusable (read-only lists): make it a tab stop so the keyboard can scroll it. */
+  scrollFocusable?: boolean
 }
 
-export function Modal({ open, onOpenChange, title, description, children, footer, width = 'max-w-lg' }: Props) {
+export function Modal({ open, onOpenChange, title, description, children, footer, width = 'max-w-lg', scrollFocusable }: Props) {
   const { t } = useTranslation()
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -33,7 +35,9 @@ export function Modal({ open, onOpenChange, title, description, children, footer
           ) : (
             <Dialog.Description className="sr-only">{title}</Dialog.Description>
           )}
-          <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
+          <div className="min-h-0 flex-1 overflow-auto p-4" {...(scrollFocusable ? { tabIndex: 0, role: 'region', 'aria-label': title } : {})}>
+            {children}
+          </div>
           {footer && <div className="flex justify-end gap-2 border-t border-line px-4 py-3">{footer}</div>}
         </Dialog.Content>
       </Dialog.Portal>

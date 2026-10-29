@@ -99,7 +99,7 @@ export function EditCanvas({ photo }: { photo: Photo }) {
         {mainFrame.error && <span className="rounded bg-danger/90 px-1.5 py-0.5 text-xs text-white">{mainFrame.error}</span>}
       </div>
       {SHOW_BADGE && shown && (
-        <div className="tnum pointer-events-none absolute bottom-2 left-2 rounded bg-black/55 px-1.5 py-0.5 font-mono text-[11px] text-white/60" data-testid="render-badge">
+        <div className="tnum pointer-events-none absolute bottom-2 left-2 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[11px] text-white/85" data-testid="render-badge">
           {shown.backend ?? '?'} · {shown.renderMs ?? '?'}ms · {shown.w}×{shown.h} · {shown.final ? 'final' : 'drag'}
         </div>
       )}

@@ -118,9 +118,9 @@ export function Edit() {
           <ChevronLeft size={16} />
           <span className="hidden sm:inline">{t('common.back')}</span>
         </button>
-        <div className="min-w-0 truncate font-semibold" data-testid="edit-title">
+        <h1 className="min-w-0 truncate font-semibold" data-testid="edit-title">
           {photo?.file_name ?? '…'}
-        </div>
+        </h1>
         <div className="flex items-center">
           <button className="btn btn-ghost btn-icon" disabled={!canUndo} onClick={() => void actions.undo()} aria-label={t('keys.undo')} title={`${t('keys.undo')} (Ctrl+Z)`} data-testid="edit-undo">
             <Undo2 size={15} />
@@ -173,7 +173,7 @@ export function Edit() {
 
       {isMobile && photo && <MobileEditDrawer photo={photo} />}
 
-      <div className="flex h-9 shrink-0 items-center gap-2 border-t border-line bg-panel px-3 max-md:hidden" data-testid="edit-toolbar">
+      <footer className="flex h-9 shrink-0 items-center gap-2 border-t border-line bg-panel px-3 max-md:hidden" data-testid="edit-toolbar">
         <button className="btn" onClick={actions.copy} title={`${t('edit.copySettings')} (Ctrl+Shift+C)`} data-testid="copy-settings">
           <ClipboardCopy size={14} />
           {t('edit.copySettings')}
@@ -192,7 +192,7 @@ export function Edit() {
           <GenTasks />
         </span>
         <span className="text-xs text-muted">{photos.length > 0 && photo ? `${photos.findIndex((p) => p.id === photo.id) + 1} / ${photos.length}` : ''}</span>
-      </div>
+      </footer>
       {!isMobile && <Filmstrip photos={photos} activeId={photoId} onPick={go} />}
 
       <HelpOverlay />

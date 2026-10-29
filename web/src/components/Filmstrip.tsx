@@ -8,6 +8,7 @@ import type { Photo } from '@/api/types'
 import { colorVar } from '@/lib/colors'
 import { issueBadges } from '@/lib/ai'
 import { photoLabel } from '@/lib/photoLabel'
+import { Glyph } from './Glyph'
 
 const ITEM = 72
 const GAP = 4
@@ -50,7 +51,7 @@ const Thumb = memo(function Thumb({ photo, index, active, marked, onPick, t }: {
         {photo.flag === -1 && <Ban size={11} className="text-danger" aria-hidden="true" />}
         {photo.has_edits && (
           <span className="rounded bg-black/60 px-0.5 text-[10px] leading-3 text-accent" data-testid="edit-badge">
-            ✎
+            <Glyph text="✎" />
           </span>
         )}
       </div>
@@ -63,17 +64,21 @@ const Thumb = memo(function Thumb({ photo, index, active, marked, onPick, t }: {
         />
       )}
       {photo.user_rating ? (
-        <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-accent">★{photo.user_rating}</span>
+        <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-accent"><Glyph text={`★${photo.user_rating}`} /></span>
       ) : photo.ai_rating !== null ? (
-        <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-media-ai">☆{photo.ai_rating.toFixed(1)}</span>
+        <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-media-ai"><Glyph text={`☆${photo.ai_rating.toFixed(1)}`} /></span>
       ) : null}
       {issueBadges(photo.issues).length > 0 && (
-        <span className="absolute right-0 bottom-0 rounded-tl bg-black/60 px-0.5 text-[10px]">{issueBadges(photo.issues).slice(0, 2).map((b) => b.glyph).join('')}</span>
+        <span className="absolute right-0 bottom-0 rounded-tl bg-black/60 px-0.5 text-[10px]"><Glyph text={issueBadges(photo.issues).slice(0, 2).map((b) => b.glyph).join('')} /></span>
       )}
       {index !== null && (
         <span className="absolute top-0 left-0 rounded-br bg-black/60 px-1 text-[10px] text-white/90">
-          #{index}
-          {photo.rank_in_burst === 0 && <span className="ml-0.5 text-ai">✓</span>}
+          <Glyph text={`#${index}`} />
+          {photo.rank_in_burst === 0 && (
+            <span className="ml-0.5 text-ai">
+              <Glyph text="✓" />
+            </span>
+          )}
         </span>
       )}
     </button>

@@ -48,7 +48,7 @@ export function HslPanel() {
     >
       <div className="mb-1.5 flex gap-1" role="tablist">
         {(['h', 's', 'l'] as Tab[]).map((k) => (
-          <button key={k} role="tab" aria-selected={tab === k} aria-pressed={tab === k} className="chip" onClick={() => setTab(k)} data-testid={`hsl-tab-${k}`}>
+          <button key={k} role="tab" aria-selected={tab === k} className="chip" onClick={() => setTab(k)} data-testid={`hsl-tab-${k}`}>
             {t(`edit.hsl_${k}`)}
           </button>
         ))}

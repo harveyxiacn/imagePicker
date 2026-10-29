@@ -1,5 +1,5 @@
 import { Lock, RotateCcw } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePatchSettings } from '@/api/queries'
 import { eventToSpec, formatSpec, type Binding } from '@/lib/keymap'
@@ -30,7 +30,11 @@ function Chord({ spec }: { spec: string }) {
   return (
     <span className="flex items-center gap-0.5">
       {formatSpec(spec).map((k, j) => (
-        <kbd key={j}>{k}</kbd>
+        <Fragment key={j}>
+          {/* a real space between keycaps: the button's visible text then reads "Shift 0", matching its name */}
+          {j > 0 && ' '}
+          <kbd>{k}</kbd>
+        </Fragment>
       ))}
     </span>
   )
@@ -202,7 +206,7 @@ function RowView(props: {
                 className={`btn ${props.editing ? 'btn-primary' : ''}`}
                 disabled={props.disabled}
                 aria-pressed={props.editing}
-                aria-label={`${props.name}: ${formatSpec(r.chord).join('+')}`}
+                aria-label={`${props.name}: ${formatSpec(r.chord).join(' ')}`}
                 onClick={props.onEdit}
                 onBlur={() => props.editing && props.onEdit()}
                 data-testid={`key-edit-${r.id}`}

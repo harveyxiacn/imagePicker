@@ -208,7 +208,7 @@ function PeopleInner() {
   return (
     <div className="flex h-full flex-col" data-testid="people-page">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-3">
-        <Link to={`/s/${sessionId}`} className="btn btn-ghost" aria-label={t('common.back')}>
+        <Link to={`/s/${sessionId}`} className="btn btn-ghost" aria-label={session.data?.title ? `${t('common.back')}: ${session.data.title}` : t('common.back')}>
           <ChevronLeft size={16} />
           <span className="hidden max-w-48 truncate font-semibold sm:inline">{session.data?.title ?? '…'}</span>
         </Link>
@@ -235,7 +235,7 @@ function PeopleInner() {
         </div>
       </header>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-1.5" data-testid="people-toolbar">
+      <section className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-1.5" aria-label={t('people.title')} data-testid="people-toolbar">
         <div className="flex rounded-control border border-line p-0.5" role="group" aria-label={t('people.view')}>
           {(['cards', 'best'] as const).map((v) => (
             <button
@@ -276,7 +276,7 @@ function PeopleInner() {
           {busy === 'profiles' ? <Loader2 size={13} className="animate-spin" /> : <ScanFace size={13} />}
           {t('beauty.applyProfilesToSelectedPeople')}
         </button>
-      </div>
+      </section>
 
       <main className="min-h-0 flex-1 overflow-y-auto p-4">
         {people.isPending ? (
@@ -356,7 +356,7 @@ function PeopleInner() {
                     <img src={faceCropUrl(p.cover_face_id, 256)} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" draggable={false} />
                   </button>
                   <button
-                    className="absolute top-3 left-3 flex h-5 w-5 items-center justify-center rounded border before:absolute before:-inset-1 before:content-[''] [@media(pointer:coarse)]:before:-inset-3  border-white/60 bg-black/55 text-white"
+                    className="absolute top-3 left-3 flex h-6 w-6 items-center justify-center rounded border before:absolute before:-inset-1 before:content-[''] [@media(pointer:coarse)]:before:-inset-3  border-white/60 bg-black/55 text-white"
                     style={{ background: on ? 'var(--accent)' : undefined, color: on ? 'var(--accent-fg)' : undefined }}
                     aria-pressed={on}
                     aria-label={t('people.select')}

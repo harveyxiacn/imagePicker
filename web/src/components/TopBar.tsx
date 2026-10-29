@@ -47,7 +47,7 @@ export function TopBar({ sessionId, session, onView }: Props) {
       >
         <PanelLeft size={16} />
       </button>
-      <Link to="/" className="btn btn-ghost" aria-label={t('common.back')} title={t('common.back')}>
+      <Link to="/" className="btn btn-ghost" aria-label={session?.title ? `${t('common.back')}: ${session.title}` : t('common.back')} title={t('common.back')}>
         <ChevronLeft size={16} />
         <span className="hidden max-w-48 truncate font-semibold sm:inline">{session?.title ?? '…'}</span>
       </Link>

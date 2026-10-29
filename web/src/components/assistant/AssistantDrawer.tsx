@@ -67,7 +67,9 @@ function EngineBadge() {
   const llm = status.data.engine === 'llm'
   return (
     <span
-      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${llm ? 'bg-ai/20 text-ai' : 'bg-line text-muted'}`}
+      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${llm ? 'bg-ai/20' : 'bg-line text-muted'}`}
+      // the plain --ai hue is 3.99:1 on this tint in the light theme; pulling it towards the text colour clears 4.5:1 in every theme
+      style={llm ? { color: 'color-mix(in srgb, var(--ai) 70%, var(--fg))' } : undefined}
       title={llm ? t('assistant.engineLlmHint', { model: status.data.llm_model ?? '' }) : t('assistant.engineRulesHint')}
       data-testid="engine-badge"
       data-engine={status.data.engine}
