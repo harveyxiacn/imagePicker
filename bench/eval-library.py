@@ -77,6 +77,14 @@ def load(library: Path, data_dir: Path):
     return photos, unmatched, len(by_path)
 
 
+def load_centre(data_dir: Path) -> dict:
+    """photo id -> analysis.sharpness_center (empty for catalogs from before schema v18)."""
+    db = sqlite3.connect(f"file:{data_dir / 'catalog.db'}?mode=ro", uri=True)
+    if "sharpness_center" not in {r[1] for r in db.execute("PRAGMA table_info(analysis)")}:
+        return {}
+    return dict(db.execute("SELECT photo_id, sharpness_center FROM analysis"))
+
+
 def quantiles(xs):
     xs = sorted(x for x in xs if x is not None)
     if not xs:
@@ -143,6 +151,27 @@ def main() -> int:
     print(f"  sharpness / base frame, blur variants : {quantiles(ratios)}")
     print(f"  sharpness / base frame, other variants: {quantiles(others)}")
     out["burst_blur"] = {"variants": len(var), "flagged": flagged}
+    # the burst-relative blurry measure (catalog v18+): centre sharpness / median of the other frames
+    centre = load_centre(a.data_dir)
+    if centre:
+        members = defaultdict(list)
+        for r, im in photos:
+            if r["burst_id"] is not None and centre.get(r["id"]) is not None:
+                members[r["burst_id"]].append(r["id"])
+
+        def rel(r):
+            ms = members.get(r["burst_id"], [])
+            o = sorted(centre[m] for m in ms if m != r["id"])
+            if not o or centre.get(r["id"]) is None:
+                return None
+            med = o[len(o) // 2] if len(o) % 2 else (o[len(o) // 2 - 1] + o[len(o) // 2]) / 2
+            return centre[r["id"]] / med if med else None
+
+        bursts = [(r, im) for r, im in photos if im.get("burst") and r["burst_id"] is not None]
+        print("  centre sharpness / median of the other frames, blur variants : "
+              + quantiles([rel(r) for r, im in bursts if "blur" in im.get("tags", [])]))
+        print("  centre sharpness / median of the other frames, other frames  : "
+              + quantiles([rel(r) for r, im in bursts if "blur" not in im.get("tags", [])]))
 
     # ---- raw metric distributions per class
     classes = defaultdict(list)

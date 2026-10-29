@@ -35,9 +35,14 @@ pub const NOISY_AT_NIGHT: f64 = 0.30;
 pub const TILTED_MIN_DEG: f64 = 2.0;
 pub const TILTED_MAX_DEG: f64 = 10.0;
 pub const TILTED_MIN_CONFIDENCE: f64 = 0.2;
-/// A burst member this much less sharp than the burst's sharpest frame is flagged blurry
-/// (motion blur on the subject barely moves the whole-frame measure, so a fixed threshold misses it).
-pub const BLURRY_IN_BURST_RATIO: f64 = 0.80;
+/// A burst member whose centre-region sharpness (`PhotoFeat::sharpness_center`: the subject's
+/// head, hands and body, not just the inner face) is below this share of the median of the other
+/// frames is flagged blurry: motion blur on the subject leaves the absolute measure in the normal
+/// range, so a fixed threshold misses it. The inner-face measure is not used here: it drops with a
+/// blink or a head turn although nothing is blurred. Calibrated on the library's bursts
+/// (`bench/eval-library.py`, docs/03 §3.2): motion-blur variants p50 0.81 of the median, the other
+/// variants p1 0.87 / min 0.83 — generated frames differ far more than a real burst does.
+pub const BLURRY_IN_BURST_RATIO: f64 = 0.85;
 
 /// `bystander` tag (docs/03 §3.3): the photo has a non-subject face that is sharp enough to be
 /// recognised (face sharpness at least [`BLURRY_BELOW`]) and sizeable (at least this share of the
@@ -49,14 +54,19 @@ pub const BYSTANDER_MIN_SHARPNESS: f64 = BLURRY_BELOW;
 /// means the face is on a statue / poster / screen / print: never a subject or a bystander.
 pub const ARTIFICIAL_AT: f64 = 0.55;
 /// `bad_expression` tag (mirrors the worker's `steps/faces.py::expression_flag`): a subject whose
-/// mouth is open (jawOpen at least this) without a smile is mid-word, ...
-pub const TALKING_MOUTH_OPEN: f64 = 0.25;
+/// mouth is open (jawOpen at least this) without a smile is mid-word, ... MediaPipe's jawOpen
+/// stays small for speech: on the library's non-smiling subjects mid-sentence p25 0.04 / p50 0.11,
+/// closed mouths p90 0.02 / p95 0.06 (`bench/eval-bystander.py`, docs/03 §3.1.2).
+pub const TALKING_MOUTH_OPEN: f64 = 0.06;
 /// ... and one whose eyes are half shut (`eyes_open` in `[HALF_BLINK_MIN, HALF_BLINK_MAX)`;
 /// below it is `closed_eyes`) without a smile was caught blinking. A smile (at or above
 /// [`EXPR_SMILE_BELOW`]) excuses both: laughing eyes and open-mouthed grins are fine.
 pub const EXPR_SMILE_BELOW: f64 = 0.35;
 pub const HALF_BLINK_MIN: f64 = EYES_CLOSED_BELOW;
 pub const HALF_BLINK_MAX: f64 = 0.65;
+/// No expression verdict for a face whose crop sharpness is below this (the blurry threshold):
+/// the landmarks of a blurred face are guesses (mirrors the worker's `EXPR_MIN_SHARPNESS`).
+pub const EXPR_MIN_SHARPNESS: f64 = BLURRY_BELOW;
 /// Weight of the composition score in the portrait / group / night / other mixes; landscapes and
 /// architecture weigh it 0.20 (renormalised with the other available components).
 pub const COMPOSITION_WEIGHT: f64 = 0.08;
@@ -170,7 +180,11 @@ impl FaceFeat {
 #[derive(Debug, Clone, Default)]
 pub struct PhotoFeat {
     pub photo_id: i64,
+    /// Headline sharpness: the faces' (area-weighted) when there are any, otherwise the frame's.
     pub sharpness: Option<f64>,
+    /// Sharpness of the central 60% x 60% of the frame (`analysis.sharpness_center`, v18), the
+    /// burst-relative blurry measure; `None` before v18.
+    pub sharpness_center: Option<f64>,
     pub exposure: Option<f64>,
     pub noise: Option<f64>,
     pub iqa: Option<f64>,
@@ -336,13 +350,14 @@ pub fn bystander_count(faces: &[FaceFeat]) -> usize {
 
 /// Why a subject's expression is "not great", `None` when it is fine or unknown (no landmarks).
 /// `"talking"`: mouth open at least [`TALKING_MOUTH_OPEN`]; `"half_blink"`: eyes between
-/// [`HALF_BLINK_MIN`] and [`HALF_BLINK_MAX`]; both only without a smile ([`EXPR_SMILE_BELOW`]).
+/// [`HALF_BLINK_MIN`] and [`HALF_BLINK_MAX`]; both only without a smile ([`EXPR_SMILE_BELOW`])
+/// and on a face sharp enough to read ([`EXPR_MIN_SHARPNESS`]).
 pub fn bad_expression(f: &FaceFeat) -> Option<&'static str> {
     if !f.is_subject || f.likely_artificial() {
         return None;
     }
     let smile = f.smile?;
-    if smile >= EXPR_SMILE_BELOW {
+    if smile >= EXPR_SMILE_BELOW || f.sharpness.is_some_and(|s| s < EXPR_MIN_SHARPNESS) {
         return None;
     }
     if f.mouth_open.is_some_and(|m| m >= TALKING_MOUTH_OPEN) {
@@ -385,6 +400,8 @@ pub struct PhotoScore {
     pub effective_scene: &'static str,
     /// The photo's sharpness measure, also when the scene does not weigh it (burst comparison).
     pub sharpness: Option<f64>,
+    /// Centre-region sharpness, the burst comparison's measure when every frame has it.
+    pub sharpness_center: Option<f64>,
 }
 
 fn scene_class(feat: &PhotoFeat) -> &'static str {
@@ -451,7 +468,24 @@ pub fn detect_issues(feat: &PhotoFeat, scene: &str) -> (Vec<Issue>, Vec<Issue>) 
         issues.push(Issue::ClosedEyes);
         hard.push(Issue::ClosedEyes);
     }
-    if let Some(s) = feat.sharpness {
+    // Without a sharpness measure, assume the detail is gone (the old behaviour).
+    let detail = feat.sharpness.unwrap_or(0.0);
+    let over = (feat.clipped_highlights.unwrap_or(0.0) >= OVEREXPOSED_CLIPPED
+        || feat.mean_luminance.unwrap_or(0.0) > OVEREXPOSED_MEAN)
+        && (detail < OVEREXPOSED_DETAIL_BELOW
+            || feat.mean_luminance.unwrap_or(0.0) > OVEREXPOSED_SEVERE_MEAN);
+    let under = scene != "night"
+        && (feat.crushed_shadows.unwrap_or(0.0) >= UNDEREXPOSED_CRUSHED
+            || feat
+                .mean_luminance
+                .map(|m| {
+                    m < UNDEREXPOSED_SEVERE_MEAN
+                        || (m < UNDEREXPOSED_MEAN && detail < UNDEREXPOSED_DETAIL_BELOW)
+                })
+                .unwrap_or(false));
+    // A blown-out or crushed frame has no detail left to measure: its low sharpness is the
+    // exposure problem, which carries its own tag (and penalty), not blur.
+    if let Some(s) = feat.sharpness.filter(|_| !over && !under) {
         if s < BLURRY_BELOW {
             issues.push(Issue::Blurry);
             if s < BLURRY_SEVERE_BELOW {
@@ -459,12 +493,6 @@ pub fn detect_issues(feat: &PhotoFeat, scene: &str) -> (Vec<Issue>, Vec<Issue>) 
             }
         }
     }
-    // Without a sharpness measure, assume the detail is gone (the old behaviour).
-    let detail = feat.sharpness.unwrap_or(0.0);
-    let over = (feat.clipped_highlights.unwrap_or(0.0) >= OVEREXPOSED_CLIPPED
-        || feat.mean_luminance.unwrap_or(0.0) > OVEREXPOSED_MEAN)
-        && (detail < OVEREXPOSED_DETAIL_BELOW
-            || feat.mean_luminance.unwrap_or(0.0) > OVEREXPOSED_SEVERE_MEAN);
     if over {
         issues.push(Issue::Overexposed);
         if feat.clipped_highlights.unwrap_or(0.0) >= OVEREXPOSED_SEVERE_CLIPPED
@@ -473,25 +501,15 @@ pub fn detect_issues(feat: &PhotoFeat, scene: &str) -> (Vec<Issue>, Vec<Issue>) 
             hard.push(Issue::Overexposed);
         }
     }
-    if scene != "night" {
-        let under = feat.crushed_shadows.unwrap_or(0.0) >= UNDEREXPOSED_CRUSHED
+    if under {
+        issues.push(Issue::Underexposed);
+        if feat.crushed_shadows.unwrap_or(0.0) >= UNDEREXPOSED_SEVERE_CRUSHED
             || feat
                 .mean_luminance
-                .map(|m| {
-                    m < UNDEREXPOSED_SEVERE_MEAN
-                        || (m < UNDEREXPOSED_MEAN && detail < UNDEREXPOSED_DETAIL_BELOW)
-                })
-                .unwrap_or(false);
-        if under {
-            issues.push(Issue::Underexposed);
-            if feat.crushed_shadows.unwrap_or(0.0) >= UNDEREXPOSED_SEVERE_CRUSHED
-                || feat
-                    .mean_luminance
-                    .map(|m| m < UNDEREXPOSED_SEVERE_MEAN)
-                    .unwrap_or(false)
-            {
-                hard.push(Issue::Underexposed);
-            }
+                .map(|m| m < UNDEREXPOSED_SEVERE_MEAN)
+                .unwrap_or(false)
+        {
+            hard.push(Issue::Underexposed);
         }
     }
     let noisy_at = if scene == "night" {
@@ -636,7 +654,22 @@ pub fn score_photo(feat: &PhotoFeat) -> PhotoScore {
         reasons,
         effective_scene: scene,
         sharpness: feat.sharpness,
+        sharpness_center: feat.sharpness_center,
     }
+}
+
+/// Median of the values (mean of the middle two for an even count), `None` when empty.
+fn median(mut v: Vec<f64>) -> Option<f64> {
+    if v.is_empty() {
+        return None;
+    }
+    v.sort_by(f64::total_cmp);
+    let k = v.len() / 2;
+    Some(if v.len() % 2 == 1 {
+        v[k]
+    } else {
+        (v[k - 1] + v[k]) / 2.0
+    })
 }
 
 fn round4(x: f64) -> f64 {
@@ -712,10 +745,19 @@ pub fn rank_burst(members: Vec<BurstMember<'_>>) -> Vec<Ranked> {
             .then_with(|| ma.taken_at.cmp(&mb.taken_at))
             .then_with(|| ma.score.photo_id.cmp(&mb.score.photo_id))
     });
-    let sharpest = members
+    // burst-relative blur measure: the centre region when every frame has it (catalogs analysed
+    // before v18 do not), else the headline sharpness
+    let use_center = members.iter().all(|m| m.score.sharpness_center.is_some());
+    let blur_measure: Vec<Option<f64>> = members
         .iter()
-        .filter_map(|m| m.score.sharpness)
-        .fold(f64::NAN, f64::max);
+        .map(|m| {
+            if use_center {
+                m.score.sharpness_center
+            } else {
+                m.score.sharpness
+            }
+        })
+        .collect();
     let mut out = Vec::with_capacity(n);
     for (rank, &mi) in order.iter().enumerate() {
         let m = &members[mi];
@@ -723,11 +765,16 @@ pub fn rank_burst(members: Vec<BurstMember<'_>>) -> Vec<Ranked> {
         let mut contributions = m.score.contributions.clone();
         let mut reasons = m.score.reasons.clone();
         let mut issues = m.score.issues.clone();
-        let blurrier = m
-            .score
-            .sharpness
-            .is_some_and(|s| s < BLURRY_IN_BURST_RATIO * sharpest);
-        if n >= 2 && blurrier && !issues.contains(&Issue::Blurry) {
+        let others: Vec<f64> = (0..n)
+            .filter(|&j| j != mi)
+            .filter_map(|j| blur_measure[j])
+            .collect();
+        let exposure_issue =
+            issues.contains(&Issue::Overexposed) || issues.contains(&Issue::Underexposed);
+        let blurrier = blur_measure[mi]
+            .zip(median(others))
+            .is_some_and(|(s, med)| s < BLURRY_IN_BURST_RATIO * med);
+        if n >= 2 && blurrier && !exposure_issue && !issues.contains(&Issue::Blurry) {
             issues.push(Issue::Blurry);
             issues.sort();
             reasons.push(Reason {
@@ -909,17 +956,24 @@ mod tests {
     fn technical_issues_are_detected() {
         let mut f = good(1);
         f.sharpness = Some(0.1);
-        f.clipped_highlights = Some(0.3);
-        f.mean_luminance = Some(0.9);
         f.noise = Some(0.7);
         let s = score_photo(&f);
-        for i in [Issue::Blurry, Issue::Overexposed, Issue::Noisy] {
+        for i in [Issue::Blurry, Issue::Noisy] {
             assert!(s.issues.contains(&i), "{i:?}");
         }
-        assert!(s.hard_issue); // severe blur + severe overexposure
+        assert!(s.hard_issue); // severe blur
         assert_eq!(
             Issue::to_mask(&s.issues),
-            Issue::Blurry.bit() | Issue::Overexposed.bit() | Issue::Noisy.bit()
+            Issue::Blurry.bit() | Issue::Noisy.bit()
+        );
+        // blown out as well: the missing detail is the exposure problem, not blur
+        f.clipped_highlights = Some(0.3);
+        f.mean_luminance = Some(0.9);
+        let s = score_photo(&f);
+        assert!(s.hard_issue); // severe overexposure
+        assert_eq!(
+            Issue::to_mask(&s.issues),
+            Issue::Overexposed.bit() | Issue::Noisy.bit()
         );
         assert_eq!(Issue::from_mask(Issue::to_mask(&s.issues)), {
             let mut v = s.issues.clone();
@@ -973,8 +1027,9 @@ mod tests {
     fn blurrier_burst_frames_are_flagged() {
         let e = [1.0f32, 0.0];
         let (a, ea) = member(1, 0.70, &e);
-        let (b, eb) = member(2, 0.50, &e); // motion blur: 0.71 x the sharpest frame
-        let (c, ec) = member(3, 0.62, &e); // 0.89 x: an ordinary variation
+        // no centre measure (a catalog from before v18): the headline sharpness is compared
+        let (b, eb) = member(2, 0.50, &e); // motion blur: 0.76 x the median of the others
+        let (c, ec) = member(3, 0.62, &e); // 1.03 x: an ordinary variation
         assert!(b.issues.is_empty(), "above the absolute threshold");
         let r = rank_burst(vec![
             BurstMember {
@@ -1000,6 +1055,92 @@ mod tests {
         let blurred = r.iter().find(|x| x.photo_id == 2).unwrap();
         assert!(!blurred.hard_issue, "relative blur is a tag, not a penalty");
         assert!(blurred.reasons.iter().any(|x| x.key == "blurry"));
+    }
+
+    #[test]
+    fn burst_blur_compares_the_centre_region_with_the_median_frame() {
+        let e = [1.0f32, 0.0];
+        // (id, face sharpness, centre sharpness)
+        let frames = [
+            (1, 0.75, 0.60),
+            (2, 0.50, 0.59), // a blink: the inner face reads softer, nothing is blurred
+            (3, 0.70, 0.45), // motion blur on head and hands: 0.76 x the median centre
+            (4, 0.72, 0.58),
+        ];
+        let scored: Vec<(PhotoScore, Vec<f32>)> = frames
+            .iter()
+            .map(|&(id, face, center)| {
+                let mut f = good(id);
+                f.scene_type = None;
+                f.sharpness = Some(face);
+                f.sharpness_center = Some(center);
+                (score_photo(&f), e.to_vec())
+            })
+            .collect();
+        let r = rank_burst(
+            scored
+                .iter()
+                .map(|(s, e)| BurstMember {
+                    score: s.clone(),
+                    taken_at: Some(s.photo_id),
+                    emb: Some(e.as_slice()),
+                })
+                .collect(),
+        );
+        let blurry = |id| {
+            r.iter()
+                .find(|x| x.photo_id == id)
+                .unwrap()
+                .issues
+                .contains(&Issue::Blurry)
+        };
+        assert!(!blurry(1) && !blurry(2) && !blurry(4));
+        assert!(blurry(3));
+        // one frame without the centre measure: the whole burst falls back to the headline value
+        let mut old = scored.clone();
+        old[0].0.sharpness_center = None;
+        let r = rank_burst(
+            old.iter()
+                .map(|(s, e)| BurstMember {
+                    score: s.clone(),
+                    taken_at: Some(s.photo_id),
+                    emb: Some(e.as_slice()),
+                })
+                .collect(),
+        );
+        let flagged: Vec<i64> = r
+            .iter()
+            .filter(|x| x.issues.contains(&Issue::Blurry))
+            .map(|x| x.photo_id)
+            .collect();
+        assert_eq!(
+            flagged,
+            vec![2],
+            "0.50 < 0.85 x 0.72 on the headline measure"
+        );
+    }
+
+    #[test]
+    fn exposure_explains_missing_detail() {
+        // a blown-out frame has no detail left: overexposed, not blurry as well
+        let mut f = good(1);
+        f.sharpness = Some(0.05);
+        f.clipped_highlights = Some(0.4);
+        f.mean_luminance = Some(0.93);
+        let s = score_photo(&f);
+        assert!(s.issues.contains(&Issue::Overexposed));
+        assert!(!s.issues.contains(&Issue::Blurry));
+        assert!(s.hard_issue);
+        // same for crushed shadows
+        let mut d = good(2);
+        d.sharpness = Some(0.02);
+        d.mean_luminance = Some(0.03);
+        let s = score_photo(&d);
+        assert_eq!(s.issues, vec![Issue::Underexposed]);
+        // a well-exposed soft frame is still blurry
+        let mut b = good(3);
+        b.sharpness = Some(0.1);
+        assert!(score_photo(&b).issues.contains(&Issue::Blurry));
     }
 
     #[test]
@@ -1362,6 +1503,15 @@ mod tests {
         let mut art = talking(0.05, 0.5, 0.9);
         art.artificial = Some(0.9);
         assert_eq!(kind(&art), None);
+        // a face too blurry to read: no verdict (the landmarks are guesses)
+        let mut soft = talking(0.05, 0.5, 0.9);
+        soft.sharpness = Some(EXPR_MIN_SHARPNESS - 0.01);
+        assert_eq!(kind(&soft), None);
+        soft.eyes_open = Some(0.55);
+        soft.mouth_open = Some(0.0);
+        assert_eq!(kind(&soft), None);
+        soft.sharpness = Some(EXPR_MIN_SHARPNESS);
+        assert_eq!(kind(&soft), Some("half_blink"));
     }
 
     #[test]

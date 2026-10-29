@@ -139,8 +139,8 @@ def test_plane_fit_flat_and_curved():
 def test_expression_flag_mapping():
     # talking: mouth open without a smile
     assert expression_flag(0.9, 0.05, 0.40) == "talking"
-    assert expression_flag(0.9, 0.05, 0.25) == "talking"
-    assert expression_flag(0.9, 0.05, 0.24) is None
+    assert expression_flag(0.9, 0.05, 0.06) == "talking"
+    assert expression_flag(0.9, 0.05, 0.05) is None
     # a laugh / smile with an open mouth is fine
     assert expression_flag(0.9, 0.80, 0.50) is None
     assert expression_flag(0.9, 0.35, 0.50) is None
@@ -151,7 +151,12 @@ def test_expression_flag_mapping():
     assert expression_flag(0.65, 0.1, 0.0) is None
     # no landmarks: no verdict
     assert expression_flag(None, None, None) is None
-    assert faces_mod.MOUTH_OPEN_TALKING == 0.25
+    # a face too blurry to read: no verdict either (same threshold as the blurry tag)
+    assert expression_flag(0.9, 0.05, 0.40, sharpness=0.34) is None
+    assert expression_flag(0.55, 0.1, 0.0, sharpness=0.2) is None
+    assert expression_flag(0.9, 0.05, 0.40, sharpness=0.35) == "talking"
+    assert faces_mod.MOUTH_OPEN_TALKING == 0.06
+    assert faces_mod.EXPR_MIN_SHARPNESS == 0.35
 
 
 def test_saliency_box_finds_the_bright_object():

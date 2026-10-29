@@ -848,6 +848,7 @@ pub fn load_samples(conn: &Connection, ids: &[i64]) -> Result<Vec<Sample>> {
                         photo_id: r.get(0)?,
                         scene_type: r.get(1)?,
                         sharpness: r.get(2)?,
+                        sharpness_center: None, // only the burst-relative blurry tag reads it
                         exposure: r.get(3)?,
                         noise: r.get(4)?,
                         iqa: r.get(5)?,

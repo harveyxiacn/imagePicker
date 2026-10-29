@@ -403,6 +403,15 @@ CREATE TABLE taste_score (
   model_version INTEGER NOT NULL
 );
 "#,
+    // v18: `analysis.sharpness_center`, the sharpness of the central 60% x 60% of the frame (the
+    // worker's / ip-lite's `quality.sharpness_center`). `analysis.sharpness` follows the faces
+    // when there are any; the burst-relative blurry tag compares this frame-level measure instead
+    // (docs/03 §3.2): the inner-face measure moves with blinks and head turns, the subject's
+    // head + hands + body area does not. NULL for photos analysed before v18 (the tag then falls
+    // back to `sharpness`).
+    r#"
+ALTER TABLE analysis ADD COLUMN sharpness_center REAL;
+"#,
 ];
 
 /// Applies all pending migrations. Returns the resulting schema version.
@@ -812,7 +821,7 @@ mod tests {
                VALUES(1, '{\"dim\":4}', 1, 0.3, 64);",
         )
         .unwrap();
-        assert_eq!(migrate(&mut conn).unwrap(), 17);
+        assert_eq!(migrate(&mut conn).unwrap(), MIGRATIONS.len());
         let row: (i64, i64, i64, i64, i64, String) = conn
             .query_row(
                 "SELECT enabled, feature_version, model_version, pending_labels, active, model

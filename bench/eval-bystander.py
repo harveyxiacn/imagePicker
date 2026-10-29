@@ -27,7 +27,7 @@ Section 2 - the artificial confidence distribution, to move ARTIFICIAL_AT / the 
 ai-worker/imagepicker_ai/steps/liveness.py (and ip-core `scoring::ARTIFICIAL_AT`).
 
 Section 3 - bad_expression (issue bit 128) against the manifest `mid-talk` variants, per variant,
-plus a sweep of the mouth-open threshold (TALKING_MOUTH_OPEN, now 0.25) over the stored
+plus a sweep of the mouth-open threshold (TALKING_MOUTH_OPEN, now 0.06) over the stored
 `face.mouth_open` / `face.smile` so the owner can pick the value that meets recall >= 70% at
 <= 5% false positives without rerunning the analysis.
 """
@@ -47,6 +47,7 @@ ISSUE_BAD_EXPRESSION = 128
 ARTIFICIAL_AT = 0.55  # ip-core analysis/scoring.rs ARTIFICIAL_AT
 SMILE_BELOW = 0.35  # EXPR_SMILE_BELOW
 HALF_BLINK = (0.45, 0.65)
+EXPR_MIN_SHARPNESS = 0.35  # no expression verdict on a face blurrier than this
 ARTIFICIAL_TAGS = {"statue", "poster", "screen", "billboard", "painting", "print", "mannequin", "mural"}
 VARIANTS = ("eyes-closed", "laugh", "gaze-away", "mid-talk", "blur", "shake", "best", "base")
 TARGET_MISCLASS = 0.10
@@ -195,6 +196,8 @@ def artificial_section(faces, out) -> None:
 def talking(f, mouth_at: float) -> bool:
     if f["smile"] is None or f["smile"] >= SMILE_BELOW:
         return False
+    if f["sharpness"] is not None and f["sharpness"] < EXPR_MIN_SHARPNESS:
+        return False
     if f["mouth_open"] is not None and f["mouth_open"] >= mouth_at:
         return True
     return f["eyes_open"] is not None and HALF_BLINK[0] <= f["eyes_open"] < HALF_BLINK[1]
@@ -222,10 +225,11 @@ def expression_section(photos, faces, out) -> None:
             by_variant[v]["n"] += 1
             by_variant[v]["flagged"] += flagged
     print("  flagged by variant: " + ", ".join(f"{v} {c['flagged']}/{c['n']}" for v, c in sorted(by_variant.items())))
-    print("\n  mouth-open threshold sweep (smile < %.2f; half-blink rule unchanged), photo level:" % SMILE_BELOW)
+    print("\n  mouth-open threshold sweep (smile < %.2f, face sharpness >= %.2f; half-blink rule unchanged),"
+          " photo level:" % (SMILE_BELOW, EXPR_MIN_SHARPNESS))
     print("   mouth_at  recall   false-pos")
     sweep = []
-    for at in (0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50):
+    for at in (0.04, 0.05, 0.06, 0.07, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50):
         t = sum(any(talking(f, at) for f in faces[r[0]] if f["is_subject"]) for r in truth)
         o = sum(any(talking(f, at) for f in faces[r[0]] if f["is_subject"]) for r in rest)
         sweep.append({"mouth_at": at, "recall": ratio(t, len(truth)), "fp": ratio(o, len(rest))})

@@ -12,8 +12,13 @@ Sharpness
   s      = 0.5 * (1 - exp(-lap / K_lap)) + 0.5 * (1 - exp(-ten / K_ten))   (K_lap=120, K_ten=1500;
            faces: weights 0.7/0.3, K_lap=80, K_ten=6000)
   sharpness_center  = s on the central 60% x 60% region
-  sharpness_face    = mean of s over detected faces (crop resized to 128x128, central 60%, face constants)
-  sharpness         = sharpness_face if faces else sharpness_center
+  sharpness_tile    = max of s over a 4 x 4 grid of cells (the sharpest part of the frame)
+  sharpness_face    = mean of s over detected faces (crop resized to 128x128, central 60%, face
+                      constants), weighted by face area: the main faces count, small background
+                      faces (a passer-by, a crowd) barely do
+  sharpness         = sharpness_face if faces else max(sharpness_center, sharpness_tile): without a
+                      face the subject is wherever the focus is, so a shallow depth of field or an
+                      off-centre subject is not blur (camera shake / a missed focus blurs every cell)
 Exposure
   Y      = 0.2126 R + 0.7152 G + 0.0722 B  in 0..1
   mean   = mean(Y)
@@ -51,6 +56,8 @@ K_TEN_FACE = 6000.0
 FACE_LAP_WEIGHT = 0.7  # inner-face Tenengrad has a high floor (feature edges), lean on Laplacian
 FACE_CROP = 128
 CENTER_MARGIN = 0.2
+SHARP_TILES = 4  # no-face photos: the sharpest cell of a 4 x 4 grid also counts (see above)
+MIN_TILE = 8
 NOISE_FULL_SCALE_SIGMA = 12.0
 _IMMERKAER = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype=np.float32)
 
@@ -90,6 +97,37 @@ def center_region(gray: np.ndarray) -> np.ndarray:
     h, w = gray.shape
     my, mx = int(h * CENTER_MARGIN), int(w * CENTER_MARGIN)
     return gray[my : h - my, mx : w - mx]
+
+
+def tile_sharpness(gray: np.ndarray) -> float:
+    """Sharpness of the sharpest cell of a SHARP_TILES x SHARP_TILES grid (0 if all are tiny)."""
+    h, w = gray.shape
+    best = 0.0
+    for i in range(SHARP_TILES):
+        for j in range(SHARP_TILES):
+            y0, y1 = i * h // SHARP_TILES, (i + 1) * h // SHARP_TILES
+            x0, x1 = j * w // SHARP_TILES, (j + 1) * w // SHARP_TILES
+            if y1 - y0 < MIN_TILE or x1 - x0 < MIN_TILE:
+                continue
+            lap, ten = focus_measures(gray[y0:y1, x0:x1])
+            best = max(best, sharpness_score(lap, ten))
+    return best
+
+
+def faces_sharpness(
+    rgb: np.ndarray, face_boxes: list[tuple[float, float, float, float]] | None
+) -> float | None:
+    """Area-weighted mean face sharpness: a small blurry face in the background (a passer-by, a
+    crowd) must not make a photo of a sharp main subject read as blurry."""
+    pairs = [
+        (b[2] * b[3], s) for b in face_boxes or [] if (s := face_sharpness(rgb, b)) is not None
+    ]
+    if not pairs:
+        return None
+    area = sum(a for a, _ in pairs)
+    if area <= 0:
+        return float(np.mean([s for _, s in pairs]))
+    return float(sum(a * s for a, s in pairs) / area)
 
 
 def face_sharpness(rgb: np.ndarray, bbox_norm: tuple[float, float, float, float]) -> float | None:
@@ -165,12 +203,12 @@ def analyze_quality(
 ) -> dict[str, float | None]:
     # The Rust port of this step (crates/ip-lite-ffi) computes everything below in one call,
     # without the GIL; face sharpness and saliency stay here (a fraction of a millisecond each).
+    # Its `sharpness` is the no-face value, max(sharpness_center, sharpness_tile).
     fast = lite_native.quality(rgb)
     if fast is not None:
-        face_scores = [s for b in (face_boxes or []) if (s := face_sharpness(rgb, b)) is not None]
-        s_face = float(np.mean(face_scores)) if face_scores else None
+        s_face = faces_sharpness(rgb, face_boxes)
         out_fast: dict[str, float | None] = dict(fast)
-        out_fast["sharpness"] = s_face if s_face is not None else fast["sharpness_center"]
+        out_fast["sharpness"] = s_face if s_face is not None else fast["sharpness"]
         out_fast["sharpness_face"] = s_face
         res_fast: dict[str, float | list[float] | None] = {
             k: (None if v is None else round(float(v), 5)) for k, v in out_fast.items()
@@ -181,15 +219,14 @@ def analyze_quality(
     gray = _norm_gray(rgb)
     lap, ten = focus_measures(center_region(gray))
     s_center = sharpness_score(lap, ten)
-
-    face_scores = [s for b in (face_boxes or []) if (s := face_sharpness(rgb, b)) is not None]
-    s_face = float(np.mean(face_scores)) if face_scores else None
+    s_frame = max(s_center, tile_sharpness(gray))
+    s_face = faces_sharpness(rgb, face_boxes)
 
     exp = exposure_metrics(rgb)
     sigma = noise_sigma(gray)
     tilt_deg, tilt_conf = estimate_tilt(gray)
     out: dict[str, float | None] = {
-        "sharpness": s_face if s_face is not None else s_center,
+        "sharpness": s_face if s_face is not None else s_frame,
         "sharpness_center": s_center,
         "sharpness_face": s_face,
         "laplacian_var": lap,

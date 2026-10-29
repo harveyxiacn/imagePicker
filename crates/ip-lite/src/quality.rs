@@ -1,7 +1,8 @@
 //! Classic technical-quality metrics, a port of `ai-worker/imagepicker_ai/steps/quality.py`
 //! without the face-box branch (faces are measured separately, [`face_sharpness`]): sharpness of
-//! the central region, exposure statistics, Immerkaer noise and the horizon tilt
-//! ([`crate::tilt`]). Same constants, same rounding of the reported values.
+//! the central region and of the sharpest cell of a 4 x 4 grid, exposure statistics, Immerkaer
+//! noise and the horizon tilt ([`crate::tilt`]). Same constants, same rounding of the reported
+//! values.
 
 use crate::imgops::{
     filter3x3, gaussian_blur, resize_area, resize_area_emulated, resize_linear, rgb_to_gray,
@@ -13,6 +14,11 @@ pub const REF_LONG_EDGE: usize = 1024;
 const K_LAP: f64 = 120.0;
 const K_TEN: f64 = 1500.0;
 const CENTER_MARGIN: f64 = 0.2;
+/// The no-face sharpness also looks at a `SHARP_TILES` x `SHARP_TILES` grid (cells under
+/// `MIN_TILE` px are skipped) and keeps the sharpest cell: a shallow depth of field or an
+/// off-centre subject is not blur, camera shake or a missed focus blurs every cell.
+const SHARP_TILES: usize = 4;
+const MIN_TILE: usize = 8;
 const NOISE_FULL_SCALE_SIGMA: f64 = 12.0;
 const K_LAP_FACE: f64 = 80.0;
 const K_TEN_FACE: f64 = 6000.0;
@@ -22,6 +28,7 @@ const FACE_CROP: usize = 128;
 /// Result of [`analyze_quality`]; field meanings follow the worker's `quality` step output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Quality {
+    /// Photo sharpness without faces: `max(sharpness_center, sharpest grid cell)`.
     pub sharpness: f64,
     pub sharpness_center: f64,
     pub laplacian_var: f64,
@@ -137,6 +144,24 @@ pub fn face_sharpness(rgb: &[u8], w: usize, h: usize, bbox: [f64; 4]) -> Option<
     Some(sharpness_score_face(lap, ten))
 }
 
+/// Sharpness of the sharpest cell of the [`SHARP_TILES`] grid (0 when every cell is too small).
+fn tile_sharpness(gray: &Gray8) -> f64 {
+    let (h, w) = (gray.h, gray.w);
+    let mut best = 0f64;
+    for i in 0..SHARP_TILES {
+        for j in 0..SHARP_TILES {
+            let (y0, y1) = (i * h / SHARP_TILES, (i + 1) * h / SHARP_TILES);
+            let (x0, x1) = (j * w / SHARP_TILES, (j + 1) * w / SHARP_TILES);
+            if y1 - y0 < MIN_TILE || x1 - x0 < MIN_TILE {
+                continue;
+            }
+            let (lap, ten) = focus_measures(&gray.crop(x0, y0, x1, y1));
+            best = best.max(sharpness_score(lap, ten));
+        }
+    }
+    best
+}
+
 fn center_region(gray: &Gray8) -> Gray8 {
     let (h, w) = (gray.h, gray.w);
     let my = (h as f64 * CENTER_MARGIN) as usize;
@@ -248,11 +273,12 @@ pub fn analyze_quality(rgb: &[u8], w: usize, h: usize) -> Quality {
     let gray = norm_gray(rgb, w, h);
     let (lap, ten) = focus_measures(&center_region(&gray));
     let s_center = sharpness_score(lap, ten);
+    let s_frame = s_center.max(tile_sharpness(&gray));
     let (exposure, mean, hi, lo) = exposure_metrics(rgb, w, h);
     let sigma = noise_sigma(&gray);
     let tilt = estimate_tilt(&gray);
     Quality {
-        sharpness: r5(s_center),
+        sharpness: r5(s_frame),
         sharpness_center: r5(s_center),
         laplacian_var: r5(lap),
         tenengrad: r5(ten),
@@ -304,5 +330,22 @@ mod tests {
         }
         let q = analyze_quality(&img, w, h);
         assert!(q.sharpness > 0.5, "{q:?}");
+    }
+
+    #[test]
+    fn an_off_centre_sharp_subject_is_not_blur() {
+        // edges only in the top-left corner: the centre is flat, the corner cell is sharp
+        let (w, h) = (256usize, 192usize);
+        let mut img = flat(w, h, 100);
+        for y in 0..h / 6 {
+            for x in 0..w / 6 {
+                if (x / 4 + y / 4) % 2 == 0 {
+                    img[(y * w + x) * 3..][..3].copy_from_slice(&[200, 200, 200]);
+                }
+            }
+        }
+        let q = analyze_quality(&img, w, h);
+        assert!(q.sharpness_center < 0.05, "{q:?}");
+        assert!(q.sharpness > 0.3, "{q:?}");
     }
 }
