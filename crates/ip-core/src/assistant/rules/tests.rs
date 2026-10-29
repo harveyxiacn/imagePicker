@@ -550,3 +550,126 @@ fn every_table_result_passes_the_validator() {
         }
     }
 }
+
+/// Phrasings of the 2026-10-29 assistant benchmark (`bench/eval-assistant.py`).
+#[test]
+fn benchmark_phrasings() {
+    let sel = [5, 6, 7];
+    check_with(
+        "pick the selected photos",
+        &sel,
+        None,
+        &[("set_flag", json!({"flag":1,"selection":{"ids":[5,6,7]}}))],
+    );
+    check_with(
+        "lower the contrast of the selected photos by 10",
+        &sel,
+        None,
+        &[(
+            "adjust_sliders",
+            json!({"values":{"contrast":-10.0},"relative":true,"selection":{"ids":[5,6,7]}}),
+        )],
+    );
+    check(
+        "把闭眼的都标成淘汰",
+        &[
+            ("filter", json!({"issues_any":["closed_eyes"]})),
+            ("set_flag", json!({"flag":-1})),
+        ],
+    );
+    check(
+        "只看有三个人以上的照片",
+        &[("filter", json!({"faces_min":3}))],
+    );
+    check(
+        "show photos with 3 or more people",
+        &[("filter", json!({"faces_min":3}))],
+    );
+    check(
+        "show the group photos where everyone's eyes are open",
+        &[(
+            "filter",
+            json!({"scene_type":"group","person_state":["eyes_open"]}),
+        )],
+    );
+    check(
+        "把夜景照片的曝光提高0.3",
+        &[
+            ("filter", json!({"scene_type":"night"})),
+            (
+                "adjust_sliders",
+                json!({"values":{"exposure":0.3},"relative":true}),
+            ),
+        ],
+    );
+    check(
+        "export the 5-star photos for WeChat",
+        &[
+            ("filter", json!({"rating_gte":5})),
+            ("export", json!({"preset":"wechat"})),
+        ],
+    );
+    // a count of people is not a number of photos: no "a filter cannot limit" hint
+    assert!(ask("只看有三个人以上的照片").hints.is_empty());
+}
+
+#[test]
+fn capture_days() {
+    let day = |d: &str| json!({"taken_from": d, "taken_to": d});
+    check(
+        "只看2026年10月2日拍的照片",
+        &[("filter", day("2026-10-02"))],
+    );
+    assert!(ask("只看2026年10月2日拍的照片").hints.is_empty());
+    check(
+        "show photos taken on 2026-10-01",
+        &[("filter", day("2026-10-01"))],
+    );
+    check(
+        "show photos from 2026-10-01 to 2026-10-03",
+        &[(
+            "filter",
+            json!({"taken_from":"2026-10-01","taken_to":"2026-10-03"}),
+        )],
+    );
+    check(
+        "只看2026-10-02之后的5星照片",
+        &[("filter", json!({"taken_from":"2026-10-02","rating_gte":5}))],
+    );
+    let p = ask("只看2026年10月1日之前拍的");
+    assert_eq!(p.calls[0].args, json!({"taken_to":"2026-09-30"}));
+    check(
+        "把2026年10月3日的照片都淘汰",
+        &[
+            ("filter", day("2026-10-03")),
+            ("set_flag", json!({"flag":-1})),
+        ],
+    );
+    // not a day: no date filter
+    let p = ask("只看2026年13月1日拍的照片");
+    assert!(p.calls.iter().all(|c| c.args.get("taken_from").is_none()));
+    assert_eq!(super::day_of_ms(1_709_164_800_000), "2024-02-29");
+}
+
+#[test]
+fn an_unknown_place_in_english_is_named() {
+    let p = ask("show only 4 stars and up from the beach");
+    assert_eq!(p.calls.len(), 1, "{:?}", p.calls);
+    assert_eq!(p.calls[0].args, json!({"rating_gte":4}));
+    assert!(
+        p.hints.iter().any(|h| h.contains("beach")),
+        "the place is mentioned: {:?}",
+        p.hints
+    );
+    assert!(
+        !p.hints.iter().any(|h| h.contains("limit")),
+        "\"only 4 stars\" is not a count: {:?}",
+        p.hints
+    );
+    // ordinary words after "at the" / "from the" are not places
+    assert!(
+        ask("show the photos where people are looking at the camera")
+            .hints
+            .is_empty()
+    );
+}

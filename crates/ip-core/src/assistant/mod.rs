@@ -85,7 +85,8 @@ pub struct PlanStep {
 pub struct Fallback {
     /// `llm_failed` (the model call failed or its output was invalid), `llm_no_steps`,
     /// `llm_invalid` (unknown preset / person ...), `llm_unsafe_target` (a step's photos were not
-    /// justified, see [`target`]).
+    /// justified, see [`target`]), `llm_tool_mismatch` / `llm_arg_mismatch` (the rules engine's
+    /// certain reading disagrees, see `rules_disagree`).
     pub code: String,
     pub message: String,
 }
@@ -349,7 +350,7 @@ impl Core {
             .worker
             .llm_plan(&LlmPlanRequest {
                 message: req.message.clone(),
-                tools: llm_tools(),
+                tools: llm_tools_for(presets),
                 context: ctx,
                 locale: locale.code().to_string(),
                 allow_download: false,
@@ -468,8 +469,8 @@ impl Core {
                     );
                     match target::llm_problem(&calls, &targets, agree, locale) {
                         Some(why) => fallback = Some(Fallback::new("llm_unsafe_target", why)),
-                        None => match dropped_intent(&rules.calls, &calls, locale) {
-                            Some(why) => fallback = Some(Fallback::new("llm_tool_mismatch", why)),
+                        None => match rules_disagree(&req.message, &rules, &calls, locale) {
+                            Some((code, why)) => fallback = Some(Fallback::new(code, why)),
                             None => match self.build_steps(&env, &calls, &targets).await {
                                 Ok(steps) => from_llm = Some((reply, steps)),
                                 Err(why) => fallback = Some(Fallback::new("llm_invalid", why)),
@@ -854,23 +855,208 @@ struct PlanEnv<'a> {
     names: &'a Names<'a>,
 }
 
-/// Intents the rules engine recognised with certainty that a model plan must not drop: a preset
-/// the request names ("暖调胶片预设" — real models answered `apply_profiles`) and numeric slider
-/// values ("把曝光提高 0.5" — models answered `auto_adjust`, not what the reply promised).
-fn dropped_intent(rules_calls: &[Call], llm_calls: &[Call], l: Locale) -> Option<String> {
-    let has = |tool: &str| llm_calls.iter().any(|c| c.tool == tool);
-    let missing = |tool: &str| rules_calls.iter().any(|c| c.tool == tool) && !has(tool);
-    if missing("apply_preset") {
-        return Some(match l {
-            Locale::Zh => "模型没有套用请求里点名的预设".into(),
-            Locale::En => "the model did not apply the preset the request names".into(),
-        });
+/// The tool schemas offered to the model, with `apply_preset.preset_id` limited to the presets
+/// that exist (their names are in the context): with a free string a model can invent an id.
+fn llm_tools_for(presets: &[PresetName]) -> Vec<Value> {
+    let mut tools = llm_tools();
+    let ids: Vec<&str> = presets.iter().map(|p| p.id.as_str()).collect();
+    if ids.is_empty() {
+        return tools;
     }
-    if missing("adjust_sliders") {
-        return Some(match l {
-            Locale::Zh => "模型没有按请求里的数值调整滑块".into(),
-            Locale::En => "the model did not set the slider values the request names".into(),
-        });
+    for t in tools.iter_mut().filter(|t| t["name"] == "apply_preset") {
+        t["parameters"]["properties"]["preset_id"] = json!({"type": "string", "enum": ids});
+    }
+    tools
+}
+
+/// A condition of the rules' `filter` step that the model's `filter` step leaves out or changes
+/// ("show photos with closed eyes" answered with `person_state: eyes_open`, a capture day with
+/// `issues_none`). Extra model conditions are allowed; plans without a `filter` step on either
+/// side are checked through their targets instead.
+fn filter_dropped(rules_calls: &[Call], llm_calls: &[Call], l: Locale) -> Option<String> {
+    let last = |cs: &[Call]| {
+        cs.iter()
+            .rev()
+            .find(|c| c.tool == "filter")
+            .map(|c| c.args.clone())
+    };
+    let (want, got) = (last(rules_calls)?, last(llm_calls)?);
+    let (want, got) = (
+        want.as_object()?,
+        got.as_object().cloned().unwrap_or_default(),
+    );
+    for (k, v) in want {
+        if matches!(k.as_str(), "sort" | "person_mode" | "include_background") {
+            continue;
+        }
+        let ok = match (v, got.get(k)) {
+            // a list condition: the model may list more values, not fewer
+            (Value::Array(w), Some(Value::Array(g))) => w.iter().all(|x| g.contains(x)),
+            (w, g) => same_value(Some(w), g),
+        };
+        if !ok {
+            let have = got.get(k).map_or("-".to_string(), Value::to_string);
+            return Some(match l {
+                Locale::Zh => format!("模型的筛选条件 {k} = {have}，与请求不符（应为 {v}）"),
+                Locale::En => {
+                    format!("the model's filter has {k} = {have}, but the request says {v}")
+                }
+            });
+        }
+    }
+    None
+}
+
+/// Tools whose steps change photos, as the rules engine and a model must agree on them.
+fn changing_calls(calls: &[Call]) -> Vec<&Call> {
+    calls
+        .iter()
+        .filter(|c| target::changes_photos(&c.tool))
+        .collect()
+}
+
+/// The arguments that carry the user's intent: a model step must not change them.
+const INTENT_ARGS: [(&str, &[&str]); 7] = [
+    ("set_flag", &["flag"]),
+    ("set_rating", &["rating"]),
+    ("apply_preset", &["preset_id"]),
+    ("adjust_sliders", &["values", "relative"]),
+    ("group_keep_top", &["n", "reject_rest"]),
+    ("scene_keep_top", &["n", "reject_rest"]),
+    ("export", &["preset"]),
+];
+
+fn same_value(a: Option<&Value>, b: Option<&Value>) -> bool {
+    match (a, b) {
+        (Some(Value::Number(x)), Some(Value::Number(y))) => {
+            (x.as_f64().unwrap_or(f64::NAN) - y.as_f64().unwrap_or(f64::NAN)).abs() < 1e-6
+        }
+        (Some(Value::Object(x)), Some(Value::Object(y))) => {
+            x.len() == y.len() && x.iter().all(|(k, v)| same_value(Some(v), y.get(k)))
+        }
+        (a, b) => a == b,
+    }
+}
+
+/// An intent argument of a step, with its default (`relative` is false when left out).
+fn intent_arg<'a>(args: &'a Value, key: &str) -> Option<&'a Value> {
+    static FALSE: Value = Value::Bool(false);
+    match (key, args.get(key)) {
+        ("relative", None) => Some(&FALSE),
+        (_, v) => v,
+    }
+}
+
+/// The rules engine as a check of a model plan (`docs/api-contract-m6.md` A.4). When the rules
+/// read the request with certainty (no hint, not unsupported), every photo-changing step of their
+/// reading must be in the model plan, in order, with the same intent arguments; a view request
+/// must not change photos. `llm_tool_mismatch`: "暖调胶片预设" answered with `apply_profiles`,
+/// "把曝光提高 0.5" with `auto_adjust`, "只看5星" with an edit; `llm_arg_mismatch`: another flag,
+/// star count, preset, slider value or keep-top count. Extra model steps are allowed (they are
+/// validated and confirmed like every step), and requests the rules do not understand are left
+/// to the model.
+fn rules_disagree(
+    msg: &str,
+    rules: &rules::Parsed,
+    llm_calls: &[Call],
+    l: Locale,
+) -> Option<(&'static str, String)> {
+    // a capture day the request does not name is invented (seen: the date of a prompt example),
+    // whether or not the rules understood the rest
+    let named = rules::named_days(msg);
+    for c in llm_calls.iter().filter(|c| c.tool == "filter") {
+        for k in ["taken_from", "taken_to"] {
+            if let Some(d) = c.args.get(k).and_then(Value::as_str) {
+                if !named.iter().any(|n| n == d) {
+                    return Some((
+                        "llm_arg_mismatch",
+                        match l {
+                            Locale::Zh => format!("模型的筛选用了请求里没有的日期 {k} = {d}"),
+                            Locale::En => format!(
+                                "the model's filter has {k} = {d}, a day the request does not name"
+                            ),
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    if rules.unsupported.is_some() || !rules.hints.is_empty() || rules.calls.is_empty() {
+        return None;
+    }
+    if let Some(why) = filter_dropped(&rules.calls, llm_calls, l) {
+        return Some(("llm_arg_mismatch", why));
+    }
+    let (want, got) = (changing_calls(&rules.calls), changing_calls(llm_calls));
+    let tool_mismatch = |what: String| -> Option<(&'static str, String)> {
+        let has = |tool: &str| want.iter().any(|c| c.tool == tool);
+        Some((
+            "llm_tool_mismatch",
+            match l {
+                Locale::Zh if has("apply_preset") => "模型没有套用请求里点名的预设".into(),
+                Locale::Zh if has("adjust_sliders") => "模型没有按请求里的数值调整滑块".into(),
+                Locale::En if has("apply_preset") => {
+                    "the model did not apply the preset the request names".into()
+                }
+                Locale::En if has("adjust_sliders") => {
+                    "the model did not set the slider values the request names".into()
+                }
+                _ => what,
+            },
+        ))
+    };
+    if want.is_empty() {
+        // a view request: the model must not change photos
+        return match got.first() {
+            Some(c) => tool_mismatch(match l {
+                Locale::Zh => format!("请求只是筛选，模型的计划却会修改照片（{}）", c.tool),
+                Locale::En => format!(
+                    "the request only filters, but the model's plan changes photos ({})",
+                    c.tool
+                ),
+            }),
+            None => None,
+        };
+    }
+    let mut from = 0;
+    for r in &want {
+        let Some(pos) = got[from..].iter().position(|m| m.tool == r.tool) else {
+            return tool_mismatch(match l {
+                Locale::Zh => format!("模型的计划缺少请求里的 {}", r.tool),
+                Locale::En => format!("the model's plan has no {} step", r.tool),
+            });
+        };
+        let m = got[from + pos];
+        from += pos + 1;
+        let keys = INTENT_ARGS
+            .iter()
+            .find(|(t, _)| *t == r.tool)
+            .map(|(_, k)| *k)
+            .unwrap_or(&[]);
+        for k in keys {
+            // an option the request did not state (export without a platform) is the model's
+            if *k == "preset" && r.args.get(k).is_none() {
+                continue;
+            }
+            let (a, b) = (intent_arg(&r.args, k), intent_arg(&m.args, k));
+            if !same_value(a, b) {
+                let shown = |v: Option<&Value>| v.map_or("-".to_string(), Value::to_string);
+                let (have, should) = (shown(m.args.get(*k)), shown(r.args.get(*k)));
+                return Some((
+                    "llm_arg_mismatch",
+                    match l {
+                        Locale::Zh => format!(
+                            "模型的 {} 参数 {k} = {have}，与请求不符（应为 {should}）",
+                            r.tool
+                        ),
+                        Locale::En => format!(
+                            "the model's {} step has {k} = {have}, but the request says {should}",
+                            r.tool
+                        ),
+                    },
+                ));
+            }
+        }
     }
     None
 }
@@ -1071,6 +1257,23 @@ fn filter_parts(args: &Value, l: Locale, names: &Names) -> Vec<String> {
         } else {
             format!("burst #{b}")
         });
+    }
+    let (from, to) = (
+        args.get("taken_from").and_then(Value::as_str),
+        args.get("taken_to").and_then(Value::as_str),
+    );
+    match (from, to) {
+        (Some(a), Some(b)) if a == b => parts.push(if zh {
+            format!("{a} 拍摄")
+        } else {
+            format!("taken on {a}")
+        }),
+        (None, None) => {}
+        (a, b) => parts.push(if zh {
+            format!("{} 至 {} 拍摄", a.unwrap_or("…"), b.unwrap_or("…"))
+        } else {
+            format!("taken {} – {}", a.unwrap_or("…"), b.unwrap_or("…"))
+        }),
     }
     parts
 }
@@ -1405,6 +1608,147 @@ fn reply_for(steps: &[PlanStep], hints: &[String], l: Locale, confirm: bool) -> 
         r.push_str(h);
     }
     r
+}
+
+#[cfg(test)]
+mod check_tests {
+    use serde_json::{json, Value};
+
+    use super::rules::{builtin_preset_names, Call, Locale, Parsed};
+
+    fn call(tool: &str, args: Value) -> Call {
+        Call {
+            tool: tool.into(),
+            args,
+        }
+    }
+
+    fn sure(calls: Vec<Call>) -> Parsed {
+        Parsed {
+            calls,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_rules_check_tools_and_intent_arguments() {
+        let sel = json!({"ids": [1, 2]});
+        let flag = |f: i64| call("set_flag", json!({"selection": sel, "flag": f}));
+        let code =
+            |r: &Parsed, m: Vec<Call>| super::rules_disagree("", r, &m, Locale::En).map(|c| c.0);
+        // agreement, also with an extra filter step in the model plan
+        let r = sure(vec![flag(-1)]);
+        assert_eq!(code(&r, vec![flag(-1)]), None);
+        assert_eq!(code(&r, vec![call("filter", json!({})), flag(-1)]), None);
+        // another value of the intent argument
+        assert_eq!(code(&r, vec![flag(1)]), Some("llm_arg_mismatch"));
+        // another tool, or a filter where the request changes photos (and the reverse)
+        let rate = call("set_rating", json!({"selection": sel, "rating": 3}));
+        assert_eq!(code(&r, vec![rate.clone()]), Some("llm_tool_mismatch"));
+        // an extra step the rules did not read is the model's ("accept ratings then export")
+        assert_eq!(code(&r, vec![rate.clone(), flag(-1)]), None);
+        assert_eq!(
+            code(&r, vec![call("filter", json!({"flag": "rejected"}))]),
+            Some("llm_tool_mismatch")
+        );
+        let view = sure(vec![call("filter", json!({"rating_gte": 5}))]);
+        assert_eq!(code(&view, vec![rate]), Some("llm_tool_mismatch"));
+        // slider values: sign, size and relative / absolute
+        let s = |v: Value, rel: Option<bool>| {
+            let mut a = json!({"selection": sel, "values": v});
+            if let Some(r) = rel {
+                a["relative"] = json!(r);
+            }
+            call("adjust_sliders", a)
+        };
+        let r = sure(vec![s(json!({"exposure": 0.5}), Some(true))]);
+        assert_eq!(
+            code(&r, vec![s(json!({"exposure": 0.5}), Some(true))]),
+            None
+        );
+        for wrong in [
+            s(json!({"exposure": -0.5}), Some(true)),
+            s(json!({"exposure": 0.5}), Some(false)),
+            s(json!({"exposure": 0.5}), None),
+            s(json!({"exposure": 0.5, "contrast": 10}), Some(true)),
+        ] {
+            assert_eq!(code(&r, vec![wrong]), Some("llm_arg_mismatch"));
+        }
+        // absolute values: a missing `relative` is false
+        let r = sure(vec![s(json!({"contrast": 20}), Some(false))]);
+        assert_eq!(code(&r, vec![s(json!({"contrast": 20.0}), None)]), None);
+        // the preset the request names
+        let p = |id: &str| call("apply_preset", json!({"selection": sel, "preset_id": id}));
+        let r = sure(vec![p("film_warm")]);
+        assert_eq!(code(&r, vec![p("film_cool")]), Some("llm_arg_mismatch"));
+        let profiles = call("apply_profiles", json!({"selection": sel}));
+        let why = super::rules_disagree("", &r, &[profiles], Locale::Zh).unwrap();
+        assert_eq!(
+            why,
+            ("llm_tool_mismatch", "模型没有套用请求里点名的预设".into())
+        );
+        // an export platform the request did not name is the model's choice
+        let r = sure(vec![call("export", json!({"selection": sel}))]);
+        let m = call("export", json!({"selection": sel, "preset": "wechat"}));
+        assert_eq!(code(&r, vec![m]), None);
+        // the conditions of the rules' filter must be in the model's filter
+        let view = sure(vec![call("filter", json!({"issues_any": ["closed_eyes"]}))]);
+        let f = |a: Value| vec![call("filter", a)];
+        assert_eq!(
+            code(
+                &view,
+                f(json!({"issues_none": false, "person_state": ["eyes_open"]}))
+            ),
+            Some("llm_arg_mismatch")
+        );
+        assert_eq!(
+            code(
+                &view,
+                f(json!({"issues_any": ["closed_eyes", "blurry"], "sort": "ai"}))
+            ),
+            None
+        );
+        // "not edited" is not "no issues": a `false` condition is a condition
+        let view = sure(vec![call("filter", json!({"has_edits": false}))]);
+        assert_eq!(
+            code(&view, f(json!({"issues_none": true}))),
+            Some("llm_arg_mismatch")
+        );
+        // a capture day the request does not name is refused even when the rules are unsure
+        let mut unsure = sure(vec![call("filter", json!({"rating_gte": 4}))]);
+        unsure.hints.push("\"beach\" was ignored".into());
+        let dated =
+            f(json!({"rating_gte": 4, "taken_from": "2024-05-01", "taken_to": "2024-05-01"}));
+        let check =
+            |msg: &str| super::rules_disagree(msg, &unsure, &dated, Locale::En).map(|c| c.0);
+        assert_eq!(
+            check("show only 4 stars and up from the beach"),
+            Some("llm_arg_mismatch")
+        );
+        assert_eq!(check("4 stars and up on 2024-05-01"), None);
+        // requests the rules do not understand, or only approximate, are the model's
+        let mut unsure = sure(vec![flag(-1)]);
+        unsure.hints.push("an unknown place".into());
+        assert_eq!(code(&unsure, vec![flag(1)]), None);
+        let none = Parsed {
+            unsupported: Some("?".into()),
+            ..Default::default()
+        };
+        assert_eq!(code(&none, vec![flag(1)]), None);
+    }
+
+    #[test]
+    fn the_model_only_sees_existing_preset_ids() {
+        let tools = super::llm_tools_for(&builtin_preset_names());
+        let t = tools.iter().find(|t| t["name"] == "apply_preset").unwrap();
+        let ids = t["parameters"]["properties"]["preset_id"]["enum"]
+            .as_array()
+            .unwrap();
+        assert!(ids.contains(&json!("film_warm")) && ids.len() == builtin_preset_names().len());
+        let scene = &tools.iter().find(|t| t["name"] == "filter").unwrap()["parameters"]
+            ["properties"]["scene_type"]["enum"];
+        assert!(scene.as_array().unwrap().contains(&json!("night")));
+    }
 }
 
 #[cfg(test)]

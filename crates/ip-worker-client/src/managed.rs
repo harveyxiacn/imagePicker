@@ -519,6 +519,10 @@ impl AiWorker for ManagedWorker {
         self.shared.tx.subscribe()
     }
 
+    async fn ensure_started(&self) -> Result<()> {
+        self.client().await.map(|_| ())
+    }
+
     async fn system_info(&self) -> Result<SystemInfo> {
         let v = self.rpc("system.info", json!({}), None, None).await?;
         let info: SystemInfo = parse(v, "system.info")?;

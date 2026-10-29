@@ -806,6 +806,22 @@ async fn llm_engine_is_validated_and_falls_back() {
         assert_eq!(p.steps[0].tool, want, "{msg}");
         assert_eq!(p.fallback.unwrap().code, "llm_tool_mismatch", "{msg}");
     }
+    // ... and so does one that keeps the tool but changes what the request says
+    e.worker.enable_llm(LlmPlanResponse {
+        reply: "done".into(),
+        calls: vec![LlmCall {
+            tool: "set_flag".into(),
+            args: json!({"selection":"current_filter","flag":1}),
+        }],
+    });
+    let p = e
+        .core
+        .assistant_plan(plan_req(sid, "把所有照片都淘汰"))
+        .await
+        .unwrap();
+    assert_eq!(p.engine, "rules");
+    assert_eq!(p.steps[0].args["flag"], -1);
+    assert_eq!(p.fallback.unwrap().code, "llm_arg_mismatch");
     // too many steps
     e.worker.enable_llm(LlmPlanResponse {
         reply: "x".into(),

@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 use regex::{Captures, Regex};
 use serde_json::{json, Map, Value};
 
-use super::tools::{filter_query, validate_call};
+use super::tools::{day_start_ms, filter_query, validate_call};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locale {
@@ -183,6 +183,7 @@ struct Rx {
     star_num: Regex,
     star_above: Regex,
     star_below: Regex,
+    star_adj: Regex,
     ai_word: Regex,
     flag_picked: Regex,
     flag_rejected: Regex,
@@ -207,6 +208,10 @@ struct Rx {
     looking: Regex,
     single: Regex,
     nobody: Regex,
+    faces_min: Regex,
+    date: Regex,
+    date_after: Regex,
+    date_before: Regex,
     burst_best: Regex,
     sort_ai: Regex,
     sort_rating: Regex,
@@ -353,7 +358,7 @@ fn rx() -> &'static Rx {
             view: r(r"只看|只显示|只要|只留|看看|看下|看一下|显示|展示|筛选|过滤|找出|找一下|找|查看|列出|\b(show|display|filter|find|list|view|see|only|just|give me|look at)\b"),
             reject: r(r"淘汰|丢弃|拒绝|排除|删掉|删除|扔掉|弃掉|\b(reject|discard|cull|trash|delete|throw away|get rid of|bin)\b"),
             unreject: r(r"(取消|撤销|恢复|撤回).{0,3}淘汰|\b(unreject|un-reject|restore)\b|undo.{0,6}reject"),
-            pick: r(r"(标记|标为|标成|设为|设置为|设成|改为)\s*(?:为|成)?\s*(选用|选中|精选|入选)|\b(mark|flag|set|label|tag)\b.{0,24}?\bas\s+(a\s+)?(pick(s|ed)?|keepers?|favou?rites?)\b|\bpick (them|these|all|it)\b"),
+            pick: r(r"(标记|标为|标成|设为|设置为|设成|改为)\s*(?:为|成)?\s*(选用|选中|精选|入选)|\b(mark|flag|set|label|tag)\b.{0,24}?\bas\s+(a\s+)?(pick(s|ed)?|keepers?|favou?rites?)\b|\bpick (them|these|those|all|it|the|every|my|this)\b"),
             unpick: r(r"(取消|清除|去掉|移除|撤销).{0,3}(选用|选中|旗标|标记)|\b(unflag|unpick|un-pick|clear (the )?flags?|remove (the )?flags?)\b"),
             keep: r(r"保留|留下|留|只要|\b(keep|leave|retain)\b"),
             clear_filter: r(r"(清除|取消|重置|去掉|清空)\s*(所有)?(筛选|过滤)|显示(全部|所有|全部照片|所有照片)|看全部|\b(clear|reset|remove)\b.{0,8}\bfilters?\b|\bshow (me )?(all|everything)\b|\bshow all\b"),
@@ -368,7 +373,7 @@ fn rx() -> &'static Rx {
             slider_zh: r(&format!(r"({SLIDER_ZH})\s*(?:调高|调低|提高|降低|增加|减少|加上|减去|加|减|设为|调到|调成|改为|到|为)?\s*([+-]?\d+(?:\.\d+)?)")),
             slider_zh_num: r(&format!(r"(增加|提高|调高|降低|调低|减少|减去|加|减)\s*([+-]?\d+(?:\.\d+)?)\s*(?:档|个?点|级|ev|ev值)?\s*(?:的)?\s*({SLIDER_ZH})")),
             slider_en: r(r"\b(exposure|brightness|contrast|highlights?|shadows?|whites|blacks|temperature|tint|vibrance|saturation|clarity|dehaze|texture|dodge|burn)\b\s*(?:(?:by|to)\s*)?([+-]?\d+(?:\.\d+)?)\s*(?:ev|evs|stops?)?\b"),
-            slider_en_num: r(r"\b(increase|raise|boost|decrease|lower|reduce|cut|add|subtract)\b[^.\d]{0,20}?\b(exposure|brightness|contrast|highlights?|shadows?|whites|blacks|temperature|tint|vibrance|saturation|clarity|dehaze|texture)\b[^.\d]{0,12}?\b([+-]?\d+(?:\.\d+)?)"),
+            slider_en_num: r(r"\b(increase|raise|boost|decrease|lower|reduce|cut|add|subtract)\b[^.\d]{0,20}?\b(exposure|brightness|contrast|highlights?|shadows?|whites|blacks|temperature|tint|vibrance|saturation|clarity|dehaze|texture)\b(?:[^.\d]{0,12}?|[^.\d]{0,48}?\bby\s+)\b([+-]?\d+(?:\.\d+)?)"),
             accept_ai: r(r"(接受|采纳|采用|使用|应用|确认).{0,4}(ai|智能)\s*(评分|星级|评星|打分|分数)|(ai|智能)\s*(评分|星级|评星|打分).{0,4}(接受|采纳|采用|确认)|\baccept\b.{0,12}\bai\b|\b(use|adopt|take)\b.{0,6}\bai (rating|score)s?\b"),
             apply_verb: r(r"应用|套用|加上|加个|加|用|使用|换成|改成|改为|设为|调成|变成|转成|转为|做成|\b(apply|use|add|give|set|make|switch|change|turn|convert|put|grade)\b"),
             look_noun: r(r"滤镜|风格|调色|预设|色调|效果|\b(preset|filter|look|style|tone|grade|grading|effect)\b"),
@@ -381,6 +386,8 @@ fn rx() -> &'static Rx {
             star_num: r(r"(\d)\s*(?:颗)?\s*星|(\d)[\s-]*stars?\b|\b(?:rated|rating)\s*(\d)\b"),
             star_above: r(r"(\d)\s*(?:颗)?\s*星\s*(以上|及以上|或以上|起|之上|往上|及以上的)|(至少|不低于|大于等于|≥|>=)\s*(\d)\s*(?:颗)?\s*星|(\d)[\s-]*stars?\s*(\+|or (more|higher|better|above)|and (up|above|over|higher|better)|plus|minimum)|\b(at least|minimum|min\.?|above|over)\s*(\d)[\s-]*stars?\b|(\d)\s*\+\s*stars?|\brated\s*(\d)\s*(\+|or (more|above|higher))"),
             star_below: r(r"(\d)\s*(?:颗)?\s*星\s*(以下|及以下|或以下|以内|之下|及以下的)|(最多|不超过|小于等于|≤|<=)\s*(\d)\s*(?:颗)?\s*星|(\d)[\s-]*stars?\s*(or (less|fewer|lower|worse|below)|and (below|under|lower))|\b(at most|under|below|less than)\s*(\d)[\s-]*stars?\b"),
+            // "the 5-star photos", "5星的照片": a condition even next to an action verb
+            star_adj: r(r"\b(\d)[\s-]*stars? (?:photos?|pictures?|pics|shots?|images?|ones)\b|(\d)\s*(?:颗)?\s*星(?:的)?(?:照片|相片|图片|片子)"),
             ai_word: r(r"(ai|智能)\s*(评分|星级|评星|打分|分数|评级)?\s*$|ai\s*(rated|rating|score)"),
             flag_picked: r(r"已选用|已选中|已入选|选用的|入选的|精选|\b(picked|picks|selects|favou?rites?|flagged|keepers?)\b"),
             flag_rejected: r(r"已淘汰|被淘汰|淘汰的|淘汰照片|淘汰了的|\b(rejected|rejects)\b"),
@@ -422,16 +429,22 @@ fn rx() -> &'static Rx {
                 r(r"\b(\d+)\s+(?:photos?|shots?|frames?|pics?|pictures?|images?|best|each|per)\b"),
             ],
             smiling: r(r"微笑|笑的|在笑|笑着|\bsmil(e|es|ing)\b"),
-            eyes_open: r(r"睁眼|睁着眼|眼睛睁开|\beyes? open\b"),
+            eyes_open: r(r"睁眼|睁着眼|眼睛(都)?睁开|\beyes? (?:are |were )?(?:all )?open\b|\bopen eyes\b"),
             looking: r(r"看镜头|看向镜头|直视|\blooking at (the )?camera\b"),
             single: r(r"单人照|单人|独照|\bsingle (portrait|person)\b|\bsolo\b"),
             nobody: r(r"没有人|没人|无人|不含人|\b(no people|nobody|without people|empty)\b"),
+            // "3个人以上", "至少3个人", "3 or more people", "at least three faces"
+            faces_min: r(&format!(r"(\d+)\s*(?:个|位|名)?\s*人\s*(?:以上|及以上|或以上|或更多)|(?:至少|不少于)\s*(\d+)\s*(?:个|位|名)?\s*人|\b(\d+|{en_num})\s*(?:or more|\+)\s*(?:people|persons|faces)\b|\b(?:at least|more than)\s+(\d+|{en_num})\s+(?:people|persons|faces)\b")),
+            // a capture day: 2026-10-02, 2026/10/2, 2026年10月2日
+            date: r(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})|(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]"),
+            date_after: r(r"^\s*(之后|以后|起|开始|后)|\b(after|since)\s*$"),
+            date_before: r(r"^\s*(之前|以前|前)|\b(before|until|till|up to)\s*$"),
             burst_best: r(r"(每组|每个连拍|连拍|每个分组)\s*(里)?\s*(的)?\s*(最佳|最好)|\b(best of (each|every) (burst|group)|burst (winners|bests)|best in (each|every) (burst|group))\b"),
             sort_ai: r(r"按\s*(ai|智能)\s*(评分|分数)?\s*排序|\bsort(ed)? by ai\b"),
             sort_rating: r(r"按\s*(评分|星级|星)\s*排序|\bsort(ed)? by (rating|stars)\b"),
             sort_name: r(r"按\s*(名称|文件名|名字)\s*排序|\bsort(ed)? by (name|filename)\b"),
             unknown_zh: r(r"([\p{Han}A-Za-z0-9]{1,10})的(?:照片|相片|图片|合影|图|片子)"),
-            unknown_en: r(r"\bphotos? (?:of|from|in|at|taken in) ([A-Za-z][A-Za-z'’-]{1,24})\b|\b([A-Za-z][A-Za-z'’-]{1,24})['’]s (?:photos?|pictures?|pics|shots?)\b"),
+            unknown_en: r(r"\bphotos? (?:of|from|in|at|taken in) ([A-Za-z][A-Za-z'’-]{1,24})\b|\b([A-Za-z][A-Za-z'’-]{1,24})['’]s (?:photos?|pictures?|pics|shots?)\b|\b(?:from|at) the ([a-z][a-z'’-]{2,24})\b"),
             or_word: r(r"或者|或|还是|\bor\b"),
             dest: r(r"(?:到|至|进|入|\bto\b|\binto\b|\bin\b)\s*([a-zA-Z]:[\\/][^\s]*|/[^\s]+|~[\\/][^\s]*)"),
             xhs: r(r"小红书|xiaohongshu|red ?note|\bxhs\b"),
@@ -743,6 +756,8 @@ struct Ents {
     current_photo: bool,
     current_filter: bool,
     rating_below: bool,
+    taken_from: Option<String>,
+    taken_to: Option<String>,
 }
 
 impl Ents {
@@ -760,6 +775,8 @@ impl Ents {
             || self.faces_max.is_some()
             || !self.person_state.is_empty()
             || self.burst_best
+            || self.taken_from.is_some()
+            || self.taken_to.is_some()
     }
 
     fn filter_args(&self) -> Value {
@@ -806,6 +823,12 @@ impl Ents {
         if self.burst_best {
             m.insert("burst_best_only".into(), json!(true));
         }
+        if let Some(d) = &self.taken_from {
+            m.insert("taken_from".into(), json!(d));
+        }
+        if let Some(d) = &self.taken_to {
+            m.insert("taken_to".into(), json!(d));
+        }
         if let Some(s) = self.sort {
             m.insert("sort".into(), json!(s));
         }
@@ -834,6 +857,11 @@ fn extract(t: &str, ents: &mut Ents, view_or_no_action: bool) {
     if ge.is_none() && !ents.rating_below && view_or_no_action {
         // "5 stars" with a view verb / no verb: at least that many
         if let Some(c) = x.star_num.captures(t) {
+            ge = first_digit(&c).map(|n| n.clamp(0, 5));
+        }
+    }
+    if ge.is_none() && !ents.rating_below {
+        if let Some(c) = x.star_adj.captures(t) {
             ge = first_digit(&c).map(|n| n.clamp(0, 5));
         }
     }
@@ -939,6 +967,20 @@ fn extract(t: &str, ents: &mut Ents, view_or_no_action: bool) {
     if x.nobody.is_match(t) {
         ents.faces_max = Some(0);
     }
+    if let Some(c) = x.faces_min.captures(t) {
+        let n = (1..c.len()).filter_map(|i| c.get(i)).find_map(|m| {
+            m.as_str()
+                .parse::<i64>()
+                .ok()
+                .or_else(|| en_to_num(m.as_str()).map(i64::from))
+        });
+        if let Some(n) = n.filter(|n| (1..=1000).contains(n)) {
+            ents.faces_min = Some(n);
+        }
+    }
+    // "3个人以上" is a face count, not a number of photos
+    let counted = x.faces_min.replace_all(t, " ");
+    let t: &str = &counted;
     if x.smiling.is_match(t) {
         ents.person_state.push("smiling");
     }
@@ -961,6 +1003,11 @@ fn extract(t: &str, ents: &mut Ents, view_or_no_action: bool) {
     // ---- counts and scope words
     for re in &x.count {
         if let Some(c) = re.captures(t) {
+            // "only 4 stars" is a rating, not four photos
+            let rest = t[c.get(0).map_or(0, |m| m.end())..].trim_start();
+            if rest.starts_with("star") || rest.starts_with("-star") || rest.starts_with('星') {
+                continue;
+            }
             if let Some(n) = first_digit(&c) {
                 if (1..=1000).contains(&n) {
                     ents.count = Some(n);
@@ -1160,6 +1207,12 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         let start = norm[..m.start()].chars().count();
         blank_chars(&mut t, start, m.as_str().chars().count());
     }
+    // ---- capture days (blanked: their digits are neither counts nor stars)
+    let (taken_from, taken_to) = capture_days(&norm);
+    for m in x.date.find_iter(&norm) {
+        let start = norm[..m.start()].chars().count();
+        blank_chars(&mut t, start, m.as_str().chars().count());
+    }
     // ---- people
     let mut persons = match_people(&mut t, ctx.people);
     persons.dedup();
@@ -1167,6 +1220,8 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
 
     let mut ents = Ents {
         persons,
+        taken_from,
+        taken_to,
         ..Default::default()
     };
     ents.person_any = ents.persons.len() > 1 && x.or_word.is_match(&text_no_names);
@@ -1254,7 +1309,7 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
     if ents.persons.is_empty() {
         let vocab = [
             "所有", "全部", "这些", "这张", "选中", "当前", "精选", "我", "这", "那", "你", "他",
-            "她", "它", "该", "所选", "已", "未", "没", "有",
+            "她", "它", "该", "所选", "已", "未", "没", "有", "拍",
         ];
         let cand = x
             .unknown_zh
@@ -1264,6 +1319,7 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
                 x.unknown_en.captures(&text_no_names).and_then(|c| {
                     c.get(1)
                         .or_else(|| c.get(2))
+                        .or_else(|| c.get(3))
                         .map(|m| m.as_str().to_string())
                 })
             });
@@ -1302,6 +1358,27 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
                         | "best"
                         | "good"
                         | "bad"
+                        // "from the current view", "looking at the camera", "at the end"
+                        | "current"
+                        | "session"
+                        | "folder"
+                        | "album"
+                        | "view"
+                        | "grid"
+                        | "list"
+                        | "filter"
+                        | "selection"
+                        | "rest"
+                        | "others"
+                        | "top"
+                        | "same"
+                        | "camera"
+                        | "end"
+                        | "start"
+                        | "beginning"
+                        | "moment"
+                        | "first"
+                        | "last"
                 )
                 || vocab.iter().any(|v| c.starts_with(v))
                 || c.is_empty()
@@ -1508,6 +1585,85 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         unsupported: None,
         hints,
     }
+}
+
+/// Capture-day range named in the text (`YYYY-MM-DD`, both ends inclusive): one day, two days
+/// (a range), or one day after "之后 / after / since" (from) or "之前 / before" (until the day
+/// before).
+fn capture_days(norm: &str) -> (Option<String>, Option<String>) {
+    let x = rx();
+    let mut days: Vec<(String, usize, usize)> = Vec::new();
+    for c in x.date.captures_iter(norm) {
+        let g = |i: usize| c.get(i).and_then(|m| m.as_str().parse::<i64>().ok());
+        let (y, m, d) = match (g(1), g(2), g(3)) {
+            (Some(y), Some(m), Some(d)) => (y, m, d),
+            _ => match (g(4), g(5), g(6)) {
+                (Some(y), Some(m), Some(d)) => (y, m, d),
+                _ => continue,
+            },
+        };
+        let day = format!("{y:04}-{m:02}-{d:02}");
+        if day_start_ms(&day).is_some() {
+            let whole = c.get(0).expect("match");
+            days.push((day, whole.start(), whole.end()));
+        }
+    }
+    match days.as_slice() {
+        [] => (None, None),
+        [(day, start, end)] => {
+            let (before, after) = (&norm[..*start], &norm[*end..]);
+            if x.date_after.is_match(after) || x.date_after.is_match(before) {
+                (Some(day.clone()), None)
+            } else if x.date_before.is_match(after) || x.date_before.is_match(before) {
+                let prev = day_start_ms(day).map(|ms| day_of_ms(ms - 1));
+                (None, prev)
+            } else {
+                (Some(day.clone()), Some(day.clone()))
+            }
+        }
+        many => {
+            let mut ds: Vec<&String> = many.iter().map(|(d, _, _)| d).collect();
+            ds.sort();
+            (
+                ds.first().map(|d| d.to_string()),
+                ds.last().map(|d| d.to_string()),
+            )
+        }
+    }
+}
+
+/// Every capture day a message names, as the rules read it (`YYYY-MM-DD`): what a model's date
+/// filter may use.
+pub fn named_days(msg: &str) -> Vec<String> {
+    let norm = normalize(msg);
+    let mut out: Vec<String> = rx()
+        .date
+        .captures_iter(&norm)
+        .filter_map(|c| {
+            let g = |i: usize| c.get(i).and_then(|m| m.as_str().parse::<i64>().ok());
+            let (y, m, d) = (g(1).or(g(4))?, g(2).or(g(5))?, g(3).or(g(6))?);
+            let day = format!("{y:04}-{m:02}-{d:02}");
+            day_start_ms(&day).is_some().then_some(day)
+        })
+        .collect();
+    let (from, to) = capture_days(&norm);
+    out.extend(from.into_iter().chain(to));
+    out
+}
+
+/// `YYYY-MM-DD` of a `taken_at` (ms, local time stored as UTC).
+fn day_of_ms(ms: i64) -> String {
+    // H. Hinnant's civil_from_days
+    let z = ms.div_euclid(86_400_000) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
 }
 
 /// "每组 … 两张": a count next to a per-group word.

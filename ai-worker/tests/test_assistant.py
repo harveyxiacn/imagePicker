@@ -167,6 +167,27 @@ def test_prune_invented_optional_strings() -> None:
     assert out[0]["args"]["dest"] == "small" and not notes
 
 
+def test_prune_keeps_strings_with_a_fixed_shape() -> None:
+    # a date the user wrote as "10月2日" is not an invented free text
+    day = {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+    tools = parse_tools(
+        [
+            {
+                "name": "filter",
+                "description": "Filter.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"taken_from": day, "taken_to": day},
+                },
+            }
+        ]
+    )
+    calls = [{"tool": "filter", "args": {"taken_from": "2026-10-02", "taken_to": "2026-10-02"}}]
+    out, notes = prune_invented(calls, tools, "只看2026年10月2日拍的照片", {})
+    assert out == calls and not notes
+    assert validate(day, "2026-10-02") == [] and validate(day, "10月2日")
+
+
 # ---------------------------------------------------------------------------- prompts
 def test_system_prompt_embeds_tools_and_context() -> None:
     sp = build_system_prompt(TOOL_LIST, CONTEXT, "zh-CN")

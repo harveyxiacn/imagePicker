@@ -66,7 +66,7 @@ pub fn is_tool(name: &str) -> bool {
 }
 
 /// Keys of the `filter` tool: the `/api/photos` query parameters plus `collection`.
-pub const FILTER_KEYS: [&str; 18] = [
+pub const FILTER_KEYS: [&str; 20] = [
     "rating_gte",
     "flag",
     "color_label",
@@ -85,7 +85,13 @@ pub const FILTER_KEYS: [&str; 18] = [
     "faces_min",
     "faces_max",
     "has_edits",
+    "taken_from",
+    "taken_to",
 ];
+
+/// Scene types of the analysis (the `scene_type` filter): a closed set, so a model cannot filter
+/// on an invented one ("beach") and silently match nothing.
+pub const SCENE_TYPES: [&str; 8] = crate::taste::SCENES;
 
 /// `values` of `adjust_sliders`: one number per slider, with its range.
 fn slider_props() -> Value {
@@ -124,7 +130,7 @@ fn filter_schema() -> Value {
             "issues_any": {"type":"array","items":{"type":"string","enum":["closed_eyes","blurry","overexposed","underexposed","noisy","tilted","bystander","bad_expression"]}},
             "burst_best_only": {"type":"boolean"},
             "burst_id": {"type":"integer"},
-            "scene_type": {"type":"string","description":"portrait|group|landscape|food|architecture|night|pet|other"},
+            "scene_type": {"type":"string","enum": SCENE_TYPES},
             "persons": {"type":"array","items":{"type":"integer"},"description":"person ids"},
             "person_mode": {"type":"string","enum":["all","any"]},
             "exclude_persons": {"type":"array","items":{"type":"integer"}},
@@ -132,7 +138,9 @@ fn filter_schema() -> Value {
             "include_background": {"type":"boolean"},
             "faces_min": {"type":"integer","minimum":0},
             "faces_max": {"type":"integer","minimum":0},
-            "has_edits": {"type":"boolean"}
+            "has_edits": {"type":"boolean"},
+            "taken_from": {"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$","description":"first capture day, YYYY-MM-DD (inclusive)"},
+            "taken_to": {"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$","description":"last capture day, YYYY-MM-DD (inclusive); one day = the same date in both"}
         }
     })
 }
@@ -180,7 +188,7 @@ pub fn registry() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "apply_preset",
-            description: "Apply a preset (look) to the selected photos.",
+            description: "Apply a preset (a named look / colour style, 预设 / 滤镜 / 风格) to the selected photos; preset_id is one of the available presets.",
             parameters: obj(json!({"selection":sel,"preset_id":{"type":"string"}}), &["selection","preset_id"]),
         },
         ToolSpec {
@@ -195,7 +203,7 @@ pub fn registry() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "apply_profiles",
-            description: "Apply the saved per-person beauty profiles.",
+            description: "Apply each recognised person's saved beauty (face retouch) profile, 美颜档案. Not for presets or looks.",
             parameters: obj(json!({"selection":sel}), &["selection"]),
         },
         ToolSpec {
@@ -370,12 +378,11 @@ pub fn norm_filter(args: &Value) -> VResult<Value> {
             "burst_id" => json!(int_in(v, k, 0, i64::MAX)?),
             "scene_type" => {
                 let s = as_str(v, k)?.trim().to_ascii_lowercase();
-                if s.is_empty()
-                    || s.len() > 32
-                    || !s.chars().all(|c| c.is_ascii_lowercase() || c == '_')
-                {
-                    return Err("scene_type must be a short lower-case word".into());
-                }
+                json!(one_of(&json!(s), k, &SCENE_TYPES)?)
+            }
+            "taken_from" | "taken_to" => {
+                let s = as_str(v, k)?.trim();
+                day_start_ms(s).ok_or_else(|| format!("{k} must be a date YYYY-MM-DD"))?;
                 json!(s)
             }
             "persons" | "exclude_persons" => json!(id_list(v, k, 50)?),
@@ -402,7 +409,42 @@ pub fn norm_filter(args: &Value) -> VResult<Value> {
         };
         out.insert(k.clone(), nv);
     }
+    if let (Some(a), Some(b)) = (out.get("taken_from"), out.get("taken_to")) {
+        // ISO dates compare as strings
+        if a.as_str() > b.as_str() {
+            return Err("taken_from is after taken_to".into());
+        }
+    }
     Ok(Value::Object(out))
+}
+
+/// Start of a local capture day `YYYY-MM-DD` in `taken_at` units (ms; `taken_at` is local time
+/// stored as if it were UTC), as `GET /api/photos?taken_from=` reads it.
+pub fn day_start_ms(s: &str) -> Option<i64> {
+    let mut it = s.split('-');
+    let (y, m, d) = (it.next()?, it.next()?, it.next()?);
+    if it.next().is_some() || y.len() != 4 || m.len() != 2 || d.len() != 2 {
+        return None;
+    }
+    let (y, m, d): (i64, i64, i64) = (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?);
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let dim = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    };
+    if !(1..=dim).contains(&d) {
+        return None;
+    }
+    // days since 1970-01-01 (H. Hinnant's days_from_civil)
+    let y = if m <= 2 { y - 1 } else { y };
+    let (era, yoe) = (y.div_euclid(400), y.rem_euclid(400));
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some((era * 146_097 + doe - 719_468) * 86_400_000)
 }
 
 fn pct(s: &str) -> String {
@@ -596,6 +638,13 @@ pub fn photo_query_of(session_id: i64, f: &Value, limit: Option<i64>) -> PhotoQu
         faces_min: get("faces_min").and_then(Value::as_i64),
         faces_max: get("faces_max").and_then(Value::as_i64),
         has_edits: get("has_edits").and_then(Value::as_bool),
+        taken_from: get("taken_from")
+            .and_then(Value::as_str)
+            .and_then(day_start_ms),
+        taken_to: get("taken_to")
+            .and_then(Value::as_str)
+            .and_then(day_start_ms)
+            .map(|ms| ms + 86_400_000 - 1),
         ..PhotoQuery::default()
     }
 }
@@ -999,5 +1048,34 @@ mod tests {
         let (args, limit) = query_args("?issues_any=blurry,closed_eyes&limit=5").unwrap();
         assert_eq!(args["issues_any"], json!(["blurry", "closed_eyes"]));
         assert_eq!(limit, Some(5));
+    }
+
+    #[test]
+    fn scene_types_are_a_closed_set_and_days_are_dates() {
+        assert!(validate_call("filter", &json!({"scene_type":"night"})).is_ok());
+        // a made-up scene would silently match nothing
+        assert!(validate_call("filter", &json!({"scene_type":"beach"})).is_err());
+        let v = validate_call(
+            "filter",
+            &json!({"taken_from":"2026-10-01","taken_to":"2026-10-02"}),
+        )
+        .unwrap();
+        let q = filter_query(&v);
+        assert_eq!(q, "taken_from=2026-10-01&taken_to=2026-10-02");
+        let pq = parse_photo_query(1, &q).unwrap();
+        assert_eq!(pq.taken_from, Some(1_790_812_800_000));
+        assert_eq!(pq.taken_to, Some(1_790_812_800_000 + 2 * 86_400_000 - 1));
+        assert!(query_has_conditions("taken_to=2026-10-02"));
+        for bad in [
+            json!({"taken_from":"yesterday"}),
+            json!({"taken_from":"2026-13-01"}),
+            json!({"taken_from":"2026-2-1"}),
+            json!({"taken_from":"2026-10-03","taken_to":"2026-10-02"}),
+        ] {
+            assert!(validate_call("filter", &bad).is_err(), "{bad}");
+        }
+        assert_eq!(day_start_ms("1970-01-01"), Some(0));
+        assert_eq!(day_start_ms("2024-02-29"), Some(1_709_164_800_000));
+        assert_eq!(day_start_ms("2023-02-29"), None);
     }
 }

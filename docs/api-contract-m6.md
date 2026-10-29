@@ -8,13 +8,13 @@
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
-| `filter` | 与 `/api/photos` 查询参数相同的对象（含人物、问题、场景、星级、旗标、`collection`） | 只改变界面筛选，不改数据 |
+| `filter` | 与 `/api/photos` 查询参数相同的对象（含人物、问题、场景、星级、旗标、拍摄日期、`collection`）；`scene_type` 只能是分析的 8 种场景之一（portrait/group/landscape/architecture/night/food/pet/other，其他值 → 校验失败）；`taken_from` / `taken_to` 为 `YYYY-MM-DD`（拍摄地当地日期，含两端，与 `/api/photos` 同义） | 只改变界面筛选，不改数据 |
 | `set_rating` | `{selection, rating: 0..5 \| null}` | |
 | `set_flag` | `{selection, flag: -1\|0\|1}` | |
 | `accept_ai` | `{selection}` | |
 | `group_keep_top` | `{selection?, n, reject_rest: bool}` | 每个连拍组保留前 n |
 | `scene_keep_top` | `{selection?, n, reject_rest: bool}` | 每个场景保留前 n |
-| `apply_preset` | `{selection, preset_id}` | |
+| `apply_preset` | `{selection, preset_id}` | 发给模型的 schema 中 `preset_id` 为当前存在的预设 id 枚举（内置 + 用户预设） |
 | `auto_adjust` | `{selection, mode}` | 逐张 AI 一键并保存 |
 | `adjust_sliders` | `{selection, values: {滑块: 数值, ...}, relative?: bool}` | 按数值调滑块（曝光 −5..5，色温 −3000..3000，减淡/加深 0..100，其余 −100..100）；`relative:true` 在当前值上增减，否则直接设为该值；只改所指滑块，现有曲线/HSL/分级与其它滑块保留 |
 | `apply_profiles` | `{selection}` | 人物美颜档案 |
@@ -43,7 +43,7 @@
 ### A.4 目标照片与大范围修改
 
 - **目标须有依据**：每个改动照片的步骤，其目标只能是：同一计划中前面 `filter` 步骤的结果（`selection:"current_filter"` 与缺省 selection 的 keep-top 绑定到该筛选，改写为显式 `{"query"}`，执行时按同一条件取照片，不再取发请求时的网格视图）、带条件或 `limit` 的显式 query、用户已选中/当前打开的 `ids`，或——仅当请求本身没有任何条件时——当前视图/整个会话。
-- **LLM 计划的校验**：模型步骤若没有自己的条件却会作用于整个视图/会话，而规则引擎对同一请求的解读并非“无条件作用于全部”（或规则也没读懂），则整份模型计划被拒，退回规则引擎，`fallback.code = "llm_unsafe_target"`；ids 既未选中也未打开 → 同样拒绝。其余退回原因：`llm_failed`、`llm_no_steps`、`llm_invalid`（引用了不存在的预设/人物）、`llm_tool_mismatch`（规则引擎已确定识别出请求点名的预设或具体滑块数值，模型计划却没有 `apply_preset` / `adjust_sliders`）。`engine:"llm"` 且模型不可用仍返回 409 `models_missing` / 503 `worker_unavailable`。LLM 上下文含最多 200 个选中 id。
+- **LLM 计划的校验**：模型步骤若没有自己的条件却会作用于整个视图/会话，而规则引擎对同一请求的解读并非“无条件作用于全部”（或规则也没读懂），则整份模型计划被拒，退回规则引擎，`fallback.code = "llm_unsafe_target"`；ids 既未选中也未打开 → 同样拒绝。其余退回原因：`llm_failed`、`llm_no_steps`、`llm_invalid`（引用了不存在的预设/人物）、`llm_tool_mismatch` 与 `llm_arg_mismatch`（规则引擎作为校验：规则对同一请求的解读确定——无提示、非 unsupported——时，规则计划中每个改动照片的步骤必须按顺序出现在模型计划中，否则 `llm_tool_mismatch`，例如点名的预设被答成 `apply_profiles`、“曝光提高 0.5”被答成 `auto_adjust`、只是筛选的请求却被答成修改；对应步骤的意图参数——`set_flag.flag`、`set_rating.rating`、`apply_preset.preset_id`、`adjust_sliders.values/relative`、keep-top 的 `n/reject_rest`、请求点名的 `export.preset`——不一致，或规则 `filter` 步骤的条件在模型的 `filter` 步骤里缺失/被改，则 `llm_arg_mismatch`；模型多出的步骤允许，照常校验与确认；规则读不懂或只能近似理解的请求仍交给模型）。`engine:"llm"` 且模型不可用仍返回 409 `models_missing` / 503 `worker_unavailable`。LLM 上下文含最多 200 个选中 id。
 - **大范围修改**：改动照片数 > 500，或 ≥ 20 张且超过会话照片数一半的步骤 `large_impact:true`；计划 `needs_confirmation:true`，`confirm_text` 逐条列出需确认的步骤（数量、作用的照片、占比）。执行必须 `confirm:true`（CLI `--execute` 视为确认）。
 - **执行期上限**：步骤执行时重新解析目标，若照片数超过计划时计数（`affects`），该步骤以 409 失败（“重新提问”），不会改动超出用户所见范围的照片。
 

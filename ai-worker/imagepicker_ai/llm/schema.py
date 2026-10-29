@@ -248,10 +248,12 @@ def check_plan(plan: Any, tools: list[Tool]) -> tuple[str, list[dict[str, Any]],
 def prune_invented(
     calls: list[dict[str, Any]], tools: list[Tool], message: str, context: dict[str, Any] | None
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Drop optional free-text arguments (plain `string`, no enum) whose value the user never wrote.
+    """Drop optional free-text arguments (plain `string`, no enum / pattern) whose value the user
+    never wrote.
 
     Small models like to fill optional strings such as `dest` with made-up values; an invented
-    export folder is worse than none (the UI asks when it is missing).
+    export folder is worse than none (the UI asks when it is missing). Strings with a fixed shape
+    (a `pattern`, such as a `YYYY-MM-DD` date written "10月2日" by the user) are not free text.
     """
     by = {t.name: t for t in tools}
     haystack = (message + " " + json.dumps(context or {}, ensure_ascii=False, default=str)).lower()
@@ -269,6 +271,7 @@ def prune_invented(
                 isinstance(p, dict)
                 and p.get("type") == "string"
                 and "enum" not in p
+                and "pattern" not in p
                 and k not in req
                 and isinstance(v, str)
                 and v.strip().lower() not in haystack

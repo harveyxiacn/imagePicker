@@ -132,6 +132,10 @@ impl TimeoutWorker {
         let Some(limit) = self.timeouts.get(method) else {
             return fut.await;
         };
+        // A cold start (Python, CUDA libraries: up to a minute and more) is not part of the call:
+        // counting it made the first `models.list` after a restart time out at 60 s, which killed
+        // the worker again (2026-10-14 assistant benchmark). The start has its own timeout.
+        self.inner.ensure_started().await?;
         match tokio::time::timeout(limit, fut).await {
             Ok(r) => r,
             Err(_) => {
@@ -249,6 +253,9 @@ impl AiWorker for TimeoutWorker {
     async fn kill(&self) {
         self.inner.kill().await;
     }
+    async fn ensure_started(&self) -> Result<()> {
+        self.inner.ensure_started().await
+    }
 }
 
 #[cfg(test)]
@@ -260,6 +267,8 @@ mod tests {
     struct Slow {
         kills: AtomicUsize,
         sleep_ms: u64,
+        start_ms: u64,
+        starts: AtomicUsize,
     }
 
     #[async_trait::async_trait]
@@ -297,6 +306,12 @@ mod tests {
         async fn kill(&self) {
             self.kills.fetch_add(1, Ordering::SeqCst);
         }
+        async fn ensure_started(&self) -> Result<()> {
+            if self.starts.fetch_add(1, Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(self.start_ms)).await;
+            }
+            Ok(())
+        }
     }
 
     #[tokio::test]
@@ -320,6 +335,20 @@ mod tests {
         let w = TimeoutWorker::new(fast.clone(), h);
         assert!(w.system_info().await.is_ok());
         assert_eq!(fast.kills.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_slow_start_does_not_count_against_the_call() {
+        let w = Arc::new(Slow {
+            sleep_ms: 1,
+            start_ms: 300,
+            ..Default::default()
+        });
+        let h = TimeoutHandle::new(WorkerTimeouts::default());
+        h.set("system.info", Some(Duration::from_millis(100)));
+        let t = TimeoutWorker::new(w.clone(), h);
+        assert!(t.system_info().await.is_ok());
+        assert_eq!(w.kills.load(Ordering::SeqCst), 0);
     }
 
     #[test]

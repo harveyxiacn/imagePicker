@@ -109,6 +109,33 @@ EXAMPLES: list[Example] = [
     ),
     Example(
         "zh",
+        "给这些照片套用电影感预设",
+        [{"tool": "apply_preset", "args": {"selection": _CF, "preset_id": "cinematic"}}],
+        "好的，为当前照片套用电影感预设。",
+    ),
+    Example(
+        "en",
+        "raise the saturation by 15 and set the clarity to 20",
+        [
+            {
+                "tool": "adjust_sliders",
+                "args": {"selection": _CF, "values": {"saturation": 15}, "relative": True},
+            },
+            {
+                "tool": "adjust_sliders",
+                "args": {"selection": _CF, "values": {"clarity": 20}, "relative": False},
+            },
+        ],
+        "Raising the saturation by 15 and setting the clarity to 20.",
+    ),
+    Example(
+        "en",
+        "show the photos taken on 2024-05-01",
+        [{"tool": "filter", "args": {"taken_from": "2024-05-01", "taken_to": "2024-05-01"}}],
+        "Showing the photos taken on 2024-05-01.",
+    ),
+    Example(
+        "zh",
         "每个连拍组只留最好的2张，其余淘汰",
         [{"tool": "group_keep_top", "args": {"selection": _CF, "n": 2, "reject_rest": True}}],
         "每个连拍组保留前2张，其余标为淘汰。",
@@ -308,6 +335,13 @@ def build_system_prompt(
         "burst group; 场景 = scene; 小红书 = xiaohongshu; 微信/朋友圈 = wechat; 筛选/找出/显示 = filter; "
         "导出 = export; AI评分 = AI rating; 一键合成最佳表情 = Best Take.\n"
         "- Ratings are 0-5 stars (null clears). Flags: 1 = pick, -1 = reject, 0 = clear.\n"
+        "- A named preset, look or style (预设/滤镜/风格/色调, e.g. 暖调胶片 = film_warm, 黑白 = "
+        "bw_classic) is `apply_preset` with the id from the available presets. `apply_profiles` is "
+        "only for people's beauty profiles (美颜档案), never for a preset or look.\n"
+        "- Capture dates go into `filter` as `taken_from` / `taken_to` (YYYY-MM-DD, both ends "
+        "included; one day = the same date twice). `scene_type` is only one of its listed values: a "
+        "place or subject that is not one (beach, Kyoto) cannot be filtered, so leave it out and say "
+        "so in the reply instead of guessing.\n"
         "- An edit request that names a slider and a number is `adjust_sliders`: 提高/增加/降低/减少/"
         "reduce/raise/lower/increase = `relative: true` with the signed amount; 设为/调到/set to = "
         "`relative: false` with the absolute value. Use `auto_adjust` only when the user asks for "
@@ -331,7 +365,7 @@ def build_plan_messages(
     exs = usable_examples(tools) + context_examples(tools, context)
     want = "zh" if is_zh(locale) else "en"
     exs = [e for e in exs if e.locale != want] + [e for e in exs if e.locale == want]
-    for e in exs[-8:]:
+    for e in exs[-10:]:
         msgs.append({"role": "user", "content": e.user})
         msgs.append(
             {"role": "assistant", "content": _compact({"calls": e.calls, "reply": e.reply})}
