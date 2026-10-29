@@ -39,7 +39,7 @@ export function CommandPalette() {
         <Dialog.Content
           data-palette=""
           aria-describedby={undefined}
-          className="anim-pop fixed top-[14vh] left-1/2 z-50 flex max-h-[70vh] w-[calc(100vw-32px)] max-w-xl -translate-x-1/2 flex-col overflow-hidden rounded-card border border-line bg-panel shadow-[var(--shadow)]"
+          className="anim-pop fixed top-[14vh] left-1/2 z-50 flex palette-max-h w-[calc(100vw-32px)] max-w-xl -translate-x-1/2 flex-col overflow-hidden rounded-card border border-line bg-panel shadow-[var(--shadow)]"
           data-testid="command-palette"
         >
           <PaletteBody onClose={() => setOpen(false)} />

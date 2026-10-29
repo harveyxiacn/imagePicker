@@ -9,6 +9,7 @@ import { qk } from '@/lib/cache'
 import { useHistory } from '@/lib/history'
 import { movedFacesEntry, personPatchEntry, refreshPeople } from '@/lib/structureUndo'
 import { setPersonTri } from '@/lib/filter'
+import { usePopover } from '@/lib/usePopover'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { MenuItem } from './MenuItem'
@@ -31,6 +32,8 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
   const [naming, setNaming] = useState<Face | null>(null)
   const [name, setName] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  // Escape / click outside / focus into the menu + arrow keys; focus goes back to what had it before the right-click
+  const pop = usePopover({ open: menu !== null, onClose: () => setMenu(null), menu: true, panelRef: ref })
 
   const open = useCallback((e: { clientX: number; clientY: number; preventDefault: () => void }, face: Face) => {
     e.preventDefault()
@@ -40,17 +43,9 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close()
-    }
-    document.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey, true)
     window.addEventListener('blur', close)
     window.addEventListener('resize', close)
     return () => {
-      document.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('blur', close)
       window.removeEventListener('resize', close)
     }
@@ -109,6 +104,7 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
         createPortal(
           <div
             ref={ref}
+            {...pop.panelProps}
             role="menu"
             aria-label={t('face.menu')}
             className="anim-pop fixed z-[70] min-w-52 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]"

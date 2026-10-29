@@ -82,8 +82,8 @@ export function useShortcuts(ctrl: Controller) {
     const onKey = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target)) return
       const ui = useUi.getState()
-      // While a dialog is open only the help toggle is active (Radix handles Escape).
-      const dialogOpen = !!document.querySelector('[role="dialog"]')
+      // While a dialog, popover or menu is open only the help toggle is active (Radix / usePopover handle Escape and arrows).
+      const dialogOpen = !!document.querySelector('[role="dialog"], [role="menu"]')
       if (dialogOpen && e.key !== '?') return
       const scope: Scope = ui.view
 

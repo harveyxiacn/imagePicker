@@ -20,7 +20,7 @@ export function Modal({ open, onOpenChange, title, description, children, footer
       <Dialog.Portal>
         <Dialog.Overlay className="anim-fade fixed inset-0 z-40 bg-black/60" />
         <Dialog.Content
-          className={`anim-pop fixed top-1/2 left-1/2 z-50 flex max-h-[88vh] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-card border border-line bg-panel shadow-[var(--shadow)] ${width}`}
+          className={`anim-pop fixed top-1/2 left-1/2 z-50 flex modal-max-h w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-card border border-line bg-panel shadow-[var(--shadow)] ${width}`}
         >
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <Dialog.Title className="text-base font-semibold">{title}</Dialog.Title>
