@@ -83,6 +83,11 @@ export function acceptableDevices(devices: DeviceOffset[]): DeviceOffset[] {
   return devices.filter((d) => canAccept(d) && (d.estimate?.confidence ?? 0) >= ACCEPT_MIN_CONFIDENCE)
 }
 
+/** Estimates "accept all" leaves out: they would change the offset but are too weak to take unseen. */
+export function reviewDevices(devices: DeviceOffset[]): DeviceOffset[] {
+  return devices.filter((d) => canAccept(d) && (d.estimate?.confidence ?? 0) < ACCEPT_MIN_CONFIDENCE)
+}
+
 /** Whether any device has a correction applied. */
 export function hasCorrection(devices: DeviceOffset[]): boolean {
   return devices.some((d) => d.offset_ms !== 0)

@@ -13,6 +13,7 @@ import {
   formatOffset,
   hasCorrection,
   needsAlignment,
+  reviewDevices,
 } from '@/lib/timeAlign'
 import { DeviceKindIcon } from './DeviceFilterPopover'
 
@@ -47,6 +48,7 @@ export function DeviceTimePanel({ sessionId, open }: { sessionId: number; open: 
     m.mutate({ action: 'set', device_id: d.device_id, offset_ms: checked.ms }, { onSuccess: () => setEditing(null) })
   }
   const toAccept = acceptableDevices(devices)
+  const toReview = reviewDevices(devices)
 
   return (
     <section className="mt-2 border-t border-line pt-2" aria-label={t('timeAlign.title')} data-testid="time-align-panel">
@@ -60,6 +62,7 @@ export function DeviceTimePanel({ sessionId, open }: { sessionId: number; open: 
       <ul className="mt-1.5 flex max-h-[220px] flex-col gap-1.5 overflow-y-auto">
         {devices.map((d) => {
           const e = d.estimate
+          const weak = !!e && e.source !== 'reference' && confidenceLevel(e.confidence) === 'low'
           return (
             <li key={d.device_id} className="rounded-control border border-line px-2 py-1.5" data-testid={`time-align-device-${d.device_id}`}>
               <div className="flex items-center gap-2">
@@ -77,7 +80,7 @@ export function DeviceTimePanel({ sessionId, open }: { sessionId: number; open: 
                 {e && e.source === 'reference' && t('timeAlign.reference')}
                 {e && e.source !== 'reference' && (
                   <>
-                    {t('timeAlign.estimate')} <span className="tnum text-fg">{formatOffset(e.offset_ms)}</span> {'· '}
+                    {weak ? t('timeAlign.suggestion') : t('timeAlign.estimate')} <span className="tnum text-fg">{formatOffset(e.offset_ms)}</span> {'· '}
                     <span className={confidenceLevel(e.confidence) === 'low' ? 'text-warning' : ''}>
                       {t(`timeAlign.conf_${confidenceLevel(e.confidence)}`)} {fmtPct(e.confidence)}
                     </span>{' '}
@@ -142,6 +145,11 @@ export function DeviceTimePanel({ sessionId, open }: { sessionId: number; open: 
           )
         })}
       </ul>
+      {owner && toReview.length > 0 && (
+        <p className="mt-1.5 text-xs text-faint" data-testid="time-align-review">
+          {t('timeAlign.reviewHint', { n: toReview.length })}
+        </p>
+      )}
       {owner && (toAccept.length > 0 || hasCorrection(devices)) && (
         <div className="mt-1.5 flex justify-end gap-2">
           {hasCorrection(devices) && (
