@@ -1,5 +1,5 @@
-import { ChevronLeft, Columns2, Download, FolderTree, GalleryHorizontal, HelpCircle, Info, LayoutGrid, MoreVertical, SlidersHorizontal, Square, Users } from 'lucide-react'
-import { useState } from 'react'
+import { ChevronLeft, Columns2, Download, FolderTree, GalleryHorizontal, HelpCircle, Info, LayoutGrid, MoreVertical, Search, SlidersHorizontal, Square, Users } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { useMe } from '@/api/queries'
@@ -11,6 +11,7 @@ import { AnalyzeControl } from '../AnalyzeControl'
 import { AssistantButton } from '../assistant/AssistantDrawer'
 import { FilterBar } from '../FilterBar'
 import { HeaderControls } from '../HeaderControls'
+import { SearchBox } from '../SearchBox'
 import { Sheet } from './Sheet'
 
 const VIEWS: { v: View; icon: typeof LayoutGrid }[] = [
@@ -30,7 +31,11 @@ interface Props {
   onView: (v: View) => void
 }
 
-/** Phone header: back + title + filter sheet + analyze + overflow menu, with quick flag chips underneath. */
+/**
+ * Phone header: back + title + search + filter sheet + analyze + overflow menu, with quick flag chips underneath.
+ * Search swaps the title row for a full-width search box (open while a search is on); "Cancel" clears the search and
+ * returns focus to the search button.
+ */
 export function MobileTopBar({ sessionId, session, shown, total, onView }: Props) {
   const { t } = useTranslation()
   const filter = useUi((s) => s.filter)
@@ -43,28 +48,63 @@ export function MobileTopBar({ sessionId, session, shown, total, onView }: Props
   const role = useMe().data?.role ?? 'owner'
   const [filterOpen, setFilterOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searching = searchOpen || filter.search !== ''
+  const searchButton = useRef<HTMLButtonElement>(null)
+  const refocus = useRef(false)
+  const closeSearch = () => {
+    setFilter({ search: '' })
+    setSearchOpen(false)
+    refocus.current = true
+  }
+  useEffect(() => {
+    if (searching || !refocus.current) return
+    refocus.current = false
+    searchButton.current?.focus()
+  }, [searching])
   const active = isFilterActive(filter)
+
+  const filterButton = (
+    <button className="btn btn-ghost btn-icon relative" aria-label={t('mobile.filter')} onClick={() => setFilterOpen(true)} data-testid="mobile-filter">
+      <SlidersHorizontal size={18} />
+      {active && <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-accent" />}
+    </button>
+  )
 
   const item = 'flex min-h-12 w-full items-center gap-3 px-4 text-left text-base active:bg-elevated'
 
   return (
     <header className="shrink-0 border-b border-line" data-testid="mobile-topbar">
       <div className="flex h-12 items-center gap-1 px-1">
-        <Link to="/" className="btn btn-ghost btn-icon" aria-label={t('common.back')}>
-          <ChevronLeft size={20} />
-        </Link>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-base leading-tight font-semibold">{session?.title ?? '…'}</div>
-          <div className="tnum text-[11px] leading-tight text-muted">{shown === total ? total.toLocaleString() : `${shown.toLocaleString()} / ${total.toLocaleString()}`}</div>
-        </div>
-        <button className="btn btn-ghost btn-icon relative" aria-label={t('mobile.filter')} onClick={() => setFilterOpen(true)} data-testid="mobile-filter">
-          <SlidersHorizontal size={18} />
-          {active && <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-accent" />}
-        </button>
-        {can(role, 'analyze') && <AnalyzeControl sessionId={sessionId} photoCount={session?.photo_count ?? 0} />}
-        <button className="btn btn-ghost btn-icon" aria-label={t('mobile.more')} onClick={() => setMenuOpen(true)} data-testid="mobile-more">
-          <MoreVertical size={18} />
-        </button>
+        {searching ? (
+          <>
+            <div className="flex min-w-0 flex-1 pl-1">
+              <SearchBox sessionId={sessionId} mobile onClose={closeSearch} />
+            </div>
+            {filterButton}
+            <button className="btn btn-ghost shrink-0 !h-11 !px-3" onClick={closeSearch} data-testid="mobile-search-close">
+              {t('common.cancel')}
+            </button>
+          </>
+        ) : (
+          <>
+            <Link to="/" className="btn btn-ghost btn-icon" aria-label={t('common.back')}>
+              <ChevronLeft size={20} />
+            </Link>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-base leading-tight font-semibold">{session?.title ?? '…'}</div>
+              <div className="tnum text-[11px] leading-tight text-muted">{shown === total ? total.toLocaleString() : `${shown.toLocaleString()} / ${total.toLocaleString()}`}</div>
+            </div>
+            <button ref={searchButton} className="btn btn-ghost btn-icon" aria-label={t('search.label')} onClick={() => setSearchOpen(true)} data-testid="mobile-search">
+              <Search size={18} />
+            </button>
+            {filterButton}
+            {can(role, 'analyze') && <AnalyzeControl sessionId={sessionId} photoCount={session?.photo_count ?? 0} />}
+            <button className="btn btn-ghost btn-icon" aria-label={t('mobile.more')} onClick={() => setMenuOpen(true)} data-testid="mobile-more">
+              <MoreVertical size={18} />
+            </button>
+          </>
+        )}
       </div>
       <div className="flex gap-1.5 overflow-x-auto px-2 pb-2" role="group" aria-label={t('filter.flag')} data-testid="flag-chips">
         {FLAG_CHIPS.map((f) => (

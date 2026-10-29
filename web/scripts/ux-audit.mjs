@@ -134,6 +134,13 @@ try {
       }, errors);
       await page.getByTestId('search-clear').click().catch(() => {});
     } else {
+      await step(page, s('19-search'), async () => {
+        await page.getByTestId('mobile-search').click();
+        await page.getByTestId('search-input').fill('一只猫');
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(2500);
+      }, errors);
+      await page.getByTestId('mobile-search-close').click().catch(() => {});
       await step(page, s('03-cull'), async () => { await page.locator('[data-id]').first().click(); await page.waitForTimeout(900); }, errors);
       await step(page, s('04-cull-swipe'), async () => {
         const vp = page.viewportSize();
