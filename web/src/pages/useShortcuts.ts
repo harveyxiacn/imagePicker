@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { guestBlocked } from '@/lib/actions'
 import { canNow } from '@/lib/auth'
-import { COLOR_KEYS, dispatchKey, isTypingTarget, type Handlers, type Scope } from '@/lib/keymap'
+import { COLOR_KEYS, dispatchKey, isTypingTarget, tabIsShortcut, type Handlers, type Scope } from '@/lib/keymap'
 import { registerPaletteHost } from '@/lib/paletteHost'
 import { useUi } from '@/stores/ui'
 import type { Controller } from './useController'
@@ -86,6 +86,8 @@ export function useShortcuts(ctrl: Controller) {
       const dialogOpen = !!document.querySelector('[role="dialog"]')
       if (dialogOpen && e.key !== '?') return
       const scope: Scope = ui.view
+      // Tab keeps moving focus unless nothing useful is focused (see tabIsShortcut).
+      if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && !tabIsShortcut(e.target)) return
 
       // Shift+arrows extend the selection in the grid.
       if (scope === 'grid' && e.shiftKey && !e.ctrlKey && !e.metaKey) {

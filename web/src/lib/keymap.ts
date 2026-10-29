@@ -202,6 +202,23 @@ export function isTextEntryTarget(t: EventTarget | null): boolean {
   return isTypingTarget(t)
 }
 
+/**
+ * Tab is also a shortcut (inspector / swap). It must not swallow focus traversal: it fires only when nothing
+ * is focused, or when the photo grid holds a pointer-driven focus. A keyboard-focused grid (`:focus-visible`)
+ * and every other control let Tab move focus natively.
+ */
+export function tabIsShortcut(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null
+  if (!el || typeof el.tagName !== 'string') return true
+  if (el.tagName === 'BODY' || el.tagName === 'HTML') return true
+  if (el.getAttribute('role') !== 'grid') return false
+  try {
+    return !el.matches(':focus-visible')
+  } catch {
+    return true
+  }
+}
+
 export type Handlers = Record<string, ((spec: string) => void) | undefined>
 
 /** Resolve and run the action bound to `e` in `scope`. Returns true when handled. */

@@ -104,7 +104,19 @@ export const zhCN = {
     notAnalysed: '当前范围内有 {{n}} 张照片还没有分析，无法搜索。请先运行标准分析。',
     someNotAnalysed: '另有 {{n}} 张照片尚未分析，搜不到。',
   },
-  grid: { label: '照片网格', empty: '没有符合条件的照片' },
+  grid: {
+    label: '照片网格',
+    empty: '这个会话里还没有照片',
+    emptyFiltered: '没有符合当前筛选的照片',
+    emptyHidden: '已隐藏 {{n}} 张照片',
+  },
+  a11y: {
+    sep: '，',
+    starOne: '1 星',
+    aiRating: 'AI 建议 {{n}}',
+    colorLabel: '色标：{{c}}',
+    stack: '连拍堆栈，共 {{n}} 张',
+  },
   filter: {
     aiRating: 'AI 星级',
     issues: '问题',
