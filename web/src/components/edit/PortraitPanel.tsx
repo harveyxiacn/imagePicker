@@ -28,6 +28,7 @@ import {
   type PersonKey,
 } from '@/lib/beauty'
 import { qk } from '@/lib/cache'
+import { usePersonLabel } from '@/lib/usePersonLabel'
 import { changeStack, commitLive, setLive } from '@/lib/editActions'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useEdit } from '@/stores/edit'
@@ -56,6 +57,7 @@ function Chip({ active, onClick, edited, children, testId, title }: { active: bo
 /** Portrait beauty section of the edit panel (doc 04 3.5): per-person beauty / face / body ops. */
 export function PortraitPanel({ photo }: { photo: Photo }) {
   const { t } = useTranslation()
+  const personLabel = usePersonLabel()
   const qc = useQueryClient()
   const stack = useEdit((s) => s.stack)
   const [preparing, setPreparing] = useState(false)
@@ -94,7 +96,7 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
 
   const cur = () => useEdit.getState().stack
   const lv = () => getLevel(cur(), person, fallbackLevel[String(person)])
-  const who = person === null ? t('beauty.everyone') : (personInfo?.person_name ?? `#${person}`)
+  const who = person === null ? t('beauty.everyone') : personLabel(person, personInfo?.person_name ?? null)
   const label = (name: string) => t('history.portrait', { name, who })
 
   const setLevelTo = (l: Level) => {
@@ -192,7 +194,7 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
                   title={c.has_profile ? t('beauty.hasProfile') : undefined}
                 >
                   <img src={faceCropUrl(c.face_id, 128)} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" draggable={false} />
-                  <span className="max-w-16 truncate">{c.person_name ?? `${t('person.unnamed')} ${c.person_id}`}</span>
+                  <span className="max-w-16 truncate">{personLabel(c.person_id, c.person_name)}</span>
                   {c.has_profile && <Star size={10} className="shrink-0 text-accent" fill="currentColor" />}
                 </Chip>
               ))}

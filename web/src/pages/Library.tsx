@@ -132,6 +132,7 @@ export function Library() {
 
   const selectedIds = useMemo(() => [...selection.ids], [selection])
   const allIds = useMemo(() => gridPhotos.map((p) => p.id), [gridPhotos])
+  const fullIds = useMemo(() => photos.map((p) => p.id), [photos])
   const targetCount = view === 'grid' && selection.ids.size > 1 ? selection.ids.size : 1
 
   const pick = (id: number) => {
@@ -246,6 +247,7 @@ export function Library() {
               photos={listPhotos}
               photo={active}
               index={activeIndex}
+              total={photos.length}
               onMove={(d) => ctrl.move(d)}
               onPick={pick}
               onRate={(n) => ctrl.rate(n ?? 0)}
@@ -352,7 +354,7 @@ export function Library() {
       {photoMenu.node}
       <SaveCollectionDialog />
       <FaceSearchDialog sessionId={sessionId} />
-      <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={selectedIds} allIds={allIds} photos={photos} />
+      <ExportDialog open={exportOpen} onOpenChange={useUi.getState().setExportOpen} selectedIds={selectedIds} allIds={allIds} fullIds={fullIds} photos={photos} />
     </div>
   )
 }

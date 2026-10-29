@@ -1,5 +1,6 @@
 import type { Issue, Photo } from '@/api/types'
 import { computeChanges, type Change } from './history'
+import { displayName } from './people'
 
 export interface IssueBadge {
   issue: Issue
@@ -84,4 +85,4 @@ export function commonBestFrames(tracks: { best_photo_ids: number[] }[]): number
   return first.best_photo_ids.filter((id) => rest.every((t) => t.best_photo_ids.includes(id)))
 }
 
-export const personLabel = (p: { id: number; name: string | null }, unnamed: string): string => p.name ?? `${unnamed} ${p.id}`
+export const personLabel = (p: { name: string | null; unnamed_no?: number }, unnamed: string): string => displayName(p, unnamed)

@@ -4,6 +4,7 @@ import { queryToFilter } from '@/lib/collections'
 import { buildPhotosQuery, type FilterState } from '@/lib/filter'
 import { qk, type PhotosData } from '@/lib/cache'
 import { isLive } from '@/lib/tasks'
+import { withUnnamedNumbers } from '@/lib/people'
 import { mergeSettings } from '@/lib/settingsForm'
 import { useToasts } from '@/stores/toasts'
 import type { OffsetsAction } from '@/lib/timeAlign'
@@ -232,7 +233,7 @@ export function usePeople(sessionId?: number) {
   return useQuery({
     queryKey: qk.people(sessionId),
     queryFn: () => api.people(sessionId),
-    select: (d) => d.people,
+    select: (d) => withUnnamedNumbers(d.people),
     staleTime: 15_000,
     enabled: me.isSuccess && me.data.role !== 'guest',
   })

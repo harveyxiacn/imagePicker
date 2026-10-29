@@ -18,6 +18,7 @@ import { runGen } from '@/lib/gen'
 import { useHistory } from '@/lib/history'
 import { dispatchKey, eventToSpec, findBinding, isTextEntryTarget, type Handlers } from '@/lib/keymap'
 import { removeBestTake } from '@/lib/patches'
+import { usePersonLabel } from '@/lib/usePersonLabel'
 import { useEdit } from '@/stores/edit'
 import { useGen } from '@/stores/gen'
 import { useToasts } from '@/stores/toasts'
@@ -104,7 +105,8 @@ export function BestTake() {
     navigate(`/s/${sessionId}`, { state: { keep: true } })
   }, [qc, navigate, sessionId])
 
-  const who = (p: PersonView) => p.name ?? t('person.unnamed')
+  const personLabel = usePersonLabel()
+  const who = (p: PersonView) => personLabel(p.person_id, p.name)
 
   const choose = (p: PersonView, c: CandidateView) => {
     if (baseId === null) return
