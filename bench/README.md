@@ -95,9 +95,10 @@ python bench/eval-search.py bench/data/qwen-photo-library --dry-run      # no se
 ```
 
 * 20 concepts (beach, snow, cat, dog, noodles, birthday cake, neon street, group photo, ...), each as an English and a Chinese query. A photo is relevant when the English prompt that generated it mentions the concept (regular expression over the scene text, style preamble cut) or its tags say so; prompts are intentions, not verified truth, so absolute recall is underestimated. The numbers compare zh with en and one model / threshold with another.
-* Per query: relevant photos, hits in the top K, precision@K, recall@K (hits / relevant) and *capped* recall@K (hits / min(K, relevant); 1.0 = the best possible top K, the figure to compare with the 09 P1-4 target of 0.8). The summary averages each over the en and zh queries. `--min-score` defaults to 0 so the ranking is measured; use `0.05` for what a user sees.
+* Per query: relevant photos, hits in the top K, precision@K, recall@K (hits / relevant) and *capped* recall@K (hits / min(K, relevant); 1.0 = the best possible top K, the figure to compare with the 09 P1-4 target of 0.8), the top hit's score and cosine, how many photos matched and the server's `low_confidence` flag. The summary averages each over the en and zh queries. `--min-score` defaults to 0 so the ranking is measured; `--default-params` sends what the web UI sends (no `min_score`, so the server's adaptive threshold, and `limit=300`) to measure what a user sees.
+* Ten absent concepts (a giraffe / 长颈鹿, a submarine / 潜水艇, ...) are asked in both languages as well (`--no-absent` skips them): they should come back empty or flagged `low_confidence`; the summary counts those that return photos without the flag.
 * Exit status: 0 when it ran, 2 when the text model is missing (HTTP 409), 1 on other errors. Standard library only.
-* Not run in the Oracle development session that added it (no models, no GPU there): the first numbers are still to be recorded here by whoever runs it on the GPU PC.
+* First numbers (2026-10-29, standard catalog of the 1000-photo library): ranking only R@20 en 0.733 / zh 0.609; `--default-params` before the adaptive threshold (fixed `min_score` 0.05) en 0.377 / zh 0.086 with 11 of 20 Chinese queries empty, after it en 0.733 / zh 0.606, absent concepts 19 of 20 flagged `low_confidence`. Details and per-query tables: docs/03 section 3.4.
 
 ## Reproduce
 

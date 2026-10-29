@@ -1,4 +1,4 @@
-import type { ModelInfo, Photo, SearchHit } from '@/api/types'
+import type { ModelInfo, Photo, SearchHit, SearchMeta } from '@/api/types'
 
 /** Natural-language photo search (PRD F2.9): pure helpers; the request itself lives in api/client.ts. */
 
@@ -37,6 +37,11 @@ export function textModelState(models: Pick<ModelInfo, 'id' | 'installed'>[] | u
   const m = models.find((x) => x.id === TEXT_MODEL)
   if (!m) return 'unknown'
   return m.installed ? 'ready' : 'missing'
+}
+
+/** Show the "weak matches" notice above the results: a search is on, it found photos, and the server flagged them. */
+export function showLowConfidence(search: string, meta: Pick<SearchMeta, 'low_confidence'> | undefined, shown: number): boolean {
+  return search !== '' && shown > 0 && meta?.low_confidence === true
 }
 
 /** Score of a hit as a percentage for tooltips. */

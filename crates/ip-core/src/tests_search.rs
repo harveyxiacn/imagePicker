@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::analysis::vecs::encode_f16;
 use crate::fake_worker::FakeWorker;
-use crate::search::{SearchRequest, DEFAULT_MIN_SCORE};
+use crate::search::{score_of, SearchRequest, CONFIDENT_SIMILARITY};
 use crate::testutil::{make_photos, FakeImaging};
 use crate::*;
 
@@ -28,8 +28,9 @@ fn unit(v: [f32; 4]) -> Vec<u8> {
 }
 
 /// 8 photos. Query "sunset" = e0 and "dog" = e1; cosine of each photo to "sunset":
-/// 0: 1.0, 1: .9, 2: .5, 3: 0 (it is "dog"), 4: no analysis row, 5: .10 (below the default
-/// threshold), 6: .15 (just above it), 7: analysed without an embedding.
+/// 0: 1.0, 1: .9, 2: .5, 3: 0 (it is "dog"), 4: no analysis row, 5: .08 (below the confident
+/// similarity, the default threshold of a scope this small), 6: .15 (above it), 7: analysed
+/// without an embedding.
 async fn env_with(worker: Arc<dyn ip_worker_client::AiWorker>, fake: Arc<FakeWorker>) -> Env {
     let data = tempfile::tempdir().unwrap();
     let src = tempfile::tempdir().unwrap();
@@ -71,7 +72,7 @@ async fn env_with(worker: Arc<dyn ip_worker_client::AiWorker>, fake: Arc<FakeWor
                 (1, Some(unit([0.9, sin(0.9), 0.0, 0.0]))),
                 (2, Some(unit([0.5, sin(0.5), 0.0, 0.0]))),
                 (3, Some(unit([0.0, 1.0, 0.0, 0.0]))),
-                (5, Some(unit([0.10, sin(0.10), 0.0, 0.0]))),
+                (5, Some(unit([0.08, sin(0.08), 0.0, 0.0]))),
                 (6, Some(unit([0.15, sin(0.15), 0.0, 0.0]))),
                 (7, None),
             ] {
@@ -130,7 +131,10 @@ async fn ranks_by_similarity_and_applies_the_default_threshold() {
         [0, 1, 2, 6],
         "best first; photo 5 is below the threshold"
     );
-    assert_eq!(out.min_score, DEFAULT_MIN_SCORE);
+    assert_eq!(out.threshold, "adaptive");
+    assert_eq!(out.min_similarity, Some(0.095));
+    assert!((out.min_score - score_of(CONFIDENT_SIMILARITY)).abs() < 1e-6);
+    assert!(!out.low_confidence);
     assert_eq!((out.total_matched, out.searched, out.unindexed), (4, 6, 2));
     assert_eq!(out.query, "sunset");
     assert_eq!(out.model, "fake-siglip-text");
@@ -138,7 +142,7 @@ async fn ranks_by_similarity_and_applies_the_default_threshold() {
     assert!(s.windows(2).all(|w| w[0] >= w[1]), "scores descend: {s:?}");
     assert!((out.hits[0].similarity - 1.0).abs() < 1e-3);
     assert!((out.hits[1].similarity - 0.9).abs() < 2e-3);
-    assert!(out.hits[0].score > 0.99 && out.hits[3].score < 0.9 && out.hits[3].score > 0.05);
+    assert!(out.hits[0].score > 0.99 && out.hits[3].score < 0.9 && out.hits[3].score > 0.5);
     // strong matches all saturate to a score of 1.0: the cosine still orders them
     assert_eq!(out.hits[1].score, 1.0);
     assert!(out.hits[0].similarity > out.hits[1].similarity);
@@ -169,6 +173,8 @@ async fn min_score_and_limit() {
         .await
         .unwrap();
     assert_eq!(e.idx(&strict), [0, 1, 2], "photo 6 (score .6) falls out");
+    assert_eq!((strict.threshold, strict.min_score), ("min_score", 0.9));
+    assert_eq!(strict.min_similarity, None);
     let top2 = e
         .core
         .search_photos(SearchRequest {
@@ -179,6 +185,41 @@ async fn min_score_and_limit() {
         .unwrap();
     assert_eq!(e.idx(&top2), [0, 1]);
     assert_eq!(top2.total_matched, 4, "the count ignores the limit");
+}
+
+#[tokio::test]
+async fn a_query_nothing_matches_is_low_confidence() {
+    let e = env().await;
+    // only photo 5 (cosine .08) and photo 3 (0) are in scope: both below the confident similarity
+    let ids = e.ids.clone();
+    e.core
+        .db
+        .call(move |c| {
+            for i in [3, 5] {
+                c.execute("UPDATE photo SET flag=1 WHERE id=?1", [ids[i]])?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut req = e.req("sunset");
+    req.filter.as_mut().unwrap().flag = FlagFilter::Picked;
+    let out = e.core.search_photos(req.clone()).await.unwrap();
+    assert!(out.hits.is_empty() && out.low_confidence);
+    assert_eq!(out.searched, 2);
+    // an explicit threshold returns the nearest photos, still flagged
+    req.min_score = Some(0.0);
+    let out = e.core.search_photos(req).await.unwrap();
+    assert_eq!(e.idx(&out), [5, 3]);
+    assert!(out.low_confidence);
+    // the whole session has strong matches
+    assert!(
+        !e.core
+            .search_photos(e.req("sunset"))
+            .await
+            .unwrap()
+            .low_confidence
+    );
 }
 
 #[tokio::test]

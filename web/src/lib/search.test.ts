@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetchSearchPhotos, photosQueryString, searchQueryString } from '@/api/client'
 import { buildPhotosQuery, DEFAULT_FILTER, isFilterActive } from './filter'
 import { makePhoto } from './fixtures'
-import { MAX_QUERY_CHARS, normalizeSearch, orderByHits, scorePercent, TEXT_MODEL, textModelState } from './search'
+import { MAX_QUERY_CHARS, normalizeSearch, orderByHits, scorePercent, showLowConfidence, TEXT_MODEL, textModelState } from './search'
 
 describe('normalizeSearch', () => {
   it('trims and collapses whitespace, in any script', () => {
@@ -118,7 +118,7 @@ describe('fetchSearchPhotos', () => {
     const r = await fetchSearchPhotos({ session_id: 9, flag: 'picked', sort: 'name', search: 'dog' })
     expect(r.photos.map((p) => p.id)).toEqual([3, 1])
     expect(r.total).toBe(2)
-    expect(r.search).toEqual({ total_matched: 2, searched: 4, unindexed: 1 })
+    expect(r.search).toEqual({ total_matched: 2, searched: 4, unindexed: 1, low_confidence: false })
     expect(urls).toHaveLength(2)
     expect(urls[0]).toContain('/api/search?')
     expect(urls[0]).toContain('q=dog')
@@ -134,7 +134,7 @@ describe('fetchSearchPhotos', () => {
     )
     vi.stubGlobal('fetch', f)
     const r = await fetchSearchPhotos({ session_id: 1, search: 'x' })
-    expect(r).toEqual({ photos: [], total: 0, search: { total_matched: 0, searched: 0, unindexed: 7 } })
+    expect(r).toEqual({ photos: [], total: 0, search: { total_matched: 0, searched: 0, unindexed: 7, low_confidence: false } })
     expect(f).toHaveBeenCalledTimes(1)
   })
 
@@ -144,5 +144,39 @@ describe('fetchSearchPhotos', () => {
       vi.fn(() => json({ error: { code: 'models_missing', message: 'required models are not installed: siglip2-base-text' }, models: [TEXT_MODEL] }, 409)),
     )
     await expect(fetchSearchPhotos({ session_id: 1, search: 'x' })).rejects.toMatchObject({ status: 409, code: 'models_missing' })
+  })
+})
+
+describe('low-confidence results', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('carries the server flag into the search meta', async () => {
+    const body = { query: '长颈鹿', model: 'm', threshold: 'adaptive', min_score: 0.0002, min_similarity: 0.07, low_confidence: true }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify(
+              url.startsWith('/api/search')
+                ? { ...body, hits: [{ photo_id: 1, score: 0.0003, similarity: 0.072 }], total_matched: 1, searched: 50, unindexed: 0 }
+                : { photos: [makePhoto(1)], total: 1, next_cursor: null },
+            ),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        ),
+      ),
+    )
+    const r = await fetchSearchPhotos({ session_id: 1, search: '长颈鹿' })
+    expect(r.search.low_confidence).toBe(true)
+    expect(r.photos).toHaveLength(1)
+  })
+
+  it('shows the notice only above flagged, non-empty search results', () => {
+    expect(showLowConfidence('长颈鹿', { low_confidence: true }, 12)).toBe(true)
+    expect(showLowConfidence('长颈鹿', { low_confidence: true }, 0)).toBe(false) // the empty state explains instead
+    expect(showLowConfidence('猫', { low_confidence: false }, 12)).toBe(false)
+    expect(showLowConfidence('', { low_confidence: true }, 12)).toBe(false)
+    expect(showLowConfidence('猫', undefined, 12)).toBe(false)
   })
 })

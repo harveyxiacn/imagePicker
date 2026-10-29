@@ -426,7 +426,12 @@ export async function fetchSearchPhotos(
 ): Promise<{ photos: Photo[]; total: number; search: SearchMeta }> {
   const text = q.search ?? ''
   const res = await api.search(q, text)
-  const search: SearchMeta = { total_matched: res.total_matched, searched: res.searched, unindexed: res.unindexed }
+  const search: SearchMeta = {
+    total_matched: res.total_matched,
+    searched: res.searched,
+    unindexed: res.unindexed,
+    low_confidence: res.low_confidence === true,
+  }
   if (!res.hits.length) return { photos: [], total: 0, search }
   const { photos } = await fetchAllPhotos({ session_id: q.session_id, ids: res.hits.map((h) => h.photo_id) })
   const ordered = orderByHits(photos, res.hits)
