@@ -11,8 +11,11 @@ import { useUi } from '@/stores/ui'
  * Top-bar natural-language search (PRD F2.9). Typing applies the query to the library filter after a short pause
  * (Enter applies at once, Esc clears); the result shows as a "Search: ..." pill in the filter bar. Without the text
  * model the box is disabled and offers to install it.
+ *
+ * `mobile`: the phone header's search row (full width, focused when it opens, Enter closes the keyboard so the results
+ * show, Esc on an empty box calls `onClose`).
  */
-export function SearchBox({ sessionId }: { sessionId: number }) {
+export function SearchBox({ sessionId, mobile = false, onClose }: { sessionId: number; mobile?: boolean; onClose?: () => void }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const search = useUi((s) => s.filter.search)
@@ -37,6 +40,10 @@ export function SearchBox({ sessionId }: { sessionId: number }) {
     return () => window.clearTimeout(id)
   }, [draft, search, setFilter])
 
+  useEffect(() => {
+    if (mobile) input.current?.focus()
+  }, [mobile])
+
   const installModel = () =>
     useAnalysisUi.getState().setConsent({
       sessionId,
@@ -47,7 +54,7 @@ export function SearchBox({ sessionId }: { sessionId: number }) {
 
   if (state === 'missing') {
     return (
-      <div className="relative ml-1 hidden min-w-0 max-w-96 flex-1 items-center gap-1.5 lg:flex" data-testid="search-box">
+      <div className={mobile ? 'flex min-w-0 flex-1 items-center gap-1.5' : 'relative ml-1 hidden min-w-0 max-w-96 flex-1 items-center gap-1.5 lg:flex'} data-testid="search-box">
         <div className="relative min-w-0 flex-1">
           <Search size={14} className="absolute top-1/2 left-2 -translate-y-1/2 text-faint" />
           <input
@@ -68,7 +75,7 @@ export function SearchBox({ sessionId }: { sessionId: number }) {
   }
 
   return (
-    <div className="relative ml-1 hidden min-w-0 max-w-72 flex-1 lg:block" data-testid="search-box">
+    <div className={mobile ? 'relative min-w-0 flex-1' : 'relative ml-1 hidden min-w-0 max-w-72 flex-1 lg:block'} data-testid="search-box">
       <Search size={14} className="absolute top-1/2 left-2 -translate-y-1/2 text-faint" />
       <input
         ref={input}
@@ -78,20 +85,27 @@ export function SearchBox({ sessionId }: { sessionId: number }) {
         placeholder={t('search.placeholder')}
         aria-label={t('search.label')}
         title={t('search.hint')}
+        inputMode="search"
+        enterKeyHint="search"
         data-testid="search-input"
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') setFilter({ search: normalizeSearch(draft) })
-          else if (e.key === 'Escape' && draft) {
+          if (e.key === 'Enter') {
+            setFilter({ search: normalizeSearch(draft) })
+            if (mobile) input.current?.blur()
+          } else if (e.key === 'Escape' && draft) {
             e.stopPropagation()
             setDraft('')
             setFilter({ search: '' })
+          } else if (e.key === 'Escape' && onClose) {
+            e.stopPropagation()
+            onClose()
           }
         }}
       />
       {draft && (
         <button
-          className="absolute top-1/2 right-1 -translate-y-1/2 rounded-full p-1.5 text-faint hover:text-fg"
+          className="hit absolute top-1/2 right-1 -translate-y-1/2 rounded-full p-1.5 text-faint hover:text-fg"
           aria-label={t('search.clear')}
           onClick={() => {
             setDraft('')
