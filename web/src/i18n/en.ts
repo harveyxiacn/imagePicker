@@ -101,6 +101,8 @@ export const en: Messages = {
     install: 'Install search model',
     clear: 'Clear search',
     pill: 'Search',
+    byRelevance: 'By relevance',
+    byRelevanceHint: 'Search results are listed flat, best match first. Clear the search to get your sort and grouping back',
     empty: 'No photos match "{{q}}"',
     emptyHint: 'Try other words, or describe the scene more simply. Only analysed photos can be found.',
     notAnalysed: '{{n}} photos in this view have not been analysed yet, so they cannot be searched. Run the standard analysis first.',

@@ -2,6 +2,7 @@ import { ChevronsUpDown, FolderPlus, Layers, Search, Star, X } from 'lucide-reac
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDevices, usePeople, useSession } from '@/api/queries'
+import { searchLayout } from '@/lib/search'
 import { ISSUES, SCENE_TYPES, type FlagFilter, type Issue, type SceneType, type SortKey } from '@/api/types'
 import { personLabel } from '@/lib/ai'
 import { clampFaceSimilarity, DEFAULT_FACE_SIMILARITY, facesPreset, FACE_SIMILARITY_MAX, FACE_SIMILARITY_MIN, isFilterActive, setPersonTri, type FilterState } from '@/lib/filter'
@@ -88,7 +89,8 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
   const resetFilter = useUi((s) => s.resetFilter)
   const thumbSize = useUi((s) => s.thumbSize)
   const setThumbSize = useUi((s) => s.setThumbSize)
-  const grouped = useUi((s) => s.grouped)
+  const groupedPref = useUi((s) => s.grouped)
+  const { byRelevance, grouped } = searchLayout(filter.search, groupedPref)
   const setGrouped = useUi((s) => s.setGrouped)
   const expandAll = useUi((s) => s.expandAll)
   const expanded = useUi((s) => s.expandedStacks)
@@ -224,10 +226,14 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
           <span className="text-muted">{t('filter.sort')}</span>
           <select
             className="field !px-1.5"
-            value={filter.sort}
+            value={byRelevance ? 'relevance' : filter.sort}
             onChange={(e) => setFilter({ sort: e.target.value as SortKey })}
             aria-label={t('filter.sort')}
+            disabled={byRelevance}
+            title={byRelevance ? t('search.byRelevanceHint') : undefined}
+            data-testid="sort-select"
           >
+            {byRelevance && <option value="relevance">{t('search.byRelevance')}</option>}
             {SORTS.map((s) => (
               <option key={s} value={s}>
                 {t(`filter.sort_${s}`)}
@@ -240,8 +246,9 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
           <button
             className="btn"
             aria-pressed={grouped}
-            onClick={() => setGrouped(!grouped)}
-            title={grouped ? t('stack.flat') : t('stack.grouped')}
+            onClick={() => setGrouped(!groupedPref)}
+            disabled={byRelevance}
+            title={byRelevance ? t('search.byRelevanceHint') : grouped ? t('stack.flat') : t('stack.grouped')}
             data-testid="grouped-toggle"
             data-coach="stacks"
           >

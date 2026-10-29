@@ -29,6 +29,17 @@ export function orderByHits(photos: Photo[], hits: Pick<SearchHit, 'photo_id'>[]
   return out
 }
 
+/**
+ * How the grid is laid out while a search is on. Hits arrive best first, so the grid shows them as one flat list in
+ * that order: scene headers and burst stacks would regroup the photos by time and bury the best matches among the weak
+ * ones. The user's own grouped / sort choices are not touched (the toggle is just overridden), so clearing the search
+ * brings the previous view back.
+ */
+export function searchLayout(search: string, grouped: boolean): { byRelevance: boolean; grouped: boolean } {
+  const byRelevance = normalizeSearch(search) !== ''
+  return { byRelevance, grouped: grouped && !byRelevance }
+}
+
 export type TextModelState = 'ready' | 'missing' | 'unknown'
 
 /** Is the text model installed? 'unknown' while the model list is not known (loading, or a guest). */

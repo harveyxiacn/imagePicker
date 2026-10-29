@@ -35,7 +35,7 @@ import { useHistory } from '@/lib/history'
 import { compareSlots, compareUsesSelection } from '@/lib/compare'
 import { isTypingTarget } from '@/lib/keymap'
 import { overlayOwnsEscape } from '@/lib/panelOverlay'
-import { showLowConfidence } from '@/lib/search'
+import { searchLayout, showLowConfidence } from '@/lib/search'
 import { pruneSelection } from '@/lib/selection'
 import { useIsBelowLg, useIsMobile } from '@/lib/useLayout'
 import { buildGridItems, toggleInSet, visiblePhotos } from '@/lib/stacks'
@@ -71,7 +71,7 @@ export function Library() {
   const timelineOpen = useUi((s) => s.timelineOpen)
   const photoMenu = usePhotoMenu(sessionId)
   const exportOpen = useUi((s) => s.exportOpen)
-  const grouped = useUi((s) => s.grouped)
+  const groupedPref = useUi((s) => s.grouped)
   const expandAll = useUi((s) => s.expandAll)
   const expandedStacks = useUi((s) => s.expandedStacks)
   const collapsedScenes = useUi((s) => s.collapsedScenes)
@@ -98,6 +98,8 @@ export function Library() {
     if (startView.current) useUi.getState().setView(startView.current)
   }, [sessionId])
 
+  // A search shows its hits flat, best first (the grouped preference comes back when it is cleared).
+  const { grouped } = searchLayout(filter.search, groupedPref)
   // Grouped mode: scene headers (time order only) + bursts collapsed to their best shot.
   const withHeaders = filter.sort === 'taken_at' || filter.sort === '-taken_at'
   const items = useMemo(

@@ -99,6 +99,8 @@ export const zhCN = {
     install: '安装搜索模型',
     clear: '清除搜索',
     pill: '搜索',
+    byRelevance: '按相关度',
+    byRelevanceHint: '搜索结果按相关度从高到低平铺；清除搜索后恢复原来的排序与分组',
     empty: '没有照片符合「{{q}}」',
     emptyHint: '换几个词试试，或把场景描述得简单一些。只有已分析的照片才能被搜到。',
     notAnalysed: '当前范围内有 {{n}} 张照片还没有分析，无法搜索。请先运行标准分析。',
