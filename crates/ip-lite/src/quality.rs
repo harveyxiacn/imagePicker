@@ -144,6 +144,54 @@ pub fn face_sharpness(rgb: &[u8], w: usize, h: usize, bbox: [f64; 4]) -> Option<
     Some(sharpness_score_face(lap, ten))
 }
 
+/// Share of the face box measured by [`face_tone`] (skips hair / background corners).
+const TONE_INNER: f64 = 0.70;
+const TONE_SIDE: usize = 64;
+
+/// Port of the worker's `faces.face_tone`: `(luma, contrast)` = mean and standard deviation
+/// (0-1) of the grey level inside the central [`TONE_INNER`] of a normalised `[x, y, w, h]` face
+/// box, area-resampled to at most [`TONE_SIDE`] px. The core prefers a visible face as a
+/// person's cover. `None` for a box under 4 px.
+pub fn face_tone(rgb: &[u8], w: usize, h: usize, bbox: [f64; 4]) -> Option<(f64, f64)> {
+    assert_eq!(rgb.len(), w * h * 3, "rgb buffer size");
+    let (fw, fh) = (w as f64, h as f64);
+    let (cx, cy) = (
+        (bbox[0] + bbox[2] / 2.0) * fw,
+        (bbox[1] + bbox[3] / 2.0) * fh,
+    );
+    let (hw, hh) = (
+        bbox[2] * fw * TONE_INNER / 2.0,
+        bbox[3] * fh * TONE_INNER / 2.0,
+    );
+    // Python's int() truncates toward zero, like `as`
+    let x0 = ((cx - hw) as i64).max(0);
+    let y0 = ((cy - hh) as i64).max(0);
+    let x1 = ((cx + hw) as i64).min(w as i64);
+    let y1 = ((cy + hh) as i64).min(h as i64);
+    if x1 - x0 < 4 || y1 - y0 < 4 {
+        return None;
+    }
+    let gray = rgb_to_gray(rgb, w, h).crop(x0 as usize, y0 as usize, x1 as usize, y1 as usize);
+    let g = if gray.w.max(gray.h) > TONE_SIDE {
+        if gray.w >= TONE_SIDE && gray.h >= TONE_SIDE {
+            resize_area(&gray, TONE_SIDE, TONE_SIDE)
+        } else {
+            resize_area_emulated(&gray, TONE_SIDE, TONE_SIDE)
+        }
+    } else {
+        gray
+    };
+    let n = g.data.len() as f64;
+    let mean = g.data.iter().map(|&v| v as f64).sum::<f64>() / n;
+    let var = g
+        .data
+        .iter()
+        .map(|&v| (v as f64 - mean).powi(2))
+        .sum::<f64>()
+        / n;
+    Some((mean / 255.0, var.sqrt() / 255.0))
+}
+
 /// Sharpness of the sharpest cell of the [`SHARP_TILES`] grid (0 when every cell is too small).
 fn tile_sharpness(gray: &Gray8) -> f64 {
     let (h, w) = (gray.h, gray.w);

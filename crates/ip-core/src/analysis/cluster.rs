@@ -14,6 +14,19 @@ pub const TRACK_COS: f32 = 0.30;
 pub const TRACK_STRONG_COS: f32 = 0.45;
 /// A new (unnamed) person needs at least this many distinct photos; rarer faces stay unassigned.
 pub const MIN_PHOTOS_NEW_PERSON: usize = 2;
+/// People are human: YuNet also fires on dogs, cats, the back of a head or a face lost in the
+/// dark, and AuraFace happily clusters those. The MediaPipe landmarker is the second opinion: a
+/// cluster in which fewer than this share of the faces with a landmarker verdict were
+/// recognised as a human face does not become (or join) a person ([`mostly_nonhuman`]). On the
+/// 1000-photo library every multi-photo human person has share 1.0, the golden-retriever
+/// cluster 0.2 (2 of 10 dog faces got a mesh) and a cluster of unreadable shadows 0.0.
+pub const NONHUMAN_MAX_LANDMARK_SHARE: f64 = 0.5;
+
+/// `known` faces of a cluster with a landmarker verdict, `found` of them recognised as human:
+/// is the cluster mostly not human? `false` without any verdict (no landmarker, lite profile).
+pub fn mostly_nonhuman(known: usize, found: usize) -> bool {
+    known > 0 && (found as f64) < NONHUMAN_MAX_LANDMARK_SHARE * known as f64
+}
 
 pub fn iou(a: &[f64; 4], b: &[f64; 4]) -> f64 {
     let (ax2, ay2, bx2, by2) = (a[0] + a[2], a[1] + a[3], b[0] + b[2], b[1] + b[3]);
@@ -355,6 +368,15 @@ pub fn cluster_tracks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mostly_nonhuman_needs_a_minority_of_human_meshes() {
+        assert!(!mostly_nonhuman(0, 0), "no landmarker verdict: no opinion");
+        assert!(mostly_nonhuman(10, 2), "the dog cluster");
+        assert!(mostly_nonhuman(3, 0) && mostly_nonhuman(1, 0));
+        assert!(!mostly_nonhuman(2, 1), "half recognised stays a person");
+        assert!(!mostly_nonhuman(51, 46) && !mostly_nonhuman(1, 1));
+    }
 
     fn v(angle: f32) -> Vec<f32> {
         let a = angle.to_radians();

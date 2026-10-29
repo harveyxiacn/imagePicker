@@ -126,7 +126,7 @@ def test_faces_on_portrait(models_dir, manager, portrait_path):
     # YuNet-only fallback: landmark fields are null
     yo = FaceAnalyzer(manager.path("yunet"), None)
     g = yo.analyze(load_image(str(portrait_path), 1024).rgb)[0]
-    assert g["landmarks"] is False
+    assert g["landmarks"] is None  # the landmarker did not run: unknown, not "no face"
     assert g["eyes_open"] is None and g["smile"] is None and g["yaw"] is None
 
 

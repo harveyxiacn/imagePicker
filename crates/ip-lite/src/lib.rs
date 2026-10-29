@@ -13,5 +13,5 @@ pub mod quality;
 pub mod tilt;
 
 pub use phash::{hamming_hex, phash_bits, phash_hex, phash_u64};
-pub use quality::{analyze_quality, face_sharpness, Quality};
+pub use quality::{analyze_quality, face_sharpness, face_tone, Quality};
 pub use tilt::{estimate_tilt, Tilt};

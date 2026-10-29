@@ -87,7 +87,7 @@ pub fn composition_score(feat: &PhotoFeat) -> Option<Composition> {
     let faces: Vec<[f64; 4]> = feat
         .faces
         .iter()
-        .filter(|f| f.is_subject && !f.likely_artificial())
+        .filter(|f| f.is_subject && !f.not_a_person())
         .map(|f| f.bbox)
         .filter(|b| b[2] > 0.0 && b[3] > 0.0)
         .collect();

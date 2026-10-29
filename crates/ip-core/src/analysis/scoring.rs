@@ -169,11 +169,20 @@ pub struct FaceFeat {
     pub artificial: Option<f64>,
     /// jawOpen blendshape, 0 closed ... 1 wide open.
     pub mouth_open: Option<f64>,
+    /// `face.nonhuman`: the face belongs to a cluster that is mostly not recognised as a human
+    /// face (a pet; docs/03 §4.3).
+    pub nonhuman: bool,
 }
 
 impl FaceFeat {
     pub fn likely_artificial(&self) -> bool {
         self.artificial.is_some_and(|a| a >= ARTIFICIAL_AT)
+    }
+
+    /// Not a living person in the photo: on a statue / poster / screen, or not human at all.
+    /// Such a face is never a subject or a bystander and has no expression verdict.
+    pub fn not_a_person(&self) -> bool {
+        self.nonhuman || self.likely_artificial()
     }
 }
 
@@ -319,19 +328,19 @@ pub fn subject_flags(faces: &[(FaceFeat, bool /* person named */)]) -> Vec<bool>
     subject
 }
 
-/// [`subject_flags`] over the living faces only: a face on a statue, poster or screen
-/// ([`FaceFeat::likely_artificial`]) is never a subject and does not take part in the
-/// competition, so a big poster cannot demote the people standing in front of it.
+/// [`subject_flags`] over the living faces only: a face on a statue, poster or screen, or a
+/// non-human one ([`FaceFeat::not_a_person`]) is never a subject and does not take part in the
+/// competition, so a big poster or the dog in the foreground cannot demote the people.
 pub fn subject_flags_live(faces: &[(FaceFeat, bool)]) -> Vec<bool> {
     let live: Vec<(FaceFeat, bool)> = faces
         .iter()
-        .filter(|(f, _)| !f.likely_artificial())
+        .filter(|(f, _)| !f.not_a_person())
         .cloned()
         .collect();
     let mut flags = subject_flags(&live).into_iter();
     faces
         .iter()
-        .map(|(f, _)| !f.likely_artificial() && flags.next().unwrap_or(false))
+        .map(|(f, _)| !f.not_a_person() && flags.next().unwrap_or(false))
         .collect()
 }
 
@@ -339,7 +348,7 @@ pub fn subject_flags_live(faces: &[(FaceFeat, bool)]) -> Vec<bool> {
 /// [`BYSTANDER_MIN_AREA`]); the same test picks the faces "remove bystanders" suggests.
 pub fn is_tag_bystander(f: &FaceFeat) -> bool {
     !f.is_subject
-        && !f.likely_artificial()
+        && !f.not_a_person()
         && f.bbox[2].max(0.0) * f.bbox[3].max(0.0) >= BYSTANDER_MIN_AREA
         && f.sharpness.unwrap_or(0.0) >= BYSTANDER_MIN_SHARPNESS
 }
@@ -353,7 +362,7 @@ pub fn bystander_count(faces: &[FaceFeat]) -> usize {
 /// [`HALF_BLINK_MIN`] and [`HALF_BLINK_MAX`]; both only without a smile ([`EXPR_SMILE_BELOW`])
 /// and on a face sharp enough to read ([`EXPR_MIN_SHARPNESS`]).
 pub fn bad_expression(f: &FaceFeat) -> Option<&'static str> {
-    if !f.is_subject || f.likely_artificial() {
+    if !f.is_subject || f.not_a_person() {
         return None;
     }
     let smile = f.smile?;
@@ -1427,6 +1436,26 @@ mod tests {
                 .params["count"],
             1
         );
+    }
+
+    #[test]
+    fn nonhuman_faces_are_neither_subjects_nor_bystanders() {
+        // the dog walked by the subject: a little bigger and as central as she is
+        let dog = FaceFeat {
+            bbox: [0.42, 0.5, 0.16, 0.2],
+            sharpness: Some(0.8),
+            nonhuman: true,
+            ..Default::default()
+        };
+        let her = FaceFeat {
+            bbox: [0.6, 0.3, 0.14, 0.18],
+            sharpness: Some(0.8),
+            ..Default::default()
+        };
+        let flags = subject_flags_live(&[(dog.clone(), false), (her, false)]);
+        assert_eq!(flags, vec![false, true]);
+        assert!(dog.not_a_person() && !dog.likely_artificial());
+        assert!(!is_tag_bystander(&dog));
     }
 
     #[test]
