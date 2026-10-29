@@ -1,3 +1,5 @@
+import math
+
 import cv2
 import numpy as np
 import pytest
@@ -72,6 +74,47 @@ def test_no_straight_structure_gives_no_confidence():
     assert estimate_tilt(blobs)[1] < 0.15
 
 
+def segments(
+    segs: list[tuple[float, float, float, float]], w: int = 1024, h: int = 768
+) -> np.ndarray:
+    """Light gray image with dark antialiased segments (x0, y0, x1, y1) in pixels."""
+    img = np.full((h, w), 170, np.uint8)
+    for x0, y0, x1, y1 in segs:
+        p0 = (int(round(x0 * 16)), int(round(y0 * 16)))
+        p1 = (int(round(x1 * 16)), int(round(y1 * 16)))
+        cv2.line(img, p0, p1, 70, 8, cv2.LINE_AA, shift=4)
+    return cv2.GaussianBlur(img, (0, 0), 0.8)
+
+
+def lean(
+    x: float, y: float, deg: float, half: float, vertical: bool
+) -> tuple[float, float, float, float]:
+    """Segment through (x, y) px, `half` px each way, rotated clockwise by `deg` from the axis."""
+    s, c = math.sin(math.radians(deg)), math.cos(math.radians(deg))
+    dx, dy = (s * half, -c * half) if vertical else (c * half, s * half)
+    return x - dx, y - dy, x + dx, y + dy
+
+
+def test_one_sided_verticals_are_not_trusted():
+    # a lone frame at the side leans as much under camera pitch (converging verticals) as under a
+    # roll; frames on both sides leaning alike, or one through the centre, are a roll
+    one = estimate_tilt(segments([lean(870, 384, 4.0, 370, True)]))
+    assert one[1] < 0.05, one
+    two = estimate_tilt(segments([lean(150, 384, 4.0, 370, True), lean(870, 384, 4.0, 370, True)]))
+    assert abs(two[0] - 4.0) < 0.25 and two[1] > 0.3, two
+    centre = estimate_tilt(segments([lean(512, 384, 4.0, 370, True)]))
+    assert abs(centre[0] - 4.0) < 0.25 and centre[1] > 0.3, centre
+
+
+def test_short_one_sided_stripes_are_not_a_horizon():
+    # a striped shirt low in the frame: many short parallel lines, all on one side of the centre
+    shirt = [lean(512, 540 + 20 * i, 6.0, 75, False) for i in range(9)]
+    assert estimate_tilt(segments(shirt))[1] < 0.05
+    # a full-width horizon at the same height counts wherever it sits
+    tilt, conf = estimate_tilt(segments([lean(512, 620, 6.0, 600, False)]))
+    assert abs(tilt - 6.0) < 0.25 and conf > 0.3, (tilt, conf)
+
+
 def test_range_and_quality_output():
     q = analyze_quality(rotate(street(), 2.0))
     assert abs(q["tilt_deg"] - 2.0) < 0.25 and q["tilt_confidence"] > 0.4
@@ -83,8 +126,6 @@ def test_range_and_quality_output():
 def _reference_line_profiles(g: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """`line_profiles` as it was before the 2026-10-16 speed-up (full-image masks, full-length
     bincounts): the optimised version must give bit-identical profiles."""
-    import math
-
     from imagepicker_ai.steps import tilt as t
 
     h, w = g.shape

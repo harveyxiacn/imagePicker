@@ -14,7 +14,7 @@
    "sharpness_center": 0.08902,
    "sharpness_face": null,
    "tenengrad": 256.14661,
-   "tilt_confidence": 0.336,
+   "tilt_confidence": 0.187,
    "tilt_deg": -0.01
   },
   "width": 640
@@ -34,7 +34,7 @@
    "sharpness_center": 0.61919,
    "sharpness_face": null,
    "tenengrad": 8352.17383,
-   "tilt_confidence": 0.84,
+   "tilt_confidence": 0.816,
    "tilt_deg": -0.0
   },
   "width": 256
@@ -74,7 +74,7 @@
    "sharpness_center": 0.51422,
    "sharpness_face": null,
    "tenengrad": 2600.31519,
-   "tilt_confidence": 0.618,
+   "tilt_confidence": 0.475,
    "tilt_deg": -5.94
   },
   "width": 1500
@@ -94,7 +94,7 @@
    "sharpness_center": 0.48592,
    "sharpness_face": null,
    "tenengrad": 2552.71484,
-   "tilt_confidence": 0.838,
+   "tilt_confidence": 0.785,
    "tilt_deg": 1.24
   },
   "width": 768
@@ -114,7 +114,7 @@
    "sharpness_center": 0.37491,
    "sharpness_face": null,
    "tenengrad": 1540.15088,
-   "tilt_confidence": 0.74,
+   "tilt_confidence": 0.482,
    "tilt_deg": 2.94
   },
   "width": 1024
@@ -134,7 +134,7 @@
    "sharpness_center": 0.37412,
    "sharpness_face": null,
    "tenengrad": 1535.14368,
-   "tilt_confidence": 0.836,
+   "tilt_confidence": 0.534,
    "tilt_deg": -0.01
   },
   "width": 1024
@@ -174,7 +174,7 @@
    "sharpness_center": 0.10817,
    "sharpness_face": null,
    "tenengrad": 291.20258,
-   "tilt_confidence": 0.707,
+   "tilt_confidence": 0.685,
    "tilt_deg": 0.03
   },
   "width": 768
@@ -194,7 +194,7 @@
    "sharpness_center": 0.05263,
    "sharpness_face": null,
    "tenengrad": 163.38319,
-   "tilt_confidence": 0.057,
+   "tilt_confidence": 0.011,
    "tilt_deg": -0.01
   },
   "width": 100
@@ -214,7 +214,7 @@
    "sharpness_center": 0.16909,
    "sharpness_face": null,
    "tenengrad": 475.92297,
-   "tilt_confidence": 0.668,
+   "tilt_confidence": 0.667,
    "tilt_deg": -0.0
   },
   "width": 1024
@@ -234,7 +234,7 @@
    "sharpness_center": 0.04745,
    "sharpness_face": null,
    "tenengrad": 147.14905,
-   "tilt_confidence": 0.193,
+   "tilt_confidence": 0.004,
    "tilt_deg": -0.08
   },
   "width": 1024
@@ -254,7 +254,7 @@
    "sharpness_center": 0.48226,
    "sharpness_face": null,
    "tenengrad": 1029.89954,
-   "tilt_confidence": 0.024,
+   "tilt_confidence": 0.0,
    "tilt_deg": 0.09
   },
   "width": 1024
@@ -274,7 +274,7 @@
    "sharpness_center": 0.07123,
    "sharpness_face": null,
    "tenengrad": 198.99156,
-   "tilt_confidence": 0.516,
+   "tilt_confidence": 0.134,
    "tilt_deg": 0.11
   },
   "width": 1500
@@ -314,7 +314,7 @@
    "sharpness_center": 0.06782,
    "sharpness_face": null,
    "tenengrad": 203.1658,
-   "tilt_confidence": 0.44,
+   "tilt_confidence": 0.075,
    "tilt_deg": 0.03
   },
   "width": 333
@@ -354,7 +354,7 @@
    "sharpness_center": 0.11484,
    "sharpness_face": null,
    "tenengrad": 347.68347,
-   "tilt_confidence": 0.774,
+   "tilt_confidence": 0.732,
    "tilt_deg": -0.01
   },
   "width": 512
@@ -374,7 +374,7 @@
    "sharpness_center": 0.2533,
    "sharpness_face": null,
    "tenengrad": 844.68445,
-   "tilt_confidence": 0.77,
+   "tilt_confidence": 0.666,
    "tilt_deg": 0.0
   },
   "width": 700
