@@ -42,7 +42,7 @@ export function useEditShortcuts(actions: EditActions) {
     const unregister = registerPaletteHost({ scope: () => 'edit', has: (id) => !!handlers[id], run: (id) => handlers[id]?.('') })
     const onKey = (e: KeyboardEvent) => {
       if (isTextEntryTarget(e.target)) return
-      const dialogOpen = !!document.querySelector('[role="dialog"]')
+      const dialogOpen = !!document.querySelector('[role="dialog"], [role="menu"]')
       if (dialogOpen && e.key !== '?') return
       // one-shot actions ignore OS key repeat; undo / redo may repeat
       if (e.repeat && !['edit.undo', 'edit.redo'].includes(findBinding(eventToSpec(e), 'edit')?.id ?? '')) return

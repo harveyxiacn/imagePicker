@@ -536,3 +536,14 @@ input[type='range'].big-slider::-moz-range-thumb {
   background: var(--accent);
   border: 3px solid var(--panel);
 }
+
+/* --- popover/mobile pass: viewport-height caps with a vh fallback (dvh follows the browser UI / keyboard) --- */
+.modal-max-h {
+  max-height: 88vh;
+  max-height: 88dvh;
+}
+.palette-max-h {
+  max-height: 70vh;
+  max-height: 70dvh;
+}
+/* --- end popover/mobile pass --- */
