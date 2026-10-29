@@ -10,6 +10,10 @@
 //!   (2) visual co-occurrence: mutual best matches between two devices by image embedding (or
 //!   perceptual hash), whose time differences pile up at the offset while chance matches of
 //!   similar-looking scenes scatter over the whole +-24 h range. A weak peak is rejected.
+//!   Support is counted in independent *moments* (matches within a few minutes are one moment):
+//!   a burst of one device matched frame by frame to a burst of another is one coincidence, not
+//!   five. A rival peak at another offset (a place shot again twelve hours or a day later)
+//!   lowers the confidence, because the matches cannot tell the two apart.
 //! - the rest of the module stores estimates and applied offsets (`session_device_offset`) and
 //!   the `Core` API behind `GET/PUT /api/sessions/{id}/devices/offsets`.
 
@@ -55,6 +59,11 @@ pub struct AlignParams {
     pub fine_ms: i64,
     /// Fewer matching pairs than this at the peak: no estimate.
     pub min_support: usize,
+    /// Matches whose capture times (on the first device) fall in one window of this width are one
+    /// independent moment: a burst matched against a burst counts once.
+    pub moment_ms: i64,
+    /// Fewer independent moments than this at the peak: no estimate.
+    pub min_moments: usize,
     /// Photos per device used for matching (an even sample above this).
     pub max_per_device: usize,
     /// Photos with GPS time needed to anchor a device on it.
@@ -72,6 +81,8 @@ impl Default for AlignParams {
             coarse_ms: 60_000,
             fine_ms: 10_000,
             min_support: 3,
+            moment_ms: 5 * 60_000,
+            min_moments: 2,
             max_per_device: 1_500,
             gps_min: 3,
             gps_spread_ms: 5_000,
@@ -167,8 +178,15 @@ struct PairEst {
     confidence: f32,
 }
 
-/// Differences `a.t - b.t` of the mutual best visual matches between two devices.
-fn pair_deltas(a: &[&AlignPhoto], b: &[&AlignPhoto], p: &AlignParams) -> Vec<i64> {
+/// One mutual best match: the capture time on device `a` and the difference `a.t - b.t`.
+#[derive(Debug, Clone, Copy)]
+struct Match {
+    t: i64,
+    delta: i64,
+}
+
+/// The mutual best visual matches between two devices.
+fn pair_deltas(a: &[&AlignPhoto], b: &[&AlignPhoto], p: &AlignParams) -> Vec<Match> {
     let mut best_a: Vec<Option<(f32, usize)>> = vec![None; a.len()];
     let mut best_b: Vec<Option<(f32, usize)>> = vec![None; b.len()];
     for (i, x) in a.iter().enumerate() {
@@ -192,19 +210,63 @@ fn pair_deltas(a: &[&AlignPhoto], b: &[&AlignPhoto], p: &AlignParams) -> Vec<i64
         .enumerate()
         .filter_map(|(i, m)| {
             let (_, j) = (*m)?;
-            (best_b[j]?.1 == i).then(|| a[i].t - b[j].t)
+            (best_b[j]?.1 == i).then(|| Match {
+                t: a[i].t,
+                delta: a[i].t - b[j].t,
+            })
         })
         .collect()
 }
 
-/// The densest cluster of `deltas` and the offset in its centre; `None` when it is too weak to
-/// tell from chance matches.
-fn find_peak(mut deltas: Vec<i64>, p: &AlignParams) -> Option<PairEst> {
-    let n = deltas.len();
+/// Independent moments among capture times: greedy windows of `width` ms over the sorted times.
+fn moments(mut times: Vec<i64>, width: i64) -> usize {
+    times.sort_unstable();
+    let mut count = 0;
+    let mut open: Option<i64> = None;
+    for t in times {
+        if open.is_none_or(|start| t - start > width) {
+            open = Some(t);
+            count += 1;
+        }
+    }
+    count
+}
+
+/// The most independent moments in one cluster of `fine_ms` half width (centred on a match).
+fn densest_moments(matches: &[Match], p: &AlignParams) -> usize {
+    matches
+        .iter()
+        .map(|m| {
+            moments(
+                matches
+                    .iter()
+                    .filter(|x| (x.delta - m.delta).abs() <= p.fine_ms)
+                    .map(|x| x.t)
+                    .collect(),
+                p.moment_ms,
+            )
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// The densest cluster of match differences and the offset in its centre; `None` when it is too
+/// weak to tell from chance matches.
+///
+/// Confidence = significance x size x share x uniqueness, all counted in independent moments:
+/// - significance: how many of the matched moments would fall in the cluster by chance (chance
+///   matches spread evenly over +-max_offset), against the `k` moments it holds;
+/// - size `k / (k + 3)`: three agreeing moments are half the way;
+/// - share: the cluster's part of all matched moments, as `0.4 + 0.6 x share`;
+/// - uniqueness `1 - k2 / k`: `k2` moments at the strongest other offset (outside the coarse
+///   window), e.g. a place shot again twelve hours or a day later. A tie gives 0.
+fn find_peak(mut matches: Vec<Match>, p: &AlignParams) -> Option<PairEst> {
+    let n = matches.len();
     if n < p.min_support {
         return None;
     }
-    deltas.sort_unstable();
+    matches.sort_unstable_by_key(|m| m.delta);
+    let deltas: Vec<i64> = matches.iter().map(|m| m.delta).collect();
     // coarse: the window of 2 * coarse_ms with the most differences
     let (mut best, mut best_lo, mut hi) = (0usize, 0usize, 0usize);
     for lo in 0..n {
@@ -234,21 +296,32 @@ fn find_peak(mut deltas: Vec<i64>, p: &AlignParams) -> Option<PairEst> {
         }
         centre = c;
     }
-    let support = deltas
+    let inside: Vec<i64> = matches
         .iter()
-        .filter(|d| (**d - centre).abs() <= p.fine_ms)
-        .count();
-    if support < p.min_support {
+        .filter(|m| (m.delta - centre).abs() <= p.fine_ms)
+        .map(|m| m.t)
+        .collect();
+    let support = inside.len();
+    let k = moments(inside, p.moment_ms);
+    if support < p.min_support || k < p.min_moments {
         return None;
     }
-    // chance matches spread evenly over +-max_offset: how many would fall in the cluster
-    let chance = n as f64 * (2 * p.fine_ms) as f64 / (2 * p.max_offset_ms) as f64;
-    let significance = (1.0 - chance / support as f64).clamp(0.0, 1.0);
+    let total = moments(matches.iter().map(|m| m.t).collect(), p.moment_ms);
+    let chance = total as f64 * (2 * p.fine_ms) as f64 / (2 * p.max_offset_ms) as f64;
+    let significance = (1.0 - chance / k as f64).clamp(0.0, 1.0);
     if significance < 0.5 {
         return None;
     }
-    let frac = support as f64 / n as f64;
-    let confidence = significance * (support as f64 / (support as f64 + 4.0)) * (0.4 + 0.6 * frac);
+    let rivals: Vec<Match> = matches
+        .iter()
+        .copied()
+        .filter(|m| (m.delta - centre).abs() > 2 * p.coarse_ms)
+        .collect();
+    let k2 = densest_moments(&rivals, p);
+    let uniqueness = (1.0 - k2 as f64 / k as f64).clamp(0.0, 1.0);
+    let share = (k as f64 / total as f64).min(1.0);
+    let size = k as f64 / (k as f64 + 3.0);
+    let confidence = significance * size * (0.4 + 0.6 * share) * uniqueness;
     Some(PairEst {
         delta: centre,
         support,
@@ -1200,6 +1273,84 @@ mod tests {
             worst
         );
         assert!(worst <= 5 * S, "worst error {worst} ms");
+    }
+
+    #[test]
+    fn a_burst_matched_to_a_burst_is_one_coincidence() {
+        // what the 1000-photo library showed: two devices never shot the same scene, but each has a
+        // burst of the same person (six frames 25 s apart, the pose changing frame by frame) at
+        // unrelated times. The frames pair up one to one with identical differences: six matches
+        // at one offset, all from a single moment. That is one coincidence, not an offset.
+        let mut rng = Rng(61);
+        let mut ph = Vec::new();
+        for i in 0..40 {
+            ph.push(photo(1, T0 + i * 3 * MIN, scene_vec(&mut rng)));
+            ph.push(photo(2, T0 + i * 4 * MIN + 20 * S, scene_vec(&mut rng)));
+        }
+        let (a, b) = (T0 + 2 * H, T0 + 11 * H + 34 * MIN);
+        for i in 0..6 {
+            let pose = scene_vec(&mut rng);
+            ph.push(photo(1, a + i * 25 * S, view(&mut rng, &pose)));
+            ph.push(photo(2, b + i * 25 * S, view(&mut rng, &pose)));
+        }
+        let ests = estimate(&ph, &AlignParams::default());
+        assert!(off(&ests, 2).is_none(), "{ests:?}");
+        // two such bursts at the same offset by chance would be an estimate, but a weak one
+        let pose = scene_vec(&mut rng);
+        ph.push(photo(1, a + 3 * H, view(&mut rng, &pose)));
+        ph.push(photo(2, b + 3 * H, view(&mut rng, &pose)));
+        let pose = scene_vec(&mut rng);
+        ph.push(photo(1, a + 3 * H + 30 * S, view(&mut rng, &pose)));
+        ph.push(photo(2, b + 3 * H + 30 * S, view(&mut rng, &pose)));
+        let ests = estimate(&ph, &AlignParams::default());
+        let e = off(&ests, 2).expect("two moments give an estimate");
+        assert!(e.confidence < ACCEPT_MIN_CONFIDENCE, "{e:?}");
+    }
+
+    #[test]
+    fn a_place_shot_again_twelve_hours_later_is_ambiguous() {
+        // device 1 shoots 30 places in the morning and the same places again in the evening;
+        // device 2 (clock 40 min fast) only in the evening. Each of its photos matches a morning and
+        // an evening photo equally well: the offset and the offset +-12 h are both supported, so
+        // the estimate must not be taken by "accept all".
+        let err = 40 * MIN;
+        let mut rng = Rng(62);
+        let mut ph = Vec::new();
+        let mut t = T0;
+        for _ in 0..30 {
+            t += (2 + rng.below(5) as i64) * MIN;
+            let v = scene_vec(&mut rng);
+            ph.push(photo(1, t + rng.jitter(2 * S), view(&mut rng, &v)));
+            ph.push(photo(1, t + 12 * H + rng.jitter(2 * S), view(&mut rng, &v)));
+            ph.push(photo(
+                2,
+                t + 12 * H + err + rng.jitter(2 * S),
+                view(&mut rng, &v),
+            ));
+        }
+        let ests = estimate(&ph, &AlignParams::default());
+        if let Some(e) = off(&ests, 2) {
+            assert!(e.confidence < ACCEPT_MIN_CONFIDENCE, "{e:?}");
+        }
+        // shot only once, the same places give a confident estimate
+        let once: Vec<AlignPhoto> = ph
+            .iter()
+            .filter(|p| p.device == 2 || p.t >= T0 + 12 * H - H)
+            .cloned()
+            .collect();
+        let ests = estimate(&once, &AlignParams::default());
+        let e = off(&ests, 2).expect("estimate");
+        assert_close(e, -err, "evening only");
+        assert!(e.confidence >= ACCEPT_MIN_CONFIDENCE, "{e:?}");
+    }
+
+    #[test]
+    fn moments_count_windows_not_frames() {
+        assert_eq!(moments(vec![], 5 * MIN), 0);
+        // a burst over two minutes is one moment, and so is anything within the window
+        assert_eq!(moments(vec![0, 25 * S, 50 * S, 125 * S], 5 * MIN), 1);
+        assert_eq!(moments(vec![10 * MIN, 0, 4 * MIN, 6 * MIN], 5 * MIN), 2);
+        assert_eq!(moments((0..10).map(|i| i * 6 * MIN).collect(), 5 * MIN), 10);
     }
 
     #[test]

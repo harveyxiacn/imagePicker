@@ -13,6 +13,7 @@ import {
   hasCorrection,
   needsAlignment,
   parseOffset,
+  reviewDevices,
 } from './timeAlign'
 
 function dev(id: number, over: Partial<DeviceOffset> = {}): DeviceOffset {
@@ -122,6 +123,23 @@ describe('accepting estimates', () => {
     expect(acceptBody(devices)).toEqual({ action: 'accept', device_ids: [2, 5] })
     // one device by choice, even with a weak estimate
     expect(acceptBody(devices, 3)).toEqual({ action: 'accept', device_ids: [3] })
+  })
+
+  it('lists the weak estimates "accept all" skips as suggestions to review', () => {
+    const devices = [
+      dev(1, { estimate: est(0, 1, 'reference') }),
+      dev(2, { estimate: est(-3_600_000, 0.9) }),
+      dev(3, { estimate: est(120_000, 0.3) }),
+      dev(4),
+      dev(5, { estimate: est(43_200_000, 0.49) }),
+      // already applied: nothing left to review
+      dev(6, { estimate: est(9_000, 0.2), offset_ms: 9_000, source: 'auto' }),
+    ]
+    expect(reviewDevices(devices).map((d) => d.device_id)).toEqual([3, 5])
+    // every changing estimate is either taken or listed for review, never both
+    const taken = acceptableDevices(devices).map((d) => d.device_id)
+    expect(taken).toEqual([2])
+    expect(devices.filter(canAccept).length).toBe(taken.length + reviewDevices(devices).length)
   })
 
   it('knows when a correction is applied and when alignment matters', () => {

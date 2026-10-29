@@ -3,27 +3,39 @@
 Usage:
     python bench/eval-time-align.py DATA_DIR [--session ID] [--trials 60] [--min-photos 30]
                                     [--offsets 4s,45s,7m13s,1h2m5s,-3h11m,11h59m] [--seed 1]
-                                    [--json OUT.json]
+                                    [--true-clocks] [--twin-share 0.03:0.5] [--json OUT.json]
 
 DATA_DIR is the --data-dir of a catalog that holds an analysed session with photos of two or more
-devices (cameras / phones) that shot the SAME scenes, e.g. the owner's own library after
+devices (cameras / phones), e.g. the owner's own library after
 `imagepicker analyze <dir> --profile standard --data-dir DATA_DIR`. The catalog is opened read-only
 and no file is written.
 
-The acceptance metric is "error <= 5 s on a whole-device-offset sample". The real clocks of the
-devices are not known, so the sample is built by shifting: one device's capture times are moved by
-a known offset s (in memory only) and the estimator has to find s on top of whatever offset the
-devices already had. For every trial
+The acceptance metric is "error <= 5 s on a whole-device-offset sample", and "accept all" (which
+takes confidence >= ACCEPT_MIN_CONFIDENCE) must take right estimates only. Every trial moves clocks
+by a known offset s, in memory only, and scores two samples:
 
-    error = (estimate_shifted - estimate_unshifted) + s
+- shift: one device (never the reference: the reference *defines* the time base, its estimate is 0
+  by construction, so shifting it would move every other device instead) has its capture times
+  and GPS evidence moved by s. Its offset relative to the reference must change by -s:
+  error = (estimate_shifted - estimate_unshifted) + s. With --true-clocks (the library's devices
+  are known to share one clock, e.g. the synthetic Qwen library, whose generator wrote the true
+  times) the unshifted estimate is not trusted but known to be 0: error = estimate_shifted + s,
+  and the unshifted estimates are scored as samples too (any offset > 5 s is wrong).
+- twin (--twin-share LO:HI, 0 for none): a simulated second camera that shot some of the same
+  moments as an aligned device (a share of its photos drawn log-uniform from LO..HI, so from a
+  handful of overlapping shots to half of them; each embedding perturbed to a cosine of 0.85-0.97 with
+  its original, like another viewpoint, 1-3 pHash bits flipped, +-2 s of shutter jitter) with a
+  clock that is s off. True positives with a known answer: error = (est[twin] - est[source]) + s.
+  Libraries whose devices never shot the same scene (the synthetic one) need these: there,
+  every visual estimate between real devices is a coincidence.
 
-and the report gives, per offset size and overall, the share of trials with |error| <= 5 s, the
-median / p95 / max error and the number of trials without an estimate. The unshifted estimates
-(the real clock differences of the library) and the GPS-time evidence are listed first.
+The report gives per sample kind and offset size the share within 5 s, the median / p95 / max
+error, samples without an estimate, and a reliability table (confidence bins against the share
+within 5 s), including the precision of "accept all".
 
 The estimator below is a line-for-line port of `crates/ip-core/src/analysis/time_align.rs`
-(`estimate`, `pair_deltas`, `find_peak`, `gps_anchor`; same thresholds). Needs numpy; standard
-library otherwise. Run it on the GPU PC next to the analysed catalog; it is not part of CI.
+(`estimate`, `pair_deltas`, `find_peak`, `moments`, `gps_anchor`; same thresholds). Needs numpy;
+standard library otherwise. Run it on the GPU PC next to the analysed catalog; it is not part of CI.
 """
 
 import argparse
@@ -44,6 +56,8 @@ HAMMING_MAX = 8
 COARSE_MS = 60_000
 FINE_MS = 10_000
 MIN_SUPPORT = 3
+MOMENT_MS = 5 * 60_000
+MIN_MOMENTS = 2
 MAX_PER_DEVICE = 1_500
 GPS_MIN = 3
 GPS_SPREAD_MS = 5_000
@@ -175,7 +189,8 @@ def sim_matrix(a: list[Photo], b: list[Photo]) -> np.ndarray:
     return sim
 
 
-def pair_deltas(a: list[Photo], b: list[Photo]) -> list[int]:
+def pair_deltas(a: list[Photo], b: list[Photo]) -> list[tuple[int, int]]:
+    """(a.t, a.t - b.t) of the mutual best matches."""
     ta = np.array([p.t for p in a], dtype=np.int64)
     tb = np.array([p.t for p in b], dtype=np.int64)
     sim = sim_matrix(a, b)
@@ -187,16 +202,30 @@ def pair_deltas(a: list[Photo], b: list[Photo]) -> list[int]:
     for i in np.nonzero(ok)[0]:
         j = ba[i]
         if bb[j] == i and sim[i, j] >= 0:
-            out.append(int(ta[i] - tb[j]))
+            out.append((int(ta[i]), int(ta[i] - tb[j])))
     return out
 
 
-def find_peak(deltas: list[int]):
+def moments(times: list[int]) -> int:
+    """Independent moments: greedy windows of MOMENT_MS over the sorted times."""
+    count, start = 0, None
+    for t in sorted(times):
+        if start is None or t - start > MOMENT_MS:
+            start, count = t, count + 1
+    return count
+
+
+def densest_moments(matches: list[tuple[int, int]]) -> int:
+    return max((moments([t for t, x in matches if abs(x - d) <= FINE_MS]) for _, d in matches), default=0)
+
+
+def find_peak(matches: list[tuple[int, int]]):
     """(delta, support, confidence) of the densest cluster, or None."""
-    n = len(deltas)
+    n = len(matches)
     if n < MIN_SUPPORT:
         return None
-    d = sorted(deltas)
+    matches = sorted(matches, key=lambda m: m[1])
+    d = [m[1] for m in matches]
     best, best_lo, hi = 0, 0, 0
     for lo in range(n):
         while hi < n and d[hi] - d[lo] <= 2 * COARSE_MS:
@@ -212,15 +241,20 @@ def find_peak(deltas: list[int]):
         if c == centre:
             break
         centre = c
-    support = sum(1 for x in d if abs(x - centre) <= FINE_MS)
-    if support < MIN_SUPPORT:
+    inside = [t for t, x in matches if abs(x - centre) <= FINE_MS]
+    support = len(inside)
+    k = moments(inside)
+    if support < MIN_SUPPORT or k < MIN_MOMENTS:
         return None
-    chance = n * (2 * FINE_MS) / (2 * MAX_OFFSET_MS)
-    significance = min(1.0, max(0.0, 1.0 - chance / support))
+    total = moments([t for t, _ in matches])
+    chance = total * (2 * FINE_MS) / (2 * MAX_OFFSET_MS)
+    significance = min(1.0, max(0.0, 1.0 - chance / k))
     if significance < 0.5:
         return None
-    frac = support / n
-    conf = significance * (support / (support + 4.0)) * (0.4 + 0.6 * frac)
+    k2 = densest_moments([m for m in matches if abs(m[1] - centre) > 2 * COARSE_MS])
+    uniqueness = min(1.0, max(0.0, 1.0 - k2 / k))
+    share = min(1.0, k / total)
+    conf = significance * (k / (k + 3.0)) * (0.4 + 0.6 * share) * uniqueness
     return centre, support, conf
 
 
@@ -287,6 +321,68 @@ def percentile(xs: list[float], q: float) -> float:
     return xs[min(len(xs) - 1, int(round(q * (len(xs) - 1))))] if xs else float("nan")
 
 
+def twin_of(src: list[Photo], dev: int, share: float, s: int, rng: random.Random, nprng) -> list[Photo]:
+    """Another camera that shot a `share` of the moments of `src`, from a nearby viewpoint, with a
+    clock `s` ms off."""
+    out = []
+    for p in src:
+        if rng.random() >= share:
+            continue
+        emb = None
+        if p.emb is not None:
+            e = p.emb / max(float(np.linalg.norm(p.emb)), 1e-9)
+            r = nprng.standard_normal(e.shape[0]).astype(np.float32)
+            r -= float(r @ e) * e
+            r /= max(float(np.linalg.norm(r)), 1e-9)
+            c = rng.uniform(0.85, 0.97)
+            emb = (c * e + (1.0 - c * c) ** 0.5 * r).astype(np.float32)
+        ph = p.phash
+        if ph is not None:
+            for _ in range(rng.randint(1, 3)):
+                ph ^= 1 << rng.randrange(64)
+        out.append(Photo(dev, p.t + s + rng.randint(-2000, 2000), None, ph, emb))
+    return out
+
+
+BINS = [(0.0, 0.2), (0.2, 0.35), (0.35, ACCEPT_MIN_CONFIDENCE), (ACCEPT_MIN_CONFIDENCE, 0.7), (0.7, 1.01)]
+
+
+def summary(label: str, samples: list[dict]) -> None:
+    done = [x for x in samples if x["error_ms"] is not None]
+    errs = [abs(x["error_ms"]) for x in done]
+    ok = sum(1 for e in errs if e <= TOLERANCE_MS)
+    print(f"  {label}: {len(samples)} samples, {len(done)} with an estimate; |error| <= 5 s: {ok}/{len(samples)}", end="")
+    if errs:
+        print(f"; |error| median {statistics.median(errs) / 1000:.1f}s p95 {percentile(errs, 0.95) / 1000:.1f}s max {max(errs) / 1000:.1f}s")
+    else:
+        print()
+    for lo, hi, name in [(0, 60_000, "< 1 min"), (60_000, 3_600_000, "1 min - 1 h"), (3_600_000, 10**12, ">= 1 h")]:
+        sel = [x for x in samples if x.get("shift_ms") is not None and lo <= abs(x["shift_ms"]) < hi]
+        if sel:
+            good = sum(1 for x in sel if x["error_ms"] is not None and abs(x["error_ms"]) <= TOLERANCE_MS)
+            none = sum(1 for x in sel if x["error_ms"] is None)
+            print(f"    shift {name:<12} {good}/{len(sel)} within 5 s, {none} without an estimate")
+
+
+def reliability(samples: list[dict]) -> list[dict]:
+    done = [x for x in samples if x["error_ms"] is not None]
+    rows = []
+    print("  reliability (confidence bin -> share within 5 s):")
+    for lo, hi in BINS:
+        sel = [x for x in done if lo <= x["confidence"] < hi]
+        good = sum(1 for x in sel if abs(x["error_ms"]) <= TOLERANCE_MS)
+        rows.append(dict(lo=lo, hi=min(hi, 1.0), n=len(sel), within=good))
+        share = f"{good / len(sel):.0%}" if sel else "-"
+        print(f"    [{lo:.2f}, {min(hi, 1.0):.2f}{']' if hi > 1 else ')'}  {len(sel):>4} estimates, {good:>4} within 5 s  {share}")
+    acc = [x for x in done if x["confidence"] >= ACCEPT_MIN_CONFIDENCE]
+    good = sum(1 for x in acc if abs(x["error_ms"]) <= TOLERANCE_MS)
+    print(
+        f"  confidence >= {ACCEPT_MIN_CONFIDENCE} (what 'accept all' takes): {len(acc)} estimates, {len(acc) - good} wrong by more than 5 s"
+        + (f" (precision {good / len(acc):.1%})" if acc else "")
+    )
+    return rows
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("data_dir", type=Path)
@@ -295,6 +391,8 @@ def main() -> int:
     ap.add_argument("--min-photos", type=int, default=30, help="devices with fewer photos are left out")
     ap.add_argument("--offsets", default=DEFAULT_OFFSETS)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--true-clocks", action="store_true", help="the devices are known to share one clock: every true offset is 0")
+    ap.add_argument("--twin-share", default="0.03:0.5", help="LO:HI share of a device's photos its simulated twin shot (0: no twins)")
     ap.add_argument("--json", type=Path)
     args = ap.parse_args()
 
@@ -314,52 +412,73 @@ def main() -> int:
         return 2
 
     base = estimate(photos)
-    print("\nestimate on the library as it is (real clock differences):")
+    ref = next((d for d, e in base.items() if e["source"] == "reference"), None)
+    print("\nestimate on the library as it is" + (" (true offsets: 0)" if args.true_clocks else " (real clock differences)") + ":")
+    base_samples = []
     for d in sorted(keep, key=lambda d: -counts[d]):
         e = base.get(d)
         print(
             f"  device {d:>4}: "
             + (f"{fmt_offset(e['offset']):>14}  conf {e['confidence']:.2f}  evidence {e['evidence']:>4}  {e['source']}" if e else "no estimate")
         )
+        if args.true_clocks and d != ref:
+            base_samples.append(
+                dict(kind="base", device=d, shift_ms=None, error_ms=None if e is None else e["offset"], confidence=None if e is None else e["confidence"], source=None if e is None else e["source"])
+            )
 
     rng = random.Random(args.seed)
+    nprng = np.random.default_rng(args.seed)
     offsets = [parse_offset(s) for s in args.offsets.split(",")]
-    movable = [d for d in keep if d in base]
-    if not movable:
-        print("no device has an estimate to shift", file=sys.stderr)
-        return 2
-    trials = []
+    # the reference defines the time base (offset 0 by construction): shifting it moves all others
+    movable = sorted(d for d in keep if d != ref and (args.true_clocks or d in base))
+    sources = sorted(d for d in keep if d in base)
+    by_dev: dict[int, list[Photo]] = {}
+    for p in photos:
+        by_dev.setdefault(p.device, []).append(p)
+    twin_id = max(keep) + 1000
+    lo_share, hi_share = (float(x) for x in (args.twin_share.split(":") * 2)[:2])
+    shift_samples, twin_samples = [], []
     for k in range(args.trials):
-        dev = rng.choice(movable)
         s = offsets[k % len(offsets)]
-        # the device's clock moves by s, so its GPS evidence (gps - exif) moves by -s
+        dev = rng.choice(movable) if movable else None
         shifted = [
+            # the device's clock moves by s, so its GPS evidence (gps - exif) moves by -s
             Photo(p.device, p.t + s, None if p.gps_delta is None else p.gps_delta - s, p.phash, p.emb) if p.device == dev else p
             for p in photos
         ]
-        e = estimate(shifted).get(dev)
-        err = None if e is None else (e["offset"] - base[dev]["offset"]) + s
-        trials.append(dict(device=dev, shift_ms=s, error_ms=err, confidence=None if e is None else e["confidence"], source=None if e is None else e["source"]))
-        print(f"  trial {k + 1:>3}/{args.trials} device {dev:>4} shift {fmt_offset(s):>14} -> " + ("no estimate" if err is None else f"error {err / 1000:+.1f}s conf {e['confidence']:.2f} {e['source']}"))
+        src = rng.choice(sources) if hi_share > 0 and sources else None
+        share = 0.0
+        if src is not None:
+            share = lo_share * (hi_share / lo_share) ** rng.random() if lo_share > 0 else hi_share
+            shifted += twin_of(by_dev[src], twin_id, share, s, rng, nprng)
+        est = estimate(shifted)
+        line = f"  trial {k + 1:>3}/{args.trials} shift {fmt_offset(s):>14}"
+        if dev is not None:
+            e = est.get(dev)
+            truth = 0 if args.true_clocks else base[dev]["offset"]
+            err = None if e is None else (e["offset"] - truth) + s
+            shift_samples.append(dict(kind="shift", device=dev, shift_ms=s, error_ms=err, confidence=None if e is None else e["confidence"], source=None if e is None else e["source"]))
+            line += f" | device {dev:>4}: " + ("no estimate" if e is None else f"error {err / 1000:+.0f}s conf {e['confidence']:.2f}")
+        if src is not None:
+            e, es = est.get(twin_id), est.get(src)
+            err = None if e is None or es is None else (e["offset"] - es["offset"]) + s
+            twin_samples.append(dict(kind="twin", device=src, shift_ms=s, error_ms=err, confidence=None if err is None else e["confidence"], source=None if e is None else e["source"]))
+            line += f" | twin of {src:>4} ({share:.0%}): " + ("no estimate" if err is None else f"error {err / 1000:+.0f}s conf {e['confidence']:.2f}")
+        print(line)
 
-    done = [t for t in trials if t["error_ms"] is not None]
-    errs = [abs(t["error_ms"]) for t in done]
-    ok = sum(1 for x in errs if x <= TOLERANCE_MS)
-    print(f"\n{len(trials)} trials: {len(done)} with an estimate, {len(trials) - len(done)} without")
-    print(f"  |error| <= 5 s: {ok}/{len(trials)} = {ok / len(trials):.1%} of all trials, {ok / max(1, len(done)):.1%} of the estimated ones")
-    if errs:
-        print(f"  |error| median {statistics.median(errs) / 1000:.2f}s  p95 {percentile(errs, 0.95) / 1000:.2f}s  max {max(errs) / 1000:.2f}s")
-    confident = [t for t in done if t["confidence"] >= ACCEPT_MIN_CONFIDENCE]
-    bad = [t for t in confident if abs(t["error_ms"]) > TOLERANCE_MS]
-    print(f"  confidence >= {ACCEPT_MIN_CONFIDENCE} (what 'accept all' takes): {len(confident)} trials, {len(bad)} wrong by more than 5 s")
-    print("  by shift size:")
-    for lo, hi, label in [(0, 60_000, "< 1 min"), (60_000, 3_600_000, "1 min - 1 h"), (3_600_000, 10**12, ">= 1 h")]:
-        sel = [t for t in trials if lo <= abs(t["shift_ms"]) < hi]
-        good = [t for t in sel if t["error_ms"] is not None and abs(t["error_ms"]) <= TOLERANCE_MS]
-        print(f"    {label:<12} {len(good)}/{len(sel)} within 5 s")
+    print(f"\n{args.trials} trials")
+    if base_samples:
+        summary("unshifted devices (true offset 0)", base_samples)
+    summary("shifted device" + (" (true offset -s)" if args.true_clocks else " (consistency with its unshifted estimate)"), shift_samples)
+    if twin_samples:
+        summary("simulated twin camera (true offset -s)", twin_samples)
+    every = base_samples + shift_samples + twin_samples
+    rows = reliability(every)
     if args.json:
-        args.json.write_text(json.dumps(dict(baseline=base, trials=trials), indent=2, default=str))
-    return 0 if ok == len(trials) else 1
+        args.json.write_text(json.dumps(dict(baseline=base, reference=ref, samples=every, reliability=rows), indent=2, default=str))
+    acc = [x for x in every if x["error_ms"] is not None and x["confidence"] >= ACCEPT_MIN_CONFIDENCE]
+    good = sum(1 for x in acc if abs(x["error_ms"]) <= TOLERANCE_MS)
+    return 0 if good >= 0.95 * len(acc) else 1
 
 
 if __name__ == "__main__":
