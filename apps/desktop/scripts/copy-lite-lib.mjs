@@ -22,13 +22,12 @@ const name =
       : 'libip_lite_ffi.so'
 const profile = process.env.CARGO_PROFILE || 'release'
 const src = join(repo, 'target', profile, name)
-if (!existsSync(src)) {
-  // `tauri build` builds only the app package, so the library is built here (it is small and
-  // shares the same target dir).
-  console.log(`[lite] ${src} is missing; building ip-lite-ffi`)
-  const args = ['build', ...(profile === 'release' ? ['--release'] : []), '-p', 'ip-lite-ffi']
-  execFileSync('cargo', args, { cwd: repo, stdio: 'inherit' })
-}
+// `tauri build` builds only the app package, so the library is built here (it is small and shares
+// the same target dir). Always build, not only when the file is missing: a stale library from an
+// older checkout has an older ABI, `lite_native.py` rejects it and the worker silently falls back
+// to the slower Python `quality` step. Cargo makes this a no-op when it is up to date.
+const args = ['build', ...(profile === 'release' ? ['--release'] : []), '-p', 'ip-lite-ffi']
+execFileSync('cargo', args, { cwd: repo, stdio: 'inherit' })
 if (!existsSync(src)) {
   console.error(`[lite] ${src} still missing after cargo build -p ip-lite-ffi`)
   process.exit(1)
