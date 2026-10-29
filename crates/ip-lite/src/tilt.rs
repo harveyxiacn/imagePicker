@@ -7,9 +7,11 @@
 //! the candidate angles near their own gradient direction at their line offset `rho`. Only long
 //! collinear runs (rho peaks of at least `LINE_MIN_FRAC` x the long edge) count, so texture,
 //! faces and foliage add nothing. The tilt is the centroid of the angle profile's peak; the
-//! confidence combines the line length behind the peak, its dominance over the best other angle
-//! and, per family, how strongly that family alone prefers another angle (converging verticals
-//! against a level horizon, a slanted table edge against upright door frames).
+//! confidence combines the line length behind the peak, its dominance over the best other angle,
+//! per family, how strongly that family alone prefers another angle (converging verticals
+//! against a level horizon, a slanted table edge against upright door frames), and the
+//! [`credibility`] of the lines at the peak: lines off the image centre lean under perspective
+//! alone, so they count only where both sides agree (a long horizon counts wherever it sits).
 //!
 //! Convention: `deg > 0` means the content is rotated clockwise (the horizon falls to the right);
 //! rotating the photo counter-clockwise by `deg` levels it.
@@ -30,6 +32,9 @@ const PEAK_HALF_BINS: usize = 3;
 const RIVAL_BINS: usize = 4;
 const SUPPORT_SCALE: f64 = 0.5;
 const FAMILY_SCALE: f64 = 0.5;
+const CENTRE_FRAC: f64 = 0.15;
+const HORIZON_FRAC: f64 = 0.2;
+const CRED_HALF_BINS: usize = 1;
 
 /// Result of [`estimate_tilt`].
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -76,42 +81,78 @@ fn argmax(v: &[f64]) -> usize {
     k
 }
 
-/// Soft-thresholded strength of the rho peaks of every angle row of one family's accumulator.
-fn line_profile(acc: &[f64], n_rho: usize, line_min: f64) -> Vec<f64> {
-    let mut a3 = vec![0f64; n_rho];
-    acc.chunks(n_rho)
-        .map(|row| {
-            for r in 0..n_rho {
-                let left = if r > 0 { row[r - 1] } else { 0.0 };
-                let right = if r + 1 < n_rho { row[r + 1] } else { 0.0 };
-                a3[r] = row[r] + left + right;
-            }
-            let at = |r: usize, d: isize| {
-                let i = r as isize + d;
-                if i < 0 || i >= n_rho as isize {
-                    0.0
-                } else {
-                    a3[i as usize]
-                }
-            };
-            let mut s = 0f64;
-            for (r, &c) in a3.iter().enumerate() {
-                if c > at(r, -1) && c > at(r, -2) && c >= at(r, 1) && c >= at(r, 2) {
-                    s += c * ((c - line_min) / line_min).clamp(0.0, 1.0);
-                }
-            }
-            s
-        })
-        .collect()
+/// One family's line evidence, one value per candidate angle.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Lines {
+    /// Soft-thresholded strength of the rho peaks (the angle profile P).
+    pub total: Vec<f64>,
+    /// The part of `total` from lines more than `CENTRE_FRAC` of the image off-centre, one side.
+    pub below: Vec<f64>,
+    /// ... and the other side.
+    pub above: Vec<f64>,
+    /// Strength (collinear length) of the strongest single line.
+    pub longest: Vec<f64>,
 }
 
-/// Angle profiles `[P_H, P_V]` (one value per `BIN_DEG` step over +-[`TILT_MAX_DEG`]) of the
+impl Lines {
+    fn zeros(n: usize) -> Self {
+        Lines {
+            total: vec![0.0; n],
+            below: vec![0.0; n],
+            above: vec![0.0; n],
+            longest: vec![0.0; n],
+        }
+    }
+}
+
+/// Line evidence of every angle row of one family's accumulator; rho bin `r` is a line `r - r0`
+/// px off the image centre, "off-centre" beyond `edge` px.
+fn line_profile(acc: &[f64], n_rho: usize, line_min: f64, r0: f64, edge: f64) -> Lines {
+    let mut a3 = vec![0f64; n_rho];
+    let mut out = Lines::default();
+    for row in acc.chunks(n_rho) {
+        for r in 0..n_rho {
+            let left = if r > 0 { row[r - 1] } else { 0.0 };
+            let right = if r + 1 < n_rho { row[r + 1] } else { 0.0 };
+            a3[r] = row[r] + left + right;
+        }
+        let at = |r: usize, d: isize| {
+            let i = r as isize + d;
+            if i < 0 || i >= n_rho as isize {
+                0.0
+            } else {
+                a3[i as usize]
+            }
+        };
+        let (mut s, mut below, mut above, mut longest) = (0f64, 0f64, 0f64, 0f64);
+        for (r, &c) in a3.iter().enumerate() {
+            if c > at(r, -1) && c > at(r, -2) && c >= at(r, 1) && c >= at(r, 2) {
+                let v = c * ((c - line_min) / line_min).clamp(0.0, 1.0);
+                s += v;
+                let off = r as f64 - r0;
+                if off < -edge {
+                    below += v;
+                } else if off > edge {
+                    above += v;
+                }
+                longest = longest.max(c);
+            }
+        }
+        out.total.push(s);
+        out.below.push(below);
+        out.above.push(above);
+        out.longest.push(longest);
+    }
+    out
+}
+
+/// Line evidence `[H, V]` (one value per `BIN_DEG` step over +-[`TILT_MAX_DEG`]) of the
 /// near-horizontal and near-vertical lines of a gray image.
-pub fn line_profiles(gray: &Gray8) -> [Vec<f64>; 2] {
+pub fn line_profiles(gray: &Gray8) -> [Lines; 2] {
     let (w, h) = (gray.w, gray.h);
     let nk = n_bins();
     if w.min(h) < 4 * MARGIN + 16 {
-        return [vec![0.0; nk], vec![0.0; nk]];
+        return [Lines::zeros(nk), Lines::zeros(nk)];
     }
     let g = gaussian_blur(&gray.to_f32(), BLUR_SIGMA);
     let gx = filter3x3(&g, &SOBEL_X);
@@ -183,16 +224,47 @@ pub fn line_profiles(gray: &Gray8) -> [Vec<f64>; 2] {
         }
     }
     let [ah, av] = accs;
+    // offsets across the lines: vertical for H, horizontal for V
     [
-        line_profile(&ah, n_rho, line_min),
-        line_profile(&av, n_rho, line_min),
+        line_profile(&ah, n_rho, line_min, r0, CENTRE_FRAC * h as f64),
+        line_profile(&av, n_rho, line_min, r0, CENTRE_FRAC * w as f64),
     ]
 }
 
-/// Tilt and confidence from the two families' angle profiles (`long_edge` of the image they
-/// came from).
-pub fn combine(prof_h: &[f64], prof_v: &[f64], long_edge: usize) -> Tilt {
-    let long = long_edge as f64;
+/// Share of the line evidence at angle bin `k` (+-`CRED_HALF_BINS`, the smoothing window) that
+/// perspective cannot explain. Lines more than `CENTRE_FRAC` of the image off-centre lean under
+/// perspective alone (verticals off the centre column converge when the camera pitches,
+/// horizontals off the centre row under yaw), in opposite directions on the two sides, so they
+/// count only as far as both sides agree; a roll moves every line alike. A near-horizontal family
+/// whose longest line spans `HORIZON_FRAC` of the width counts in full: a horizon stays level
+/// under pitch wherever it sits.
+pub fn credibility(lh: &Lines, lv: &Lines, k: usize, width: usize) -> f64 {
+    let lo = k.saturating_sub(CRED_HALF_BINS);
+    let hi = (k + CRED_HALF_BINS + 1).min(lh.total.len());
+    let (mut total, mut credible) = (0f64, 0f64);
+    for (fam, l) in [lh, lv].into_iter().enumerate() {
+        let t: f64 = l.total[lo..hi].iter().sum();
+        total += t;
+        let longest = l.longest[lo..hi].iter().copied().fold(f64::MIN, f64::max);
+        if fam == 0 && longest >= HORIZON_FRAC * width as f64 {
+            credible += t;
+        } else {
+            let below: f64 = l.below[lo..hi].iter().sum();
+            let above: f64 = l.above[lo..hi].iter().sum();
+            credible += t - below - above + 2.0 * below.min(above);
+        }
+    }
+    if total > 0.0 {
+        credible / total
+    } else {
+        0.0
+    }
+}
+
+/// Tilt and confidence from the two families' line evidence (of a `w` x `h` image).
+pub fn combine(lh: &Lines, lv: &Lines, w: usize, h: usize) -> Tilt {
+    let (prof_h, prof_v) = (&lh.total[..], &lv.total[..]);
+    let long = w.max(h) as f64;
     let prof: Vec<f64> = prof_h.iter().zip(prof_v).map(|(a, b)| a + b).collect();
     let nk = prof.len();
     if prof.iter().sum::<f64>() <= 0.0 {
@@ -229,6 +301,7 @@ pub fn combine(prof_h: &[f64], prof_v: &[f64], long_edge: usize) -> Tilt {
             conf *= 1.0 - strength * (1.0 - smf[k] / own);
         }
     }
+    conf *= credibility(lh, lv, k, w);
     Tilt {
         deg: round_to(num / den, 1e2),
         confidence: round_to(conf, 1e3),
@@ -237,8 +310,8 @@ pub fn combine(prof_h: &[f64], prof_v: &[f64], long_edge: usize) -> Tilt {
 
 /// Tilt of a gray image at analysis size (long edge about 1024, as the quality step uses).
 pub fn estimate_tilt(gray: &Gray8) -> Tilt {
-    let [ph, pv] = line_profiles(gray);
-    combine(&ph, &pv, gray.w.max(gray.h))
+    let [lh, lv] = line_profiles(gray);
+    combine(&lh, &lv, gray.w, gray.h)
 }
 
 #[cfg(test)]
@@ -308,6 +381,83 @@ mod tests {
         let one = estimate_tilt(&render(1024, 768, &[(0.3, 1.0)], 0, 0));
         let two = estimate_tilt(&render(1024, 768, &[(0.3, 1.0), (0.7, 7.0)], 0, 0));
         assert!(two.confidence < 0.5 * one.confidence, "{two:?} vs {one:?}");
+    }
+
+    /// Light gray image with dark soft-edged segments `(x0, y0, x1, y1)` in pixels.
+    fn segments(w: usize, h: usize, segs: &[(f64, f64, f64, f64)]) -> Gray8 {
+        let mut data = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                let (px, py) = (x as f64, y as f64);
+                let mut v = 170.0;
+                for &(x0, y0, x1, y1) in segs {
+                    let (dx, dy) = (x1 - x0, y1 - y0);
+                    let t =
+                        (((px - x0) * dx + (py - y0) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                    let d = (px - x0 - t * dx).hypot(py - y0 - t * dy);
+                    v -= 100.0 * (1.0 - soft(d - 4.0));
+                }
+                data.push(v.round().clamp(0.0, 255.0) as u8);
+            }
+        }
+        Gray8 { w, h, data }
+    }
+
+    /// Segment through `(x, y)` px, `half` px each way, rotated clockwise by `deg` from the axis.
+    fn lean(x: f64, y: f64, deg: f64, half: f64, vertical: bool) -> (f64, f64, f64, f64) {
+        let (s, c) = deg.to_radians().sin_cos();
+        let (dx, dy) = if vertical {
+            (s * half, -c * half)
+        } else {
+            (c * half, s * half)
+        };
+        (x - dx, y - dy, x + dx, y + dy)
+    }
+
+    #[test]
+    fn one_sided_lines_are_not_trusted() {
+        // a lone frame at the side leans as much under camera pitch as under a roll
+        let one = estimate_tilt(&segments(
+            1024,
+            768,
+            &[lean(870.0, 384.0, 4.0, 370.0, true)],
+        ));
+        assert!(one.confidence < 0.05, "{one:?}");
+        // frames on both sides leaning alike, or one through the centre, are a roll
+        let two = estimate_tilt(&segments(
+            1024,
+            768,
+            &[
+                lean(150.0, 384.0, 4.0, 370.0, true),
+                lean(870.0, 384.0, 4.0, 370.0, true),
+            ],
+        ));
+        assert!(
+            (two.deg - 4.0).abs() < 0.2 && two.confidence > 0.3,
+            "{two:?}"
+        );
+        let centre = estimate_tilt(&segments(
+            1024,
+            768,
+            &[lean(512.0, 384.0, 4.0, 370.0, true)],
+        ));
+        assert!(
+            (centre.deg - 4.0).abs() < 0.2 && centre.confidence > 0.3,
+            "{centre:?}"
+        );
+        // short stripes low in the frame (a striped shirt) are no horizon ...
+        let shirt: Vec<_> = (0..9)
+            .map(|i| lean(512.0, 540.0 + 20.0 * i as f64, 6.0, 75.0, false))
+            .collect();
+        let t = estimate_tilt(&segments(1024, 768, &shirt));
+        assert!(t.confidence < 0.05, "{t:?}");
+        // ... but a full-width horizon at the same height counts wherever it sits
+        let t = estimate_tilt(&segments(
+            1024,
+            768,
+            &[lean(512.0, 620.0, 6.0, 600.0, false)],
+        ));
+        assert!((t.deg - 6.0).abs() < 0.2 && t.confidence > 0.3, "{t:?}");
     }
 
     #[test]
