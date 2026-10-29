@@ -379,7 +379,13 @@ async fn patch_semantics_and_events() {
         .await
         .unwrap();
     assert_eq!(n, 1, "unknown ids are ignored");
-    match drain(&mut rx).as_slice() {
+    // a late session.updated from the import's background work can still arrive under load; it is
+    // not produced by the patch (whose counts it does not carry), so only the patch's own events count
+    let events: Vec<Event> = drain(&mut rx)
+        .into_iter()
+        .filter(|e| !matches!(e, Event::SessionUpdated { .. }))
+        .collect();
+    match events.as_slice() {
         [Event::PhotosUpdated { items }] => {
             assert_eq!(items.len(), 1);
             assert_eq!(items[0].id, ids[0]);

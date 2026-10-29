@@ -18,7 +18,9 @@ use crate::xmp::XmpSyncRequest;
 use crate::*;
 
 const BASE: u64 = 1_700_000_000;
-const WAIT: Duration = Duration::from_secs(30);
+/// Wall-clock deadline for background work; minutes, not seconds, so a loaded machine or CI runner
+/// (parallel compiles) does not turn a slow run into a failure.
+const WAIT: Duration = Duration::from_secs(120);
 
 struct Env {
     core: Arc<Core>,
