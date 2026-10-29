@@ -1074,17 +1074,62 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
     })
 }
 
+/// What decides whether a face makes a good cover picture of its person.
+pub(crate) struct CoverCandidate {
+    pub w: f64,
+    pub h: f64,
+    pub det: Option<f64>,
+    pub sharpness: Option<f64>,
+    /// degrees; 0 = facing the camera
+    pub yaw: Option<f64>,
+    pub pitch: Option<f64>,
+    /// 0..1, higher = more covered
+    pub occlusion: Option<f64>,
+    /// mean luminance of the whole photo, 0..1 (the face itself is not measured)
+    pub luminance: Option<f64>,
+}
+
+/// Cover quality: a big, confidently detected, sharp, frontal, unoccluded face in a well-exposed
+/// photo beats a huge but turned-away, back-lit or blurry one. Size is capped so that a close-up
+/// does not win on size alone. Higher is better; never negative.
+pub(crate) fn cover_score(c: &CoverCandidate) -> f64 {
+    let size = (c.w * c.h).max(0.0).sqrt().min(0.3);
+    let det = c.det.unwrap_or(0.5).clamp(0.05, 1.0);
+    let sharp = 0.3 + c.sharpness.unwrap_or(0.5).clamp(0.0, 1.0);
+    let frontal = if c.yaw.is_none() && c.pitch.is_none() {
+        0.7
+    } else {
+        (1.0 - c.yaw.unwrap_or(0.0).abs() / 75.0).max(0.05)
+            * (1.0 - c.pitch.unwrap_or(0.0).abs() / 60.0).max(0.1)
+    };
+    let open = 1.0 - 0.8 * c.occlusion.unwrap_or(0.0).clamp(0.0, 1.0);
+    let light = c.luminance.map_or(1.0, |l| (l / 0.3).clamp(0.25, 1.0));
+    size * det * sharp * frontal * open * light
+}
+
 /// Refreshes centre and cover of a person; deletes it when it has no faces left and no name.
 pub fn recompute_person(conn: &Connection, person_id: i64) -> Result<()> {
     let mut st = conn.prepare(
-        "SELECT id, embedding, bbox_w * bbox_h * (0.3 + COALESCE(sharpness, 0.5)) FROM face WHERE person_id=?1",
+        "SELECT f.id, f.embedding, f.bbox_w, f.bbox_h, f.det_score, f.sharpness, f.yaw, f.pitch,
+                f.occlusion, a.mean_luminance
+         FROM face f LEFT JOIN analysis a ON a.photo_id=f.photo_id WHERE f.person_id=?1",
     )?;
     let faces = st
         .query_map([person_id], |r| {
+            let cand = CoverCandidate {
+                w: r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                h: r.get::<_, Option<f64>>(3)?.unwrap_or(0.0),
+                det: r.get(4)?,
+                sharpness: r.get(5)?,
+                yaw: r.get(6)?,
+                pitch: r.get(7)?,
+                occlusion: r.get(8)?,
+                luminance: r.get(9)?,
+            };
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, Option<Vec<u8>>>(1)?,
-                r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                cover_score(&cand),
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1115,7 +1160,7 @@ pub fn recompute_person(conn: &Connection, person_id: i64) -> Result<()> {
     let center = mean_embedding(embs.iter()).map(|c| encode_f16(&c));
     let cover = faces
         .iter()
-        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap().then(b.0.cmp(&a.0)))
+        .max_by(|a, b| a.2.total_cmp(&b.2).then(b.0.cmp(&a.0)))
         .map(|f| f.0);
     conn.execute(
         "UPDATE person SET cover_face_id=?2, center=COALESCE(?3, center) WHERE id=?1",
@@ -2097,4 +2142,84 @@ pub fn purge_orphan_people(conn: &Connection) -> Result<()> {
         [],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod cover_tests {
+    use super::*;
+
+    fn face() -> CoverCandidate {
+        CoverCandidate {
+            w: 0.12,
+            h: 0.16,
+            det: Some(0.9),
+            sharpness: Some(0.7),
+            yaw: Some(5.0),
+            pitch: Some(0.0),
+            occlusion: Some(0.0),
+            luminance: Some(0.5),
+        }
+    }
+
+    #[test]
+    fn frontal_sharp_face_beats_larger_turned_away_one() {
+        let good = face();
+        let back_of_head = CoverCandidate {
+            w: 0.2,
+            h: 0.26,
+            det: Some(0.4),
+            yaw: Some(80.0),
+            ..face()
+        };
+        assert!(cover_score(&good) > cover_score(&back_of_head));
+    }
+
+    #[test]
+    fn dark_photo_loses_to_well_exposed_one() {
+        let dark = CoverCandidate {
+            luminance: Some(0.04),
+            ..face()
+        };
+        assert!(cover_score(&face()) > cover_score(&dark));
+    }
+
+    #[test]
+    fn blurry_and_occluded_faces_rank_lower() {
+        let blurry = CoverCandidate {
+            sharpness: Some(0.05),
+            ..face()
+        };
+        let masked = CoverCandidate {
+            occlusion: Some(0.9),
+            ..face()
+        };
+        assert!(cover_score(&face()) > cover_score(&blurry));
+        assert!(cover_score(&face()) > cover_score(&masked));
+    }
+
+    #[test]
+    fn size_is_capped_and_missing_fields_are_neutral() {
+        let big = CoverCandidate {
+            w: 0.9,
+            h: 0.9,
+            ..face()
+        };
+        let capped = CoverCandidate {
+            w: 0.3,
+            h: 0.3,
+            ..face()
+        };
+        assert!((cover_score(&big) - cover_score(&capped)).abs() < 1e-12);
+        let unknown = CoverCandidate {
+            det: None,
+            sharpness: None,
+            yaw: None,
+            pitch: None,
+            occlusion: None,
+            luminance: None,
+            ..face()
+        };
+        let s = cover_score(&unknown);
+        assert!(s.is_finite() && s > 0.0);
+    }
 }

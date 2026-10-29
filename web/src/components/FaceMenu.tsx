@@ -9,6 +9,7 @@ import { qk } from '@/lib/cache'
 import { useHistory } from '@/lib/history'
 import { movedFacesEntry, personPatchEntry, refreshPeople } from '@/lib/structureUndo'
 import { setPersonTri } from '@/lib/filter'
+import { usePersonLabel } from '@/lib/usePersonLabel'
 import { usePopover } from '@/lib/usePopover'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -28,6 +29,7 @@ interface MenuState {
  */
 export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; preventDefault: () => void }, face: Face) => void; node: ReactNode } {
   const { t } = useTranslation()
+  const personLabel = usePersonLabel()
   const qc = useQueryClient()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [naming, setNaming] = useState<Face | null>(null)
@@ -112,7 +114,7 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
             style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 245) }}
             data-testid="face-menu"
           >
-            <div className="px-2 py-1 text-xs text-muted">{menu.face.person_name ?? (known ? `${t('person.unnamed')} ${menu.face.person_id}` : t('face.unassigned'))}</div>
+            <div className="px-2 py-1 text-xs text-muted">{known || menu.face.person_name ? personLabel(menu.face.person_id, menu.face.person_name) : t('face.unassigned')}</div>
             <MenuItem icon={<Check size={14} className="text-success" />} disabled={!known} onClick={() => filterBy(menu.face, 'include')}>
               {t('face.filterBy')}
             </MenuItem>

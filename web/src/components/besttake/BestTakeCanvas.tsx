@@ -5,6 +5,7 @@ import type { Photo } from '@/api/types'
 import type { PersonView } from '@/lib/besttake'
 import { stackKey, withoutCrop } from '@/lib/edit'
 import { useElementSize } from '@/lib/hooks'
+import { usePersonLabel } from '@/lib/usePersonLabel'
 import { FIT_VIEW, type ViewState } from '@/lib/zoom'
 import { useEdit } from '@/stores/edit'
 import { useGen } from '@/stores/gen'
@@ -30,6 +31,7 @@ interface Props {
 /** Composite preview of the base photo (render preview with the base stack) with a clickable box per person. */
 export function BestTakeCanvas({ photo, people, boxes, selected, onSelect, original }: Props) {
   const { t } = useTranslation()
+  const personLabel = usePersonLabel()
   const stack = useEdit((s) => s.stack)
   const ready = useEdit((s) => s.loaded && s.photoId === photo.id)
   const tasks = useGen((s) => s.tasks)
@@ -74,7 +76,7 @@ export function BestTakeCanvas({ photo, people, boxes, selected, onSelect, origi
               background: isSel ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined,
             }}
             aria-pressed={isSel}
-            aria-label={person.name ?? `#${person.person_id ?? person.track_id}`}
+            aria-label={personLabel(person.person_id, person.name)}
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             onClick={() => onSelect(b.key)}
@@ -83,7 +85,7 @@ export function BestTakeCanvas({ photo, people, boxes, selected, onSelect, origi
             data-replaced={person.replaced}
           >
             <span className="absolute -top-5 left-0 flex max-w-full items-center gap-1 truncate rounded bg-black/70 px-1 text-[11px] leading-4 text-white">
-              {person.name ?? t('person.unnamed')}
+              {personLabel(person.person_id, person.name)}
               {person.replaced && (
                 <span className="text-ai" title={t('besttake.replaced')} data-testid="bt-replaced-icon">
                   <RotateCcw size={10} />

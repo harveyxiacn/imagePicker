@@ -10,6 +10,7 @@ import { ExportDialog } from '@/components/ExportDialog'
 import { FaceSearchDialog } from '@/components/FaceSearchDialog'
 import { Modal } from '@/components/Modal'
 import { HeaderControls } from '@/components/HeaderControls'
+import { personLabel } from '@/lib/ai'
 import { can } from '@/lib/auth'
 import { buildBestSections, sectionsToFolders } from '@/lib/bestN'
 import { qk } from '@/lib/cache'
@@ -58,7 +59,7 @@ function NameField({ person, onSave }: { person: Person; onSave: (name: string |
       }}
       data-testid="person-name"
     >
-      <span className={`truncate font-medium ${person.name ? '' : 'text-muted italic'}`}>{person.name ?? `${t('person.unnamed')} ${person.id}`}</span>
+      <span className={`truncate font-medium ${person.name ? '' : 'text-muted italic'}`}>{personLabel(person, t('person.unnamed'))}</span>
       <Pencil size={12} className="shrink-0 text-faint opacity-0 group-hover/name:opacity-100 [@media(hover:none)]:opacity-100" />
     </button>
   )
@@ -313,7 +314,7 @@ function PeopleInner() {
                 <div className="mb-2 flex items-center gap-3">
                   <img src={faceCropUrl(sec.person.cover_face_id, 128)} alt="" className="h-9 w-9 rounded-full object-cover" draggable={false} />
                   <div className="min-w-0">
-                    <div className="truncate font-medium">{sec.person.name ?? `${t('person.unnamed')} ${sec.person.id}`}</div>
+                    <div className="truncate font-medium">{personLabel(sec.person, t('person.unnamed'))}</div>
                     <div className="tnum text-xs text-muted">{t('best.shown', { n: sec.photos.length, total: sec.person.photo_count })}</div>
                   </div>
                   <button className="btn btn-ghost ml-auto" onClick={() => openLibrary(sec.person)}>
@@ -406,7 +407,7 @@ function PeopleInner() {
             <label key={p.id} className="flex cursor-pointer items-center gap-3 rounded-control border border-line p-2" style={{ borderColor: into === p.id ? 'var(--accent)' : undefined }}>
               <input type="radio" name="merge-into" checked={into === p.id} onChange={() => setInto(p.id)} />
               <img src={faceCropUrl(p.cover_face_id, 128)} alt="" className="h-9 w-9 rounded-full object-cover" />
-              <span className="flex-1 truncate">{p.name ?? `${t('person.unnamed')} ${p.id}`}</span>
+              <span className="flex-1 truncate">{personLabel(p, t('person.unnamed'))}</span>
               <span className="tnum text-xs text-muted">{p.photo_count}</span>
             </label>
           ))}

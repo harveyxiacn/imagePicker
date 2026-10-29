@@ -4,6 +4,7 @@ import { faceCropUrl } from '@/api/client'
 import { useBurstFaces } from '@/api/queries'
 import type { Face, Photo } from '@/api/types'
 import { commonBestFrames, expressionTone, type CellTone } from '@/lib/ai'
+import { usePersonLabel } from '@/lib/usePersonLabel'
 import { useFaceMenu } from './FaceMenu'
 import { errorText } from '@/lib/errors'
 
@@ -29,6 +30,7 @@ interface Props {
 /** Person x frame expression matrix (doc 04 3.3): green = eyes open + smile, yellow = so-so, red = closed/blurry. */
 export function ExpressionMatrix({ burstId, photos, aId, bId, onPick, onCompose }: Props) {
   const { t } = useTranslation()
+  const personLabel = usePersonLabel()
   const q = useBurstFaces(burstId)
   const menu = useFaceMenu()
   const data = q.data
@@ -72,7 +74,7 @@ export function ExpressionMatrix({ burstId, photos, aId, bId, onPick, onCompose 
                   <td className="pr-2">
                     <div className="flex items-center gap-2">
                       {firstFace && <img src={faceCropUrl(firstFace.id, 128)} alt="" className="h-6 w-6 rounded-full object-cover" draggable={false} />}
-                      <span className="max-w-20 truncate text-sm">{tr.person_name ?? (tr.person_id !== null ? `${t('person.unnamed')} ${tr.person_id}` : t('face.unassigned'))}</span>
+                      <span className="max-w-20 truncate text-sm">{tr.person_id !== null || tr.person_name ? personLabel(tr.person_id, tr.person_name) : t('face.unassigned')}</span>
                     </div>
                   </td>
                   {photos.map((p) => {

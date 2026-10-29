@@ -101,7 +101,7 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
   const active = isFilterActive(filter)
   const p = filter.person
   const names = useMemo(() => new Map((people.data ?? []).map((x) => [x.id, personLabel(x, t('person.unnamed'))])), [people.data, t])
-  const nameOf = (id: number) => names.get(id) ?? `${t('person.unnamed')} ${id}`
+  const nameOf = (id: number) => names.get(id) ?? t('person.unnamed')
 
   const setIssue = (v: string) => {
     if (v === 'all') setFilter({ issueMode: 'all', issues: [] })

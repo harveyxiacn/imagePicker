@@ -671,6 +671,8 @@ export interface Person {
   cover_face_id: number
   photo_count: number
   hidden: boolean
+  /** display number among the unnamed people (set client-side, see lib/people.ts); never a stored id */
+  unnamed_no?: number
 }
 
 export type ServerEvent =

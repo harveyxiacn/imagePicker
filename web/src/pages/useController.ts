@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import type { ColorLabel, Flag, Photo } from '@/api/types'
 import { acceptAiRatings, editPhotos, redo, undo } from '@/lib/actions'
 import { compareUsesSelection } from '@/lib/compare'
+import { groupViewState } from '@/lib/counts'
 import { jumpGroup, moveVertical, toggleStacks } from '@/lib/stacks'
 import { clickSelect, selectAll } from '@/lib/selection'
 import { useToasts } from '@/stores/toasts'
@@ -121,8 +122,32 @@ export function useController(photos: Photo[], hooks: ControllerHooks = {}) {
         // Enter the group view for the cursor photo's burst.
         const cur = list.find((p) => p.id === ui.activeId)
         if (ui.view === 'group') return
-        if (!cur || cur.burst_id === null || (cur.burst_size ?? 0) < 2) {
-          push('info', t('group.notInBurst'), 2500)
+        if (!cur) return
+        const state = groupViewState(cur)
+        if (state === 'not-analysed') {
+          push('info', t('group.notAnalysed'), 2500)
+          return
+        }
+        if (state === 'no-similar') {
+          // Analysed but alone: say so, and offer the next burst that has at least two shots.
+          const nextId = jumpGroup(list, cur.id, 1)
+          const target = nextId === null ? undefined : list.find((p) => p.id === nextId)
+          if (!target || target.burst_id === null) {
+            push('info', `${t('group.noSimilar')}。${t('group.noOtherGroup')}`, 3000)
+            return
+          }
+          const burst = target.burst_id
+          push('info', t('group.noSimilar'), 6000, [
+            {
+              label: t('group.jumpNext'),
+              onClick: () => {
+                const s = useUi.getState()
+                s.setActive(target.id)
+                s.setGroupBurst(burst)
+                s.setView('group')
+              },
+            },
+          ])
           return
         }
         ui.setGroupBurst(cur.burst_id)

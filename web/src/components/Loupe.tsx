@@ -5,6 +5,7 @@ import { previewUrl } from '@/api/client'
 import type { Photo } from '@/api/types'
 import { useKeyHeld } from '@/lib/hooks'
 import { FIT_VIEW, type ViewState } from '@/lib/zoom'
+import { foldedAway } from '@/lib/counts'
 import { useUi } from '@/stores/ui'
 import { FaceBoxes } from './FaceBoxes'
 import { ZoomPane } from './ZoomPane'
@@ -15,6 +16,8 @@ interface Props {
   photos: Photo[]
   photo: Photo | undefined
   index: number
+  /** Photos in the whole filter; more than `photos.length` when bursts are folded behind their best shot. */
+  total?: number
   onMove: (delta: number) => void
   onPick: (id: number) => void
   onRate: (n: number | null) => void
@@ -26,8 +29,9 @@ const PRELOAD_AHEAD = 3
 const PRELOAD_BEHIND = 2
 
 /** Single-photo view: fit / 100% / wheel zoom, pan, progressive loading, neighbour preloading, filmstrip. */
-export function Loupe({ photos, photo, index, onMove, onPick, onRate, onEdit }: Props) {
+export function Loupe({ photos, photo, index, total, onMove, onPick, onRate, onEdit }: Props) {
   const { t } = useTranslation()
+  const folded = foldedAway(total ?? photos.length, photos.length)
   // View is keyed by photo id so it resets to "fit" automatically when the photo changes.
   const [state, setState] = useState<{ id: number | null; view: ViewState }>({ id: null, view: FIT_VIEW })
   const [hover, setHover] = useState({ nx: 0.5, ny: 0.5 })
@@ -94,8 +98,9 @@ export function Loupe({ photos, photo, index, onMove, onPick, onRate, onEdit }: 
           <div className="pointer-events-auto flex flex-col gap-1">
             <div className="tnum text-sm font-medium">
               {photo.file_name}
-              <span className="ml-2 text-xs text-white/60">
+              <span className="ml-2 text-xs text-white/60" title={folded > 0 ? t('loupe.collapsedTip', { total }) : undefined}>
                 {index + 1} / {photos.length}
+                {folded > 0 && ` · ${t('loupe.collapsed', { total })}`}
               </span>
             </div>
             <div className="flex items-center gap-3">

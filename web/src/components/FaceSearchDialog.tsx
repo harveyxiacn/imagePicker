@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useMatch, useNavigate } from 'react-router-dom'
 import { api, faceCropUrl } from '@/api/client'
 import { usePeople } from '@/api/queries'
+import { usePersonLabel } from '@/lib/usePersonLabel'
 import { qk } from '@/lib/cache'
 import {
   DEFAULT_SEARCH_SIMILARITY,
@@ -57,6 +58,7 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
   const [minSim, setMinSim] = useState(DEFAULT_SEARCH_SIMILARITY)
   const minRef = useRef(DEFAULT_SEARCH_SIMILARITY)
   const people = usePeople(sessionId)
+  const personLabel = usePersonLabel(sessionId)
   const navigate = useNavigate()
   const inLibrary = useMatch('/s/:sessionId')
 
@@ -163,7 +165,7 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
       void qc.invalidateQueries({ queryKey: ['analysis', 'photo'] })
       void qc.invalidateQueries({ queryKey: ['burstFaces'] })
       void qc.invalidateQueries({ queryKey: qk.photoPeopleAll })
-      useToasts.getState().push('success', t('faceSearch.created', { name: person.name ?? `${t('person.unnamed')} ${person.id}` }), 3000)
+      useToasts.getState().push('success', t('faceSearch.created', { name: personLabel(person.id, person.name) }), 3000)
       if (inLibrary) useUi.getState().setFilter({ person: { ...DEFAULT_PERSON_FILTER, include: [person.id] } })
       close()
     } catch (err) {
@@ -272,7 +274,7 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
                               <span className="h-10 w-10 shrink-0 rounded-full bg-bg" />
                             )}
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate font-medium">{c.person_name ?? `${t('person.unnamed')} ${c.person_id}`}</span>
+                              <span className="block truncate font-medium">{personLabel(c.person_id, c.person_name)}</span>
                               <span className="mt-1 block h-1.5 overflow-hidden rounded bg-line">
                                 <span className="block h-full bg-accent" style={{ width: `${pct}%` }} />
                               </span>
@@ -332,7 +334,7 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
                       {results.resp.similar_faces.map((f) => {
                         const on = results.chosen.has(f.face_id)
                         const blocked = f.photo_id === lockedPhoto
-                        const owner = f.person_id === null ? t('face.unassigned') : (f.person_name ?? `${t('person.unnamed')} ${f.person_id}`)
+                        const owner = f.person_id === null ? t('face.unassigned') : personLabel(f.person_id, f.person_name)
                         const pct = similarityPct(f.similarity)
                         return (
                           <li key={f.face_id}>
