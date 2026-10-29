@@ -43,7 +43,7 @@ export function StatusBar({ sessionId, session, photos }: Props) {
   return (
     <footer className="flex h-7 shrink-0 items-center gap-4 border-t border-line bg-panel px-3 text-xs text-muted">
       {busy ? (
-        <span className="flex items-center gap-1.5 text-accent">
+        <span className="flex items-center gap-1.5 text-accent-text">
           <Loader2 size={12} className="animate-spin" />
           {t(`import.${session.import_state}`)} · {fmt(session.photo_count)}
         </span>
@@ -64,19 +64,19 @@ export function StatusBar({ sessionId, session, photos }: Props) {
             {pct}%{analysis.total > 0 && ` · ${fmt(analysis.done)} / ${fmt(analysis.total)}`}
           </span>
           {actions.canPause && (
-            <button className="btn btn-ghost !h-5 !px-1.5 text-xs" onClick={() => void pauseAnalysis(sessionId)} data-testid="analysis-pause">
+            <button className="btn hit btn-ghost !h-5 !px-1.5 text-xs" onClick={() => void pauseAnalysis(sessionId)} data-testid="analysis-pause">
               <Pause size={11} />
               {t('analysis.pause')}
             </button>
           )}
           {actions.canContinue && (
-            <button className="btn btn-ghost !h-5 !px-1.5 text-xs" onClick={() => void continueAnalysis(qc, sessionId)} data-testid="analysis-continue">
+            <button className="btn hit btn-ghost !h-5 !px-1.5 text-xs" onClick={() => void continueAnalysis(qc, sessionId)} data-testid="analysis-continue">
               <Play size={11} />
               {t('analysis.continue')}
             </button>
           )}
           {actions.canCancel && (
-            <button className="btn btn-ghost !h-5 !px-1.5 text-xs" onClick={() => void cancelAnalysis(qc, sessionId)} data-testid="analysis-cancel">
+            <button className="btn hit btn-ghost !h-5 !px-1.5 text-xs" onClick={() => void cancelAnalysis(qc, sessionId)} data-testid="analysis-cancel">
               <X size={11} />
               {t('common.cancel')}
             </button>
@@ -88,7 +88,7 @@ export function StatusBar({ sessionId, session, photos }: Props) {
         <span className="flex items-center gap-2">
           <span className="text-danger">{analysis.error ?? t('analysis.failed')}</span>
           {actions.offerLite && (
-            <button className="btn btn-ghost !h-5 !px-1.5 text-xs text-ai" onClick={() => void startAnalysis(qc, sessionId, 'lite')} data-testid="analysis-lite">
+            <button className="btn hit btn-ghost !h-5 !px-1.5 text-xs text-ai" onClick={() => void startAnalysis(qc, sessionId, 'lite')} data-testid="analysis-lite">
               <Sparkles size={11} />
               {t('analysis.liteFinish')}
             </button>
@@ -127,7 +127,7 @@ export function StatusBar({ sessionId, session, photos }: Props) {
             <span className="hidden lg:inline">{t('tasks.short')}</span>
           </Link>
         )}
-        {__MOCK__ && <span className="rounded bg-accent/20 px-1.5 text-accent">MOCK</span>}
+        {__MOCK__ && <span className="rounded bg-accent/20 px-1.5 text-accent-text">MOCK</span>}
         <span className="flex items-center gap-1.5" title={t(`status.conn_${connection}`)}>
           <span
             className={`h-2 w-2 rounded-full ${connection === 'open' ? 'bg-success' : connection === 'connecting' ? 'bg-warning' : 'bg-danger'}`}

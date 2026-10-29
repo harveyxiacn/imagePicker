@@ -29,7 +29,7 @@ export function GenTasks({ photoId, className = '' }: { photoId?: number; classN
             <span className="tnum">{t('gen.percent', { n: pct })}</span>
             <button
               type="button"
-              className="btn btn-ghost !h-5 !px-1.5 text-xs"
+              className="btn hit btn-ghost !h-5 !px-1.5 text-xs"
               disabled={task.cancelling}
               onClick={() => void cancelGen(qc, task.taskId)}
               title={t('gen.cancelHint')}

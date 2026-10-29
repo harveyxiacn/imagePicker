@@ -33,7 +33,7 @@ export function HoldCompare() {
   }
   return (
     <button
-      className={`btn absolute bottom-3 left-3 z-20 !h-12 touch-none select-none rounded-full border-white/20 bg-black/60 px-4 text-white backdrop-blur ${compare === 'original' ? '!border-accent' : ''}`}
+      className={`btn absolute bottom-3 left-3 z-(--z-sticky) !h-12 touch-none select-none rounded-full border-white/20 bg-black/60 px-4 text-white backdrop-blur ${compare === 'original' ? '!border-accent' : ''}`}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId)
         on()
@@ -154,7 +154,7 @@ export function MobileEditDrawer({ photo }: { photo: Photo }) {
                       data-testid={`param-${k}`}
                     >
                       <span>{t(`adjust.${k}`)}</span>
-                      {changed && <span className="tnum text-[10px] text-accent">{(adjust[k] ?? 0) > 0 ? '+' : ''}{(adjust[k] ?? 0).toFixed(SLIDER_SPEC[k].decimals)}</span>}
+                      {changed && <span className="tnum text-[11px] text-accent-text">{(adjust[k] ?? 0) > 0 ? '+' : ''}{(adjust[k] ?? 0).toFixed(SLIDER_SPEC[k].decimals)}</span>}
                     </button>
                   )
                 })}

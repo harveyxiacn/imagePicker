@@ -9,13 +9,15 @@
   --line: #3a3a3a;
   --fg: #e8e8e8;
   --muted: #a6a6a6;
-  --faint: #959595;
+  --line-strong: #7d7d7d; /* control borders: >= 3:1 on --bg / --panel / --elevated (--line stays for dividers) */
+  --faint: #a0a0a0;
   --accent: #f5a524;
+  --accent-text: #f5a524; /* accent used as text; --accent itself is a fill that carries --accent-fg */
   --accent-fg: #1a1200;
-  --ai: #a371f7;
+  --ai: #b28cf9;
   --success: #3fb950;
   --warning: #d29922;
-  --danger: #f85149;
+  --danger: #ff6b63;
   --skeleton-a: #2a2a2a;
   --skeleton-b: #353535;
   --label-red: #e5534b;
@@ -27,6 +29,16 @@
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --focus: var(--accent);
   --font-scale: 1;
+  /* Stacking scale (used as z-(--z-*)). Menus > toasts > modal > popovers > side panels > sticky bars. */
+  --z-sticky: 20;
+  --z-overlay-panel: 30;
+  --z-popover: 40;
+  --z-scrim: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+  --z-menu: 70;
+  --z-coach: 70;
+  --z-coach-bubble: 71;
 }
 
 :root[data-theme='light'] {
@@ -37,10 +49,16 @@
   --line: #d2d2d2;
   --fg: #1c1c1c;
   --muted: #555555;
+  --line-strong: #787878;
   --faint: #666666;
   --accent: #d98c00;
+  --accent-text: #7a4f00;
   --accent-fg: #1a1200;
-  --ai: #7c4dd6;
+  --ai: #6f3fcb;
+  --success: #17702f;
+  --warning: #7d5300;
+  --danger: #c4281f;
+  --focus: #7a4f00; /* --accent (amber fill) is only 2.4:1 on light surfaces */
   --skeleton-a: #e0e0e0;
   --skeleton-b: #ebebeb;
   --shadow: 0 8px 28px rgb(0 0 0 / 0.18);
@@ -52,10 +70,12 @@
   --panel: #0d0d0d;
   --elevated: #1a1a1a;
   --line: #8f8f8f;
+  --line-strong: #8f8f8f;
   --fg: #ffffff;
   --muted: #dcdcdc;
   --faint: #bdbdbd;
   --accent: #ffcc33;
+  --accent-text: #ffcc33;
   --accent-fg: #000000;
   --ai: #cdb0ff;
   --success: #5ee27a;
@@ -71,13 +91,15 @@
   --panel: #f4f4f4;
   --elevated: #ffffff;
   --line: #595959;
+  --line-strong: #595959;
   --fg: #000000;
   --muted: #2b2b2b;
   --faint: #474747;
-  --accent: #8a4b00;
+  --accent: #7a4200;
+  --accent-text: #5e3300;
   --accent-fg: #ffffff;
   --ai: #4a1fa8;
-  --success: #0b6b1f;
+  --success: #095c1a;
   --warning: #6e4a00;
   --danger: #a8071a;
   --skeleton-a: #e3e3e3;
@@ -91,10 +113,12 @@
   --color-panel: var(--panel);
   --color-elevated: var(--elevated);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
   --color-fg: var(--fg);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
   --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
   --color-accent-fg: var(--accent-fg);
   --color-ai: var(--ai);
   --color-success: var(--success);
@@ -150,9 +174,6 @@ body {
   border-color: var(--line);
 }
 /* Arbitrary pixel text sizes follow the font scale too. */
-.text-\[9px\] {
-  font-size: calc(9px * var(--font-scale, 1));
-}
 .text-\[10px\] {
   font-size: calc(10px * var(--font-scale, 1));
 }
@@ -200,7 +221,7 @@ kbd {
   height: 1.75rem;
   padding: 0 0.625rem;
   border-radius: var(--radius-control);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: var(--elevated);
   color: var(--fg);
   font-size: 0.8125rem;
@@ -240,6 +261,29 @@ kbd {
   padding: 0;
   justify-content: center;
 }
+/* Hit area (WCAG 2.5.8): small controls keep their visual size but get a >= 24x24 px target, 44x44 px on touch.
+   Icon buttons get it automatically; add .hit to other small buttons, chips and swatches. */
+.hit:not(.absolute, .fixed),
+.btn-icon:not(.absolute, .fixed) {
+  position: relative;
+}
+.hit::after,
+.btn-icon::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 24px);
+  height: max(100%, 24px);
+  transform: translate(-50%, -50%);
+}
+@media (pointer: coarse) {
+  .hit::after,
+  .btn-icon::after {
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+  }
+}
 .btn-ai {
   border-color: color-mix(in srgb, var(--ai) 55%, transparent);
   color: var(--ai);
@@ -254,7 +298,7 @@ kbd {
   height: 1.75rem;
   padding: 0 0.5rem;
   border-radius: var(--radius-control);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: var(--bg);
   color: var(--fg);
   font-size: 0.8125rem;
@@ -413,7 +457,7 @@ input[type='range'].lr-slider[data-changed='true']::-webkit-slider-thumb {
   height: 1.5rem;
   padding: 0 0.5rem;
   border-radius: 0.75rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   background: var(--elevated);
   color: var(--fg);
   font-size: 0.75rem;

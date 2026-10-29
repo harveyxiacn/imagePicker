@@ -51,7 +51,7 @@ export function BottomNav() {
         return (
           <button
             key={tab}
-            className={`flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] transition-colors disabled:opacity-40 ${on ? 'text-accent' : 'text-muted'}`}
+            className={`flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] transition-colors disabled:opacity-40 ${on ? 'text-accent-text' : 'text-muted'}`}
             aria-current={on ? 'page' : undefined}
             disabled={disabled}
             onClick={() => go(tab)}

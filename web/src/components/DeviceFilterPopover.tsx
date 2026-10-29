@@ -71,13 +71,13 @@ export function DeviceFilterButton({ sessionId }: { sessionId: number }) {
       >
         <Camera size={14} />
         {t('device.filter')}
-        {selected.length > 0 && <span className="tnum text-accent">({selected.length})</span>}
+        {selected.length > 0 && <span className="tnum text-accent-text">({selected.length})</span>}
       </button>
       {open && (
         <div
           role="dialog"
           aria-label={t('device.filter')}
-          className="anim-pop absolute top-full left-0 z-40 mt-1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
+          className="anim-pop absolute top-full left-0 z-(--z-popover) mt-1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
           data-testid="device-filter-popover"
         >
           <ul className="flex max-h-[260px] flex-col gap-0.5 overflow-y-auto">

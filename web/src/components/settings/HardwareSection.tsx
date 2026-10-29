@@ -77,7 +77,7 @@ export function HardwareSection() {
           )}
         </Row>
         <Row label={t('settings.hardware.tier')} hint={t('settings.hardware.tierHint')}>
-          <span className="rounded bg-accent/20 px-2 py-0.5 font-semibold text-accent" data-testid="settings-tier">
+          <span className="rounded bg-accent/20 px-2 py-0.5 font-semibold text-accent-text" data-testid="settings-tier">
             {w?.tier ?? '—'}
           </span>
         </Row>

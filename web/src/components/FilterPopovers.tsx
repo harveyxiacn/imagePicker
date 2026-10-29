@@ -57,13 +57,13 @@ function FilterPopover({
       >
         {icon}
         {label}
-        {count > 0 && <span className="tnum text-accent">({count})</span>}
+        {count > 0 && <span className="tnum text-accent-text">({count})</span>}
       </button>
       {open && (
         <div
           role="dialog"
           aria-label={label}
-          className="anim-pop absolute top-full left-0 z-40 mt-1.5 w-[300px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
+          className="anim-pop absolute top-full left-0 z-(--z-popover) mt-1.5 w-[300px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
           data-testid={`${testId}-popover`}
         >
           {children}
@@ -182,7 +182,7 @@ export function SharpFilter() {
     <div className="flex items-center gap-1" role="group" aria-label={t('filter.sharp')}>
       <span className="text-muted">{t('filter.sharp')}</span>
       {SHARP_STATES.map((s) => (
-        <button key={s} className="btn !h-6 !px-2" aria-pressed={sharp === s} onClick={() => setFilter({ sharp: sharp === s ? null : s })} data-testid={`sharp-${s}`}>
+        <button key={s} className="btn hit !h-6 !px-2" aria-pressed={sharp === s} onClick={() => setFilter({ sharp: sharp === s ? null : s })} data-testid={`sharp-${s}`}>
           {t(`filter.sharp_${s}`)}
         </button>
       ))}

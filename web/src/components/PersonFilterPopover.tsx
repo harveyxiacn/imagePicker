@@ -99,7 +99,7 @@ function Popover({ sessionId, resultCount }: Props) {
     <div
       role="dialog"
       aria-label={t('person.filter')}
-      className="anim-pop absolute top-full left-0 z-40 mt-1.5 w-[440px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
+      className="anim-pop absolute top-full left-0 z-(--z-popover) mt-1.5 w-[440px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
       data-testid="person-filter-popover"
     >
       <div className="mb-2 flex items-center gap-4">
@@ -141,7 +141,7 @@ function Popover({ sessionId, resultCount }: Props) {
                 )}
               </span>
               <span className="w-full truncate text-center text-xs">{personLabel(p, t('person.unnamed'))}</span>
-              <span className="tnum text-[10px] text-faint">{p.photo_count.toLocaleString(i18n.language)}</span>
+              <span className="tnum text-[11px] text-faint">{p.photo_count.toLocaleString(i18n.language)}</span>
             </button>
           )
         })}
@@ -153,7 +153,7 @@ function Popover({ sessionId, resultCount }: Props) {
         {STATES.map((s) => (
           <button
             key={s}
-            className="btn !h-6"
+            className="btn hit !h-6"
             disabled={!hasInclude}
             aria-pressed={filter.states.includes(s)}
             onClick={() => set(toggleState(filter, s))}

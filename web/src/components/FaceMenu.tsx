@@ -111,7 +111,7 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
             ref={ref}
             role="menu"
             aria-label={t('face.menu')}
-            className="anim-pop fixed z-[70] min-w-52 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]"
+            className="anim-pop fixed z-(--z-menu) min-w-52 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]"
             style={{ left: Math.min(menu.x, window.innerWidth - 230), top: Math.min(menu.y, window.innerHeight - 245) }}
             data-testid="face-menu"
           >

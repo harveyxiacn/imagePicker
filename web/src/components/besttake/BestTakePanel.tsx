@@ -97,8 +97,8 @@ export function BestTakePanel({ person, retargeted, busy, onChoose, onRestore }:
                   <span className="tnum font-medium">#{c.frame ?? '?'}</span>
                   <span className="tnum text-muted">{c.score}</span>
                 </span>
-                {c.isBase && <span className="bg-panel px-1.5 pb-1 text-[10px] text-muted">{t('besttake.base')}</span>}
-                {disabled && <span className="px-1.5 pb-1 text-[10px] leading-tight text-danger">{t(`besttake.reason_${c.reason ?? 'unknown'}`, { defaultValue: c.reason ?? '' })}</span>}
+                {c.isBase && <span className="bg-panel px-1.5 pb-1 text-[11px] text-muted">{t('besttake.base')}</span>}
+                {disabled && <span className="px-1.5 pb-1 text-[11px] leading-tight text-danger">{t(`besttake.reason_${c.reason ?? 'unknown'}`, { defaultValue: c.reason ?? '' })}</span>}
               </button>
             )
           })}

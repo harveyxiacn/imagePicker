@@ -178,7 +178,7 @@ export function Library() {
 
       <div className="relative flex min-h-0 flex-1">
         {sidebarOpen && !isMobile && (
-          <aside className="shrink-0 max-lg:absolute max-lg:top-0 max-lg:left-0 max-lg:bottom-0 max-lg:z-30 max-lg:shadow-[var(--shadow)]">
+          <aside className="shrink-0 max-lg:absolute max-lg:top-0 max-lg:left-0 max-lg:bottom-0 max-lg:z-(--z-overlay-panel) max-lg:shadow-[var(--shadow)]">
             <CollectionsSidebar sessionId={sessionId} />
           </aside>
         )}
@@ -280,7 +280,7 @@ export function Library() {
 
         {inspectorOpen && !isMobile && (
           <aside
-            className="w-[300px] shrink-0 overflow-y-auto border-l border-line bg-panel max-lg:absolute max-lg:top-0 max-lg:right-0 max-lg:bottom-0 max-lg:z-30 max-lg:shadow-[var(--shadow)]"
+            className="w-[300px] shrink-0 overflow-y-auto border-l border-line bg-panel max-lg:absolute max-lg:top-0 max-lg:right-0 max-lg:bottom-0 max-lg:z-(--z-overlay-panel) max-lg:shadow-[var(--shadow)]"
             aria-label={t('top.inspector')}
           >
             <Inspector

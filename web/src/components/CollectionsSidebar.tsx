@@ -74,7 +74,7 @@ function Row({ c, sessionId }: { c: Collection; sessionId: number }) {
           onClick={() => useUi.getState().setFilter(queryToFilter(c.query))}
           data-testid="collection-apply"
         >
-          <FolderHeart size={14} className={c.builtin ? 'text-ai' : 'text-accent'} />
+          <FolderHeart size={14} className={c.builtin ? 'text-ai' : 'text-accent-text'} />
           <span className="min-w-0 flex-1 truncate">{nameOf(c)}</span>
           <span className="tnum text-xs text-faint" data-testid="collection-count">
             {count.data === undefined ? '…' : count.data.toLocaleString(i18n.language)}

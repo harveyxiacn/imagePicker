@@ -220,7 +220,7 @@ export function LocalPanel({ photo }: { photo: Photo }) {
                 <ChevronDown size={11} />
               </button>
               {personMenu && (
-                <div className="anim-pop absolute top-7 left-0 z-20 min-w-32 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]">
+                <div className="anim-pop absolute top-7 left-0 z-(--z-sticky) min-w-32 rounded-card border border-line bg-elevated p-1 shadow-[var(--shadow)]">
                   <button
                     className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-panel"
                     onClick={() => {
@@ -282,7 +282,7 @@ export function LocalPanel({ photo }: { photo: Photo }) {
                     <span className={op.mask.kind === 'ai' ? 'text-ai' : ''}>{name}</span>
                   </button>
                   <button
-                    className="chip !h-5 px-1.5 text-[11px]"
+                    className="chip hit !h-5 px-1.5 text-[11px]"
                     aria-pressed={!!op.invert}
                     onClick={() => changeStack(qc, updateLocal(useEdit.getState().stack, index, (o) => ({ ...o, invert: !o.invert })), t('history.invertMask'))}
                   >
