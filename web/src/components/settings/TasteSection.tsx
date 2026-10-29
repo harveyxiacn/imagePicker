@@ -9,10 +9,9 @@ import { qk } from '@/lib/cache'
 import { tasteFeatureLabel, tasteLead, tasteNeeds, tasteStateText } from '@/lib/taste'
 import { useToasts } from '@/stores/toasts'
 import { Card, ConfirmDialog, Row, Toggle } from './controls'
+import { errorText } from '@/lib/errors'
 
-function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
-}
+const errText = errorText
 
 /** One learned preference as a sentence ("Photos with more “Open eyes” tend to be your keepers"). */
 function TraitText({ tr }: { tr: TasteTrait }) {

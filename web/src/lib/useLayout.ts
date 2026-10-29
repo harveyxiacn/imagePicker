@@ -21,6 +21,22 @@ export function useIsMobile(): boolean {
   return m
 }
 
+const belowLgQuery = '(max-width: 1023px)'
+
+/** True below Tailwind's `lg` (1024 px): the library's sidebar / inspector then float over the photos. */
+export function useIsBelowLg(): boolean {
+  const [m, setM] = useState(() => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(belowLgQuery).matches)
+  useEffect(() => {
+    if (!window.matchMedia) return
+    const mq = window.matchMedia(belowLgQuery)
+    const on = () => setM(mq.matches)
+    on()
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return m
+}
+
 /** True when the primary pointer is a finger (phones, tablets): used to hide hover-only affordances. */
 export function useIsTouch(): boolean {
   const [t] = useState(() => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches)

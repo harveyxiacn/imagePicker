@@ -4,6 +4,7 @@
  */
 import type { EditStack, HairDonor, PatchOp, PhotoPerson, SweatOp } from '@/api/types'
 import { patchEntries, removePatch, updatePatch } from './patches'
+import { reasonKey } from '@/lib/reasons'
 
 const hairEntry = (s: EditStack, faceId: number) => patchEntries(s).find((e) => e.op.kind === 'hair' && e.op.base_face_id === faceId)
 
@@ -46,7 +47,7 @@ export const bestDonor = (donors: HairDonor[]): HairDonor | undefined => donors.
 
 /** i18n keys explaining a donor: the refusal reason, or its cues (the ranking's "why"). */
 export function donorReasonKeys(d: HairDonor): string[] {
-  if (!d.composable) return [`hair.reason_${d.reason ?? 'unknown'}`]
+  if (!d.composable) return [reasonKey('hair', d.reason)]
   return d.cues.map((c) => `hair.cue_${c}`)
 }
 

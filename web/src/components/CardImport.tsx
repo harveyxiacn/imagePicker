@@ -29,7 +29,7 @@ export function CardImportSection({ excludes }: { excludes: string[] }) {
       <ul className="flex flex-col gap-2">
         {list.map((s) => (
           <li key={s.path} className="flex flex-wrap items-center gap-3 rounded-control border border-line bg-bg px-3 py-2" data-testid="card-source">
-            <HardDrive size={18} className="shrink-0 text-accent" />
+            <HardDrive size={18} className="shrink-0 text-accent-text" />
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{s.label}</div>
               <div className="tnum truncate text-xs text-muted">
@@ -93,7 +93,7 @@ function CardImportDialog({ source, excludes, onClose }: { source: ImportSource;
   const sample = new Date()
   const summary = ended ? cardSummary(rec) : null
   const Icon = summary?.tone === 'success' ? CheckCircle2 : summary?.tone === 'error' ? AlertCircle : summary?.tone === 'warning' ? AlertCircle : summary?.tone === 'muted' && rec?.status === 'cancelled' ? Ban : Info
-  const tone = summary?.tone === 'success' ? 'text-success' : summary?.tone === 'error' ? 'text-danger' : summary?.tone === 'warning' ? 'text-accent' : 'text-muted'
+  const tone = summary?.tone === 'success' ? 'text-success' : summary?.tone === 'error' ? 'text-danger' : summary?.tone === 'warning' ? 'text-accent-text' : 'text-muted'
 
   return (
     <Modal
@@ -190,7 +190,7 @@ function CardImportDialog({ source, excludes, onClose }: { source: ImportSource;
       ) : running ? (
         <div className="flex flex-col gap-3" data-testid="card-progress">
           <div className="flex items-center gap-2">
-            <Loader2 size={16} className="animate-spin text-accent" />
+            <Loader2 size={16} className="animate-spin text-accent-text" />
             <span className="flex-1">{total > 0 ? t('card.copying', { done, total }) : t('card.scanning')}</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded bg-line">

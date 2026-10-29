@@ -84,7 +84,7 @@ export function BestTakeCanvas({ photo, people, boxes, selected, onSelect, origi
             data-selected={isSel}
             data-replaced={person.replaced}
           >
-            <span className="absolute -top-5 left-0 flex max-w-full items-center gap-1 truncate rounded bg-black/70 px-1 text-[10px] leading-4 text-white">
+            <span className="absolute -top-5 left-0 flex max-w-full items-center gap-1 truncate rounded bg-black/70 px-1 text-[11px] leading-4 text-white">
               {personLabel(person.person_id, person.name)}
               {person.replaced && (
                 <span className="text-ai" title={t('besttake.replaced')} data-testid="bt-replaced-icon">

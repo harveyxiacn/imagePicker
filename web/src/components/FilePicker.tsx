@@ -90,7 +90,7 @@ export function FilePicker({ open, onOpenChange, onSelect, exts, title }: Props)
                 return (
                   <li key={full}>
                     <button className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-elevated" onClick={() => setPath(full)}>
-                      <Folder size={15} className="shrink-0 text-accent" />
+                      <Folder size={15} className="shrink-0 text-accent-text" />
                       <span className="truncate">{fileBaseName(full)}</span>
                     </button>
                   </li>

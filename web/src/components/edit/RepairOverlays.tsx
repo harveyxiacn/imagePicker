@@ -30,7 +30,7 @@ export function BystanderOverlay({ photoId, crop, aspect }: { photoId: number; c
             }}
             data-testid="bystander-box"
           >
-            <span className="absolute -top-5 left-0 rounded bg-danger px-1 text-[10px] leading-4 whitespace-nowrap text-white">{t('repair.bystander')}</span>
+            <span className="absolute -top-5 left-0 rounded bg-danger px-1 text-[11px] leading-4 whitespace-nowrap text-white">{t('repair.bystander')}</span>
           </div>
         )
       })}

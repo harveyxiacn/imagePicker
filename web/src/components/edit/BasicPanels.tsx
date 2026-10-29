@@ -56,7 +56,7 @@ export function AiPanel() {
             <Sparkles size={12} />
             <span className="flex-1 font-medium">{applied.diff.length ? t('edit.applied', { n: applied.diff.length }) : t('edit.appliedNone')}</span>
             <button
-              className="btn btn-ghost !h-5 px-1.5 text-xs text-ai"
+              className="btn hit btn-ghost !h-5 px-1.5 text-xs text-ai"
               data-testid="auto-undo"
               onClick={() => {
                 void undo(qc)

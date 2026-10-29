@@ -136,7 +136,7 @@ export function LanSection() {
           <Toggle label={t('settings.lan.enabled')} testId="setting-lan-enabled" checked={s.lan.enabled} onChange={(v) => set('lan.enabled', v)} />
         </Row>
         {lan.data?.restart_required && (
-          <div className="flex items-center gap-2 bg-accent/10 px-4 py-2 text-xs text-accent" data-testid="lan-restart">
+          <div className="flex items-center gap-2 bg-accent/10 px-4 py-2 text-xs text-accent-text" data-testid="lan-restart">
             <RefreshCw size={13} />
             {t('settings.lan.restartRequired')}
           </div>
@@ -220,7 +220,7 @@ export function XmpSection() {
       useToasts.getState().push('success', t(`settings.xmp.synced_${direction}`, { n: r.updated ?? 0 }), 3500)
       void qc.invalidateQueries({ queryKey: qk.photosAll })
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+      useToasts.getState().push('error', errorText(e), 6000)
     } finally {
       setBusy(null)
     }

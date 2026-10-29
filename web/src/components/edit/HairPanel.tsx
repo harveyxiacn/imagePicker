@@ -13,6 +13,8 @@ import { useGen } from '@/stores/gen'
 import { GenTasks } from '../GenTasks'
 import { Section } from './Section'
 import { Slider } from './Slider'
+import { errorText } from '@/lib/errors'
+import { reasonText } from '@/lib/reasons'
 
 /** One donor in the strip: thumbnail + donor face, score, and why (or why not). */
 function DonorCard({ d, chosen, onPick }: { d: HairDonor; chosen: boolean; onPick: () => void }) {
@@ -47,7 +49,7 @@ function DonorCard({ d, chosen, onPick }: { d: HairDonor; chosen: boolean; onPic
           loading="lazy"
         />
       </span>
-      <span className="flex items-center gap-1 text-[10px] leading-tight">
+      <span className="flex items-center gap-1 text-[11px] leading-tight">
         {d.composable ? (
           pct !== null && <span className="tnum font-semibold">{pct}</span>
         ) : (
@@ -204,7 +206,7 @@ export function HairPanel({ photo }: { photo: Photo }) {
                 {t('hair.ranking')}
               </div>
             ) : donorsQ.isError ? (
-              <div className="text-xs text-danger">{(donorsQ.error as Error).message}</div>
+              <div className="text-xs text-danger">{errorText(donorsQ.error)}</div>
             ) : donors.length === 0 ? (
               <p className="text-[11px] text-faint" data-testid="hair-no-donors">
                 {t('hair.noDonors')}
@@ -237,14 +239,14 @@ export function HairPanel({ photo }: { photo: Photo }) {
                   <div className="flex items-center gap-2 rounded-control border border-line p-1.5" data-testid="hair-preview">
                     <figure className="flex flex-col items-center gap-0.5">
                       <img src={faceCropUrl(faceId!, 256)} alt={t('hair.now')} className="h-14 w-14 rounded-sm object-cover" draggable={false} />
-                      <figcaption className="text-[10px] text-muted">{t('hair.now')}</figcaption>
+                      <figcaption className="text-[11px] text-muted">{t('hair.now')}</figcaption>
                     </figure>
                     <span aria-hidden className="text-muted">→</span>
                     <figure className="flex flex-col items-center gap-0.5">
                       <img src={faceCropUrl(donor.face_id, 256)} alt={t('hair.from', { name: donor.file_name })} className="h-14 w-14 rounded-sm object-cover" draggable={false} />
-                      <figcaption className="max-w-20 truncate text-[10px] text-muted">{donor.file_name}</figcaption>
+                      <figcaption className="max-w-20 truncate text-[11px] text-muted">{donor.file_name}</figcaption>
                     </figure>
-                    <ul className="min-w-0 flex-1 text-[10px] leading-snug text-muted">
+                    <ul className="min-w-0 flex-1 text-[11px] leading-snug text-muted">
                       {donorReasonKeys(donor).map((k) => (
                         <li key={k} className="truncate">
                           {t(k)}
@@ -313,18 +315,18 @@ export function HairPanel({ photo }: { photo: Photo }) {
                   onCommit={() => commitLive(qc, t('history.hairStrength', { who: who(faceId) }), `hair:${faceId}`)}
                 />
                 {(layer.warnings?.length ?? 0) > 0 && (
-                  <p className="text-[10px] text-warning">{layer.warnings!.map((w) => t(`hair.warn_${w}`, { defaultValue: w })).join(' · ')}</p>
+                  <p className="text-[11px] text-warning">{layer.warnings!.map((w) => reasonText('hair', w, 'warn')).join(' · ')}</p>
                 )}
               </div>
             )}
             <div className="flex flex-col gap-1.5 border-t border-line/60 pt-2" data-testid="sweat-cleanup">
               <div className="text-[11px] font-medium text-muted">{t('hair.sweatTitle')}</div>
-              <p className="text-[10px] text-faint">{t('hair.sweatHint')}</p>
+              <p className="text-[11px] text-faint">{t('hair.sweatHint')}</p>
               {(['deshine', 'flyaway'] as const).map((op) => (
                 <SweatRow key={op} photo={photo} op={op} busy={enhanceBusy} />
               ))}
             </div>
-            <p className="text-[10px] text-faint">{t('hair.limits')}</p>
+            <p className="text-[11px] text-faint">{t('hair.limits')}</p>
           </>
         )}
       </div>

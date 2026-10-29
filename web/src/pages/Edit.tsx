@@ -28,6 +28,7 @@ import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { useEditActions } from './useEditActions'
 import { useEditShortcuts } from './useEditShortcuts'
+import { errorText } from '@/lib/errors'
 
 /** Edit (retouch) page: preview + panels + filmstrip. Route `/s/:sessionId/edit/:photoId`. */
 export function Edit() {
@@ -60,7 +61,7 @@ export function Edit() {
       .then((res) => {
         if (alive) useEdit.getState().load(photoId, res.stack)
       })
-      .catch((err: unknown) => useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000))
+      .catch((err: unknown) => useToasts.getState().push('error', errorText(err), 5000))
     useRepair.getState().reset()
     useUi.getState().setActive(photoId)
     return () => {

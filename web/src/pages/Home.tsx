@@ -19,6 +19,7 @@ import { getMobilePlatform } from '@/lib/mobilePlatform'
 import { useIsMobile } from '@/lib/useLayout'
 import { getPlatform, useNativeImport } from '@/platform'
 import { useToasts } from '@/stores/toasts'
+import { ConfirmDialog } from '@/components/settings/controls'
 
 export function Home() {
   const { t } = useTranslation()
@@ -57,7 +58,7 @@ export function Home() {
       const p = await platform.pickFolder()
       if (p) importMut.mutate(p)
     } catch (e) {
-      push('error', e instanceof Error ? e.message : String(e))
+      push('error', errorText(e))
     }
   }
 
@@ -71,7 +72,7 @@ export function Home() {
     <div className="flex h-full flex-col">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4">
         <div className="flex items-center gap-2 text-base font-semibold">
-          <Aperture size={20} className="text-accent" />
+          <Aperture size={20} className="text-accent-text" />
           imagePicker
         </div>
         <div className="flex items-center gap-2">
@@ -154,7 +155,7 @@ export function Home() {
               </div>
             ) : sessions.isError ? (
               <div className="rounded-card border border-line bg-panel p-4 text-danger">
-                {t('home.loadFailed')}: {(sessions.error as Error).message}
+                {t('home.loadFailed')}: {errorText(sessions.error)}
               </div>
             ) : sessions.data.length === 0 ? (
               <div className="rounded-card border border-line bg-panel p-8 text-center text-muted">{t('home.empty')}</div>
@@ -195,6 +196,7 @@ export function Home() {
 function SessionCard({ s }: { s: Session }) {
   const { t, i18n } = useTranslation()
   const qc = useQueryClient()
+  const [confirmRemove, setConfirmRemove] = useState(false)
   const del = useMutation({
     mutationFn: () => api.deleteSession(s.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
@@ -229,8 +231,8 @@ function SessionCard({ s }: { s: Session }) {
           <div className="mt-0.5 flex items-center gap-1 text-xs">
             {importing ? (
               <>
-                <Loader2 size={12} className="animate-spin text-accent" />
-                <span className="text-accent">{t(`import.${s.import_state}`)}</span>
+                <Loader2 size={12} className="animate-spin text-accent-text" />
+                <span className="text-accent-text">{t(`import.${s.import_state}`)}</span>
               </>
             ) : (
               <>
@@ -245,12 +247,24 @@ function SessionCard({ s }: { s: Session }) {
         className="btn btn-icon absolute top-2 right-2 bg-black/60 opacity-0 backdrop-blur group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
         aria-label={t('home.remove')}
         title={t('home.removeHint')}
-        onClick={() => {
-          if (confirm(t('home.removeConfirm', { title: s.title }))) del.mutate()
-        }}
+        onClick={() => setConfirmRemove(true)}
+        data-testid="session-remove"
       >
         <Trash2 size={14} />
       </button>
+      <ConfirmDialog
+        open={confirmRemove}
+        onOpenChange={setConfirmRemove}
+        title={t('home.remove')}
+        description={t('home.removeConfirm', { title: s.title })}
+        confirmLabel={t('home.remove')}
+        danger
+        testId="session-remove-confirm"
+        onConfirm={() => {
+          setConfirmRemove(false)
+          del.mutate()
+        }}
+      />
     </div>
   )
 }

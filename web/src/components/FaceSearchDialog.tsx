@@ -3,7 +3,7 @@ import { Check, ImagePlus, Loader2, ScanSearch, UserPlus } from 'lucide-react'
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMatch, useNavigate } from 'react-router-dom'
-import { api, ApiError, faceCropUrl } from '@/api/client'
+import { api, faceCropUrl } from '@/api/client'
 import { usePeople } from '@/api/queries'
 import { usePersonLabel } from '@/lib/usePersonLabel'
 import { qk } from '@/lib/cache'
@@ -25,6 +25,7 @@ import { movedFacesEntry, refreshPeople } from '@/lib/structureUndo'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { Modal } from './Modal'
+import { errorText } from '@/lib/errors'
 
 /**
  * Search by face (F2.13.4): drop / pick / paste a photo (or start from a library face via the face menu), choose a
@@ -79,7 +80,7 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
         : api.faceSearch({ face_id: q.faceId }, { session_id: sessionId, min_similarity })
     req
       .then((resp) => alive && dispatch({ type: 'result', resp }))
-      .catch((err: unknown) => alive && dispatch({ type: 'fail', message: err instanceof ApiError || err instanceof Error ? err.message : String(err) }))
+      .catch((err: unknown) => alive && dispatch({ type: 'fail', message: errorText(err) }))
     return () => {
       alive = false
     }
@@ -168,7 +169,7 @@ function FaceSearchBody({ sessionId, seed, close }: { sessionId: number; seed: {
       if (inLibrary) useUi.getState().setFilter({ person: { ...DEFAULT_PERSON_FILTER, include: [person.id] } })
       close()
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+      useToasts.getState().push('error', errorText(err))
       setCreating(false)
     }
   }

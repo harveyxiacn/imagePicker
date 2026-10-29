@@ -112,7 +112,7 @@ export function FaceChip({ face, size = 44, onMenu }: { face: Face; size?: numbe
         {eyesOpen ? <Eye size={12} className="text-success" /> : <EyeOff size={12} className="text-danger" />}
         <Smile size={12} className={smiling ? 'text-success' : 'text-faint'} />
       </span>
-      {face.person_name && <span className="max-w-[52px] truncate text-[10px] text-muted">{face.person_name}</span>}
+      {face.person_name && <span className="max-w-[52px] truncate text-[11px] text-muted">{face.person_name}</span>}
     </button>
   )
 }

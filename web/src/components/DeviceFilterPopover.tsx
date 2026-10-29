@@ -1,9 +1,10 @@
 import { Aperture, Camera, CameraOff, Plane, Smartphone, Video, type LucideIcon } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDevices, useSession } from '@/api/queries'
 import type { DeviceKind } from '@/api/types'
 import { toggleDevice } from '@/lib/filter'
+import { usePopover } from '@/lib/usePopover'
 import { useUi } from '@/stores/ui'
 import { DeviceTimePanel } from './DeviceTimePanel'
 
@@ -34,22 +35,8 @@ export function DeviceFilterButton({ sessionId }: { sessionId: number }) {
   const setFilter = useUi((s) => s.setFilter)
   const [open, setOpen] = useState(false)
   const wrap = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  const panel = useRef<HTMLDivElement>(null)
+  const pop = usePopover({ open, onClose: () => setOpen(false), panelRef: panel, wrapRef: wrap })
 
   const list = devices.data ?? []
   const withDevice = list.reduce((n, d) => n + d.photo_count, 0)
@@ -63,21 +50,22 @@ export function DeviceFilterButton({ sessionId }: { sessionId: number }) {
       <button
         className="btn"
         aria-pressed={selected.length > 0 || open}
-        aria-haspopup="dialog"
-        aria-expanded={open}
+        {...pop.triggerProps}
         title={t('device.filter')}
         onClick={() => setOpen(!open)}
         data-testid="device-filter-button"
       >
         <Camera size={14} />
         {t('device.filter')}
-        {selected.length > 0 && <span className="tnum text-accent">({selected.length})</span>}
+        {selected.length > 0 && <span className="tnum text-accent-text">({selected.length})</span>}
       </button>
       {open && (
         <div
+          ref={panel}
+          {...pop.panelProps}
           role="dialog"
           aria-label={t('device.filter')}
-          className="anim-pop absolute top-full left-0 z-40 mt-1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
+          className="anim-pop absolute top-full left-0 z-(--z-popover) mt-1.5 w-[340px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
           data-testid="device-filter-popover"
         >
           <ul className="flex max-h-[260px] flex-col gap-0.5 overflow-y-auto">

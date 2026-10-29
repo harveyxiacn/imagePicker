@@ -8,6 +8,7 @@ import { useToasts } from '@/stores/toasts'
 import { qk } from './cache'
 import { faceConsentPending } from './faceConsent'
 import { offerRuntimeInstall } from './runtime'
+import { errorText } from '@/lib/errors'
 
 /** Extracts the `models` list of a 409 models_missing response (contract C.2). */
 export function missingModelsOf(err: unknown): string[] | null {
@@ -88,7 +89,7 @@ export async function startAnalysis(
       useToasts.getState().push('error', i18n.t('analysis.liteOffer'), 10_000, [lite])
       return false
     }
-    useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 6000)
+    useToasts.getState().push('error', errorText(err), 6000)
     return false
   }
 }
@@ -101,7 +102,7 @@ export async function pauseAnalysis(sessionId: number): Promise<void> {
     await api.pauseAnalysis(sessionId)
   } catch (err) {
     ui.setPausing(sessionId, false)
-    useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+    useToasts.getState().push('error', errorText(err))
   }
 }
 
@@ -110,7 +111,7 @@ export async function continueAnalysis(qc: QueryClient, sessionId: number): Prom
   try {
     await api.continueAnalysis(sessionId)
   } catch (err) {
-    useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+    useToasts.getState().push('error', errorText(err))
     return
   }
   qc.setQueryData<AnalysisStatus>(qk.analysisStatus(sessionId), (old) =>
@@ -122,7 +123,7 @@ export async function cancelAnalysis(qc: QueryClient, sessionId: number): Promis
   try {
     await api.cancelAnalysis(sessionId)
   } catch (err) {
-    useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+    useToasts.getState().push('error', errorText(err))
     return
   }
   qc.setQueryData<AnalysisStatus>(qk.analysisStatus(sessionId), (old) => (old ? { ...old, state: 'idle', stage: null } : old))

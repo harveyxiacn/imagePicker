@@ -23,6 +23,7 @@ import { useEdit } from '@/stores/edit'
 import { useGen } from '@/stores/gen'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
+import { errorText } from '@/lib/errors'
 
 const timeOrder = <T extends { taken_at: number | null; id: number }>(a: T, b: T) => (a.taken_at ?? 0) - (b.taken_at ?? 0) || a.id - b.id
 
@@ -67,7 +68,7 @@ export function BestTake() {
       .then((res) => {
         if (alive) useEdit.getState().load(baseId, res.stack)
       })
-      .catch((err: unknown) => useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000))
+      .catch((err: unknown) => useToasts.getState().push('error', errorText(err), 5000))
     useUi.getState().setActive(baseId)
     return () => {
       alive = false
@@ -190,7 +191,7 @@ export function BestTake() {
   if (planQ.isError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3" data-testid="bt-error">
-        <div className="text-danger">{(planQ.error as Error).message}</div>
+        <div className="text-danger">{errorText(planQ.error)}</div>
         <Link to={`/s/${sessionId}`} className="btn">
           {t('common.back')}
         </Link>
@@ -210,7 +211,7 @@ export function BestTake() {
 
   return (
     <div className="flex h-full flex-col" data-testid="besttake-page">
-      <header className="relative z-20 flex h-12 shrink-0 items-center gap-2 border-b border-line px-2 sm:gap-3 sm:px-3">
+      <header className="relative z-(--z-sticky) flex h-12 shrink-0 items-center gap-2 border-b border-line px-2 sm:gap-3 sm:px-3">
         <button className="btn btn-ghost" onClick={back} aria-label={t('common.back')} data-testid="bt-back">
           <ChevronLeft size={16} />
           <span className="hidden sm:inline">{t('common.back')}</span>
@@ -227,7 +228,7 @@ export function BestTake() {
               <ChevronDown size={13} />
             </button>
             {baseMenu && (
-              <div className="absolute top-full left-0 z-30 mt-1 flex w-max max-w-[80vw] gap-1.5 overflow-x-auto rounded-card border border-line bg-elevated p-2 shadow-[var(--shadow)]" data-testid="bt-base-menu">
+              <div className="absolute top-full left-0 z-(--z-overlay-panel) mt-1 flex w-max max-w-[80vw] gap-1.5 overflow-x-auto rounded-card border border-line bg-elevated p-2 shadow-[var(--shadow)]" data-testid="bt-base-menu">
                 {photos.map((p, i) => (
                   <button
                     key={p.id}

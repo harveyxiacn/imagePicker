@@ -10,6 +10,7 @@ import { useToasts } from '@/stores/toasts'
 import type { OffsetsAction } from '@/lib/timeAlign'
 import type { AnalysisProfile, DeviceOffsets, SearchMeta, Settings, SettingsPatch, TimelineQuery } from './types'
 import { api, fetchAllPhotos, fetchSearchPhotos, timelineQueryString } from './client'
+import { errorText } from '@/lib/errors'
 
 
 /**
@@ -212,7 +213,7 @@ export function useDeviceOffsetsMutation(sessionId: number) {
       void qc.invalidateQueries({ queryKey: qk.groups(sessionId) })
       void qc.invalidateQueries({ queryKey: qk.timeline(sessionId) })
     },
-    onError: (e) => useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000),
+    onError: (e) => useToasts.getState().push('error', errorText(e), 6000),
   })
 }
 
@@ -370,7 +371,7 @@ export function usePatchSettings() {
     },
     onError: (e, _patch, ctx) => {
       if (ctx?.prev) qc.setQueryData(qk.settings, ctx.prev)
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+      useToasts.getState().push('error', errorText(e), 6000)
     },
     onSuccess: (s) => qc.setQueryData(qk.settings, s),
   })

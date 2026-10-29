@@ -1,6 +1,8 @@
 /// <reference types="node" />
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -60,5 +62,14 @@ describe('regular themes keep readable body text', () => {
   ])('%s: fg / muted / faint on bg and panel, accent button text', (_n, t) => {
     for (const s of ['bg', 'panel']) for (const k of ['fg', 'muted', 'faint']) expect(ratio(t[k], t[s]), `${k} on ${s}`).toBeGreaterThanOrEqual(4.5)
     expect(ratio(t['accent-fg'], t.accent)).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
+describe('contrast-check script (npm run contrast)', () => {
+  it('passes for every theme: text >= 4.5:1 (7:1 high contrast), control borders and focus >= 3:1', () => {
+    const script = fileURLToPath(new URL('../../scripts/contrast-check.mjs', import.meta.url))
+    // Throws (non-zero exit) with the failing table in the message when a pair is too weak.
+    const out = execFileSync(process.execPath, [script], { encoding: 'utf8' })
+    expect(out).toContain('pairs pass')
   })
 })

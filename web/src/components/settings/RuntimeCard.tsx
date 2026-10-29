@@ -9,6 +9,7 @@ import { formatBytes } from '@/lib/format'
 import { runtimeView } from '@/lib/runtime'
 import { useToasts } from '@/stores/toasts'
 import { Card, ConfirmDialog, Row } from './controls'
+import { errorText } from '@/lib/errors'
 
 const TONE = { muted: 'bg-faint', ai: 'bg-ai', success: 'bg-success', danger: 'bg-danger' } as const
 
@@ -28,7 +29,7 @@ export function RuntimeCard() {
       await fn()
       if (done) useToasts.getState().push('success', done, 2500)
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+      useToasts.getState().push('error', errorText(e), 6000)
     } finally {
       setBusy(false)
       void qc.invalidateQueries({ queryKey: qk.runtime })

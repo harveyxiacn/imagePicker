@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { settleSheet } from '@/lib/layout'
+import { useKeyboardInset } from '@/lib/useKeyboardInset'
 
 interface Props {
   open: boolean
@@ -25,6 +26,9 @@ export function Sheet({ open, onOpenChange, title, children, footer, tall, testI
   const [expanded, setExpanded] = useState(false)
   const drag = useRef<{ y: number; t: number; h: number } | null>(null)
   const full = tall || expanded
+  // on-screen keyboard (iOS only shrinks the visual viewport): lift the sheet above it so the focused field stays visible
+  const kb = useKeyboardInset(open)
+  const h = full ? 94 : 82
 
   const down = (e: RPointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -55,17 +59,19 @@ export function Sheet({ open, onOpenChange, title, children, footer, tall, testI
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="anim-fade fixed inset-0 z-40 bg-black/60" />
+        <Dialog.Overlay className="anim-fade fixed inset-0 z-(--z-scrim) bg-black/60" />
         <Dialog.Content
           data-testid={testId ?? 'sheet'}
           aria-describedby={undefined}
-          className="sheet-in fixed right-0 bottom-0 left-0 z-50 mx-auto flex w-full max-w-2xl flex-col rounded-t-2xl border border-b-0 border-line bg-panel shadow-[var(--shadow)]"
+          className="sheet-in fixed right-0 bottom-0 left-0 z-(--z-modal) mx-auto flex w-full max-w-2xl flex-col rounded-t-2xl border border-b-0 border-line bg-panel shadow-[var(--shadow)]"
           style={{
-            maxHeight: full ? '94dvh' : '82dvh',
-            height: full ? '94dvh' : undefined,
+            bottom: kb || undefined,
+            maxHeight: kb ? `calc(${h}dvh - ${kb}px)` : `${h}dvh`,
+            height: full ? (kb ? `calc(${h}dvh - ${kb}px)` : `${h}dvh`) : undefined,
             transform: dy ? `translateY(${Math.max(0, dy)}px)` : undefined,
             transition: dy ? 'none' : 'transform 200ms var(--ease), height 200ms var(--ease)',
-            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+            // the home-indicator inset only applies while no keyboard covers it
+            paddingBottom: kb ? 0 : 'env(safe-area-inset-bottom, 0px)',
           }}
         >
           <div

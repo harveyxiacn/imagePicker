@@ -1,9 +1,10 @@
 import { Aperture, CalendarRange, Tag } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useFilterOptions, useSession } from '@/api/queries'
 import { SHARP_STATES } from '@/api/types'
 import { isIsoDate, msToDate, setDateRange, toggleValue } from '@/lib/filter'
+import { usePopover } from '@/lib/usePopover'
 import { useUi } from '@/stores/ui'
 
 /** Button + popover shell shared by the lens / keyword / date filters (same pattern as the device filter). */
@@ -27,43 +28,30 @@ function FilterPopover({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const wrap = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  const panel = useRef<HTMLDivElement>(null)
+  const pop = usePopover({ open, onClose: () => setOpen(false), panelRef: panel, wrapRef: wrap })
 
   return (
     <div className="relative" ref={wrap}>
       <button
         className="btn"
         aria-pressed={count > 0 || open}
-        aria-haspopup="dialog"
-        aria-expanded={open}
+        {...pop.triggerProps}
         title={label}
         onClick={() => setOpen(!open)}
         data-testid={`${testId}-button`}
       >
         {icon}
         {label}
-        {count > 0 && <span className="tnum text-accent">({count})</span>}
+        {count > 0 && <span className="tnum text-accent-text">({count})</span>}
       </button>
       {open && (
         <div
+          ref={panel}
+          {...pop.panelProps}
           role="dialog"
           aria-label={label}
-          className="anim-pop absolute top-full left-0 z-40 mt-1.5 w-[300px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
+          className="anim-pop absolute top-full left-0 z-(--z-popover) mt-1.5 w-[300px] max-w-[calc(100vw-24px)] rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
           data-testid={`${testId}-popover`}
         >
           {children}
@@ -182,7 +170,7 @@ export function SharpFilter() {
     <div className="flex items-center gap-1" role="group" aria-label={t('filter.sharp')}>
       <span className="text-muted">{t('filter.sharp')}</span>
       {SHARP_STATES.map((s) => (
-        <button key={s} className="btn !h-6 !px-2" aria-pressed={sharp === s} onClick={() => setFilter({ sharp: sharp === s ? null : s })} data-testid={`sharp-${s}`}>
+        <button key={s} className="btn hit !h-6 !px-2" aria-pressed={sharp === s} onClick={() => setFilter({ sharp: sharp === s ? null : s })} data-testid={`sharp-${s}`}>
           {t(`filter.sharp_${s}`)}
         </button>
       ))}

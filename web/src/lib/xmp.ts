@@ -5,6 +5,7 @@ import type { ServerEvent } from '@/api/types'
 import i18n from '@/i18n'
 import { useToasts } from '@/stores/toasts'
 import { findCachedPhotos, qk } from './cache'
+import { errorText } from '@/lib/errors'
 
 type Conflict = Extract<ServerEvent, { type: 'xmp.conflict' }>
 
@@ -30,7 +31,7 @@ async function resolve(qc: QueryClient, sessionId: number, direction: 'read' | '
     void qc.invalidateQueries({ queryKey: qk.photosAll })
     useToasts.getState().push('success', t(direction === 'read' ? 'xmp.resolvedSidecar' : 'xmp.resolvedCatalog'), 3000)
   } catch (e) {
-    useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+    useToasts.getState().push('error', errorText(e), 6000)
   }
 }
 

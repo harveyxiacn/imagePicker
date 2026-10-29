@@ -12,6 +12,7 @@ import { COACH_MARKS, shouldPostDone, visibleOverlay, type CoachMark, type Onboa
 import { useOnboardingUi } from '@/stores/onboarding'
 import { useToasts } from '@/stores/toasts'
 import { Modal } from './Modal'
+import { errorText } from '@/lib/errors'
 
 const mb = (n: number) => (n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : `${Math.round(n)} MB`)
 
@@ -39,7 +40,7 @@ export function Onboarding() {
       void api
         .onboardingDone()
         .then(() => qc.setQueryData(qk.onboarding, info.data ? { ...info.data, first_run: false } : undefined))
-        .catch((e) => useToasts.getState().push('error', e instanceof Error ? e.message : String(e)))
+        .catch((e) => useToasts.getState().push('error', errorText(e)))
     }
     return next
   }
@@ -80,7 +81,7 @@ function HardwareCard({ info, onChoose }: { info: NonNullable<ReturnType<typeof 
       }
       onChoose(true)
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 6000)
+      useToasts.getState().push('error', errorText(e), 6000)
     } finally {
       setBusy(false)
       setPercent(null)
@@ -103,14 +104,14 @@ function HardwareCard({ info, onChoose }: { info: NonNullable<ReturnType<typeof 
     >
       <div className="flex flex-col gap-3" data-testid="onboarding-card">
         <div className="flex items-center gap-3 rounded-card border border-line bg-bg/50 p-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent-text">
             <Cpu size={20} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="truncate font-medium">{gpu ? t('onboarding.detected', { gpu: gpu.name }) : t('onboarding.detectedCpu')}</div>
             <div className="text-xs text-muted">{gpu ? `${(gpu.vram_mb / 1024).toFixed(0)} GB VRAM` : (info.hardware.device ?? 'CPU')}</div>
           </div>
-          <span className="rounded bg-accent/20 px-2 py-1 text-base font-semibold text-accent" data-testid="onboarding-tier">
+          <span className="rounded bg-accent/20 px-2 py-1 text-base font-semibold text-accent-text" data-testid="onboarding-tier">
             {info.recommended_tier}
           </span>
         </div>
@@ -170,8 +171,8 @@ function CoachBubble({ mark, index, onNext, onBack, onSkip }: { mark: CoachMark;
 
   return (
     <>
-      {rect && <div className="pointer-events-none fixed z-[70] rounded-control border-2 border-accent shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent)_25%,transparent)]" style={{ top: rect.top - 3, left: rect.left - 3, width: rect.width + 6, height: rect.height + 6 }} />}
-      <div className="anim-pop fixed z-[71] rounded-card border border-accent bg-elevated p-3 shadow-[var(--shadow)]" style={{ top, left, width: W }} role="status" data-testid="coach-bubble" data-mark={mark}>
+      {rect && <div className="pointer-events-none fixed z-(--z-coach) rounded-control border-2 border-accent shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent)_25%,transparent)]" style={{ top: rect.top - 3, left: rect.left - 3, width: rect.width + 6, height: rect.height + 6 }} />}
+      <div className="anim-pop fixed z-(--z-coach-bubble) rounded-card border border-accent bg-elevated p-3 shadow-[var(--shadow)]" style={{ top, left, width: W }} role="status" data-testid="coach-bubble" data-mark={mark}>
         {arrowLeft !== null && (
           <span
             className={`absolute h-3 w-3 rotate-45 border-accent bg-elevated ${below ? '-top-1.5 border-t border-l' : '-bottom-1.5 border-r border-b'}`}
@@ -179,7 +180,7 @@ function CoachBubble({ mark, index, onNext, onBack, onSkip }: { mark: CoachMark;
           />
         )}
         <div className="mb-1 flex items-center gap-1.5 font-semibold">
-          <Sparkles size={13} className="text-accent" />
+          <Sparkles size={13} className="text-accent-text" />
           {t(`onboarding.coach_${mark}_title`)}
         </div>
         <p className="text-muted">{t(`onboarding.coach_${mark}`)}</p>
@@ -187,15 +188,15 @@ function CoachBubble({ mark, index, onNext, onBack, onSkip }: { mark: CoachMark;
           <span className="tnum text-xs text-faint">
             {index + 1} / {COACH_MARKS.length}
           </span>
-          <button className="btn btn-ghost ml-auto !h-6 text-xs" onClick={onSkip} data-testid="coach-skip">
+          <button className="btn hit btn-ghost ml-auto !h-6 text-xs" onClick={onSkip} data-testid="coach-skip">
             {t('onboarding.skip')}
           </button>
           {index > 0 && (
-            <button className="btn !h-6 text-xs" onClick={onBack}>
+            <button className="btn hit !h-6 text-xs" onClick={onBack}>
               {t('common.back')}
             </button>
           )}
-          <button className="btn btn-primary !h-6 text-xs" onClick={onNext} data-testid="coach-next">
+          <button className="btn hit btn-primary !h-6 text-xs" onClick={onNext} data-testid="coach-next">
             {last ? t('onboarding.done') : t('onboarding.next')}
           </button>
         </div>

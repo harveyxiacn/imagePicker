@@ -1,10 +1,13 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Ban, Flag as FlagIcon } from 'lucide-react'
 import { memo, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { thumbUrl } from '@/api/client'
 import type { Photo } from '@/api/types'
 import { colorVar } from '@/lib/colors'
 import { issueBadges } from '@/lib/ai'
+import { photoLabel } from '@/lib/photoLabel'
 
 const ITEM = 72
 const GAP = 4
@@ -19,16 +22,16 @@ interface Props {
   onPick: (id: number, e?: React.MouseEvent) => void
 }
 
-const Thumb = memo(function Thumb({ photo, index, active, marked, onPick }: { photo: Photo; index: number | null; active: boolean; marked: boolean; onPick: (id: number, e?: React.MouseEvent) => void }) {
+const Thumb = memo(function Thumb({ photo, index, active, marked, onPick, t }: { photo: Photo; index: number | null; active: boolean; marked: boolean; onPick: (id: number, e?: React.MouseEvent) => void; t: TFunction }) {
   return (
     <button
-      className="relative h-full w-full overflow-hidden rounded-[2px] bg-bg"
+      className="relative h-full w-full overflow-hidden rounded-[2px] bg-bg focus-visible:ring-2 focus-visible:ring-[var(--fg)] focus-visible:ring-inset"
       style={{
         outline: active ? '2px solid var(--accent)' : marked ? '2px solid var(--faint)' : 'none',
         outlineOffset: -2,
       }}
       onClick={(e) => onPick(photo.id, e)}
-      aria-label={photo.file_name}
+      aria-label={photoLabel(photo, t)}
       aria-current={active}
     >
       {photo.thumb_ready ? (
@@ -43,8 +46,8 @@ const Thumb = memo(function Thumb({ photo, index, active, marked, onPick }: { ph
         <div className="skeleton h-full w-full" />
       )}
       <div className={`absolute left-0.5 flex gap-0.5 ${index !== null ? 'top-4' : 'top-0.5'}`}>
-        {photo.flag === 1 && <FlagIcon size={11} className="text-success" fill="currentColor" />}
-        {photo.flag === -1 && <Ban size={11} className="text-danger" />}
+        {photo.flag === 1 && <FlagIcon size={11} className="text-success" fill="currentColor" aria-hidden="true" />}
+        {photo.flag === -1 && <Ban size={11} className="text-danger" aria-hidden="true" />}
         {photo.has_edits && (
           <span className="rounded bg-black/60 px-0.5 text-[10px] leading-3 text-accent" data-testid="edit-badge">
             ✎
@@ -52,7 +55,12 @@ const Thumb = memo(function Thumb({ photo, index, active, marked, onPick }: { ph
         )}
       </div>
       {photo.color_label && (
-        <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full" style={{ background: colorVar(photo.color_label) }} />
+        <span
+          className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full"
+          style={{ background: colorVar(photo.color_label) }}
+          title={t(`color.${photo.color_label}`)}
+          aria-hidden="true"
+        />
       )}
       {photo.user_rating ? (
         <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-accent">★{photo.user_rating}</span>
@@ -74,6 +82,7 @@ const Thumb = memo(function Thumb({ photo, index, active, marked, onPick }: { ph
 
 /** Horizontal virtualized thumbnail strip; keeps the active photo in view. */
 export function Filmstrip({ photos, activeId, markedIds, numbered, onPick }: Props) {
+  const { t } = useTranslation()
   const scrollRef = useRef<HTMLDivElement>(null)
   const virt = useVirtualizer({
     horizontal: true,
@@ -95,7 +104,7 @@ export function Filmstrip({ photos, activeId, markedIds, numbered, onPick }: Pro
           const p = photos[v.index]
           return (
             <div key={p.id} className="absolute top-2" style={{ left: v.start + GAP, width: ITEM, height: ITEM }}>
-              <Thumb photo={p} index={numbered ? v.index + 1 : null} active={p.id === activeId} marked={!!markedIds?.includes(p.id)} onPick={onPick} />
+              <Thumb photo={p} index={numbered ? v.index + 1 : null} active={p.id === activeId} marked={!!markedIds?.includes(p.id)} onPick={onPick} t={t} />
             </div>
           )
         })}

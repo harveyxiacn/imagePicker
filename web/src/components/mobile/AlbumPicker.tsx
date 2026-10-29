@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getMobilePlatform, type Album, type MediaPermission } from '@/lib/mobilePlatform'
 import { Sheet } from './Sheet'
+import { errorText } from '@/lib/errors'
 
 interface Props {
   open: boolean
@@ -27,7 +28,7 @@ async function load(retry: boolean): Promise<Result> {
   try {
     return { perm, albums: await mp.listAlbums() }
   } catch (e) {
-    if (/permission|denied|403/i.test(e instanceof Error ? e.message : String(e))) return { perm: 'denied', albums: [] }
+    if (/permission|denied|403/i.test(errorText(e))) return { perm: 'denied', albums: [] }
     throw e
   }
 }
@@ -53,7 +54,7 @@ export function AlbumPicker({ open, onOpenChange, onSelect, onBrowse }: Props) {
         </div>
       ) : q.isError ? (
         <div className="flex flex-col items-center gap-3 p-8 text-center" data-testid="album-error">
-          <div className="text-danger">{(q.error as Error).message}</div>
+          <div className="text-danger">{errorText(q.error)}</div>
           <button className="btn" onClick={() => setAttempt((n) => n + 1)}>
             <RefreshCw size={14} />
             {t('common.retry')}

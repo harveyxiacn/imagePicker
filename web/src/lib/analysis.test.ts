@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '@/api/client'
 import type { AnalysisStatus, Settings } from '@/api/types'
+import i18n from '@/i18n'
 import { useAnalysisUi } from '@/stores/analysis'
 import { useToasts } from '@/stores/toasts'
 import { analysisActions, analysisActive, analysisFraction, continueAnalysis, isWorkerUnavailable, pauseAnalysis, startAnalysis } from './analysis'
@@ -88,7 +89,7 @@ describe('starting, pausing and continuing', () => {
     useToasts.setState({ toasts: [] })
     await startAnalysis(qc, 7, 'lite')
     expect(run).toHaveBeenCalledTimes(2)
-    expect(useToasts.getState().toasts[0]).toMatchObject({ kind: 'error', text: 'worker down' })
+    expect(useToasts.getState().toasts[0]).toMatchObject({ kind: 'error', text: i18n.t('errors.workerUnavailable') })
     expect(useToasts.getState().toasts[0].actions).toBeUndefined()
   })
 

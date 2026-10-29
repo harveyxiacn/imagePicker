@@ -6,6 +6,7 @@ import type { Face, Photo } from '@/api/types'
 import { commonBestFrames, expressionTone, type CellTone } from '@/lib/ai'
 import { usePersonLabel } from '@/lib/usePersonLabel'
 import { useFaceMenu } from './FaceMenu'
+import { errorText } from '@/lib/errors'
 
 const TONE_COLOR: Record<CellTone, string> = {
   good: 'var(--success)',
@@ -36,7 +37,7 @@ export function ExpressionMatrix({ burstId, photos, aId, bId, onPick, onCompose 
   const num = new Map(photos.map((p, i) => [p.id, i + 1]))
 
   if (q.isPending) return <div className="p-3 text-muted">{t('library.loading')}</div>
-  if (q.isError) return <div className="p-3 text-danger">{(q.error as Error).message}</div>
+  if (q.isError) return <div className="p-3 text-danger">{errorText(q.error)}</div>
   if (!data || data.tracks.length === 0) return <div className="p-3 text-muted" data-testid="matrix-empty">{t('matrix.noFaces')}</div>
 
   const common = commonBestFrames(data.tracks)
@@ -95,7 +96,7 @@ export function ExpressionMatrix({ burstId, photos, aId, bId, onPick, onCompose 
                           >
                             <img src={faceCropUrl(face.id, 128)} alt="" className="h-full w-full object-cover" draggable={false} />
                             <span className="absolute inset-0 rounded-control" style={{ boxShadow: `inset 0 0 0 2px ${TONE_COLOR[tone]}` }} />
-                            {isBest && <span className="absolute right-0 bottom-0 rounded-tl bg-black/70 px-0.5 text-[9px] leading-3 text-ai">★</span>}
+                            {isBest && <span className="absolute right-0 bottom-0 rounded-tl bg-black/70 px-0.5 text-[10px] leading-3 text-ai">★</span>}
                           </button>
                         ) : (
                           <span className="block h-9 w-9 rounded-control border border-dashed border-line text-faint" style={{ lineHeight: '34px' }}>
@@ -120,7 +121,7 @@ export function ExpressionMatrix({ burstId, photos, aId, bId, onPick, onCompose 
       </div>
       <div className="flex flex-wrap items-center gap-3 text-xs" data-testid="matrix-hint">
         <span className="flex items-center gap-1.5 text-muted">
-          <Lightbulb size={13} className="text-accent" />
+          <Lightbulb size={13} className="text-accent-text" />
           {bestForAll ? t('matrix.commonBest', { frames: common.map((id) => `#${num.get(id)}`).join(' ') }) : t('matrix.noCommonBest')}
         </span>
         <span className="flex items-center gap-2 text-faint">
