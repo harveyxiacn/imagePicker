@@ -28,6 +28,7 @@ import { useToasts } from '@/stores/toasts'
 import { AdjustSliders } from './AdjustSliders'
 import { Section } from './Section'
 import { Slider } from './Slider'
+import { errorText } from '@/lib/errors'
 
 const AI_CHIPS: MaskTarget[] = ['subject', 'sky', 'background', 'person', 'skin', 'hair', 'clothes']
 const LOCAL_KEYS: AdjustKey[] = ['exposure', 'contrast', 'highlights', 'shadows', 'temp', 'saturation', 'clarity', 'dehaze', 'texture', 'dodge', 'burn']
@@ -202,7 +203,7 @@ export function LocalPanel({ photo }: { photo: Photo }) {
       const missing = missingModelsOf(err)
       if (missing) {
         useAnalysisUi.getState().setConsent({ sessionId: photo.session_id, profile: 'fast', models: missing, onReady: () => void addAi(target, personId) })
-      } else useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000)
+      } else useToasts.getState().push('error', errorText(err), 5000)
       return
     } finally {
       setBusy(null)

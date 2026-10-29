@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Ban, CheckCircle2, Download, Info, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { errorText } from '@/lib/errors'
 import { cancelTask } from '@/lib/tasks'
 import { useAnalysisUi } from '@/stores/analysis'
 import { isGenKind } from '@/stores/gen'
@@ -12,21 +13,29 @@ export function Toasts() {
   const toasts = useToasts((s) => s.toasts)
   const tasks = useToasts((s) => s.tasks)
   const dismiss = useToasts((s) => s.dismiss)
+  const pause = useToasts((s) => s.pause)
+  const resume = useToasts((s) => s.resume)
   const dismissTask = useToasts((s) => s.dismissTask)
   const consentOpen = useAnalysisUi((s) => s.consent !== null)
 
   return (
     <div
       className="pointer-events-none fixed right-4 bottom-10 z-[60] flex w-[min(360px,calc(100vw-32px))] flex-col gap-2 max-md:right-3 max-md:bottom-[calc(72px+env(safe-area-inset-bottom,0px))] max-md:left-3 max-md:w-auto"
-      role="status"
-      aria-live="polite"
     >
       {Object.values(tasks)
         .filter((task) => !(task.kind === 'model_download' && consentOpen) && !isGenKind(task.kind) && task.kind !== 'analysis')
         .map((task) => {
         const pct = task.total > 0 ? Math.round((task.done / task.total) * 100) : 0
+        const label =
+          task.kind === 'model_download'
+            ? task.state === 'done' ? t('models.ready') : task.state === 'failed' ? t('models.failed') : t('models.downloading')
+            : task.state === 'done' ? t('export.done', { n: task.total }) : task.state === 'failed' ? t('export.failed') : task.state === 'cancelled' ? t('export.cancelled', { n: task.done }) : t('export.running')
         return (
-          <div key={task.task_id} className="anim-pop pointer-events-auto rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]">
+          <div
+            key={task.task_id}
+            role={task.state === 'failed' ? 'alert' : 'status'}
+            className="anim-pop pointer-events-auto rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
+          >
             <div className="flex items-center gap-2">
               {task.state === 'done' ? (
                 <CheckCircle2 size={16} className="text-success" />
@@ -37,35 +46,28 @@ export function Toasts() {
               ) : (
                 <Download size={16} className="text-accent" />
               )}
-              <span className="flex-1 font-medium">
-                {task.kind === 'model_download'
-                  ? task.state === 'done'
-                    ? t('models.ready')
-                    : task.state === 'failed'
-                      ? t('models.failed')
-                      : t('models.downloading')
-                  : task.state === 'done'
-                    ? t('export.done', { n: task.total })
-                    : task.state === 'failed'
-                      ? t('export.failed')
-                      : task.state === 'cancelled'
-                        ? t('export.cancelled', { n: task.done })
-                        : t('export.running')}
-              </span>
+              <span className="flex-1 font-medium">{label}</span>
               <span className="tnum text-muted">
                 {task.kind === 'model_download' ? `${Math.round(task.total > 0 ? (task.done / task.total) * 100 : 0)}%` : `${task.done}/${task.total}`}
               </span>
               {task.kind === 'export' && task.state === 'running' && (
-                <button className="btn btn-ghost !h-6 !px-1.5 text-xs" onClick={() => void cancelTask(qc, task.task_id)} data-testid="export-cancel">
+                <button className="btn btn-ghost toast-hit !px-1.5 text-xs" onClick={() => void cancelTask(qc, task.task_id)} data-testid="export-cancel">
                   {t('common.cancel')}
                 </button>
               )}
-              <button className="btn btn-ghost btn-icon !h-6 !w-6" aria-label={t('common.close')} onClick={() => dismissTask(task.task_id)}>
+              <button className="btn btn-ghost btn-icon toast-hit toast-hit-icon" aria-label={t('common.close')} onClick={() => dismissTask(task.task_id)}>
                 <X size={14} />
               </button>
             </div>
-            {task.state === 'failed' && task.error && <div className="mt-1 text-danger">{task.error}</div>}
-            <div className="mt-2 h-1.5 overflow-hidden rounded bg-line">
+            {task.state === 'failed' && task.error && <div className="mt-1 text-danger">{errorText(task.error)}</div>}
+            <div
+              className="mt-2 h-1.5 overflow-hidden rounded bg-line"
+              role="progressbar"
+              aria-label={label}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={pct}
+            >
               <div
                 className={`h-full transition-[width] duration-200 ${task.state === 'failed' ? 'bg-danger' : task.state === 'done' ? 'bg-success' : task.state === 'cancelled' ? 'bg-muted' : 'bg-accent'}`}
                 style={{ width: `${pct}%` }}
@@ -77,6 +79,11 @@ export function Toasts() {
       {toasts.map((x) => (
         <div
           key={x.id}
+          role={x.kind === 'error' ? 'alert' : 'status'}
+          onMouseEnter={() => pause(x.id)}
+          onMouseLeave={() => resume(x.id)}
+          onFocus={() => pause(x.id)}
+          onBlur={() => resume(x.id)}
           className="anim-pop pointer-events-auto flex items-start gap-2 rounded-card border border-line bg-elevated p-3 shadow-[var(--shadow)]"
         >
           {x.kind === 'error' ? (
@@ -93,7 +100,7 @@ export function Toasts() {
                 {x.actions.map((a) => (
                   <button
                     key={a.label}
-                    className="btn !h-6 text-xs"
+                    className="btn toast-hit text-xs"
                     onClick={() => {
                       a.onClick()
                       dismiss(x.id)
@@ -105,7 +112,7 @@ export function Toasts() {
               </span>
             )}
           </span>
-          <button className="btn btn-ghost btn-icon !h-6 !w-6" aria-label={t('common.close')} onClick={() => dismiss(x.id)}>
+          <button className="btn btn-ghost btn-icon toast-hit toast-hit-icon" aria-label={t('common.close')} onClick={() => dismiss(x.id)}>
             <X size={14} />
           </button>
         </div>

@@ -43,6 +43,7 @@ import { useUi, type View } from '@/stores/ui'
 import { useController } from './useController'
 import { useGroup } from './useGroup'
 import { useShortcuts } from './useShortcuts'
+import { errorText } from '@/lib/errors'
 
 export function Library() {
   const { sessionId: raw } = useParams()
@@ -250,7 +251,7 @@ export function Library() {
             </div>
           ) : photosQ.isError ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-danger">
-              {(photosQ.error as Error).message}
+              {errorText(photosQ.error)}
               <div className="flex gap-2">
                 <button className="btn" onClick={() => void photosQ.refetch()}>
                   {t('common.retry')}

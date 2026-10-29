@@ -10,6 +10,7 @@ import { useHistory } from '@/lib/history'
 import { mergeGroupsEntry, splitGroupEntry } from '@/lib/structureUndo'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
+import { errorText } from '@/lib/errors'
 
 const timeOrder = (a: Photo, b: Photo) => (a.taken_at ?? 0) - (b.taken_at ?? 0) || a.id - b.id
 
@@ -111,7 +112,7 @@ export function useGroup(sessionId: number) {
       useHistory.getState().push(splitGroupEntry({ label: t('history.splitGroup'), api, burstIds: burst_ids, atPhotoId: ui.activeId, after: refreshGroups }))
       push('success', t('group.splitDone'), 2200)
     } catch (err) {
-      push('error', err instanceof Error ? err.message : String(err))
+      push('error', errorText(err))
     }
   }, [burstId, photos, refreshGroups, push, t])
 
@@ -135,7 +136,7 @@ export function useGroup(sessionId: number) {
         if (splitAt) useHistory.getState().push(mergeGroupsEntry({ label: t('history.mergeGroups'), api, mergedId: burst_id, splitAtPhotoId: splitAt.id, after: refreshGroups }))
         push('success', t('group.mergeDone'), 2200)
       } catch (err) {
-        push('error', err instanceof Error ? err.message : String(err))
+        push('error', errorText(err))
       }
     },
     [burstId, allBursts, photos, sessionId, refreshGroups, push, t],

@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, BookmarkCheck, BookmarkPlus, Loader2, RotateCcw, ScanFace, Star } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, ApiError, faceCropUrl } from '@/api/client'
+import { api, faceCropUrl } from '@/api/client'
 import { usePhotoPeople } from '@/api/queries'
 import { LEVELS, type BeautyKey, type Level, type Photo, type PhotoPerson, type WarpBodyKey, type WarpFaceKey } from '@/api/types'
 import { missingModelsOf } from '@/lib/analysis'
@@ -34,6 +34,7 @@ import { useEdit } from '@/stores/edit'
 import { useToasts } from '@/stores/toasts'
 import { Section } from './Section'
 import { Slider } from './Slider'
+import { errorText } from '@/lib/errors'
 
 /** One person chip (cover crop + name) or the "everyone" chip. */
 function Chip({ active, onClick, edited, children, testId, title }: { active: boolean; onClick: () => void; edited?: boolean; children: React.ReactNode; testId?: string; title?: string }) {
@@ -87,7 +88,7 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
       if (missing) {
         // 409 models_missing: the consent dialog downloads the models, then we try again.
         useAnalysisUi.getState().setConsent({ sessionId: photo.session_id, profile: 'fast', models: missing, onReady: () => void prepare() })
-      } else push('error', err instanceof ApiError || err instanceof Error ? err.message : String(err), 5000)
+      } else push('error', errorText(err), 5000)
     }
   }
   const preparingNow = preparing && !ready
@@ -115,7 +116,7 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
       void qc.invalidateQueries({ queryKey: qk.photoPeopleAll })
       push('success', t('beauty.profileSaved', { who }), 2500)
     } catch (err) {
-      push('error', err instanceof Error ? err.message : String(err), 5000)
+      push('error', errorText(err), 5000)
     }
   }
   const applySaved = async () => {
@@ -128,7 +129,7 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
       }
       changeStack(qc, applyProfile(cur(), profile, person), t('history.applyProfile', { who }))
     } catch (err) {
-      push('error', err instanceof Error ? err.message : String(err), 5000)
+      push('error', errorText(err), 5000)
     }
   }
 
@@ -158,7 +159,7 @@ export function PortraitPanel({ photo }: { photo: Photo }) {
           {t('library.loading')}
         </div>
       ) : peopleQ.isError ? (
-        <div className="text-xs text-danger">{(peopleQ.error as Error).message}</div>
+        <div className="text-xs text-danger">{errorText(peopleQ.error)}</div>
       ) : (data?.people.length ?? 0) === 0 ? (
         <p className="text-[11px] text-faint" data-testid="portrait-none">
           {t('beauty.noPeople')}

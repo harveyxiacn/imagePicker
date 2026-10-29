@@ -9,6 +9,7 @@ import { qk } from '@/lib/cache'
 import { LOGIN_PATH, noteLogout } from '@/lib/auth'
 import { usePopover } from '@/lib/usePopover'
 import { useToasts } from '@/stores/toasts'
+import { errorText } from '@/lib/errors'
 
 /** LAN mode only: "只读访客" badge for guests + account menu with logout. Renders nothing on the desktop. */
 export function UserMenu() {
@@ -34,7 +35,7 @@ export function UserMenu() {
       await api.logout()
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'auth' })
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e))
+      useToasts.getState().push('error', errorText(e))
       void qc.invalidateQueries({ queryKey: qk.me })
     }
   }

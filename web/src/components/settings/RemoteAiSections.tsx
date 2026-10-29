@@ -21,13 +21,14 @@ import {
 } from '@/lib/pairing'
 import { useToasts } from '@/stores/toasts'
 import { Card, Row } from './controls'
+import { errorText } from '@/lib/errors'
 
 /** Error code -> dictionary key; unknown codes show the server message. */
 function pairErrorText(e: unknown, t: (k: string) => string): string {
   if (e instanceof ApiError && ['invalid_code', 'pair_expired', 'host_unreachable', 'rate_limited', 'too_many_requests'].includes(e.code)) {
     return t(`remote.err_${e.code === 'too_many_requests' ? 'rate_limited' : e.code}`)
   }
-  return e instanceof Error ? e.message : String(e)
+  return errorText(e)
 }
 
 /** Connected / offline / not paired summary of the paired host (phone side). Also used by the analysis profile chooser. */
@@ -63,7 +64,7 @@ export function RemoteStatusCard({ status, compact }: { status: RemoteStatus | u
       {status.last_error && (
         <div className="flex items-start gap-1.5 text-xs text-danger" data-testid="remote-error">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          {t(`remote.err_${status.last_error}`, { defaultValue: status.last_error })}
+          {t(`remote.err_${status.last_error}`, { defaultValue: t('errors.unknown') as string })}
         </div>
       )}
     </div>
@@ -106,7 +107,7 @@ export function RemoteAiSection() {
       setCode(parsed.code)
       await connect(parsed)
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 5000)
+      useToasts.getState().push('error', errorText(e), 5000)
     }
   }
 
@@ -116,7 +117,7 @@ export function RemoteAiSection() {
       dispatch({ type: 'disconnect' })
       await qc.invalidateQueries({ queryKey: qk.remoteStatus })
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 5000)
+      useToasts.getState().push('error', errorText(e), 5000)
     }
   }
 
@@ -134,7 +135,7 @@ export function RemoteAiSection() {
           {status.isPending ? (
             <Loader2 className="animate-spin text-muted" size={16} />
           ) : status.isError ? (
-            <div className="text-danger">{(status.error as Error).message}</div>
+            <div className="text-danger">{errorText(status.error)}</div>
           ) : (
             <RemoteStatusCard status={status.data} />
           )}
@@ -256,7 +257,7 @@ export function RemoteDevicesSection() {
       setPair(await api.remotePairStart())
       setNow(Date.now())
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 5000)
+      useToasts.getState().push('error', errorText(e), 5000)
     } finally {
       setBusy(false)
     }
@@ -268,7 +269,7 @@ export function RemoteDevicesSection() {
       setConfirm(null)
       await qc.invalidateQueries({ queryKey: qk.remoteDevices })
     } catch (e) {
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 5000)
+      useToasts.getState().push('error', errorText(e), 5000)
     }
   }
 
@@ -315,7 +316,7 @@ export function RemoteDevicesSection() {
             <Loader2 className="animate-spin text-muted" size={16} />
           </div>
         ) : devices.isError ? (
-          <div className="p-4 text-danger">{(devices.error as Error).message}</div>
+          <div className="p-4 text-danger">{errorText(devices.error)}</div>
         ) : devices.data.length === 0 ? (
           <div className="p-4 text-muted" data-testid="devices-empty">
             {t('remote.noDevices')}

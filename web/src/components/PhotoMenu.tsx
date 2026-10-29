@@ -10,6 +10,7 @@ import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { RejectFilesDialog } from './FilesUi'
 import { MenuItem } from './MenuItem'
+import { errorText } from '@/lib/errors'
 
 interface MenuState {
   id: number
@@ -60,7 +61,7 @@ export function usePhotoMenu(sessionId: number): { open: (e: { clientX: number; 
       const n = await applyProfilesToPhotos(qc, ids, t('history.applyProfiles', { n: ids.length }))
       useToasts.getState().push(n > 0 ? 'success' : 'info', n > 0 ? t('beauty.profilesApplied', { n }) : t('beauty.profilesNone'), 3000)
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000)
+      useToasts.getState().push('error', errorText(err), 5000)
     }
   }
 

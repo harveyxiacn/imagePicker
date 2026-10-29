@@ -22,11 +22,12 @@ import { filterToQuery, queryToFilter } from './collections'
 import { changeStack, fetchStack } from './editActions'
 import { mergeAuto } from './edit'
 import { useHistory, type EditablePatch, type HistoryEntry } from './history'
+import { errorText } from '@/lib/errors'
 
 type DoneEvent = Extract<ServerEvent, { type: 'assistant.done' }>
 
 const t = (k: string, o?: Record<string, unknown>) => i18n.t(k, o) as string
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const errText = errorText
 
 /** history entry created per executed plan (for the "undo" button: only valid while it is the newest step) */
 const entries = new Map<string, HistoryEntry>()
