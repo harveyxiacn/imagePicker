@@ -65,7 +65,7 @@ const Thumb = memo(function Thumb({ photo, index, active, marked, onPick, t }: {
       {photo.user_rating ? (
         <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-accent">★{photo.user_rating}</span>
       ) : photo.ai_rating !== null ? (
-        <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-ai">☆{photo.ai_rating.toFixed(1)}</span>
+        <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-media-ai">☆{photo.ai_rating.toFixed(1)}</span>
       ) : null}
       {issueBadges(photo.issues).length > 0 && (
         <span className="absolute right-0 bottom-0 rounded-tl bg-black/60 px-0.5 text-[10px]">{issueBadges(photo.issues).slice(0, 2).map((b) => b.glyph).join('')}</span>

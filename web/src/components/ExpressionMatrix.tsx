@@ -96,7 +96,7 @@ export function ExpressionMatrix({ burstId, photos, aId, bId, onPick, onCompose 
                           >
                             <img src={faceCropUrl(face.id, 128)} alt="" className="h-full w-full object-cover" draggable={false} />
                             <span className="absolute inset-0 rounded-control" style={{ boxShadow: `inset 0 0 0 2px ${TONE_COLOR[tone]}` }} />
-                            {isBest && <span className="absolute right-0 bottom-0 rounded-tl bg-black/70 px-0.5 text-[10px] leading-3 text-ai">★</span>}
+                            {isBest && <span className="absolute right-0 bottom-0 rounded-tl bg-black/70 px-0.5 text-[10px] leading-3 text-media-ai">★</span>}
                           </button>
                         ) : (
                           <span className="block h-9 w-9 rounded-control border border-dashed border-line text-faint" style={{ lineHeight: '34px' }}>

@@ -2,6 +2,11 @@
 
 /* ---- Design tokens (doc 04 section 6). Neutral grey UI so photo colour stays truthful. ---- */
 :root {
+  /* text on photos and dark media chips (bg-black/NN): the same in every theme */
+  --media-warning: #f2c14e;
+  --media-danger: #ff7b72;
+  --media-success: #56d364;
+  --media-ai: #c9a7ff;
   color-scheme: dark;
   --bg: #1e1e1e;
   --panel: #2a2a2a;
@@ -124,6 +129,10 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-media-warning: var(--media-warning);
+  --color-media-danger: var(--media-danger);
+  --color-media-success: var(--media-success);
+  --color-media-ai: var(--media-ai);
   --font-sans: system-ui, -apple-system, 'Segoe UI', 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei UI',
     'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
   --radius-control: 6px;

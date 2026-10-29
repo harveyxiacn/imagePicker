@@ -132,7 +132,7 @@ function Popover({ sessionId, resultCount, panelRef, panelProps }: Props & { pan
               <span className="relative block h-12 w-12 overflow-hidden rounded-full bg-bg" style={{ outline: tri === 'include' ? '2px solid var(--success)' : tri === 'exclude' ? '2px solid var(--danger)' : 'none', outlineOffset: 1 }}>
                 <img src={faceCropUrl(p.cover_face_id, 128)} alt="" className={`h-full w-full object-cover ${tri === 'exclude' ? 'opacity-40' : ''}`} draggable={false} />
                 {tri !== 'off' && (
-                  <span className={`absolute inset-0 flex items-center justify-center bg-black/35 ${tri === 'include' ? 'text-success' : 'text-danger'}`}>
+                  <span className={`absolute inset-0 flex items-center justify-center bg-black/35 ${tri === 'include' ? 'text-media-success' : 'text-media-danger'}`}>
                     {tri === 'include' ? <Check size={22} strokeWidth={3} /> : <Ban size={22} strokeWidth={3} />}
                   </span>
                 )}

@@ -13,14 +13,14 @@ export interface IssueBadge {
 }
 
 const BADGES: Record<Issue, IssueBadge> = {
-  closed_eyes: { issue: 'closed_eyes', glyph: '⚠', label: 'closed_eyes', tone: 'text-warning' },
+  closed_eyes: { issue: 'closed_eyes', glyph: '⚠', label: 'closed_eyes', tone: 'text-media-warning' },
   blurry: { issue: 'blurry', glyph: '🌫', label: 'blurry', tone: 'text-white' },
-  overexposed: { issue: 'overexposed', glyph: '☀', label: 'overexposed', tone: 'text-warning' },
+  overexposed: { issue: 'overexposed', glyph: '☀', label: 'overexposed', tone: 'text-media-warning' },
   underexposed: { issue: 'underexposed', glyph: '🌑', label: 'underexposed', tone: 'text-white' },
   noisy: { issue: 'noisy', glyph: '▒', label: 'noisy', tone: 'text-white' },
   tilted: { issue: 'tilted', glyph: '⟋', label: 'tilted', tone: 'text-white' },
   bystander: { issue: 'bystander', glyph: '👤', label: 'bystander', tone: 'text-white' },
-  bad_expression: { issue: 'bad_expression', glyph: '😮', label: 'bad_expression', tone: 'text-warning' },
+  bad_expression: { issue: 'bad_expression', glyph: '😮', label: 'bad_expression', tone: 'text-media-warning' },
 }
 
 /** Display order: the most actionable problem first. */
