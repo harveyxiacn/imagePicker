@@ -30,10 +30,11 @@ pub struct QualityOut {
     pub tilt_confidence: f64,
 }
 
-/// Version of the ABI and of the struct layout; the loader refuses a different value.
-pub const ABI_VERSION: u32 = 1;
+/// Version of the ABI, of the struct layout and of the field meanings; the loader refuses a
+/// different value. 2: `sharpness` is `max(sharpness_center, sharpest grid cell)` (was the centre).
+pub const ABI_VERSION: u32 = 2;
 
-/// `1` for this build. The Python loader compares it before the first call so that an old library
+/// `2` for this build. The Python loader compares it before the first call so that an old library
 /// left next to a new worker (or the reverse) is ignored instead of read with the wrong layout.
 #[no_mangle]
 pub extern "C" fn imagepicker_lite_abi_version() -> u32 {

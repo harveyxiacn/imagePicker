@@ -8,7 +8,7 @@ Per face the result carries
   camera-space convention, magnitude is what the scorer uses)
   gaze      0-1 "looking at the camera": iris position inside the eye socket (MediaPipe iris
             landmarks vs eye corners / lids) combined with head yaw / pitch, see `gaze_score`
-  mouth_open  jawOpen blendshape (0 closed ... 1 wide open)
+  mouth_open  jawOpen blendshape (0 closed ... 1 wide open; speech is about 0.05-0.2)
   bad_expression  None, "talking" or "half_blink", see `expression_flag`
   sharpness (0-1, see quality.face_sharpness), blendshapes {52 coefficients}
   artificial  0-1 confidence that the face is on a statue / poster / screen / print (steps/liveness.py)
@@ -43,9 +43,14 @@ GAZE_SIGMA_YAW = 25.0  # degrees
 GAZE_SIGMA_PITCH = 20.0
 
 # "Expression not great" (docs/03 §3.3), a tag only: a subject mid-word or caught half-blinking.
-MOUTH_OPEN_TALKING = 0.25  # jawOpen at or above this ...
+# MediaPipe's jawOpen stays small for speech: on the library's non-smiling subjects mid-sentence
+# p25 0.04 / p50 0.11, a closed mouth p90 0.02 / p95 0.06 (bench/eval-bystander.py).
+MOUTH_OPEN_TALKING = 0.06  # jawOpen at or above this ...
 EXPR_SMILE_BELOW = 0.35  # ... without a smile is "talking" (a laugh or a smile is fine)
 HALF_BLINK = (0.45, 0.65)  # eyes_open in [lo, hi) is half shut; below lo is the closed_eyes tag
+# Landmarks on a face this blurry (quality.face_sharpness; the blurry-tag threshold) are guesses:
+# no expression tag for it.
+EXPR_MIN_SHARPNESS = 0.35
 
 log = logging.getLogger(__name__)
 
@@ -128,15 +133,21 @@ def gaze_score(
 
 
 def expression_flag(
-    eyes_open: float | None, smile: float | None, mouth_open: float | None
+    eyes_open: float | None,
+    smile: float | None,
+    mouth_open: float | None,
+    sharpness: float | None = None,
 ) -> str | None:
     """`"talking"`, `"half_blink"` or None. Mirrors `scoring::bad_expression` in ip-core.
 
-    talking     mouth_open >= 0.25 and smile < 0.35
+    talking     mouth_open >= 0.06 and smile < 0.35
     half_blink  0.45 <= eyes_open < 0.65 and smile < 0.35
-    Needs the landmarker (all inputs None without it -> None).
+    Never for a face with sharpness < 0.35 (blurred landmarks). Needs the landmarker (all inputs
+    None without it -> None).
     """
     if smile is None or smile >= EXPR_SMILE_BELOW:
+        return None
+    if sharpness is not None and sharpness < EXPR_MIN_SHARPNESS:
         return None
     if mouth_open is not None and mouth_open >= MOUTH_OPEN_TALKING:
         return "talking"
@@ -245,7 +256,9 @@ class FaceAnalyzer:
                     f.update(self._landmark(rgb, f["bbox"]))
                 except Exception as e:  # noqa: BLE001
                     log.debug("landmarker failed: %s", e)
-            f["bad_expression"] = expression_flag(f["eyes_open"], f["smile"], f["mouth_open"])
+            f["bad_expression"] = expression_flag(
+                f["eyes_open"], f["smile"], f["mouth_open"], f["sharpness"]
+            )
         return faces
 
     def _landmark(self, rgb: np.ndarray, bbox: list[float]) -> dict[str, Any]:

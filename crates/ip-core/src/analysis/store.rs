@@ -82,8 +82,9 @@ pub fn ingest(
         tx.execute(
             "INSERT OR REPLACE INTO analysis(photo_id, profile, steps_done, model_versions, phash, embedding,
                sharpness, exposure, noise, aesthetic, iqa, mean_luminance, clipped_highlights, crushed_shadows,
-               scene_scores, explain, artifacts_dir, analyzed_at, tilt_deg, tilt_confidence, saliency)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16,?17,?18,?19,?20)",
+               scene_scores, explain, artifacts_dir, analyzed_at, tilt_deg, tilt_confidence, saliency,
+               sharpness_center)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,NULL,?16,?17,?18,?19,?20,?21)",
             params![
                 pid,
                 profile.as_str(),
@@ -104,7 +105,8 @@ pub fn ingest(
                 now,
                 q.tilt_deg,
                 q.tilt_confidence,
-                q.saliency.map(|b| json!(b).to_string())
+                q.saliency.map(|b| json!(b).to_string()),
+                q.sharpness_center
             ],
         )?;
         // faces
@@ -588,7 +590,8 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
             let mut st = tx.prepare(&format!(
                 "SELECT p.id, p.burst_id, COALESCE(p.taken_at, p.mtime), p.scene_type, a.sharpness, a.exposure,
                         a.noise, a.iqa, a.aesthetic, a.clipped_highlights, a.crushed_shadows,
-                        a.mean_luminance, a.embedding, a.tilt_deg, a.tilt_confidence, a.saliency
+                        a.mean_luminance, a.embedding, a.tilt_deg, a.tilt_confidence, a.saliency,
+                        a.sharpness_center
                  FROM photo p JOIN analysis a ON a.photo_id=p.id WHERE p.burst_id IN ({ph})"
             ))?;
             let v = st
@@ -600,6 +603,7 @@ pub fn rescore_bursts(conn: &mut Connection, burst_ids: &[i64]) -> Result<Vec<i6
                             photo_id: r.get(0)?,
                             scene_type: r.get(3)?,
                             sharpness: r.get(4)?,
+                            sharpness_center: r.get(16)?,
                             exposure: r.get(5)?,
                             noise: r.get(6)?,
                             iqa: r.get(7)?,

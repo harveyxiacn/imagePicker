@@ -175,10 +175,8 @@ fn analyze_one_with(
     let (wu, hu) = (w as usize, h as usize);
     let q = ip_lite::analyze_quality(&rgb, wu, hu);
     let faces = detector.map(|d| detect_faces(d, &rgb, wu, hu));
-    let face_sharp: Vec<f64> = faces.iter().flatten().filter_map(|f| f.sharpness).collect();
     // Like the worker: the headline sharpness follows the faces when there are any.
-    let sharpness_face = (!face_sharp.is_empty())
-        .then(|| round5(face_sharp.iter().sum::<f64>() / face_sharp.len() as f64));
+    let sharpness_face = faces.as_deref().and_then(faces_sharpness);
     AnalyzeItem {
         photo_id,
         width: Some(w as i64),
@@ -201,6 +199,25 @@ fn analyze_one_with(
         faces: faces.unwrap_or_default(),
         ..Default::default()
     }
+}
+
+/// Area-weighted mean face sharpness, like the worker's `quality.faces_sharpness`: a small blurry
+/// face in the background must not make a sharp main subject read as blurry.
+fn faces_sharpness(faces: &[AnalyzeFace]) -> Option<f64> {
+    let pairs: Vec<(f64, f64)> = faces
+        .iter()
+        .filter_map(|f| f.sharpness.map(|s| (f.bbox[2] * f.bbox[3], s)))
+        .collect();
+    if pairs.is_empty() {
+        return None;
+    }
+    let area: f64 = pairs.iter().map(|(a, _)| a).sum();
+    let mean = if area > 0.0 {
+        pairs.iter().map(|(a, s)| a * s).sum::<f64>() / area
+    } else {
+        pairs.iter().map(|(_, s)| s).sum::<f64>() / pairs.len() as f64
+    };
+    Some(round5(mean))
 }
 
 fn round5(x: f64) -> f64 {
@@ -335,6 +352,24 @@ impl AiWorker for LiteWorker {
 mod tests {
     use super::*;
     use crate::testutil::FakeImaging;
+
+    #[test]
+    fn face_sharpness_is_weighted_by_face_area() {
+        let face = |w: f64, s: Option<f64>| AnalyzeFace {
+            bbox: [0.1, 0.1, w, w],
+            sharpness: s,
+            ..Default::default()
+        };
+        assert_eq!(faces_sharpness(&[]), None);
+        assert_eq!(faces_sharpness(&[face(0.2, None)]), None);
+        // a sharp main face (0.3 x 0.3) and a blurry passer-by (0.05 x 0.05)
+        let s = faces_sharpness(&[face(0.3, Some(0.8)), face(0.05, Some(0.1))]).unwrap();
+        assert!(
+            (s - (0.09 * 0.8 + 0.0025 * 0.1) / 0.0925).abs() < 1e-5,
+            "{s}"
+        );
+        assert!(s > 0.75);
+    }
 
     #[test]
     fn steps_without_a_model_are_phash_and_quality() {

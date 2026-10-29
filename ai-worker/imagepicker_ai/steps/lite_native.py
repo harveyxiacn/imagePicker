@@ -27,8 +27,8 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-#: Must match `ip_lite_ffi::ABI_VERSION`.
-ABI_VERSION = 1
+#: Must match `ip_lite_ffi::ABI_VERSION` (2: `sharpness` also looks at the sharpest grid cell).
+ABI_VERSION = 2
 
 #: Order of `QualityOut`'s doubles after `status` (crates/ip-lite-ffi/src/lib.rs).
 FIELD_NAMES = (

@@ -23,7 +23,7 @@ def test_ranges():
     ):
         assert 0.0 <= q[k] <= 1.0, k
     assert q["sharpness_face"] is None
-    assert q["sharpness"] == q["sharpness_center"]
+    assert q["sharpness"] >= q["sharpness_center"]  # without faces: max(centre, sharpest cell)
 
 
 def test_blur_lowers_sharpness_monotonically():
@@ -86,3 +86,29 @@ def test_face_sharpness_used_when_faces_given():
 def test_tiny_face_box_ignored():
     img = synth_image(8, (640, 480))
     assert face_sharpness(img, (0.5, 0.5, 0.001, 0.001)) is None
+
+
+def test_off_centre_subject_is_not_blur():
+    # detail only in the top-left corner: the centre is flat, the corner cell of the grid is sharp
+    img = np.full((768, 1024, 3), 100, np.uint8)
+    yy, xx = np.mgrid[0:128, 0:170]
+    img[:128, :170][((xx // 16 + yy // 16) % 2) == 0] = 200
+    q = _q(img)
+    assert q["sharpness_center"] < 0.05
+    assert q["sharpness"] > 0.3
+    # blurring the whole frame (camera shake, missed focus) still reads as blur
+    soft = _q(cv2.GaussianBlur(img, (0, 0), 8))
+    assert soft["sharpness"] < q["sharpness"] - 0.2
+
+
+def test_face_sharpness_weighted_by_face_area():
+    img = synth_image(9, (1024, 768))
+    big, small = (0.3, 0.3, 0.3, 0.4), (0.85, 0.05, 0.06, 0.08)
+    x0, y0, x1, y1 = 870, 38, 932, 100  # blur the small "background" face only
+    img[y0:y1, x0:x1] = cv2.GaussianBlur(img[y0:y1, x0:x1], (0, 0), 6)
+    s_big, s_small = face_sharpness(img, big), face_sharpness(img, small)
+    assert s_big is not None and s_small is not None and s_small < s_big
+    q = _q(img, [big, small])
+    want = (0.12 * s_big + 0.0048 * s_small) / (0.12 + 0.0048)
+    assert abs(q["sharpness_face"] - want) < 1e-4
+    assert q["sharpness_face"] > (s_big + s_small) / 2  # the plain mean would be dragged down

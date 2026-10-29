@@ -44,7 +44,7 @@
 5. **助手的安全网**：模型输出必须先过 `validate_call`；规则引擎的解读作为校验（`llm_unsafe_target`、`llm_tool_mismatch`），必要时整份模型计划退回规则。破坏性/大范围步骤必须确认，计划执行要可一次撤销。
 6. **生成任务必须可取消**：`inpaint`/`enhance`/`besttake`/`hair` 等 worker 计算在线程池里，必须在循环里检查 `Cancel` 令牌（`ai-worker/imagepicker_ai/cancel.py`），否则请求结束后计算还在跑。
 7. **图层与编辑栈顺序是内容**：`PatchKind::layer_order()`（`ip-render`）与 `edit/sync.rs` 的 `rank()` 决定合成顺序；改动会改变已有照片的渲染结果，必须补一致性测试（`ip-render/tests/correctness.rs` 的不变量）。
-8. **数据库迁移只追加**（当前 `PRAGMA user_version` = **17**）：新增表/列写成新的 migration，不要改历史条目；v17 归风格模型使用，已被占用。
+8. **数据库迁移只追加**（当前 `PRAGMA user_version` = **18**）：新增表/列写成新的 migration，不要改历史条目；v17 归风格模型使用，v18 是 `analysis.sharpness_center`（连拍相对模糊），均已被占用。
 9. **i18n 两个文件同步**：`web/src/i18n/zh-CN.ts` 与 `en.ts`；`i18n.test.ts` 校验键表，新增界面文案两边都要加。快捷键只在 `web/src/lib/keymap.ts` 定义一次。
 10. **文档口径**：不要写成「逆向 / 复刻 Photoshop、Lightroom」；描述功能本身与实现原理即可。
 11. **提交**：身份用仓库的 noreply 邮箱（推送会被拒）；提交信息末尾可加 `Co-Authored-By: Claude Code <noreply@anthropic.com>`；PR 描述末尾 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`。分支 `feat/<area>-<topic>` / `fix/<area>-<topic>`。
