@@ -9,6 +9,7 @@ import { bestTakeOf, updateBestTake } from '@/lib/patches'
 import { useEdit } from '@/stores/edit'
 import { useGen } from '@/stores/gen'
 import { Slider } from '../edit/Slider'
+import { reasonText } from '@/lib/reasons'
 
 interface Props {
   person: PersonView | undefined
@@ -76,7 +77,7 @@ export function BestTakePanel({ person, retargeted, busy, onChoose, onRestore }:
                 aria-disabled={disabled}
                 aria-pressed={c.isCurrent}
                 disabled={busy && !disabled}
-                title={disabled ? `${t('besttake.notComposable')}: ${t(`besttake.reason_${c.reason ?? 'unknown'}`, { defaultValue: c.reason ?? '' })}` : c.isBase ? t('besttake.baseHint') : t('besttake.useHint')}
+                title={disabled ? `${t('besttake.notComposable')}: ${reasonText('besttake', c.reason)}` : c.isBase ? t('besttake.baseHint') : t('besttake.useHint')}
                 onClick={() => (disabled ? undefined : onChoose(person, c))}
                 data-testid="bt-candidate"
                 data-photo={c.photo_id}
@@ -98,7 +99,7 @@ export function BestTakePanel({ person, retargeted, busy, onChoose, onRestore }:
                   <span className="tnum text-muted">{c.score}</span>
                 </span>
                 {c.isBase && <span className="bg-panel px-1.5 pb-1 text-[10px] text-muted">{t('besttake.base')}</span>}
-                {disabled && <span className="px-1.5 pb-1 text-[10px] leading-tight text-danger">{t(`besttake.reason_${c.reason ?? 'unknown'}`, { defaultValue: c.reason ?? '' })}</span>}
+                {disabled && <span className="px-1.5 pb-1 text-[10px] leading-tight text-danger">{reasonText('besttake', c.reason)}</span>}
               </button>
             )
           })}
@@ -154,7 +155,7 @@ export function BestTakePanel({ person, retargeted, busy, onChoose, onRestore }:
       {result && !result.ok && (
         <div className="flex items-start gap-1.5 rounded-control bg-danger/10 p-2 text-xs text-danger" data-testid="bt-failure">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          {t('besttake.failed', { reason: t(`besttake.reason_${result.reason ?? 'unknown'}`, { defaultValue: result.reason ?? '' }) })}
+          {t('besttake.failed', { reason: reasonText('besttake', result.reason) })}
         </div>
       )}
 

@@ -13,6 +13,7 @@ import { useHistory } from '@/lib/history'
 import { useAssistant } from '@/stores/assistant'
 import { useUi } from '@/stores/ui'
 import { Modal } from '../Modal'
+import { ConfirmDialog } from '../settings/controls'
 
 const chordLabel = (spec?: string) => (spec ? formatSpec(spec).join('+') : '')
 
@@ -82,6 +83,7 @@ function AssistantDrawer({ sessionId, photoId }: { sessionId: number; photoId: n
   const setOpen = useAssistant((s) => s.setOpen)
   const dispatch = useAssistant((s) => s.dispatch)
   const [text, setText] = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
   const bottom = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
 
@@ -110,7 +112,7 @@ function AssistantDrawer({ sessionId, photoId }: { sessionId: number; photoId: n
         <span className="font-semibold">{t('assistant.title')}</span>
         <EngineBadge />
         <span className="ml-auto flex items-center gap-1">
-          <button className="btn btn-ghost btn-icon" onClick={() => dispatch({ type: 'clear' })} disabled={!items.length} aria-label={t('assistant.clear')} title={t('assistant.clear')}>
+          <button className="btn btn-ghost btn-icon" onClick={() => setConfirmClear(true)} disabled={!items.length} data-testid="assistant-clear" aria-label={t('assistant.clear')} title={t('assistant.clear')}>
             <Trash2 size={14} />
           </button>
           <button className="btn btn-ghost btn-icon" onClick={() => setOpen(false)} aria-label={t('common.close')} data-testid="assistant-close">
@@ -118,6 +120,20 @@ function AssistantDrawer({ sessionId, photoId }: { sessionId: number; photoId: n
           </button>
         </span>
       </div>
+
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title={t('assistant.clearTitle')}
+        description={t('assistant.clearDesc')}
+        confirmLabel={t('assistant.clear')}
+        danger
+        testId="assistant-clear-confirm"
+        onConfirm={() => {
+          setConfirmClear(false)
+          dispatch({ type: 'clear' })
+        }}
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="assistant-transcript">
         <div className="flex flex-col gap-3">

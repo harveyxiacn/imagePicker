@@ -19,6 +19,7 @@ import { mergePeopleEntry, personPatchEntry, refreshPeople, type MergedPersonSna
 import { DEFAULT_PERSON_FILTER } from '@/lib/filter'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
+import { errorText } from '@/lib/errors'
 
 function NameField({ person, onSave }: { person: Person; onSave: (name: string | null) => void }) {
   const { t } = useTranslation()
@@ -105,7 +106,7 @@ function PeopleInner() {
   const sections = useMemo(() => buildBestSections(list, best.data, bestIds, bestN), [list, best.data, bestIds, bestN])
 
   const refresh = () => void qc.invalidateQueries({ queryKey: qk.peopleAll })
-  const fail = (err: unknown) => push('error', err instanceof Error ? err.message : String(err))
+  const fail = (err: unknown) => push('error', errorText(err))
 
   const patch = async (p: Person, body: { name?: string | null; hidden?: boolean }) => {
     // optimistic
@@ -285,7 +286,7 @@ function PeopleInner() {
           </div>
         ) : people.isError ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-danger">
-            {(people.error as Error).message}
+            {errorText(people.error)}
             <button className="btn" onClick={() => void people.refetch()}>
               {t('common.retry')}
             </button>
@@ -306,7 +307,7 @@ function PeopleInner() {
                 {t('library.loading')}
               </div>
             )}
-            {best.isError && <div className="text-danger">{(best.error as Error).message}</div>}
+            {best.isError && <div className="text-danger">{errorText(best.error)}</div>}
             {best.isSuccess && sections.length === 0 && <div className="py-10 text-center text-muted">{t('best.empty')}</div>}
             {sections.map((sec) => (
               <section key={sec.person.id} data-testid="best-section" aria-label={sec.person.name ?? String(sec.person.id)}>

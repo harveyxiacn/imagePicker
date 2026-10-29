@@ -8,6 +8,7 @@ import type { Photo, Taste, TasteContribution } from '@/api/types'
 import { qk } from '@/lib/cache'
 import { splitContributions, tasteFeatureLabel, tastePercent } from '@/lib/taste'
 import { useToasts } from '@/stores/toasts'
+import { errorText } from '@/lib/errors'
 
 /** Small "my style" score chip (grid / loupe); nothing while no taste model is in use. */
 export function TasteChip({ score, className = '' }: { score: number | null | undefined; className?: string }) {
@@ -56,7 +57,7 @@ export function TasteBadge({ photo }: { photo: Photo }) {
       useToasts.getState().push('success', t('taste.forgotPhoto'), 2500)
     },
     onError: (e: unknown) =>
-      useToasts.getState().push('error', e instanceof Error ? e.message : String(e), 5000),
+      useToasts.getState().push('error', errorText(e), 5000),
   })
   if (photo.taste_score === null || photo.taste_score === undefined) return null
   const data = ex.data && ex.data.photo_id === photo.id ? ex.data : undefined
@@ -85,7 +86,7 @@ export function TasteBadge({ photo }: { photo: Photo }) {
           {ex.isPending ? (
             <Loader2 size={14} className="animate-spin text-muted" aria-label={t('library.loading')} />
           ) : ex.isError ? (
-            <span className="text-danger">{(ex.error as Error).message}</span>
+            <span className="text-danger">{errorText(ex.error)}</span>
           ) : pro.length + con.length === 0 ? (
             <span className="text-muted">{t('taste.whyNone')}</span>
           ) : (

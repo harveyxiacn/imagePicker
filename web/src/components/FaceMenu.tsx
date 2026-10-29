@@ -13,6 +13,7 @@ import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { MenuItem } from './MenuItem'
 import { Modal } from './Modal'
+import { errorText } from '@/lib/errors'
 
 interface MenuState {
   face: Face
@@ -82,7 +83,7 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
       }
       useToasts.getState().push('info', t('face.splitDone'), 2200)
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+      useToasts.getState().push('error', errorText(err))
     }
   }
 
@@ -98,7 +99,7 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
       void qc.invalidateQueries({ queryKey: ['burstFaces'] })
       setNaming(null)
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err))
+      useToasts.getState().push('error', errorText(err))
     }
   }
 

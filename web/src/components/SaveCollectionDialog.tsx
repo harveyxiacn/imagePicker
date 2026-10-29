@@ -8,6 +8,7 @@ import { qk } from '@/lib/cache'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import { Modal } from './Modal'
+import { errorText } from '@/lib/errors'
 
 /** "Save as smart collection": stores the current library filter under a name (docs/api-contract-m4.md C.2). */
 export function SaveCollectionDialog() {
@@ -30,7 +31,7 @@ export function SaveCollectionDialog() {
       setName('')
       setOpen(false)
     } catch (err) {
-      useToasts.getState().push('error', err instanceof Error ? err.message : String(err), 5000)
+      useToasts.getState().push('error', errorText(err), 5000)
     } finally {
       setBusy(false)
     }

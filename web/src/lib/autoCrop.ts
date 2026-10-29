@@ -5,6 +5,7 @@ import { useEdit } from '@/stores/edit'
 import { useToasts } from '@/stores/toasts'
 import { aspectRatio, getCrop, setCrop, stacksEqual } from './edit'
 import { changeStack } from './editActions'
+import { errorText } from '@/lib/errors'
 
 /** |angle| below this (degrees) counts as "no rotation" when deciding whether a level photo needs a change. */
 export const LEVEL_EPS = 0.05
@@ -62,7 +63,7 @@ export async function runAutoCrop(
     else if (outcome === 'none') toasts.push('info', text.none, 5000)
     return outcome
   } catch (err) {
-    toasts.push('error', err instanceof Error ? err.message : String(err), 5000)
+    toasts.push('error', errorText(err), 5000)
     return 'error'
   }
 }
