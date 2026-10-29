@@ -159,47 +159,6 @@ export function buildGridItems(photos: Photo[], opts: StackOptions): GridItem[] 
 export const visiblePhotos = (items: GridItem[]): Photo[] =>
   items.filter((i): i is PhotoItem => i.kind === 'photo').map((i) => i.photo)
 
-export type GridRow = { kind: 'header'; item: HeaderItem } | { kind: 'photos'; items: PhotoItem[] }
-
-/** Lay items out in rows of `cols`; every header starts a new row and breaks the photo run. */
-export function buildRows(items: GridItem[], cols: number): GridRow[] {
-  const rows: GridRow[] = []
-  let run: PhotoItem[] | null = null
-  for (const it of items) {
-    if (it.kind === 'header') {
-      run = null
-      rows.push({ kind: 'header', item: it })
-      continue
-    }
-    if (!run || run.length >= cols) {
-      run = []
-      rows.push({ kind: 'photos', items: run })
-    }
-    run.push(it)
-  }
-  return rows
-}
-
-/** Id of the photo one visual row above/below `activeId` (same column, clamped); skips header rows. */
-export function moveVertical(rows: GridRow[], activeId: number | null, dir: 1 | -1): number | null {
-  let r = -1
-  let c = 0
-  rows.forEach((row, ri) => {
-    if (row.kind !== 'photos') return
-    const ci = row.items.findIndex((i) => i.photo.id === activeId)
-    if (ci >= 0) {
-      r = ri
-      c = ci
-    }
-  })
-  if (r < 0) return null
-  for (let i = r + dir; i >= 0 && i < rows.length; i += dir) {
-    const row = rows[i]
-    if (row.kind === 'photos') return row.items[Math.min(c, row.items.length - 1)].photo.id
-  }
-  return null
-}
-
 /** First photo of the previous/next stack relative to the active photo (`,` / `.`). */
 export function jumpGroup(photos: Photo[], activeId: number | null, dir: 1 | -1): number | null {
   const idx = photos.findIndex((p) => p.id === activeId)

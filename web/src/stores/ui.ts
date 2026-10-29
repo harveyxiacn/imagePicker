@@ -4,7 +4,7 @@ import type { ConnectionStatus } from '@/api/events'
 import { clampFontScale, type Contrast, type Theme } from '@/lib/appearance'
 import type { CompareCount } from '@/lib/compare'
 import { DEFAULT_FILTER, type FilterState } from '@/lib/filter'
-import type { GridRow } from '@/lib/stacks'
+import type { PackedRow } from '@/lib/gridPack'
 import { EMPTY_SELECTION, type SelectionState } from '@/lib/selection'
 
 export type View = 'grid' | 'loupe' | 'compare' | 'group'
@@ -29,7 +29,7 @@ interface UiState {
   expandedStacks: ReadonlySet<number>
   collapsedScenes: ReadonlySet<number>
   /** Rows currently laid out by the grid (for row-aware arrow navigation). */
-  gridRows: GridRow[]
+  gridRows: PackedRow[]
   showFaces: boolean
   personFilterOpen: boolean
   acceptAllOpen: boolean
@@ -71,7 +71,7 @@ interface UiState {
   setGroupBurst: (id: number | null) => void
   setStacks: (s: { expandAll: boolean; expanded: ReadonlySet<number> }) => void
   setCollapsedScenes: (s: ReadonlySet<number>) => void
-  setGridRows: (r: GridRow[]) => void
+  setGridRows: (r: PackedRow[]) => void
   setShowFaces: (b: boolean) => void
   setPersonFilterOpen: (b: boolean) => void
   setAcceptAllOpen: (b: boolean) => void

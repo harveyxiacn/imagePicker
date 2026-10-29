@@ -446,6 +446,8 @@ export const en: Messages = {
   scene: {
     title: 'Scene {{n}}',
     counts: '{{groups}} groups · {{photos}} photos',
+    photos: '{{n}} photos',
+    folded: 'Folded, click to expand',
   },
   stack: {
     collapse: 'Collapse stack',
