@@ -153,7 +153,9 @@ export function HardwareSection() {
                 <th className="px-2 py-2 font-medium">{t('settings.models.col_size')}</th>
                 <th className="px-2 py-2 font-medium">{t('settings.models.col_license')}</th>
                 <th className="px-2 py-2 font-medium">{t('settings.models.col_status')}</th>
-                <th className="px-4 py-2" />
+                <th className="px-4 py-2">
+                  <span className="sr-only">{t('settings.models.col_actions')}</span>
+                </th>
               </tr>
             </thead>
             <tbody>

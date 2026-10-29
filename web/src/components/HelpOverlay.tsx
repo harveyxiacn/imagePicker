@@ -10,7 +10,7 @@ export function HelpOverlay() {
   const open = useUi((s) => s.helpOpen)
   const setOpen = useUi((s) => s.setHelpOpen)
   return (
-    <Modal open={open} onOpenChange={setOpen} title={t('help.title')} width="max-w-3xl">
+    <Modal open={open} onOpenChange={setOpen} title={t('help.title')} width="max-w-3xl" scrollFocusable>
       <div className="grid gap-x-8 gap-y-5 md:grid-cols-2" data-testid="help-overlay">
         {GROUPS.map((g) => (
           <section key={g.group}>

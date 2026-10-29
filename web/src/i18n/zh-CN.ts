@@ -120,6 +120,7 @@ export const zhCN = {
     stack: '连拍堆栈，共 {{n}} 张',
   },
   filter: {
+    bar: '筛选条件',
     aiRating: 'AI 星级',
     issues: '问题',
     issues_all: '全部',
@@ -1557,6 +1558,7 @@ export const zhCN = {
       col_size: '大小',
       col_license: '许可证',
       col_status: '状态',
+      col_actions: '操作',
       installed: '已安装',
       notInstalled: '未安装',
       download: '下载',

@@ -65,6 +65,7 @@ function check(src) {
     }
     for (const s of SURFACES) for (const k of TEXT) add('text', k, s, t.text)
     for (const k of ['accent-fg']) add('text', k, 'accent', t.text)
+    add('text', 'ai-fg', 'ai', t.text)
     // Accent text also sits on tinted chips (bg-accent/10..20 over the panel).
     {
       const mix = (a, b, p) => '#' + [16, 8, 0].map((sh) => Math.round(((parseInt(a.slice(1), 16) >> sh) & 255) * p + ((parseInt(b.slice(1), 16) >> sh) & 255) * (1 - p)).toString(16).padStart(2, '0')).join('')

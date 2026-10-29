@@ -30,7 +30,7 @@ export function HeaderControls() {
       </button>
       <button
         className="btn btn-ghost"
-        aria-label={t('app.language')}
+        aria-label={`${lang === 'zh-CN' ? '中' : 'EN'}: ${t('app.language')}`}
         title={t('app.language')}
         onClick={() => {
           const next = lang === 'zh-CN' ? 'en' : 'zh-CN'

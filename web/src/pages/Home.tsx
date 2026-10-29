@@ -71,10 +71,10 @@ export function Home() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4">
-        <div className="flex items-center gap-2 text-base font-semibold">
+        <h1 className="flex items-center gap-2 text-base font-semibold">
           <Aperture size={20} className="text-accent-text" />
           imagePicker
-        </div>
+        </h1>
         <div className="flex items-center gap-2">
           <HeaderControls />
           <Link to="/taste" className="btn btn-ghost" data-testid="home-taste-link" aria-label={t('taste.title')}>

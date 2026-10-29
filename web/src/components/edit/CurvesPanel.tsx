@@ -153,7 +153,7 @@ export function CurvesPanel() {
     >
       <div className="mb-2 flex gap-1" role="tablist">
         {CHANNELS.map((c) => (
-          <button key={c.id} role="tab" aria-selected={ch === c.id} className="chip" aria-pressed={ch === c.id} onClick={() => setCh(c.id)}>
+          <button key={c.id} role="tab" aria-selected={ch === c.id} className="chip" onClick={() => setCh(c.id)}>
             <span className="h-2 w-2 rounded-full" style={{ background: c.color }} />
             {c.label}
           </button>

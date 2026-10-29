@@ -288,7 +288,7 @@ function InfoHandle({ onOpen, label }: { onOpen: () => void; label: string }) {
   const y0 = useRef<number | null>(null)
   return (
     <button
-      className="flex w-full touch-none flex-col items-center py-2"
+      className="flex min-h-6 w-full touch-none flex-col items-center justify-center py-2"
       aria-label={label}
       data-testid="cull-info-handle"
       onPointerDown={(e) => {

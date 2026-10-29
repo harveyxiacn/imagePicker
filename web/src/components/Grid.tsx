@@ -15,6 +15,7 @@ import { visiblePhotos, type GridItem, type StackInfo } from '@/lib/stacks'
 import { useUi } from '@/stores/ui'
 import { colorVar } from '@/lib/colors'
 import { FoldedTile, SegmentDivider, SegmentHeader } from './GridSegments'
+import { Glyph } from './Glyph'
 
 /** DOM id of a photo's cell: the grid points `aria-activedescendant` at it. */
 const cellId = (photoId: number) => `grid-cell-${photoId}`
@@ -109,7 +110,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
             {rejected && <Ban size={14} className="text-danger drop-shadow" aria-hidden="true" />}
             {photo.has_edits && (
               <span className="rounded bg-black/65 px-1 text-[11px] leading-4 text-accent" data-testid="edit-badge" title={t('edit.edited')}>
-                ✎
+                <Glyph text="✎" />
               </span>
             )}
             {photo.duplicate_group_id != null && (
@@ -119,7 +120,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
                 data-kind={photo.duplicate_kind}
                 title={t(photo.duplicate_kind === 'exact' ? 'duplicates.exact' : 'duplicates.near')}
               >
-                ⧉
+                <Glyph text="⧉" />
               </span>
             )}
           </div>
@@ -127,7 +128,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
             <div className="flex gap-0.5 rounded bg-black/65 px-1 text-[11px] leading-4" data-testid="issue-badges">
               {badges.map((b) => (
                 <span key={b.issue} className={b.tone} title={t(`issue.${b.label}`)}>
-                  {b.glyph}
+                  <Glyph text={b.glyph} />
                 </span>
               ))}
             </div>
@@ -145,7 +146,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
           <>
             {photo.user_rating ? (
               <span className="tnum pointer-events-none absolute bottom-1 left-1 rounded bg-black/65 px-1 text-[11px] leading-4 text-accent" aria-hidden="true">
-                {'★'.repeat(photo.user_rating)}
+                <Glyph text={'★'.repeat(photo.user_rating)} />
               </span>
             ) : photo.ai_rating !== null ? (
               <span
@@ -156,7 +157,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
                 data-testid="ai-badge"
                 aria-hidden="true"
               >
-                ☆{photo.ai_rating.toFixed(1)}
+                <Glyph text={`☆${photo.ai_rating.toFixed(1)}`} />
               </span>
             ) : null}
             {paired && (
@@ -166,7 +167,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
                 data-testid="pair-badge"
                 aria-hidden="true"
               >
-                {t('files.pair')}
+                <Glyph text={t('files.pair')} />
               </span>
             )}
             {!paired && photo.format !== 'jpeg' && (
@@ -176,7 +177,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
                 }`}
                 aria-hidden="true"
               >
-                {photo.format}
+                <Glyph text={photo.format} />
               </span>
             )}
           </>
@@ -185,7 +186,7 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
           <button
             type="button"
             tabIndex={-1} // keyboard users toggle stacks with S
-            className="absolute top-1 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-ai px-1.5 text-[11px] leading-4 font-semibold text-white shadow"
+            className="absolute top-1 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-ai px-1.5 text-[11px] leading-4 font-semibold text-ai-fg shadow"
             style={{ transform: 'translateX(-50%)' }}
             title={stack.expanded ? t('stack.collapse') : t('stack.expand', { n: stack.count })}
             aria-label={stack.expanded ? t('stack.collapse') : t('stack.expand', { n: stack.count })}
@@ -198,7 +199,9 @@ const Cell = memo(function Cell({ photo, stack, size, selected, active, onToggle
             onDoubleClick={(e) => e.stopPropagation()}
           >
             <Layers size={11} />
-            <span className="tnum">{stack.count}</span>
+            <span className="tnum">
+              <Glyph text={String(stack.count)} />
+            </span>
           </button>
         )}
       </div>

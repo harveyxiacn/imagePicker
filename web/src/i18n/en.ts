@@ -122,6 +122,7 @@ export const en: Messages = {
     stack: 'Burst stack of {{n}}',
   },
   filter: {
+    bar: 'Filters',
     aiRating: 'AI rating',
     issues: 'Issues',
     issues_all: 'All',
@@ -1559,6 +1560,7 @@ export const en: Messages = {
       col_size: 'Size',
       col_license: 'Licence',
       col_status: 'Status',
+      col_actions: 'Actions',
       installed: 'Installed',
       notInstalled: 'Not installed',
       download: 'Download',

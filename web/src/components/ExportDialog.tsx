@@ -178,7 +178,7 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, fullIds,
               ))}
             </div>
           </div>
-          <fieldset className={`flex flex-wrap gap-x-4 gap-y-1 ${byFolder ? 'hidden' : ''}`}>
+          <fieldset className={`flex flex-wrap gap-x-4 gap-y-2 ${byFolder ? 'hidden' : ''}`}>
             <legend className="mb-1 text-muted">{t('export.scope')}</legend>
             <label className="flex items-center gap-1.5">
               <input type="radio" name="scope" checked={effectiveScope === 'selected'} disabled={!hasSelection} onChange={() => setScope('selected')} />
@@ -251,11 +251,11 @@ export function ExportDialog({ open, onOpenChange, selectedIds, allIds, fullIds,
           </div>
 
           <div className={`flex flex-col gap-1 ${isCollage ? 'hidden' : ''}`} data-testid="export-strip">
-            <label className="flex items-center gap-1.5">
+            <label className="flex items-center gap-1.5 py-1">
               <input type="checkbox" checked={stripGps || stripMetadata} disabled={stripMetadata} onChange={(e) => set({ stripGps: e.target.checked })} data-testid="export-strip-gps" />
               {t('export.stripGps')}
             </label>
-            <label className="flex items-center gap-1.5">
+            <label className="flex items-center gap-1.5 py-1">
               <input type="checkbox" checked={stripMetadata} onChange={(e) => set({ stripMetadata: e.target.checked })} data-testid="export-strip-metadata" />
               {t('export.stripMetadata')}
             </label>

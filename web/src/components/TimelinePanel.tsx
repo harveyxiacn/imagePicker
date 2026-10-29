@@ -175,6 +175,9 @@ export function TimelinePanel({ sessionId }: { sessionId: number }) {
           {buckets.map((b, i) => {
             const on = active === b.key
             const label = bucketLabel(b.key, level, i18n.language)
+            const short = bucketShortLabel(b.key, level, i18n.language)
+            // the button is named by its content: visible short label + count, then the full label for screen readers
+            const name = `${label.includes(short) ? label : `${short} ${label}`}, ${t('timelineView.photos', { n: b.count.toLocaleString(i18n.language) })}`
             const next = zoomInScope(b, level)
             return (
               <div key={b.key} className="relative shrink-0">
@@ -186,7 +189,6 @@ export function TimelinePanel({ sessionId }: { sessionId: number }) {
                   style={on ? { borderColor: 'var(--accent)' } : undefined}
                   tabIndex={i === current ? 0 : -1}
                   aria-pressed={on}
-                  aria-label={`${label}, ${t('timelineView.photos', { n: b.count })}`}
                   onFocus={() => setFocus(i)}
                   onClick={() => filterTo(b)}
                   onDoubleClick={() => zoomIn(b)}
@@ -197,11 +199,12 @@ export function TimelinePanel({ sessionId }: { sessionId: number }) {
                   {b.photo_ids[0] !== undefined && (
                     <img src={thumbUrlById(b.photo_ids[0])} alt="" loading="lazy" draggable={false} className="pointer-events-none absolute inset-x-0 top-0 h-[46px] w-full object-cover opacity-80" />
                   )}
-                  <span className="relative block truncate text-xs font-medium">{bucketShortLabel(b.key, level, i18n.language)}</span>
+                  <span className="relative block truncate text-xs font-medium">{short}</span>{' '}
                   <span className="relative flex items-center gap-1">
                     <span className="block h-1.5 rounded-full bg-accent" style={{ width: `${Math.round(barRatio(b.count, max) * 100)}%` }} aria-hidden />
                     <span className="tnum text-[11px] text-faint">{b.count.toLocaleString(i18n.language)}</span>
                   </span>
+                  <span className="sr-only">{`, ${name}`}</span>
                 </button>
                 {next && (
                   <button

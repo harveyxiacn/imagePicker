@@ -95,7 +95,7 @@ export function MobileEditDrawer({ photo }: { photo: Photo }) {
   }
 
   return (
-    <div className="shrink-0 border-t border-line bg-panel" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }} data-testid="edit-drawer">
+    <section className="shrink-0 border-t border-line bg-panel" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }} aria-label={t('edit.panel')} data-testid="edit-drawer">
       <Sheet open={historyOpen} onOpenChange={setHistoryOpen} title={t('edit.history')} testId="history-sheet">
         <HistoryList />
       </Sheet>
@@ -128,20 +128,22 @@ export function MobileEditDrawer({ photo }: { photo: Photo }) {
           </div>
 
           {/* tabs */}
-          <div className="flex gap-1 px-3 pb-1" role="tablist">
-            {(['adjust', 'portrait'] as Tab[]).map((tb) => (
-              <button
-                key={tb}
-                role="tab"
-                aria-selected={tab === tb}
-                className={`flex min-h-10 items-center gap-1.5 rounded-full px-4 text-sm ${tab === tb ? 'bg-accent text-accent-fg font-semibold' : 'text-muted'}`}
-                onClick={() => setTab(tb)}
-                data-testid={`drawer-tab-${tb}`}
-              >
-                {tb === 'portrait' && <ScanFace size={14} />}
-                {t(tb === 'adjust' ? 'mobile.edit.adjust' : 'mobile.edit.portrait')}
-              </button>
-            ))}
+          <div className="flex gap-1 px-3 pb-1">
+            <div className="flex gap-1" role="tablist">
+              {(['adjust', 'portrait'] as Tab[]).map((tb) => (
+                <button
+                  key={tb}
+                  role="tab"
+                  aria-selected={tab === tb}
+                  className={`flex min-h-10 items-center gap-1.5 rounded-full px-4 text-sm ${tab === tb ? 'bg-accent text-accent-fg font-semibold' : 'text-muted'}`}
+                  onClick={() => setTab(tb)}
+                  data-testid={`drawer-tab-${tb}`}
+                >
+                  {tb === 'portrait' && <ScanFace size={14} />}
+                  {t(tb === 'adjust' ? 'mobile.edit.adjust' : 'mobile.edit.portrait')}
+                </button>
+              ))}
+            </div>
             <div className="ml-auto flex items-center gap-0.5">
               <button
                 className="btn btn-ghost btn-icon !h-10 !w-10"
@@ -234,6 +236,6 @@ export function MobileEditDrawer({ photo }: { photo: Photo }) {
           )}
         </>
       )}
-    </div>
+    </section>
   )
 }

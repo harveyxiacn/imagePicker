@@ -247,6 +247,7 @@ export function Library() {
           </aside>
         )}
         <main className="min-w-0 flex-1">
+          <h1 className="sr-only">{session.data?.title ?? t('library.loading')}</h1>
           {photosQ.isPending ? (
             <div className="flex h-full items-center justify-center gap-2 text-muted">
               <Loader2 className="animate-spin" size={18} />

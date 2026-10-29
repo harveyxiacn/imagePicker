@@ -115,7 +115,7 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
   const showPills = personPill || p.exclude.length > 0 || preset !== 'any' || filter.issueMode !== 'all' || filter.sceneType !== null || filter.device.length > 0 || filter.lens.length > 0 || filter.tags.length > 0 || filter.takenFrom !== null || filter.takenTo !== null || filter.sharp !== null || filter.faceIds.length > 0 || filter.bestOnly || filter.edited || filter.search !== ''
 
   return (
-    <div className="shrink-0 border-b border-line">
+    <section className="shrink-0 border-b border-line" aria-label={t('filter.bar')}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-1.5">
         <div className="flex items-center gap-1" role="group" aria-label={t('filter.rating')}>
           <span className="text-muted">{t('filter.rating')}</span>
@@ -400,6 +400,6 @@ export function FilterBar({ sessionId, shown, total, showSize }: Props) {
           )}
         </div>
       )}
-    </div>
+    </section>
   )
 }

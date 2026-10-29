@@ -211,16 +211,16 @@ export function BestTake() {
 
   return (
     <div className="flex h-full flex-col" data-testid="besttake-page">
-      <header className="relative z-(--z-sticky) flex h-12 shrink-0 items-center gap-2 border-b border-line px-2 sm:gap-3 sm:px-3">
+      <header className="relative z-(--z-sticky) flex min-h-12 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-2 py-1 sm:gap-x-3 sm:px-3">
         <button className="btn btn-ghost" onClick={back} aria-label={t('common.back')} data-testid="bt-back">
           <ChevronLeft size={16} />
           <span className="hidden sm:inline">{t('common.back')}</span>
         </button>
         <div className="flex min-w-0 items-center gap-2 font-semibold">
           <Sparkles size={15} className="shrink-0 text-ai" />
-          <span className="truncate" data-testid="bt-title">
+          <h1 className="truncate" data-testid="bt-title">
             {t('besttake.title')}
-          </span>
+          </h1>
           <span className="relative">
             <button className="btn" onClick={() => setBaseMenu((v) => !v)} aria-expanded={baseMenu} title={why ? t(why.key, why.params) : undefined} data-testid="bt-base-button">
               {t('besttake.base')} #{baseNum ?? '?'}
@@ -244,7 +244,7 @@ export function BestTake() {
                   >
                     <img src={thumbUrl(p, 256)} alt="" className="h-14 w-20 object-cover" draggable={false} />
                     <span className="tnum absolute bottom-0 left-0 rounded-tr bg-black/70 px-1 text-[10px] text-white">#{i + 1}</span>
-                    {p.id === plan?.base_photo_id && <span className="absolute top-0 right-0 rounded-bl bg-ai px-1 text-[10px] text-white">★</span>}
+                    {p.id === plan?.base_photo_id && <span className="absolute top-0 right-0 rounded-bl bg-ai px-1 text-[10px] text-ai-fg">★</span>}
                   </button>
                 ))}
               </div>
@@ -302,12 +302,12 @@ export function BestTake() {
         </aside>
       </div>
 
-      <div className="flex h-9 shrink-0 items-center gap-3 border-t border-line bg-panel px-3 text-xs text-muted" data-testid="bt-footer">
+      <footer className="flex h-9 shrink-0 items-center gap-3 border-t border-line bg-panel px-3 text-xs text-muted" data-testid="bt-footer">
         <span>{done ? t('besttake.allBest') : t('besttake.summary', { n: improvable, total: view.length })}</span>
         <span className="ml-auto">
           <GenTasks />
         </span>
-      </div>
+      </footer>
       <HelpOverlay />
       <ModelConsentDialog />
     </div>

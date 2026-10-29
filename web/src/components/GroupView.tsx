@@ -135,7 +135,7 @@ export function GroupView({ group, slots, onPick, onSwap, onRate }: Props) {
                 <span className={`rounded px-1.5 text-xs font-bold ${isA ? 'bg-accent text-accent-fg' : 'bg-white/20'}`}>{LABELS[i]}</span>
                 <span className="tnum text-xs">{p.file_name}</span>
                 {p.rank_in_burst === 0 && (
-                  <span className="flex items-center gap-0.5 rounded bg-ai px-1 text-[11px] font-semibold text-white">
+                  <span className="flex items-center gap-0.5 rounded bg-ai px-1 text-[11px] font-semibold text-ai-fg">
                     <Sparkles size={10} />
                     {t('group.recommended')}
                   </span>
