@@ -105,6 +105,8 @@ export const en: Messages = {
     emptyHint: 'Try other words, or describe the scene more simply. Only analysed photos can be found.',
     notAnalysed: '{{n}} photos in this view have not been analysed yet, so they cannot be searched. Run the standard analysis first.',
     someNotAnalysed: '{{n}} photos have not been analysed and cannot be found.',
+    lowConfidence: 'These are weak matches: possibly no photo really shows "{{q}}", these are the closest ones.',
+    emptyLow: 'Even the closest photos are far off: there may be nothing like this in the current view.',
   },
   grid: {
     label: 'Photo grid',

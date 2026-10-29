@@ -20,7 +20,8 @@ struct SearchParams {
 const OWN_KEYS: [&str; 4] = ["q", "min_score", "limit", "session_id"];
 
 /// `q` (required), `session_id` (omit to search the whole library), `limit` (default 200, max
-/// 5000), `min_score` (0..1, default 0.05) and, with `session_id`, every filter of
+/// 5000), `min_score` (0..1; without it the threshold adapts to the query, see
+/// `ip_core::search::Threshold`) and, with `session_id`, every filter of
 /// `GET /api/photos` (`sort` and `cursor` do not apply: the result is ranked).
 pub async fn search(State(st): State<AppState>, RawQuery(raw): RawQuery) -> ApiResult<Json<Value>> {
     let raw = raw.unwrap_or_default();

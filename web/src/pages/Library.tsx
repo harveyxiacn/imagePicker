@@ -21,7 +21,7 @@ import { MobileTopBar } from '@/components/mobile/MobileTopBar'
 import { QuickCull } from '@/components/mobile/QuickCull'
 import { Sheet } from '@/components/mobile/Sheet'
 import { Modal } from '@/components/Modal'
-import { SearchEmpty } from '@/components/SearchEmpty'
+import { SearchEmpty, SearchLowConfidence } from '@/components/SearchEmpty'
 import { ModelConsentDialog } from '@/components/ModelConsentDialog'
 import { usePhotoMenu } from '@/components/PhotoMenu'
 import { SaveCollectionDialog } from '@/components/SaveCollectionDialog'
@@ -35,6 +35,7 @@ import { useHistory } from '@/lib/history'
 import { compareSlots, compareUsesSelection } from '@/lib/compare'
 import { isTypingTarget } from '@/lib/keymap'
 import { overlayOwnsEscape } from '@/lib/panelOverlay'
+import { showLowConfidence } from '@/lib/search'
 import { pruneSelection } from '@/lib/selection'
 import { useIsBelowLg, useIsMobile } from '@/lib/useLayout'
 import { buildGridItems, toggleInSet, visiblePhotos } from '@/lib/stacks'
@@ -230,6 +231,7 @@ export function Library() {
       )}
 
       <MissingBanner sessionId={sessionId} photos={photos} />
+      {showLowConfidence(filter.search, photosQ.data?.search, photos.length) && <SearchLowConfidence query={filter.search} />}
       {timelineOpen && <TimelinePanel sessionId={sessionId} />}
 
       <div className="relative flex min-h-0 flex-1">

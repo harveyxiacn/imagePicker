@@ -62,7 +62,8 @@ async fn call(app: &Router, method: Method, uri: &str, body: Option<Value>) -> R
 }
 
 /// Five photos whose fake embeddings sit at 0, 25, 70, 86 and 90 degrees from the "sunset" query
-/// vector: cosines 1.0, .91, .34, .07, 0 (the last two fall under the default threshold).
+/// vector: cosines 1.0, .91, .34, .07, 0 (the last two fall under the default threshold, which
+/// for a scope this small is the confident similarity 0.095).
 async fn env() -> Env {
     let data = tempfile::tempdir().unwrap();
     let src = tempfile::tempdir().unwrap();
@@ -182,7 +183,10 @@ async fn search_returns_ranked_hits_with_the_documented_shape() {
     assert_eq!(names(&e, &r), ["a.jpg", "b.jpg", "c.jpg"]);
     assert_eq!(j["query"], "sunset");
     assert_eq!(j["model"], "fake-siglip-text");
-    assert_eq!(j["min_score"], 0.05);
+    assert_eq!(j["threshold"], "adaptive");
+    assert_eq!(j["min_similarity"], 0.095);
+    assert!((j["min_score"].as_f64().unwrap() - 0.003).abs() < 0.0005);
+    assert_eq!(j["low_confidence"], false);
     assert_eq!(j["total_matched"], 3);
     assert_eq!(j["searched"], 5);
     assert_eq!(j["unindexed"], 0);
@@ -209,6 +213,9 @@ async fn threshold_limit_and_library_scope() {
         "no session_id searches the whole library"
     );
     assert_eq!(names(&e, &r).len(), 5);
+    assert_eq!(r.json()["threshold"], "min_score");
+    assert_eq!(r.json()["min_score"], 0.0);
+    assert_eq!(r.json()["min_similarity"], Value::Null);
     let r = call(
         &e.app,
         Method::GET,

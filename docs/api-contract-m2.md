@@ -208,18 +208,23 @@ interface Face {
 | `q` | 必填，查询文本，去掉首尾空白并折叠空白后 1–256 个字符（按字符数，不是字节） |
 | `session_id` | 省略 = 搜整个目录库（不含已标记 `missing` 的照片）；给出 = 只搜该会话，并可同时带 `GET /api/photos` 的所有筛选参数（评分、旗标、人物、设备、标签……，语义相同）。`sort` / `cursor` / `ids` 无效（结果按匹配度排序）；没有 `session_id` 时带筛选参数 → `400`（筛选以会话为范围） |
 | `limit` | 最多返回多少条，1–5000，默认 200 |
-| `min_score` | 分数下限 0..1，默认 `0.05`（余弦约 0.12）；`0` = 不设阈值，只按名次返回 |
+| `min_score` | 可选，分数下限 0..1；`0` = 不设阈值，只按名次返回。**省略时（界面从不传）用自适应阈值**，见下 |
 
 ```jsonc
 // 200
-{ "query": "海边 日落", "model": "siglip2-base-text", "min_score": 0.05,
+{ "query": "海边 日落", "model": "siglip2-base-text",
+  "threshold": "adaptive",   // 没传 min_score；传了则为 "min_score"
+  "min_score": 0.000208,     // 实际生效的分数下限：传入的 min_score，或自适应余弦下限对应的分数
+  "min_similarity": 0.0712,  // 自适应阈值的余弦下限；传了 min_score 时为 null
+  "low_confidence": false,   // 连最好的照片余弦都 < 0.095：范围里多半没有这样的画面，hits 只是最接近的几张
   "hits": [ { "photo_id": 812, "score": 0.9931, "similarity": 0.2514 }, … ],   // 按余弦从高到低（相同按照片 id）；强匹配的 score 都会饱和成 1.0，名次以余弦为准
-  "total_matched": 57,   // 分数 ≥ min_score 的照片数（limit 截断之前）
+  "total_matched": 57,   // 达到下限的照片数（limit 截断之前）
   "searched": 980,       // 参与比较的照片数（有嵌入的）
   "unindexed": 20 }      // 范围内没有嵌入的照片数：它们永远搜不到（先做标准分析）
 ```
 
-- **分数**：`score = sigmoid(112.67 × cos + b)`，SigLIP 的 sigmoid 损失使它与其他照片无关；`similarity` 是查询与照片的余弦。`112.67` 是 `siglip2-base-patch16-224` 学到的 `exp(logit_scale)`（与零样本场景分类同一常数）；偏置 `b = -16.5` 是 SigLIP 系列的公开取值，导出的 ONNX 里没有它，**未在本机读回校准**，所以它只决定概率刻度与默认阈值，不影响排名；用 `bench/eval-search.py` 复核。
+- **分数**：`score = sigmoid(112.67 × cos + b)`，SigLIP 的 sigmoid 损失使它与其他照片无关（显式 `min_score` 作用于它）；`similarity` 是查询与照片的余弦。`112.67` 是 `siglip2-base-patch16-224` 学到的 `exp(logit_scale)`（与零样本场景分类同一常数）；偏置 `b = -16.5` 是 SigLIP 系列的公开取值，导出的 ONNX 里没有它，**未在本机读回校准**，所以它只决定概率刻度，不影响排名和自适应阈值；用 `bench/eval-search.py` 复核。
+- **自适应阈值（默认，2026-10-29）**：余弦下限 = `min(0.095, 均值 + 2 × 标准差)`，均值与标准差取自本次范围内所有参与比较的照片对该查询的余弦；范围不足 30 张时只用 0.095。原因：匹配照片的余弦水平随语言和措辞变化——1000 张合成图库上中文查询的最佳照片余弦约 0.10–0.13、英文约 0.12–0.17，且中文查询与**所有**照片的余弦都高约 0.03、离散度更小——旧的固定下限 0.05（余弦≈0.12）让 20 条中文查询里 11 条在界面上一张也搜不到，尽管正确照片排在第一。`0.095` 同时是 `low_confidence` 的界线：40 条图库里有的概念中 38 条的最佳余弦 ≥ 0.101（例外是两条「婚礼」查询，前 20 名里也没有婚礼照片），20 条图库里没有的东西（长颈鹿、a submarine……）中 19 条 ≤ 0.091。`low_confidence` 为真时界面在结果上方提示「以下结果相关性较低」。实测见 `bench/eval-search.py --default-params` 与 docs/03 §3.4。
 - 嵌入只在标准档位的 `embed` 步骤写入；未分析、`fast` / `lite` 分析过的照片计入 `unindexed`。
 - 错误：`400`（`q` 为空 / 过长、`min_score` 或 `limit` 越界、参数格式错误）、`404`（会话不存在）、`409 models_missing`（文本模型未安装，`models` 列出 `siglip2-base-text`，与其他接口一致，界面据此提供「安装搜索模型」）、`503 worker_unavailable`、`504 worker_timeout`。访客可以搜索（只返回他们本来就能看到的照片）。
 - `GET /api/photos` 新增 `ids`（逗号分隔，最多 5000 个）：只返回这些照片（`ids=` 空值 = 没有照片）。界面先调 `/api/search` 得到名次，再用 `ids` 取照片；不可用于智能集合。

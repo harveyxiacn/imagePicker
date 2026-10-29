@@ -235,7 +235,14 @@ export interface SearchHit {
 export interface SearchResponse {
   query: string
   model: string
+  /** 'adaptive' when no `min_score` was sent (the app never sends one): the cut-off follows the query */
+  threshold?: 'adaptive' | 'min_score'
+  /** score cut-off that was applied */
   min_score: number
+  /** cosine cut-off of the adaptive threshold */
+  min_similarity?: number | null
+  /** even the best photo is a weak match: the hits are only the nearest photos */
+  low_confidence?: boolean
   hits: SearchHit[]
   /** photos at or above `min_score` before the `limit` cut the list */
   total_matched: number
@@ -250,6 +257,8 @@ export interface SearchMeta {
   total_matched: number
   searched: number
   unindexed: number
+  /** the server flagged the result as weak matches (see SearchResponse) */
+  low_confidence: boolean
 }
 
 export interface PhotosResponse {
