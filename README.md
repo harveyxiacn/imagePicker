@@ -7,7 +7,7 @@
 
 [中文](#中文) · [English](#english) · [用户指南 / User Guide](docs/user-guide/README.md) · [文档 / Docs](docs/README.md)
 
-![imagePicker grid with stacks and AI stars](docs/images/grid.png)
+![imagePicker — Qwen 1000-image library with AI ratings](docs/images/qwen/grid.png)
 
 </div>
 
@@ -49,17 +49,19 @@
 
 ### 截图
 
-| 一键分析后的网格（堆栈 + AI 星级） | 组视图与表情矩阵 |
-|---|---|
-| ![grid](docs/images/grid.png) | ![group view](docs/images/group-view.png) |
-| **最佳表情编辑器** | **编辑：局部蒙版** |
-| ![best take](docs/images/besttake.png) | ![masks](docs/images/edit-masks.png) |
-| **人像美化** | **AI 助手** |
-| ![portrait](docs/images/portrait.png) | ![assistant](docs/images/assistant.png) |
-| **人物页** | **浅色主题** |
-| ![people](docs/images/people.png) | ![light theme](docs/images/grid-light.png) |
+以下为当前版本在 **Qwen 生成的 1000 张图片图库**上的实际运行截图，使用本地 Rust 服务和正式构建的 WebUI。涵盖人像、家庭合影、旅行风景、美食与宠物等素材。
 
-> 截图由 mock 后端和程序生成的示例图（渐变风景 + 卡通脸）截取，不含任何真实照片。
+| 1000 张图库与 AI 评分 | 连拍对比与表情矩阵 |
+|---|---|
+| ![1000 张 Qwen 图库与评分检查器](docs/images/qwen/grid.png) | ![家庭合影连拍对比与逐人表情矩阵](docs/images/qwen/group-view.png) |
+| **最佳表情：逐人选择候选帧** | **非破坏性编辑** |
+| ![最佳表情编辑器与候选人脸](docs/images/qwen/besttake.png) | ![人像照片的基础编辑与局部调整面板](docs/images/qwen/edit-basic.png) |
+| **人物聚类** | **中文自然语言搜索** |
+| ![图库中的人物与照片数量](docs/images/qwen/people.png) | ![搜索“一只猫”的实际结果](docs/images/qwen/search.png) |
+| **导出设置** | **浅色主题** |
+| ![导出格式、尺寸、隐私与水印设置](docs/images/qwen/export.png) | ![浅色主题下的 1000 张图库](docs/images/qwen/grid-light.png) |
+
+> 素材由 ComfyUI + Qwen-Image 2.1 生成，并非真实相机照片；评分、分组、人物和搜索结果来自实际后端，未使用 mock 数据。截图展示当前界面和已有分析结果，不代表真实照片上的准确率。截图日期：2026-10-30；[来源与复现方法](docs/images/qwen/README.md)。
 
 ### 硬件档位
 
@@ -158,17 +160,19 @@ Thousands of shots from a trip, party or wedding? Drop the folder in and hit Ana
 
 ### Screenshots
 
-| Grid after analysis (stacks + AI stars) | Group view with expression matrix |
-|---|---|
-| ![grid](docs/images/grid.png) | ![group view](docs/images/group-view.png) |
-| **Best take editor** | **Editing: local masks** |
-| ![best take](docs/images/besttake.png) | ![masks](docs/images/edit-masks.png) |
-| **Portrait retouch** | **AI assistant** |
-| ![portrait](docs/images/portrait.png) | ![assistant](docs/images/assistant.png) |
-| **People** | **Light theme** |
-| ![people](docs/images/people.png) | ![light theme](docs/images/grid-light.png) |
+Captured from the current version running a **1,000-image Qwen-generated library**, with the local Rust server and production WebUI build. The library includes portraits, family groups, travel landscapes, food, and pets.
 
-> Screenshots were captured against the mock backend with generated sample images (gradient landscapes and cartoon faces); no real photos are shown. The UI language in the images is Chinese; switch to English in Settings.
+| 1,000-image library with AI ratings | Burst comparison and expression matrix |
+|---|---|
+| ![Qwen library and rating inspector](docs/images/qwen/grid.png) | ![Family burst comparison and per-person expression matrix](docs/images/qwen/group-view.png) |
+| **Best take: per-person frame selection** | **Non-destructive editing** |
+| ![Best take editor with candidate faces](docs/images/qwen/besttake.png) | ![Portrait with basic and local adjustment controls](docs/images/qwen/edit-basic.png) |
+| **People clustering** | **Natural-language search in Chinese** |
+| ![Detected people and photo counts](docs/images/qwen/people.png) | ![Actual results for the query “a cat” in Chinese](docs/images/qwen/search.png) |
+| **Export settings** | **Light theme** |
+| ![Export format, size, privacy and watermark options](docs/images/qwen/export.png) | ![The 1,000-image library in light theme](docs/images/qwen/grid-light.png) |
+
+> Images were generated with ComfyUI + Qwen-Image 2.1, not captured by real cameras. Ratings, groups, people, and search results come from the actual backend, without mock data. These screenshots show the current UI and existing analysis results, not accuracy on real-world photos. Captured on 2026-10-30; see [provenance and reproduction instructions](docs/images/qwen/README.md). The UI is shown in Chinese; English is available in Settings.
 
 ### Hardware tiers
 
