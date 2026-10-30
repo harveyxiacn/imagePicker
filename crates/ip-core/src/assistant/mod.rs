@@ -1058,6 +1058,28 @@ fn rules_disagree(
             }
         }
     }
+    // a step the rules did not read is the model's only where the request names that action
+    // ("评5星然后导出"); any other is a change nobody asked for ("淘汰过曝的" + rate the rest)
+    let named = |tool: &str| {
+        let n = |cs: &[&Call]| cs.iter().filter(|c| c.tool == tool).count();
+        let cues = rules.mentioned.iter().filter(|t| **t == tool).count();
+        (n(&got), n(&want).max(cues))
+    };
+    if let Some(m) = got.iter().find(|m| {
+        let (have, allowed) = named(&m.tool);
+        have > allowed
+    }) {
+        return Some((
+            "llm_tool_mismatch",
+            match l {
+                Locale::Zh => format!("模型的计划多出请求里没有的 {}", m.tool),
+                Locale::En => format!(
+                    "the model's plan has a {} step the request does not ask for",
+                    m.tool
+                ),
+            },
+        ));
+    }
     None
 }
 
@@ -1645,8 +1667,25 @@ mod check_tests {
         // another tool, or a filter where the request changes photos (and the reverse)
         let rate = call("set_rating", json!({"selection": sel, "rating": 3}));
         assert_eq!(code(&r, vec![rate.clone()]), Some("llm_tool_mismatch"));
-        // an extra step the rules did not read is the model's ("accept ratings then export")
-        assert_eq!(code(&r, vec![rate.clone(), flag(-1)]), None);
+        // an extra changing step only where the request names that action ("评5星然后导出")
+        assert_eq!(
+            code(&r, vec![rate.clone(), flag(-1)]),
+            Some("llm_tool_mismatch")
+        );
+        assert_eq!(
+            code(&r, vec![flag(-1), flag(-1)]),
+            Some("llm_tool_mismatch")
+        );
+        let named = Parsed {
+            calls: vec![flag(-1)],
+            mentioned: vec!["set_flag", "set_rating"],
+            ..Default::default()
+        };
+        assert_eq!(code(&named, vec![rate.clone(), flag(-1)]), None);
+        assert_eq!(
+            code(&named, vec![rate.clone(), rate.clone(), flag(-1)]),
+            Some("llm_tool_mismatch")
+        );
         assert_eq!(
             code(&r, vec![call("filter", json!({"flag": "rejected"}))]),
             Some("llm_tool_mismatch")
