@@ -303,6 +303,17 @@ def _context_lines(context: dict[str, Any] | None) -> list[str]:
         v = ctx.get(key)
         if isinstance(v, list) and v:
             lines.append(f"- {label}: {_compact(v[:40])}")
+    dates = [
+        d
+        for d in (ctx.get("dates") or [])
+        if isinstance(d, dict) and all(isinstance(d.get(k), str) for k in ("phrase", "from", "to"))
+    ]
+    if dates:
+        shown = "; ".join(f'"{d["phrase"]}" = {d["from"]}..{d["to"]}' for d in dates[:6])
+        lines.append(
+            "- days the request names without a year (use exactly these dates for "
+            f"`taken_from`..`taken_to`; never pick a year yourself): {shown}"
+        )
     return lines
 
 
@@ -339,7 +350,8 @@ def build_system_prompt(
         "bw_classic) is `apply_preset` with the id from the available presets. `apply_profiles` is "
         "only for people's beauty profiles (美颜档案), never for a preset or look.\n"
         "- Capture dates go into `filter` as `taken_from` / `taken_to` (YYYY-MM-DD, both ends "
-        "included; one day = the same date twice). `scene_type` is only one of its listed values: a "
+        "included; one day = the same date twice; a day named without a year is listed under Current "
+        "state: copy those dates). `scene_type` is only one of its listed values: a "
         "place or subject that is not one (beach, Kyoto) cannot be filtered, so leave it out and say "
         "so in the reply instead of guessing.\n"
         "- An edit request that names a slider and a number is `adjust_sliders`: 提高/增加/降低/减少/"

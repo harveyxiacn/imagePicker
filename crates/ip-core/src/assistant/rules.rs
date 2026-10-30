@@ -11,6 +11,9 @@ use regex::{Captures, Regex};
 use serde_json::{json, Map, Value};
 
 use super::tools::{day_start_ms, filter_query, validate_call};
+use crate::library_timeline::format_ymd;
+
+mod days;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locale {
@@ -52,6 +55,10 @@ pub struct RulesCtx<'a> {
     pub selection: &'a [i64],
     pub current_photo_id: Option<i64>,
     pub locale: Locale,
+    /// The capture days of the session (local days since 1970-01-01, ascending, distinct): what
+    /// a date without a year and a relative day ("10月2日", "上周六") are resolved against, see
+    /// `days.rs`. Empty = unknown.
+    pub days: &'a [i64],
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1212,11 +1219,30 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         blank_chars(&mut t, start, m.as_str().chars().count());
     }
     // ---- capture days (blanked: their digits are neither counts nor stars)
-    let (taken_from, taken_to) = capture_days(&norm);
-    for m in x.date.find_iter(&norm) {
-        let start = norm[..m.start()].chars().count();
-        blank_chars(&mut t, start, m.as_str().chars().count());
+    let read = capture_days(&norm, ctx.days);
+    let (taken_from, taken_to) = (read.from, read.to);
+    for (s, e) in x
+        .date
+        .find_iter(&norm)
+        .map(|m| (m.start(), m.end()))
+        .chain(read.spans.iter().copied())
+    {
+        blank_chars(
+            &mut t,
+            norm[..s].chars().count(),
+            norm[s..e].chars().count(),
+        );
     }
+    let day_hints: Vec<String> = read
+        .unresolved
+        .iter()
+        .map(|u| match l {
+            Locale::Zh => format!("无法确定「{u}」是哪一天（照片库里没有可参照的拍摄日期），已忽略。"),
+            Locale::En => format!(
+                "I could not tell which day \"{u}\" is (the library has no capture date to count from); ignored."
+            ),
+        })
+        .collect();
     // ---- people
     let mut persons = match_people(&mut t, ctx.people);
     persons.dedup();
@@ -1574,9 +1600,10 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
     }
     let Acc {
         pre: pre_steps,
-        hints,
+        mut hints,
         err: sel_error,
     } = acc;
+    hints.extend(day_hints);
     if let Some(e) = sel_error {
         return unsupported(l, Some(e));
     }
@@ -1612,13 +1639,28 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
     }
 }
 
+/// What `capture_days` read: the range, the byte spans of the phrases without a full date (to be
+/// blanked), and the phrases that could not be resolved.
+#[derive(Debug, Default)]
+struct DayRead {
+    from: Option<String>,
+    to: Option<String>,
+    spans: Vec<(usize, usize)>,
+    unresolved: Vec<String>,
+}
+
 /// Capture-day range named in the text (`YYYY-MM-DD`, both ends inclusive): one day, two days
-/// (a range), or one day after "之后 / after / since" (from) or "之前 / before" (until the day
-/// before).
-fn capture_days(norm: &str) -> (Option<String>, Option<String>) {
+/// (a range), a week or month, or one day after "之后 / after / since" (from) or "之前 / before"
+/// (until the day before). Full dates are read as written; a date without a year and a relative
+/// day are resolved against the capture days of the session (`days.rs`).
+fn capture_days(norm: &str, library: &[i64]) -> DayRead {
     let x = rx();
-    let mut days: Vec<(String, usize, usize)> = Vec::new();
+    // (first, last, byte start, byte end) of every day phrase
+    let mut mentions: Vec<(String, String, usize, usize)> = Vec::new();
+    let mut full_spans = Vec::new();
     for c in x.date.captures_iter(norm) {
+        let whole = c.get(0).expect("match");
+        full_spans.push((whole.start(), whole.end()));
         let g = |i: usize| c.get(i).and_then(|m| m.as_str().parse::<i64>().ok());
         let (y, m, d) = match (g(1), g(2), g(3)) {
             (Some(y), Some(m), Some(d)) => (y, m, d),
@@ -1629,37 +1671,46 @@ fn capture_days(norm: &str) -> (Option<String>, Option<String>) {
         };
         let day = format!("{y:04}-{m:02}-{d:02}");
         if day_start_ms(&day).is_some() {
-            let whole = c.get(0).expect("match");
-            days.push((day, whole.start(), whole.end()));
+            mentions.push((day.clone(), day, whole.start(), whole.end()));
         }
     }
-    match days.as_slice() {
+    let floating = days::read(norm, library, &full_spans);
+    let spans = floating.found.iter().map(|m| (m.start, m.end)).collect();
+    for m in &floating.found {
+        mentions.push((format_ymd(m.from), format_ymd(m.to), m.start, m.end));
+    }
+    mentions.sort_by_key(|d| d.2);
+    let unresolved = floating.unresolved.into_iter().map(|u| u.0).collect();
+    let (from, to) = match mentions.as_slice() {
         [] => (None, None),
-        [(day, start, end)] => {
+        [(first, last, start, end)] if first == last => {
             let (before, after) = (&norm[..*start], &norm[*end..]);
             if x.date_after.is_match(after) || x.date_after.is_match(before) {
-                (Some(day.clone()), None)
+                (Some(first.clone()), None)
             } else if x.date_before.is_match(after) || x.date_before.is_match(before) {
-                let prev = day_start_ms(day).map(|ms| day_of_ms(ms - 1));
+                let prev = day_start_ms(first).map(|ms| day_of_ms(ms - 1));
                 (None, prev)
             } else {
-                (Some(day.clone()), Some(day.clone()))
+                (Some(first.clone()), Some(last.clone()))
             }
         }
-        many => {
-            let mut ds: Vec<&String> = many.iter().map(|(d, _, _)| d).collect();
-            ds.sort();
-            (
-                ds.first().map(|d| d.to_string()),
-                ds.last().map(|d| d.to_string()),
-            )
-        }
+        many => (
+            many.iter().map(|d| &d.0).min().cloned(),
+            many.iter().map(|d| &d.1).max().cloned(),
+        ),
+    };
+    DayRead {
+        from,
+        to,
+        spans,
+        unresolved,
     }
 }
 
 /// Every capture day a message names, as the rules read it (`YYYY-MM-DD`): what a model's date
-/// filter may use.
-pub fn named_days(msg: &str) -> Vec<String> {
+/// filter may use. `library` = the capture days of the session, for the dates without a year
+/// and the relative days ("10月2日", "last Saturday"); the rules resolve them the same way.
+pub fn named_days(msg: &str, library: &[i64]) -> Vec<String> {
     let norm = normalize(msg);
     let mut out: Vec<String> = rx()
         .date
@@ -1671,9 +1722,37 @@ pub fn named_days(msg: &str) -> Vec<String> {
             day_start_ms(&day).is_some().then_some(day)
         })
         .collect();
-    let (from, to) = capture_days(&norm);
-    out.extend(from.into_iter().chain(to));
+    let read = capture_days(&norm, library);
+    out.extend(read.from.into_iter().chain(read.to));
     out
+}
+
+/// The phrases of a message that name a day without a full date, as the rules resolve them
+/// against `library`: `(phrase, first day, last day)`. Given to the model so it copies the
+/// dates instead of guessing a year.
+pub fn floating_days(msg: &str, library: &[i64]) -> Vec<(String, String, String)> {
+    let norm = normalize(msg);
+    let full: Vec<(usize, usize)> = rx()
+        .date
+        .find_iter(&norm)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+    days::read(&norm, library, &full)
+        .found
+        .into_iter()
+        .map(|m| (m.phrase, format_ymd(m.from), format_ymd(m.to)))
+        .collect()
+}
+
+/// Whether the message names a day that needs the session's capture days to be resolved.
+pub fn needs_session_days(msg: &str) -> bool {
+    let norm = normalize(msg);
+    let full: Vec<(usize, usize)> = rx()
+        .date
+        .find_iter(&norm)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+    days::mentions(&norm, &full)
 }
 
 /// `YYYY-MM-DD` of a `taken_at` (ms, local time stored as UTC).

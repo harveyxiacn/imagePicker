@@ -198,6 +198,16 @@ def test_system_prompt_embeds_tools_and_context() -> None:
     assert "淘汰" in sp  # zh glossary
 
 
+def test_system_prompt_lists_the_days_named_without_a_year() -> None:
+    ctx = {**CONTEXT, "dates": [{"phrase": "10月2日", "from": "2024-10-02", "to": "2024-10-02"}]}
+    sp = build_system_prompt(TOOL_LIST, ctx, "zh-CN")
+    assert '"10月2日" = 2024-10-02..2024-10-02' in sp and "never pick a year" in sp
+    # nothing to list, or malformed entries: no line
+    for dates in ([], None, [{"phrase": "x"}], ["10月2日"]):
+        sp = build_system_prompt(TOOL_LIST, {**CONTEXT, "dates": dates}, "zh-CN")
+        assert "without a year (use" not in sp
+
+
 def test_few_shot_zh_and_en_and_filtered_by_tools() -> None:
     msgs = build_plan_messages("hello", TOOL_LIST, CONTEXT, "en")
     assert msgs[0]["role"] == "system" and msgs[-1] == {"role": "user", "content": "hello"}
