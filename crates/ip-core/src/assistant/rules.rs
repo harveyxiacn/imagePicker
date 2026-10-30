@@ -67,6 +67,10 @@ pub struct Parsed {
     pub unsupported: Option<String>,
     /// Remarks for the reply (an unknown place, an approximation).
     pub hints: Vec<String>,
+    /// Every photo-changing action the text names, once per cue, whichever one `calls` holds: the
+    /// rules read one action per request, so a model plan may carry the others ("评5星然后导出"),
+    /// but no more steps of a tool than the request names (see `rules_disagree`).
+    pub mentioned: Vec<&'static str>,
 }
 
 /// Aliases of the built-in presets (ids as in `ip_render::builtin_presets`).
@@ -374,7 +378,7 @@ fn rx() -> &'static Rx {
             slider_zh_num: r(&format!(r"(增加|提高|调高|降低|调低|减少|减去|加|减)\s*([+-]?\d+(?:\.\d+)?)\s*(?:档|个?点|级|ev|ev值)?\s*(?:的)?\s*({SLIDER_ZH})")),
             slider_en: r(r"\b(exposure|brightness|contrast|highlights?|shadows?|whites|blacks|temperature|tint|vibrance|saturation|clarity|dehaze|texture|dodge|burn)\b\s*(?:(?:by|to)\s*)?([+-]?\d+(?:\.\d+)?)\s*(?:ev|evs|stops?)?\b"),
             slider_en_num: r(r"\b(increase|raise|boost|decrease|lower|reduce|cut|add|subtract)\b[^.\d]{0,20}?\b(exposure|brightness|contrast|highlights?|shadows?|whites|blacks|temperature|tint|vibrance|saturation|clarity|dehaze|texture)\b(?:[^.\d]{0,12}?|[^.\d]{0,48}?\bby\s+)\b([+-]?\d+(?:\.\d+)?)"),
-            accept_ai: r(r"(接受|采纳|采用|使用|应用|确认).{0,4}(ai|智能)\s*(评分|星级|评星|打分|分数)|(ai|智能)\s*(评分|星级|评星|打分).{0,4}(接受|采纳|采用|确认)|\baccept\b.{0,12}\bai\b|\b(use|adopt|take)\b.{0,6}\bai (rating|score)s?\b"),
+            accept_ai: r(r"(接受|采纳|采用|使用|应用|确认).{0,4}(ai|智能)\s*(评分|星级|评星|打分|分数)|(ai|智能)\s*(评分|星级|评星|打分).{0,4}(接受|采纳|采用|确认)|\baccept\b.{0,12}\bai\b|\b(use|adopt|take)\b.{0,6}\bai (rating|score)s?\b|(接受|采纳).{0,2}(评分|星级|评星)|\baccept\b.{0,12}\b(rating|score)s\b"),
             apply_verb: r(r"应用|套用|加上|加个|加|用|使用|换成|改成|改为|设为|调成|变成|转成|转为|做成|\b(apply|use|add|give|set|make|switch|change|turn|convert|put|grade)\b"),
             look_noun: r(r"滤镜|风格|调色|预设|色调|效果|\b(preset|filter|look|style|tone|grade|grading|effect)\b"),
             rest: r(r"其他|其余|剩下|剩余|别的|余下|其它|\b(the )?(rest|others?|remaining|remainder)\b"),
@@ -1389,6 +1393,26 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         }
     }
 
+    let mentioned: Vec<&'static str> = [
+        (is_export, "export"),
+        (is_bystanders, "remove_bystanders"),
+        (is_besttake, "besttake_auto"),
+        (is_profiles, "apply_profiles"),
+        (is_accept_ai, "accept_ai"),
+        (per_scene, "scene_keep_top"),
+        (per_group, "group_keep_top"),
+        (unreject || unpick, "set_flag"),
+        (reject, "set_flag"),
+        (pick || keep, "set_flag"),
+        (set_rating.is_some(), "set_rating"),
+        (preset.is_some(), "apply_preset"),
+        (sliders.is_some(), "adjust_sliders"),
+        (auto_adjust, "auto_adjust"),
+    ]
+    .into_iter()
+    .filter_map(|(cue, tool)| cue.then_some(tool))
+    .collect();
+
     // ---- selection of an action
     let mut acc = Acc::default();
     let un = &unknown_subject;
@@ -1584,6 +1608,7 @@ pub fn parse(msg: &str, ctx: &RulesCtx) -> Parsed {
         calls: out,
         unsupported: None,
         hints,
+        mentioned,
     }
 }
 

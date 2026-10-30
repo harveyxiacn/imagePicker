@@ -673,3 +673,24 @@ fn an_unknown_place_in_english_is_named() {
             .is_empty()
     );
 }
+
+#[test]
+fn every_named_action_is_listed_not_only_the_one_read() {
+    // the rules read one action; the other one the text names stays allowed in a model plan
+    let both = ask("把5星的照片导出到微信，再全部评4星");
+    assert!(both.mentioned.contains(&"export"), "{:?}", both.mentioned);
+    assert!(
+        both.mentioned.contains(&"set_rating"),
+        "{:?}",
+        both.mentioned
+    );
+    let one = ask("把过曝的照片都淘汰");
+    assert_eq!(one.calls.last().map(|c| c.tool.as_str()), Some("set_flag"));
+    assert_eq!(one.mentioned, vec!["set_flag"]);
+    // "accept the ratings" can only mean the AI ratings
+    let acc = ask("accept ratings then export");
+    assert!(acc.mentioned.contains(&"accept_ai"), "{:?}", acc.mentioned);
+    assert!(acc.mentioned.contains(&"export"), "{:?}", acc.mentioned);
+    let en = ask("reject the blurry photos");
+    assert!(!en.mentioned.contains(&"set_rating"), "{:?}", en.mentioned);
+}
