@@ -328,6 +328,7 @@ impl Core {
         locale: Locale,
         people: &[(i64, String)],
         presets: &[PresetName],
+        days: &[i64],
         start_worker: bool,
     ) -> Result<(String, Vec<Call>)> {
         let info = self.llm_info(start_worker).await?;
@@ -345,6 +346,12 @@ impl Core {
             "current_photo_id": req.context.current_photo_id,
             "people": people.iter().map(|(id, n)| json!({"id": id, "name": n})).collect::<Vec<_>>(),
             "presets": presets.iter().map(|p| json!({"id": p.id, "names": p.names})).collect::<Vec<_>>(),
+            // days the request names without a year, resolved as the rules do: the model copies
+            // them instead of guessing a year
+            "dates": rules::floating_days(&req.message, days)
+                .into_iter()
+                .map(|(phrase, from, to)| json!({"phrase": phrase, "from": from, "to": to}))
+                .collect::<Vec<_>>(),
         });
         let resp = self
             .worker
@@ -402,6 +409,25 @@ impl Core {
         Ok(self.photos(q).await?.total as usize)
     }
 
+    /// The capture days of a session (days since 1970-01-01 of `photo.taken_at`, as the
+    /// `taken_from` / `taken_to` filters read it; ascending, distinct), which dates without a
+    /// year and relative days are resolved against (`rules/days.rs`).
+    async fn session_capture_days(&self, session_id: i64) -> Result<Vec<i64>> {
+        self.db
+            .call(move |c| {
+                let mut st = c.prepare(
+                    "SELECT DISTINCT p.taken_at / 86400000 AS d
+                     FROM session_photo sp JOIN photo p ON p.id = sp.photo_id
+                     WHERE sp.session_id = ?1 AND p.taken_at >= 0 ORDER BY d",
+                )?;
+                let days = st
+                    .query_map([session_id], |r| r.get::<_, i64>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(days)
+            })
+            .await
+    }
+
     /// `POST /api/assistant/plan`.
     pub async fn assistant_plan(self: &Arc<Self>, req: PlanRequest) -> Result<PlanOut> {
         let sid = req.session_id;
@@ -428,6 +454,12 @@ impl Core {
             return Err(CoreError::bad_request("engine must be auto, rules or llm"));
         }
         let (people, presets) = self.rules_context(sid).await?;
+        // only a request that names a day without a year needs the session's capture days
+        let days = if rules::needs_session_days(&req.message) {
+            self.session_capture_days(sid).await?
+        } else {
+            Vec::new()
+        };
         let names = Names {
             people: &people,
             presets: &presets,
@@ -442,6 +474,7 @@ impl Core {
                 selection: &req.context.selection,
                 current_photo_id: req.context.current_photo_id,
                 locale,
+                days: &days,
             },
         );
         let env = PlanEnv {
@@ -457,7 +490,7 @@ impl Core {
         if engine_req != "rules" {
             // `auto` only uses a model that is already loaded; `llm` starts the worker
             match self
-                .llm_calls(&req, locale, &people, &presets, engine_req == "llm")
+                .llm_calls(&req, locale, &people, &presets, &days, engine_req == "llm")
                 .await
             {
                 Ok((reply, mut calls)) if !calls.is_empty() => {
@@ -469,7 +502,7 @@ impl Core {
                     );
                     match target::llm_problem(&calls, &targets, agree, locale) {
                         Some(why) => fallback = Some(Fallback::new("llm_unsafe_target", why)),
-                        None => match rules_disagree(&req.message, &rules, &calls, locale) {
+                        None => match rules_disagree(&req.message, &rules, &calls, &days, locale) {
                             Some((code, why)) => fallback = Some(Fallback::new(code, why)),
                             None => match self.build_steps(&env, &calls, &targets).await {
                                 Ok(steps) => from_llm = Some((reply, steps)),
@@ -959,11 +992,12 @@ fn rules_disagree(
     msg: &str,
     rules: &rules::Parsed,
     llm_calls: &[Call],
+    days: &[i64],
     l: Locale,
 ) -> Option<(&'static str, String)> {
     // a capture day the request does not name is invented (seen: the date of a prompt example),
     // whether or not the rules understood the rest
-    let named = rules::named_days(msg);
+    let named = rules::named_days(msg, days);
     for c in llm_calls.iter().filter(|c| c.tool == "filter") {
         for k in ["taken_from", "taken_to"] {
             if let Some(d) = c.args.get(k).and_then(Value::as_str) {
@@ -1656,8 +1690,9 @@ mod check_tests {
     fn the_rules_check_tools_and_intent_arguments() {
         let sel = json!({"ids": [1, 2]});
         let flag = |f: i64| call("set_flag", json!({"selection": sel, "flag": f}));
-        let code =
-            |r: &Parsed, m: Vec<Call>| super::rules_disagree("", r, &m, Locale::En).map(|c| c.0);
+        let code = |r: &Parsed, m: Vec<Call>| {
+            super::rules_disagree("", r, &m, &[], Locale::En).map(|c| c.0)
+        };
         // agreement, also with an extra filter step in the model plan
         let r = sure(vec![flag(-1)]);
         assert_eq!(code(&r, vec![flag(-1)]), None);
@@ -1721,7 +1756,7 @@ mod check_tests {
         let r = sure(vec![p("film_warm")]);
         assert_eq!(code(&r, vec![p("film_cool")]), Some("llm_arg_mismatch"));
         let profiles = call("apply_profiles", json!({"selection": sel}));
-        let why = super::rules_disagree("", &r, &[profiles], Locale::Zh).unwrap();
+        let why = super::rules_disagree("", &r, &[profiles], &[], Locale::Zh).unwrap();
         assert_eq!(
             why,
             ("llm_tool_mismatch", "模型没有套用请求里点名的预设".into())
@@ -1759,7 +1794,7 @@ mod check_tests {
         let dated =
             f(json!({"rating_gte": 4, "taken_from": "2024-05-01", "taken_to": "2024-05-01"}));
         let check =
-            |msg: &str| super::rules_disagree(msg, &unsure, &dated, Locale::En).map(|c| c.0);
+            |msg: &str| super::rules_disagree(msg, &unsure, &dated, &[], Locale::En).map(|c| c.0);
         assert_eq!(
             check("show only 4 stars and up from the beach"),
             Some("llm_arg_mismatch")

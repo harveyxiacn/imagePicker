@@ -8,8 +8,17 @@ on how the plan spells it (`{"query"}`, a `filter` step + `current_filter`, ...)
 
     python bench/eval-assistant.py --base http://127.0.0.1:17961 --engine both --json out.json
 
-`--engine rules|llm|both`; `--cases all|base|new` (the 20 commands of the M6 benchmark, the
-newer ones, or both). Failure kinds: `http_<status>` / `timeout` (request failed), `unsupported`
+`--engine rules|llm|both`; `--cases all|base|new|days` (the 20 commands of the M6 benchmark, the
+newer ones, or both; `days` = only the date and place phrases below, `new` includes them).
+
+The `d..` commands name days without a year ("10月2日", "photos from Oct 2") or relative to the
+library ("昨天", "last Saturday"). Their expected days come from the session's own capture days
+(`GET /api/timeline?granularity=day`), by the documented rule (docs/03 §9.1): a month-day = the
+most recent year of the session with photos on that day, else its latest year; relative days
+count from the session's latest capture day; weeks run Monday to Sunday. The step must carry
+exactly that range and `affects` must equal `GET /api/photos` with it. `d..` commands about a
+place (Kyoto) must keep the rest of the request and say the place was ignored: the catalog has
+no place names or filterable events. Failure kinds: `http_<status>` / `timeout` (request failed), `unsupported`
 (no plan), `wrong_tool`, `wrong_args`, `wrong_target`. For `llm`, `fallback` notes plans that came
 from the rules engine because the model plan was refused or failed; `model_ok` counts plans that
 the model produced itself and that are correct.
@@ -18,6 +27,7 @@ the model produced itself and that are correct.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import math
 import sys
@@ -170,7 +180,7 @@ NEW: list[tuple[str, str, bool, list[tuple[str, dict[str, Any]]], Any]] = [
 
 # commands whose condition cannot be expressed: a plan that keeps the rest of the request and
 # says what it ignored (a hint / the reply) is the best possible answer; `unsupported` is accepted
-HONEST_PARTIAL = {"n02"}
+HONEST_PARTIAL = {"n02", "d20", "d21"}
 
 CHANGES = {
     "set_rating",
@@ -186,6 +196,124 @@ CHANGES = {
     "remove_bystanders",
     "export",
 }
+
+
+def day_cases(days: list[str]) -> list[tuple[str, str, bool, list[tuple[str, dict[str, Any]]], Any]]:
+    """Commands with a day without a year or a relative day; the expected days follow from `days`
+    (the session's capture days, `YYYY-MM-DD`) by the documented rule."""
+    ds = sorted(dt.date.fromisoformat(d) for d in days)
+    ref = ds[-1]
+    have = set(ds)
+    years = sorted({d.year for d in ds}, reverse=True)
+
+    def month_day(m: int, d: int) -> dt.date:
+        cands = []
+        for y in years:
+            try:
+                cands.append(dt.date(y, m, d))
+            except ValueError:
+                pass
+        return next((c for c in cands if c in have), cands[0])
+
+    def q(a: dt.date, b: dt.date | None = None) -> str:
+        return f"taken_from={a.isoformat()}&taken_to={(b or a).isoformat()}"
+
+    def day(a: dt.date, b: dt.date | None = None) -> dict[str, Any]:
+        return {"taken_from": a.isoformat(), "taken_to": (b or a).isoformat()}
+
+    mon = ref - dt.timedelta(days=ref.weekday())  # Monday of the reference week
+    last_sat_en = ref - dt.timedelta(days=1)
+    while last_sat_en.weekday() != 5:
+        last_sat_en -= dt.timedelta(days=1)
+    last_sat_zh = mon - dt.timedelta(days=7) + dt.timedelta(days=5)
+    this_fri = mon + dt.timedelta(days=4)
+    # a month-day that exists in the library, and one that does not exist in any year
+    md = ds[min(1, len(ds) - 1)]
+    month_start = ref.replace(day=1)
+    next_month = (month_start + dt.timedelta(days=32)).replace(day=1)
+    month_end = next_month - dt.timedelta(days=1)
+    yday = ref - dt.timedelta(days=1)
+    zh_md = f"{md.month}月{md.day}日"
+    en_md = f"{md.strftime('%b')} {md.day}"
+    target = month_day(md.month, md.day)
+    rows: list[tuple[str, str, bool, list[tuple[str, dict[str, Any]]], Any]] = [
+        ("d01", f"只看{zh_md}的照片", False, [("filter", day(target))], q(target)),
+        ("d02", f"show photos from {en_md}", False, [("filter", day(target))], q(target)),
+        (
+            "d03",
+            f"把{zh_md}的照片都淘汰",
+            False,
+            [("set_flag", {"flag": -1})],
+            q(target),
+        ),
+        (
+            "d04",
+            f"reject the photos from {en_md}",
+            False,
+            [("set_flag", {"flag": -1})],
+            q(target),
+        ),
+        ("d05", "只看昨天的照片", False, [("filter", day(yday))], q(yday)),
+        ("d06", "show photos from yesterday", False, [("filter", day(yday))], q(yday)),
+        ("d07", "只看上周六的照片", False, [("filter", day(last_sat_zh))], q(last_sat_zh)),
+        (
+            "d08",
+            "show photos from last Saturday",
+            False,
+            [("filter", day(last_sat_en))],
+            q(last_sat_en),
+        ),
+        ("d09", "只看这周五的照片", False, [("filter", day(this_fri))], q(this_fri)),
+        ("d10", "show photos from this Friday", False, [("filter", day(this_fri))], q(this_fri)),
+        (
+            "d11",
+            "只看这个月的照片",
+            False,
+            [("filter", day(month_start, month_end))],
+            q(month_start, month_end),
+        ),
+        (
+            "d12",
+            "show photos from last week",
+            False,
+            [("filter", day(mon - dt.timedelta(days=7), mon - dt.timedelta(days=1)))],
+            q(mon - dt.timedelta(days=7), mon - dt.timedelta(days=1)),
+        ),
+        (
+            "d13",
+            f"给{zh_md}拍的照片打3星",
+            False,
+            [("set_rating", {"rating": 3})],
+            q(target),
+        ),
+        (
+            "d14",
+            f"只看{zh_md}的5星照片",
+            False,
+            [("filter", {**day(target), "rating_gte": 5})],
+            f"{q(target)}&rating_gte=5",
+        ),
+        # no year has photos on this day: the latest year of the session
+        (
+            "d15",
+            "show photos from Dec 25",
+            False,
+            [("filter", day(dt.date(years[0], 12, 25)))],
+            q(dt.date(years[0], 12, 25)),
+        ),
+        # an explicit year is not changed
+        (
+            "d16",
+            f"只看{ref.year}年{md.month}月{md.day}日的照片",
+            False,
+            [("filter", day(dt.date(ref.year, md.month, md.day)))],
+            q(dt.date(ref.year, md.month, md.day)),
+        ),
+        # places: no place names exist in the catalog, so the place is ignored and said so
+        ("d20", "只看4星以上、在京都拍的照片", False, [("filter", {"rating_gte": 4})], None),
+        ("d21", "show 5 star photos from Kyoto", False, [("filter", {"rating_gte": 5})], None),
+    ]
+    return rows
 
 
 def has_cjk(s: str) -> bool:
@@ -261,11 +389,14 @@ def score(case, plan: dict[str, Any], api: Api, session: int, ids: list[int], to
         if not tool_ok:
             return False, False, "wrong_tool"
         last = [s for s in steps if s["tool"] == "filter"][-1]
-        return (
-            True,
-            filter_equal(main_args, last["args"]),
-            (None if filter_equal(main_args, last["args"]) else "wrong_args"),
-        )
+        if not filter_equal(main_args, last["args"]):
+            return True, False, "wrong_args"
+        if isinstance(target, str):
+            if target not in cache:
+                cache[target] = api.count(session, target)
+            if last["affects"] != cache[target]:
+                return True, False, "wrong_target"
+        return True, True, None
     tool_ok = [s["tool"] for s in changing] == [main_tool]
     if not tool_ok:
         return False, False, "wrong_tool"
@@ -337,7 +468,7 @@ def run(
             if cid in HONEST_PARTIAL:
                 hinted = bool(plan.get("unsupported")) or any(
                     w in (plan.get("reply") or "").lower()
-                    for w in ("ignor", "忽略", "beach", "海滩")
+                    for w in ("ignor", "忽略", "beach", "海滩", "kyoto", "京都")
                 )
                 if not hinted:
                     tool_ok, args_ok, kind = tool_ok, False, kind or "silent_drop"
@@ -396,7 +527,7 @@ def main() -> int:
     )
     ap.add_argument("--base", default="http://127.0.0.1:17961", help="server URL")
     ap.add_argument("--engine", choices=["rules", "llm", "both"], default="both")
-    ap.add_argument("--cases", choices=["all", "base", "new"], default="all")
+    ap.add_argument("--cases", choices=["all", "base", "new", "days"], default="all")
     ap.add_argument("--session", type=int, help="session id (default: the one with most photos)")
     ap.add_argument("--timeout", type=float, default=180, help="seconds per plan request")
     ap.add_argument("--no-warmup", action="store_true", help="llm: do not load the model first")
@@ -413,7 +544,9 @@ def main() -> int:
     session = a.session or max(sessions, key=lambda s: s.get("photo_count", 0))["id"]
     ids = [p["id"] for p in api.get(f"/api/photos?session_id={session}&limit=3")["photos"]]
     total = api.count(session, "")
-    cases = {"all": BASE + NEW, "base": BASE, "new": NEW}[a.cases]
+    tl = api.get(f"/api/timeline?granularity=day&session_id={session}")
+    days = day_cases([b["from"] for b in tl["buckets"]]) if tl["buckets"] else []
+    cases = {"all": BASE + NEW + days, "base": BASE, "new": NEW + days, "days": days}[a.cases]
     print(f"session {session}: {total} photos, selection {ids}, {len(cases)} commands", flush=True)
 
     cache: dict[str, int] = {}
@@ -436,6 +569,7 @@ def main() -> int:
             "all": summary(rows),
             "base": summary([r for r in rows if r["id"].startswith("b")]),
             "new": summary([r for r in rows if r["id"].startswith("n")]),
+            "days": summary([r for r in rows if r["id"].startswith("d")]),
         }
         out["engines"][engine] = {"warmup": warm, "summary": by, "rows": rows}
         for k, s in by.items():

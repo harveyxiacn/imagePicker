@@ -19,7 +19,27 @@ fn presets() -> Vec<PresetName> {
     p
 }
 
+/// Capture days of the test library (2025-10-10 is a Friday, the latest day).
+fn library() -> Vec<i64> {
+    let mut d: Vec<i64> = [
+        "2023-03-05",
+        "2024-10-02",
+        "2025-04-12",
+        "2025-10-04",
+        "2025-10-10",
+    ]
+    .iter()
+    .map(|s| crate::library_timeline::parse_ymd(s).expect("day"))
+    .collect();
+    d.sort_unstable();
+    d
+}
+
 fn ask_with(msg: &str, selection: &[i64], current: Option<i64>) -> Parsed {
+    ask_in(msg, selection, current, &library())
+}
+
+fn ask_in(msg: &str, selection: &[i64], current: Option<i64>, days: &[i64]) -> Parsed {
     let people = people();
     let presets = presets();
     parse(
@@ -30,6 +50,7 @@ fn ask_with(msg: &str, selection: &[i64], current: Option<i64>) -> Parsed {
             selection,
             current_photo_id: current,
             locale: if has_cjk(msg) { Locale::Zh } else { Locale::En },
+            days,
         },
     )
 }
@@ -693,4 +714,247 @@ fn every_named_action_is_listed_not_only_the_one_read() {
     assert!(acc.mentioned.contains(&"export"), "{:?}", acc.mentioned);
     let en = ask("reject the blurry photos");
     assert!(!en.mentioned.contains(&"set_rating"), "{:?}", en.mentioned);
+}
+
+/// A one-day or range filter step.
+fn days_of(from: &str, to: &str) -> Value {
+    json!({"taken_from": from, "taken_to": to})
+}
+
+#[test]
+fn a_month_and_day_takes_the_most_recent_year_with_photos_on_it() {
+    // 2 October: not shot in 2025, shot in 2024
+    for msg in [
+        "只看10月2日的照片",
+        "只看十月二日拍的照片",
+        "只看10月2号的照片",
+    ] {
+        check(msg, &[("filter", days_of("2024-10-02", "2024-10-02"))]);
+    }
+    check(
+        "show photos from Oct 2",
+        &[("filter", days_of("2024-10-02", "2024-10-02"))],
+    );
+    check(
+        "show photos from the 2nd of October",
+        &[("filter", days_of("2024-10-02", "2024-10-02"))],
+    );
+    check(
+        "show photos taken on october 2nd",
+        &[("filter", days_of("2024-10-02", "2024-10-02"))],
+    );
+    // the only year with photos on the day
+    check(
+        "3月5日的照片",
+        &[("filter", days_of("2023-03-05", "2023-03-05"))],
+    );
+    check(
+        "4月12日的照片",
+        &[("filter", days_of("2025-04-12", "2025-04-12"))],
+    );
+    // no year has photos on the day: the latest year of the session
+    check(
+        "12月25日的照片",
+        &[("filter", days_of("2025-12-25", "2025-12-25"))],
+    );
+    // 29 February: the latest year in which it exists
+    check(
+        "2月29日的照片",
+        &[("filter", days_of("2024-02-29", "2024-02-29"))],
+    );
+    // an explicit year is never replaced
+    check(
+        "show photos from Oct 2 2021",
+        &[("filter", days_of("2021-10-02", "2021-10-02"))],
+    );
+    check(
+        "2026年10月2日的照片",
+        &[("filter", days_of("2026-10-02", "2026-10-02"))],
+    );
+    // ... and the day's digits are neither a count nor a star rating
+    for msg in ["把10月2日的照片都淘汰", "reject the photos from Oct 2"] {
+        check(
+            msg,
+            &[
+                ("filter", days_of("2024-10-02", "2024-10-02")),
+                ("set_flag", json!({"flag": -1})),
+            ],
+        );
+        assert!(ask(msg).hints.is_empty(), "{msg}: {:?}", ask(msg).hints);
+    }
+    check(
+        "只看10月2日之后的5星照片",
+        &[(
+            "filter",
+            json!({"taken_from": "2024-10-02", "rating_gte": 5}),
+        )],
+    );
+    check(
+        "show photos from 5 Mar to 12 Apr",
+        &[("filter", days_of("2023-03-05", "2025-04-12"))],
+    );
+    // not a date at all
+    for msg in [
+        "只看13月40日的照片",
+        "只看2月30日的照片",
+        "show 5 stars from the beach",
+    ] {
+        assert!(
+            ask(msg)
+                .calls
+                .iter()
+                .all(|c| c.args.get("taken_from").is_none()),
+            "{msg}"
+        );
+    }
+}
+
+#[test]
+fn relative_days_count_from_the_latest_capture_day() {
+    // the latest capture day is Friday 2025-10-10
+    let one = |d: &str| [("filter", days_of(d, d))];
+    check("只看昨天的照片", &one("2025-10-09"));
+    check("只看前天拍的", &one("2025-10-08"));
+    check(
+        "show today's photos",
+        &[("filter", days_of("2025-10-10", "2025-10-10"))],
+    );
+    check("show photos from yesterday", &one("2025-10-09"));
+    check(
+        "show photos from the day before yesterday",
+        &one("2025-10-08"),
+    );
+    // Chinese: the weekday of the previous / of this week (weeks run Monday to Sunday)
+    check("只看上周六的照片", &one("2025-10-04"));
+    check("只看上星期二拍的照片", &one("2025-09-30"));
+    check("只看这周三的照片", &one("2025-10-08"));
+    check("只看上周日的照片", &one("2025-10-05"));
+    // English: the most recent such weekday before the latest day
+    check("show photos from last Saturday", &one("2025-10-04"));
+    check("show photos from last Tuesday", &one("2025-10-07"));
+    check("show photos from this Wednesday", &one("2025-10-08"));
+    // weeks, weekends, months
+    check(
+        "只看上周的照片",
+        &[("filter", days_of("2025-09-29", "2025-10-05"))],
+    );
+    check(
+        "只看上周末的照片",
+        &[("filter", days_of("2025-10-04", "2025-10-05"))],
+    );
+    check(
+        "只看这周的照片",
+        &[("filter", days_of("2025-10-06", "2025-10-12"))],
+    );
+    check(
+        "show photos from last week",
+        &[("filter", days_of("2025-09-29", "2025-10-05"))],
+    );
+    check(
+        "show photos from last weekend",
+        &[("filter", days_of("2025-10-04", "2025-10-05"))],
+    );
+    check(
+        "只看上个月的照片",
+        &[("filter", days_of("2025-09-01", "2025-09-30"))],
+    );
+    check(
+        "show photos from this month",
+        &[("filter", days_of("2025-10-01", "2025-10-31"))],
+    );
+    // combined with the rest of the request
+    check(
+        "把上周六的照片都淘汰",
+        &[
+            ("filter", days_of("2025-10-04", "2025-10-04")),
+            ("set_flag", json!({"flag": -1})),
+        ],
+    );
+    assert!(ask("只看上周六的照片").hints.is_empty());
+    // the year boundary
+    let dec = [crate::library_timeline::parse_ymd("2025-01-02").expect("day")];
+    let p = ask_in("show photos from last month", &[], None, &dec);
+    assert_eq!(p.calls[0].args, days_of("2024-12-01", "2024-12-31"));
+}
+
+#[test]
+fn a_day_without_a_reference_is_a_hint_not_a_guess() {
+    for msg in [
+        "只看昨天的照片",
+        "show photos from last Saturday",
+        "只看10月2日的照片",
+    ] {
+        let p = ask_in(msg, &[], None, &[]);
+        assert!(
+            p.calls.iter().all(|c| c.args.get("taken_from").is_none()),
+            "{msg}: {:?}",
+            p.calls
+        );
+        assert!(
+            p.unsupported.is_some() || !p.hints.is_empty(),
+            "{msg} is neither a plan nor a hint"
+        );
+    }
+    // the rest of the request still works, with the hint
+    let p = ask_in("只看昨天的5星照片", &[], None, &[]);
+    assert_eq!(p.calls[0].args, json!({"rating_gte": 5}));
+    assert!(p.hints.iter().any(|h| h.contains("昨天")), "{:?}", p.hints);
+}
+
+#[test]
+fn named_days_resolve_like_the_rules() {
+    let lib = library();
+    let named = |m: &str| named_days(m, &lib);
+    assert_eq!(named("只看10月2日的照片"), ["2024-10-02", "2024-10-02"]);
+    assert!(named("show photos from last Saturday").contains(&"2025-10-04".to_string()));
+    let w = named("只看上周的照片");
+    assert!(w.contains(&"2025-09-29".to_string()) && w.contains(&"2025-10-05".to_string()));
+    // a day the request does not name is not among them; without a library nothing is resolved
+    assert!(!named("只看10月2日的照片").contains(&"2025-10-02".to_string()));
+    assert!(named_days("只看10月2日的照片", &[]).is_empty());
+    // full dates keep working without a library
+    assert!(named_days("show photos on 2026-10-01", &[])
+        .iter()
+        .all(|d| d == "2026-10-01"));
+    assert_eq!(
+        floating_days("只看10月2日的照片", &lib),
+        [(
+            "10月2日".to_string(),
+            "2024-10-02".to_string(),
+            "2024-10-02".to_string()
+        )]
+    );
+    assert!(needs_session_days("上周六"));
+    assert!(needs_session_days("photos from Oct 2"));
+    assert!(!needs_session_days("2026年10月2日的照片"));
+    assert!(!needs_session_days("只看5星"));
+}
+
+#[test]
+fn places_and_events_stay_unsupported_filters() {
+    // the catalog has no place names (coordinates only) and no stable, nameable events, so a
+    // place is a hint and never becomes a filter argument
+    for msg in [
+        "只看在京都拍的照片",
+        "show photos from Kyoto",
+        "show photos from the wedding",
+    ] {
+        let p = ask(msg);
+        for c in &p.calls {
+            let keys: Vec<&String> = c
+                .args
+                .as_object()
+                .map(|o| o.keys().collect())
+                .unwrap_or_default();
+            assert!(
+                keys.iter().all(|k| !["event_id", "place", "location", "lat", "lon"].contains(&k.as_str())),
+                "{msg}: {:?}",
+                c.args
+            );
+        }
+        assert!(
+            p.unsupported.is_some() || !p.hints.is_empty(),
+            "{msg} must say the place is ignored"
+        );
+    }
 }
