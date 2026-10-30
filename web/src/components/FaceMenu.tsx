@@ -10,6 +10,7 @@ import { useHistory } from '@/lib/history'
 import { movedFacesEntry, personPatchEntry, refreshPeople } from '@/lib/structureUndo'
 import { setPersonTri } from '@/lib/filter'
 import { usePersonLabel } from '@/lib/usePersonLabel'
+import { menuPortalRoot } from '@/lib/popover'
 import { usePopover } from '@/lib/usePopover'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -154,7 +155,7 @@ export function useFaceMenu(): { open: (e: { clientX: number; clientY: number; p
               {t('face.searchSimilar')}
             </MenuItem>
           </div>,
-          document.body,
+          menuPortalRoot(),
         )}
       <Modal
         open={naming !== null}

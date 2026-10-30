@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { keyboardInset, rovingIndex, tabIndexIn } from './popover'
+import { keyboardInset, menuPortalRoot, rovingIndex, tabIndexIn } from './popover'
 
 describe('rovingIndex', () => {
   it('moves down and up with wrap-around', () => {
@@ -46,5 +46,16 @@ describe('keyboardInset', () => {
     expect(keyboardInset(800, { height: 800, offsetTop: 0 })).toBe(0)
     expect(keyboardInset(800, { height: 770, offsetTop: 0 })).toBe(0)
     expect(keyboardInset(800, null)).toBe(0)
+  })
+})
+
+describe('menuPortalRoot', () => {
+  const body = { tag: 'body' } as unknown as HTMLElement
+  const main = { tag: 'main' } as unknown as HTMLElement
+  it('portals into the main landmark when the page has one', () => {
+    expect(menuPortalRoot({ querySelector: () => main, body } as unknown as Document)).toBe(main)
+  })
+  it('falls back to body without a main landmark', () => {
+    expect(menuPortalRoot({ querySelector: () => null, body } as unknown as Document)).toBe(body)
   })
 })

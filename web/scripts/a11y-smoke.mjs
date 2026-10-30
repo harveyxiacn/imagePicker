@@ -283,6 +283,13 @@ for (const vpName of viewports) {
         await page.getByTestId('mobile-filter').click()
         await sleep(page, 500)
       })
+      await state('mobile-search', async () => {
+        await lib()
+        await page.getByTestId('mobile-search').click()
+        await page.getByTestId('search-input').waitFor({ timeout: 3000 })
+        await page.getByTestId('search-input').fill('cat')
+        await sleep(page, 500)
+      })
       await state('analyze-sheet', async () => {
         await lib()
         await page.getByTestId('analyze-button').click()

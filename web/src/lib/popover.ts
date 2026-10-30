@@ -37,3 +37,11 @@ export function keyboardInset(layoutHeight: number, vv: { height: number; offset
   // small differences are URL-bar animation noise, not a keyboard
   return inset > 40 ? inset : 0
 }
+
+/**
+ * Where a context menu is portalled to. Inside the page's `<main>` landmark (the menus are `position: fixed`, so the
+ * parent does not move them) instead of straight under `<body>`, where axe flags it as content outside every landmark.
+ */
+export function menuPortalRoot(doc: Document = document): HTMLElement {
+  return doc.querySelector<HTMLElement>('main') ?? doc.body
+}

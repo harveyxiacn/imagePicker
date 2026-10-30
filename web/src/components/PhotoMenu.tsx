@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { applyProfilesToPhotos } from '@/lib/editActions'
+import { menuPortalRoot } from '@/lib/popover'
 import { usePopover } from '@/lib/usePopover'
 import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
@@ -102,7 +103,7 @@ export function usePhotoMenu(sessionId: number): { open: (e: { clientX: number; 
             <span data-testid="menu-reject-files">{t('files.rejectMenu')}</span>
           </MenuItem>
         </div>,
-        document.body,
+        menuPortalRoot(),
       )
     : null
   return {
