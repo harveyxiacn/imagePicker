@@ -850,6 +850,8 @@ struct CFace {
     /// `face.landmarks`: the landmarker found a human face (None = it did not run).
     landmarks: Option<bool>,
     nonhuman: bool,
+    /// `face.sharpness`: identity evidence or not ([`cluster::identity_evidence`])
+    sharpness: Option<f64>,
 }
 
 fn load_cfaces(conn: &Connection, sql: &str, args: &[i64]) -> Result<Vec<CFace>> {
@@ -872,6 +874,7 @@ fn load_cfaces(conn: &Connection, sql: &str, args: &[i64]) -> Result<Vec<CFace>>
                 is_subject: r.get::<_, i64>(11)? != 0,
                 landmarks: r.get::<_, Option<i64>>(12)?.map(|v| v != 0),
                 nonhuman: r.get::<_, i64>(13)? != 0,
+                sharpness: r.get(14)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -880,7 +883,8 @@ fn load_cfaces(conn: &Connection, sql: &str, args: &[i64]) -> Result<Vec<CFace>>
 
 const CFACE_COLS: &str =
     "f.id, f.photo_id, f.person_id, f.person_locked, f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h,
-    f.embedding, p.burst_id, COALESCE(p.taken_at, p.mtime), f.is_subject, f.landmarks, f.nonhuman";
+    f.embedding, p.burst_id, COALESCE(p.taken_at, p.mtime), f.is_subject, f.landmarks, f.nonhuman,
+    f.sharpness";
 
 /// Track index (within its group) per face; `groups` are the face indices of each burst.
 fn track_groups(faces: &[CFace]) -> (Vec<usize>, BTreeMap<i64, Vec<usize>>) {
@@ -951,6 +955,8 @@ enum PersonGroup {
     New(usize),
     /// A singleton subject (its track index).
     Single(usize),
+    /// Low-quality look-alikes that are not a person ([`Assignment::Weak`]).
+    Weak(usize),
 }
 
 /// The would-be people of a session that are mostly not human faces
@@ -1050,6 +1056,7 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
                 photos: HashSet::new(),
                 n_faces: 0,
                 locked_person: None,
+                reliable: false,
             });
             locked_votes.push(HashMap::new());
             sums.push(None);
@@ -1058,6 +1065,7 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
         face_track.push(ti);
         tracks[ti].photos.insert(f.photo_id);
         tracks[ti].n_faces += 1;
+        tracks[ti].reliable |= cluster::identity_evidence(f.sharpness);
         if f.locked {
             if let Some(p) = f.person_id {
                 *locked_votes[ti].entry(p).or_insert(0) += 1;
@@ -1098,17 +1106,33 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
     for (i, f) in faces.iter().enumerate() {
         track_subject[face_track[i]] |= f.is_subject;
     }
+    let single_of = |ti: usize| -> Option<PersonGroup> {
+        (tracks[ti].emb.is_some() && track_subject[ti]).then_some(PersonGroup::Single(ti))
+    };
     let group_of = |ti: usize| -> Option<PersonGroup> {
         match &assignment[ti] {
             Assignment::Person(p) => Some(PersonGroup::Person(*p)),
             Assignment::New(k) => Some(PersonGroup::New(*k)),
-            Assignment::None if tracks[ti].emb.is_some() && track_subject[ti] => {
-                Some(PersonGroup::Single(ti))
-            }
-            Assignment::None => None,
+            Assignment::Weak(k) => Some(PersonGroup::Weak(*k)),
+            Assignment::None => single_of(ti),
         }
     };
-    let nonhuman = nonhuman_groups(conn, session_id, &faces, &face_track, &group_of)?;
+    // a weak group that is not voted non-human leaves its subjects to singleton people, each
+    // judged on its own faces like any unassigned subject
+    let weak_single = |ti: usize| -> Option<PersonGroup> {
+        match assignment[ti] {
+            Assignment::Weak(_) => single_of(ti),
+            _ => None,
+        }
+    };
+    let mut nonhuman = nonhuman_groups(conn, session_id, &faces, &face_track, &group_of)?;
+    nonhuman.extend(nonhuman_groups(
+        conn,
+        session_id,
+        &faces,
+        &face_track,
+        &weak_single,
+    )?);
 
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut new_ids: HashMap<usize, i64> = HashMap::new();
@@ -1118,7 +1142,9 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
     for (i, f) in faces.iter().enumerate() {
         // a cluster that is mostly not a human face: no person; its faces are marked non-human
         // when the cluster spans several photos (a single unrecognised face is only left out)
-        let verdict = group_of(face_track[i]).and_then(|g| nonhuman.get(&g).copied());
+        let verdict = group_of(face_track[i])
+            .and_then(|g| nonhuman.get(&g).copied())
+            .or_else(|| weak_single(face_track[i]).and_then(|g| nonhuman.get(&g).copied()));
         let new_person = match &assignment[face_track[i]] {
             _ if verdict.is_some() => None,
             Assignment::Person(p) => Some(*p),
@@ -1131,7 +1157,7 @@ pub fn cluster_session(conn: &mut Connection, session_id: i64) -> Result<Cluster
                     id
                 }
             }),
-            Assignment::None => {
+            Assignment::None | Assignment::Weak(_) => {
                 let ti = face_track[i];
                 if tracks[ti].emb.is_some() && track_subject[ti] {
                     Some(match singles.get(&ti) {
