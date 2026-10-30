@@ -129,6 +129,21 @@ fn drain(rx: &mut Receiver<Event>) -> Vec<Event> {
     v
 }
 
+/// Like [`drain`], but keeps receiving until `done` holds for what arrived (or a wall-clock
+/// deadline passes): a run's final status is visible before its last events are sent, so on a
+/// loaded machine they can still be on their way when the run reports done.
+async fn drain_until(rx: &mut Receiver<Event>, done: impl Fn(&[Event]) -> bool) -> Vec<Event> {
+    let mut v = drain(rx);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    while !done(&v) {
+        match tokio::time::timeout_at(deadline, rx.recv()).await {
+            Ok(Ok(e)) => v.push(e),
+            _ => break,
+        }
+    }
+    v
+}
+
 fn face_a() -> [f64; 4] {
     [0.2, 0.3, 0.2, 0.3]
 }
@@ -309,7 +324,19 @@ async fn full_pipeline_groups_scores_people() {
     }
 
     // ---- events
-    let evs = drain(&mut rx);
+    let evs = drain_until(&mut rx, |evs| {
+        evs.iter().any(|e| {
+            matches!(
+                e,
+                Event::AnalysisProgress {
+                    state: RunState::Done,
+                    stage: None,
+                    ..
+                }
+            )
+        }) && evs.iter().any(|e| matches!(e, Event::TaskProgress { kind, state, .. } if kind == "analysis" && state == "done"))
+    })
+    .await;
     assert!(evs.iter().any(|e| matches!(e, Event::AnalysisProgress { state: RunState::Running, stage: Some(s), .. } if s == "analyzing")));
     assert!(evs.iter().any(|e| matches!(
         e,
