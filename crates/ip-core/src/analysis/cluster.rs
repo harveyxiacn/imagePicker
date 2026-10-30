@@ -1,9 +1,11 @@
 //! Person clustering (docs/03 §4.3): per-burst face tracks (IoU + identity similarity), then
 //! cross-burst centroid linkage. User constraints: locked faces keep their person (must-link),
-//! faces of the same photo never share a person (cannot-link).
+//! faces of the same photo never share a person (cannot-link). Only sharp faces found people;
+//! blurred, shaken or dark ones join a person afterwards ([`TrackInput::reliable`]).
 
 use std::collections::HashSet;
 
+use super::scoring::BLURRY_BELOW;
 use super::vecs::{cosine, normalize};
 
 /// Same person if the cosine of identity embeddings is at least this (AuraFace: same person
@@ -21,6 +23,19 @@ pub const MIN_PHOTOS_NEW_PERSON: usize = 2;
 /// 1000-photo library every multi-photo human person has share 1.0, the golden-retriever
 /// cluster 0.2 (2 of 10 dog faces got a mesh) and a cluster of unreadable shadows 0.0.
 pub const NONHUMAN_MAX_LANDMARK_SHARE: f64 = 0.5;
+/// A face at least this sharp (`face.sharpness`, the blurry-tag threshold) is identity evidence
+/// that may found or extend a person. A blurred, shaken or underexposed face has an identity
+/// embedding of chance similarity to anyone's: on the 1000-photo library a shaken child, an
+/// underexposed man and a shaken passer-by from three defect frames (sharpness 0.29 / 0.01 /
+/// 0.10) became one person through a 0.380 pair and the centroid of that pair (0.399 to a face
+/// 0.33 / 0.34 from both members). Such faces only join a person that sharp faces established
+/// ([`cluster_tracks`]).
+pub const MIN_IDENTITY_SHARPNESS: f64 = BLURRY_BELOW;
+
+/// Is a face of this sharpness (None = not measured) identity evidence?
+pub fn identity_evidence(sharpness: Option<f64>) -> bool {
+    sharpness.is_none_or(|s| s >= MIN_IDENTITY_SHARPNESS)
+}
 
 /// `known` faces of a cluster with a landmarker verdict, `found` of them recognised as human:
 /// is the cluster mostly not human? `false` without any verdict (no landmarker, lite profile).
@@ -137,6 +152,10 @@ pub struct TrackInput {
     pub n_faces: usize,
     /// A user-assigned person: the track follows it.
     pub locked_person: Option<i64>,
+    /// At least one face of the track is [`identity_evidence`]. Other tracks never found or merge
+    /// people: they join an established person (a known one, or a new one spanning
+    /// [`MIN_PHOTOS_NEW_PERSON`] photos of sharp faces) when its centre is close enough.
+    pub reliable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +164,9 @@ pub enum Assignment {
     Person(i64),
     /// A new person; tracks with the same cluster id belong together.
     New(usize),
+    /// Low-quality tracks that resemble each other across photos but matched no person: never a
+    /// person, the group only feeds the non-human vote (docs/03 §4.3).
+    Weak(usize),
     /// Not assigned (no identity embedding, or too rare to become a person).
     None,
 }
@@ -174,7 +196,52 @@ impl Cluster {
     }
 }
 
+/// Online centroid assignment: each track joins the most similar cluster at or above `threshold`
+/// that shares no photo with it, else starts a new one (bigger tracks first).
+fn assign_online(
+    tracks: &[TrackInput],
+    order: &[usize],
+    clusters: &mut Vec<Cluster>,
+    assigned: &mut [Option<usize>],
+    threshold: f32,
+) {
+    for &ti in order {
+        let t = &tracks[ti];
+        let emb = t.emb.as_ref().unwrap();
+        let mut best: Option<(f32, usize)> = None;
+        for (ci, c) in clusters.iter().enumerate() {
+            if c.sum.len() != emb.len() || c.weight <= 0.0 || !c.photos.is_disjoint(&t.photos) {
+                continue;
+            }
+            let s = cosine(emb, &c.centroid());
+            if s >= threshold && best.map(|(b, _)| s > b).unwrap_or(true) {
+                best = Some((s, ci));
+            }
+        }
+        let ci = match best {
+            Some((_, ci)) => ci,
+            None => {
+                clusters.push(Cluster {
+                    person: None,
+                    sum: vec![0.0; emb.len()],
+                    weight: 0.0,
+                    photos: HashSet::new(),
+                    members: Vec::new(),
+                });
+                clusters.len() - 1
+            }
+        };
+        clusters[ci].add(emb, t.n_faces as f32, &t.photos, ti);
+        assigned[ti] = Some(ci);
+    }
+}
+
 /// `seeds` = (person id, centre) of known people. Returns one [`Assignment`] per track.
+///
+/// Reliable tracks (and locked ones) form the people: online centroid assignment, then merging
+/// close centres. Unreliable tracks come last and only join an established person (seeded,
+/// locked, or spanning [`MIN_PHOTOS_NEW_PERSON`] photos) without moving its centre; the rest are
+/// grouped among themselves as [`Assignment::Weak`].
 pub fn cluster_tracks(
     tracks: &[TrackInput],
     seeds: &[(i64, Vec<f32>)],
@@ -223,40 +290,14 @@ pub fn cluster_tracks(
         assigned[ti] = Some(ci);
     }
 
-    // 2. the rest: online centroid assignment, bigger tracks first
+    // 2. the reliable rest: online centroid assignment, bigger tracks first
     let mut order: Vec<usize> = (0..tracks.len())
         .filter(|&i| assigned[i].is_none() && tracks[i].emb.is_some())
         .collect();
     order.sort_by(|&a, &b| tracks[b].n_faces.cmp(&tracks[a].n_faces).then(a.cmp(&b)));
-    for ti in order {
-        let t = &tracks[ti];
-        let emb = t.emb.as_ref().unwrap();
-        let mut best: Option<(f32, usize)> = None;
-        for (ci, c) in clusters.iter().enumerate() {
-            if c.sum.len() != emb.len() || c.weight <= 0.0 || !c.photos.is_disjoint(&t.photos) {
-                continue;
-            }
-            let s = cosine(emb, &c.centroid());
-            if s >= threshold && best.map(|(b, _)| s > b).unwrap_or(true) {
-                best = Some((s, ci));
-            }
-        }
-        let ci = match best {
-            Some((_, ci)) => ci,
-            None => {
-                clusters.push(Cluster {
-                    person: None,
-                    sum: vec![0.0; emb.len()],
-                    weight: 0.0,
-                    photos: HashSet::new(),
-                    members: Vec::new(),
-                });
-                clusters.len() - 1
-            }
-        };
-        clusters[ci].add(emb, t.n_faces as f32, &t.photos, ti);
-        assigned[ti] = Some(ci);
-    }
+    let (reliable, weak): (Vec<usize>, Vec<usize>) =
+        order.into_iter().partition(|&i| tracks[i].reliable);
+    assign_online(tracks, &reliable, &mut clusters, &mut assigned, threshold);
 
     // 3. merge clusters whose centres are close (a person split by early order effects)
     let mut pairs: Vec<(f32, usize, usize)> = Vec::new();
@@ -336,13 +377,62 @@ pub fn cluster_tracks(
         parent[b] = a;
     }
 
-    // 4. results
+    // 4. unreliable tracks join an established person; its centre stays as the sharp faces made it
+    let centres: Vec<Option<Vec<f32>>> = clusters
+        .iter()
+        .enumerate()
+        .map(|(ci, c)| {
+            let established = c.person.is_some() || c.photos.len() >= MIN_PHOTOS_NEW_PERSON;
+            (parent[ci] == ci && c.weight > 0.0 && established).then(|| c.centroid())
+        })
+        .collect();
+    let mut leftover = Vec::new();
+    for ti in weak {
+        let t = &tracks[ti];
+        let emb = t.emb.as_ref().unwrap();
+        let mut best: Option<(f32, usize)> = None;
+        for (ci, c) in centres.iter().enumerate() {
+            let Some(c) = c else { continue };
+            if c.len() != emb.len() || !clusters[ci].photos.is_disjoint(&t.photos) {
+                continue;
+            }
+            let s = cosine(emb, c);
+            if s >= threshold && best.map(|(b, _)| s > b).unwrap_or(true) {
+                best = Some((s, ci));
+            }
+        }
+        match best {
+            Some((_, ci)) => {
+                clusters[ci].photos.extend(t.photos.iter().copied());
+                clusters[ci].members.push(ti);
+                assigned[ti] = Some(ci);
+            }
+            None => leftover.push(ti),
+        }
+    }
+    // 5. the rest group among themselves, for the non-human vote only
+    let mut weak_clusters: Vec<Cluster> = Vec::new();
+    let mut weak_of: Vec<Option<usize>> = vec![None; tracks.len()];
+    assign_online(
+        tracks,
+        &leftover,
+        &mut weak_clusters,
+        &mut weak_of,
+        threshold,
+    );
+
+    // 6. results
     let mut new_ids: Vec<Option<usize>> = vec![None; clusters.len()];
     let mut next_new = 0usize;
     let mut out = Vec::with_capacity(tracks.len());
     for (ti, t) in tracks.iter().enumerate() {
         let Some(c0) = assigned[ti] else {
-            out.push(Assignment::None);
+            out.push(match weak_of[ti] {
+                Some(w) if weak_clusters[w].photos.len() >= MIN_PHOTOS_NEW_PERSON => {
+                    Assignment::Weak(w)
+                }
+                _ => Assignment::None,
+            });
             continue;
         };
         let c = find(&mut parent, c0);
@@ -447,7 +537,73 @@ mod tests {
             photos: photos.iter().copied().collect(),
             n_faces: photos.len(),
             locked_person: locked,
+            reliable: true,
         }
+    }
+
+    fn blurred(emb: Vec<f32>, photos: &[i64]) -> TrackInput {
+        TrackInput {
+            reliable: false,
+            ..tr(Some(emb), photos, None)
+        }
+    }
+
+    #[test]
+    fn identity_evidence_is_the_blurry_threshold() {
+        assert!(identity_evidence(None), "not measured: as before");
+        assert!(identity_evidence(Some(0.35)) && identity_evidence(Some(0.9)));
+        // the three defect faces that made one person of a child and two men
+        for s in [0.2926, 0.0113, 0.0953] {
+            assert!(!identity_evidence(Some(s)));
+        }
+    }
+
+    #[test]
+    fn blurred_faces_never_found_a_person() {
+        // a chance pair at the threshold and a third face that only matches their centroid
+        // (0.33 / 0.34 to each member, 0.40 to the centre): one person before, none now
+        let a = v(0.0);
+        let b = v(67.5); // cos 0.383
+        let c = vec![0.33, 0.2313, 0.9152]; // cos 0.33 / 0.34 to a / b, 0.40 to their centre
+        let tracks = vec![blurred(a, &[1]), blurred(b, &[2]), blurred(c, &[3])];
+        let out = cluster_tracks(&tracks, &[], PERSON_COS);
+        assert!(
+            out.iter()
+                .all(|x| !matches!(x, Assignment::New(_) | Assignment::Person(_))),
+            "{out:?}"
+        );
+        let reliable: Vec<TrackInput> = tracks
+            .iter()
+            .map(|t| TrackInput {
+                reliable: true,
+                ..t.clone()
+            })
+            .collect();
+        let out = cluster_tracks(&reliable, &[], PERSON_COS);
+        assert!(matches!(out[0], Assignment::New(_)), "the old behaviour");
+        assert!(out[0] == out[1] && out[1] == out[2]);
+    }
+
+    #[test]
+    fn blurred_faces_join_an_established_person_only() {
+        let tracks = vec![
+            tr(Some(v(0.0)), &[1, 2], None), // sharp faces of A in two photos
+            blurred(v(20.0), &[3]),          // a blurred A
+            tr(Some(v(90.0)), &[4], None),   // B, sharp, seen once
+            blurred(v(92.0), &[5]),          // a blurred B: B is not established
+            blurred(v(91.0), &[6]),          // another one
+            blurred(v(10.0), &[2]),          // shares photo 2 with A: cannot-link
+        ];
+        let a = cluster_tracks(&tracks, &[], PERSON_COS);
+        assert!(matches!(a[0], Assignment::New(_)));
+        assert_eq!(a[1], a[0]);
+        assert_eq!(a[2], Assignment::None, "one photo of B: not a person");
+        assert!(matches!(a[3], Assignment::Weak(_)), "{:?}", a[3]);
+        assert_eq!(a[3], a[4], "blurred look-alikes stay grouped for the vote");
+        assert_ne!(a[5], a[0]);
+        // a known person is established
+        let a = cluster_tracks(&[blurred(v(5.0), &[9])], &[(10, v(0.0))], PERSON_COS);
+        assert_eq!(a, vec![Assignment::Person(10)]);
     }
 
     #[test]
