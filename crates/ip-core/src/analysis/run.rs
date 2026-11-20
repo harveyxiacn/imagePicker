@@ -1824,7 +1824,10 @@ fn crop_face(preview: &Path, bbox: [f64; 4], size: u32, out: &Path) -> Result<()
         .to_rgb8();
     let (w, h) = (img.width() as f64, img.height() as f64);
     let (cx, cy) = ((bbox[0] + bbox[2] / 2.0) * w, (bbox[1] + bbox[3] / 2.0) * h);
-    let side = ((bbox[2] * w).max(bbox[3] * h) * 1.4).clamp(8.0, w.min(h));
+    // at least 8 px, at most the short side (which may itself be shorter than 8 px)
+    let side = ((bbox[2] * w).max(bbox[3] * h) * 1.4)
+        .max(8.0)
+        .min(w.min(h));
     let x0 = (cx - side / 2.0).clamp(0.0, w - side);
     let y0 = (cy - side / 2.0).clamp(0.0, h - side);
     let crop =
@@ -1841,4 +1844,20 @@ fn crop_face(preview: &Path, bbox: [f64; 4], size: u32, out: &Path) -> Result<()
     std::fs::write(&tmp, &bytes)?;
     std::fs::rename(&tmp, out)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crop_face_takes_a_preview_thinner_than_the_smallest_crop() {
+        let dir = tempfile::tempdir().unwrap();
+        let preview = dir.path().join("thin.jpg");
+        crate::testutil::write_jpeg(&preview, 2048, 4, 90);
+        let out = dir.path().join("face.jpg");
+        crop_face(&preview, [0.4, 0.0, 0.1, 1.0], 128, &out).unwrap();
+        let img = image::open(&out).unwrap();
+        assert_eq!((img.width(), img.height()), (128, 128));
+    }
 }
