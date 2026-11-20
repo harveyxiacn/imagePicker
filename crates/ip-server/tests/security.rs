@@ -425,6 +425,12 @@ async fn guest_is_read_only() {
         "/api/fs/list",
         "/api/system/lan",
         "/api/photos?session_id=1&persons=3",
+        // face-similarity grouping is person data too
+        "/api/photos?session_id=1&face_ids=3",
+        "/api/photos?session_id=1&face_similarity=0.6",
+        "/api/photos?session_id=1&include_background=1",
+        "/api/timeline?face_ids=3",
+        "/api/search?q=beach&session_id=1&face_ids=3",
     ] {
         let r = send(&app, g(uri)).await;
         assert_eq!(r.status, StatusCode::FORBIDDEN, "{uri}");

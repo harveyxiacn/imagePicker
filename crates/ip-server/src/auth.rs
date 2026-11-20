@@ -568,17 +568,21 @@ fn guest_allows(method: &Method, path: &str, query: Option<&str>) -> bool {
     if first == "photos" || first == "groups" || first == "search" || first == "timeline" {
         if let Some(q) = query {
             if let Ok(pairs) = serde_urlencoded::from_str::<Vec<(String, String)>>(q) {
-                const PERSON_KEYS: [&str; 5] = [
+                // Everything that selects or groups photos by who (or which face) is in them.
+                const PERSON_KEYS: [&str; 9] = [
                     "persons",
                     "exclude_persons",
                     "person_mode",
                     "person_state",
+                    "include_background",
+                    "face_ids",
+                    "face_similarity",
                     "faces_min",
+                    "faces_max",
                 ];
                 if pairs
                     .iter()
                     .any(|(k, v)| PERSON_KEYS.contains(&k.as_str()) && !v.is_empty())
-                    || pairs.iter().any(|(k, v)| k == "faces_max" && !v.is_empty())
                 {
                     return false;
                 }
@@ -991,6 +995,22 @@ mod tests {
         assert!(g(&Method::GET, "/api/timeline", Some("granularity=day")));
         assert!(!g(&Method::GET, "/api/timeline", Some("persons=2")));
         assert!(!g(&Method::POST, "/api/timeline", None));
+        // face-similarity and background-person filters group people just like `persons`
+        for q in [
+            "session_id=1&face_ids=3,4",
+            "session_id=1&face_similarity=0.5",
+            "session_id=1&include_background=1",
+        ] {
+            assert!(!g(&Method::GET, "/api/photos", Some(q)), "{q}");
+            assert!(!g(&Method::GET, "/api/search", Some(q)), "{q}");
+            assert!(!g(&Method::GET, "/api/timeline", Some(q)), "{q}");
+            assert!(!g(&Method::GET, "/api/groups", Some(q)), "{q}");
+        }
+        assert!(g(
+            &Method::GET,
+            "/api/photos",
+            Some("session_id=1&face_ids=&face_similarity=")
+        ));
     }
 
     #[test]
