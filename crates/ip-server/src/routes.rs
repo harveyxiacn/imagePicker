@@ -537,25 +537,127 @@ pub async fn patch_photos(
 #[derive(Deserialize)]
 pub struct SizeParams {
     s: Option<u32>,
-    #[allow(dead_code)]
+    /// Version of the image (`thumb_version` of the photo row): only a versioned URL may be
+    /// cached as immutable.
     v: Option<String>,
 }
 
-async fn jpeg_file(path: PathBuf, cache_control: &'static str) -> ApiResult<Response> {
-    let bytes = tokio::fs::read(&path).await.map_err(|e| {
+impl SizeParams {
+    fn versioned(&self) -> bool {
+        self.v.as_deref().is_some_and(|v| !v.is_empty())
+    }
+}
+
+/// `Cache-Control` of a cached image: the URL's content only changes together with `v`, so a
+/// versioned URL is immutable; without `v` the browser revalidates (ETag) after a minute.
+/// `private`: LAN mode answers these only to authenticated clients.
+fn image_cache_control(versioned: bool) -> HeaderValue {
+    HeaderValue::from_static(if versioned {
+        "private, max-age=31536000, immutable"
+    } else {
+        "private, max-age=60"
+    })
+}
+
+/// Whether `candidate` (an `If-None-Match` / `If-Range` list) names `etag` (weak comparison).
+fn etag_listed(candidate: &str, etag: &str) -> bool {
+    let bare = |t: &str| t.trim().trim_start_matches("W/").to_string();
+    let etag = bare(etag);
+    candidate.trim() == "*" || candidate.split(',').any(|t| bare(t) == etag)
+}
+
+/// Validator of a cached image. The cache file name carries the photo's key, the edit hash and
+/// the size, so it changes whenever the pixels do; the length guards a regenerated file. The
+/// file time is NOT a safe validator on its own: clearing an edit switches back to an OLDER
+/// file, which `If-Modified-Since` would call "not modified" while the browser holds the edited
+/// image. The time is left out for the full-resolution cache, which stamps files on each use.
+fn image_etag(path: &std::path::Path, md: &std::fs::Metadata, with_mtime: bool) -> HeaderValue {
+    let mut h = blake3::Hasher::new();
+    if let Some(name) = path.file_name() {
+        h.update(name.as_encoded_bytes());
+    }
+    h.update(&md.len().to_le_bytes());
+    if with_mtime {
+        let t = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        h.update(&t.to_le_bytes());
+    }
+    let hex = h.finalize().to_hex();
+    HeaderValue::from_str(&format!("\"{}\"", &hex[..32])).expect("hex is a valid header value")
+}
+
+/// Streams a cached JPEG (Content-Length, Last-Modified, Range) with an ETag and the cache
+/// policy. `If-None-Match` and `If-Modified-Since` answer 304; the latter only when it echoes the
+/// exact `Last-Modified` we sent (a different file can be older than the one the client holds).
+async fn jpeg_file(
+    path: PathBuf,
+    versioned: bool,
+    full: bool,
+    mut req: Request,
+) -> ApiResult<Response> {
+    let md = tokio::fs::metadata(&path).await.map_err(|e| {
+        tracing::error!(path = %path.display(), error = %e, "cached image is not readable");
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal",
-            format!("cache read failed: {e}"),
+            "cached image is not readable",
         )
     })?;
-    let mut resp = Response::new(Body::from(bytes));
+    let etag = image_etag(&path, &md, !full);
+    let cache_control = image_cache_control(versioned);
+    let etag_str = etag.to_str().unwrap_or_default().to_string();
+    let headers = req.headers_mut();
+    let none_match = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| etag_listed(v, &etag_str));
+    let since = headers.remove(header::IF_MODIFIED_SINCE);
+    headers.remove(header::IF_UNMODIFIED_SINCE);
+    if let Some(r) = headers.get(header::IF_RANGE) {
+        // only our ETag is honoured; a date validator degrades to the whole file
+        if r.to_str().map_or(true, |r| r.trim() != etag_str) {
+            headers.remove(header::RANGE);
+            headers.remove(header::IF_RANGE);
+        }
+    }
+    let mut resp = ServeFile::new(&path)
+        .oneshot(req)
+        .await
+        .map_err(|e| {
+            tracing::error!(path = %path.display(), error = %e, "serving a cached image failed");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+                "cached image is not readable",
+            )
+        })?
+        .into_response();
+    if !resp.status().is_success() {
+        return Ok(resp);
+    }
+    let last_modified = resp.headers().get(header::LAST_MODIFIED).cloned();
+    let not_modified = match none_match {
+        Some(m) => m,
+        None => matches!((&since, &last_modified), (Some(s), Some(l)) if s == l),
+    };
+    if not_modified {
+        let mut r = Response::new(Body::empty());
+        *r.status_mut() = StatusCode::NOT_MODIFIED;
+        let h = r.headers_mut();
+        h.insert(header::ETAG, etag);
+        h.insert(header::CACHE_CONTROL, cache_control);
+        if let Some(l) = last_modified {
+            h.insert(header::LAST_MODIFIED, l);
+        }
+        return Ok(r);
+    }
     let h = resp.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
-    h.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static(cache_control),
-    );
+    h.insert(header::ETAG, etag);
+    h.insert(header::CACHE_CONTROL, cache_control);
     Ok(resp)
 }
 
@@ -563,25 +665,32 @@ pub async fn thumb(
     State(st): State<AppState>,
     ApiPath(id): ApiPath<i64>,
     ApiQuery(q): ApiQuery<SizeParams>,
+    req: Request,
 ) -> ApiResult<Response> {
     let path = st.core.thumb_path(id, q.s.unwrap_or(256)).await?;
-    jpeg_file(path, "public, max-age=31536000, immutable").await
+    jpeg_file(path, q.versioned(), false, req).await
 }
 
 pub async fn preview(
     State(st): State<AppState>,
     ApiPath(id): ApiPath<i64>,
     ApiQuery(q): ApiQuery<SizeParams>,
+    req: Request,
 ) -> ApiResult<Response> {
     let path = st.core.preview_path(id, q.s.unwrap_or(2048)).await?;
-    jpeg_file(path, "public, max-age=3600").await
+    jpeg_file(path, q.versioned(), false, req).await
 }
 
 /// Full-resolution image for the loupe at 100% and above: upright sRGB JPEG at the photo's own
 /// pixel size (the rendered edit for edited photos). Generated on first use, then cached.
-pub async fn full(State(st): State<AppState>, ApiPath(id): ApiPath<i64>) -> ApiResult<Response> {
+pub async fn full(
+    State(st): State<AppState>,
+    ApiPath(id): ApiPath<i64>,
+    ApiQuery(q): ApiQuery<SizeParams>,
+    req: Request,
+) -> ApiResult<Response> {
     let path = st.core.full_path(id).await?;
-    jpeg_file(path, "public, max-age=3600").await
+    jpeg_file(path, q.versioned(), true, req).await
 }
 
 fn content_type(format: ImageFormat) -> &'static str {
@@ -606,7 +715,14 @@ pub async fn original(
     let mut resp = ServeFile::new(path)
         .oneshot(req)
         .await
-        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))?
+        .map_err(|e| {
+            tracing::error!(error = %e, "serving an original failed");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+                "internal server error",
+            )
+        })?
         .into_response();
     if resp.status().is_success() {
         resp.headers_mut().insert(

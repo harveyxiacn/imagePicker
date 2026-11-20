@@ -312,7 +312,7 @@ async fn thumb_preview_original() {
     assert_eq!(r.headers[header::CONTENT_TYPE], "image/jpeg");
     assert_eq!(
         r.headers[header::CACHE_CONTROL],
-        "public, max-age=31536000, immutable"
+        "private, max-age=31536000, immutable"
     );
     assert_eq!(&r.body[..3], &[0xFF, 0xD8, 0xFF]);
 

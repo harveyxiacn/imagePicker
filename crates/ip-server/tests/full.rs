@@ -161,7 +161,10 @@ async fn full_resolution_route() {
     .await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.headers[header::CONTENT_TYPE], "image/jpeg");
-    assert_eq!(r.headers[header::CACHE_CONTROL], "public, max-age=3600");
+    assert_eq!(
+        r.headers[header::CACHE_CONTROL],
+        "private, max-age=31536000, immutable"
+    );
     assert_eq!(jpeg_dims(&r.body), (5000, 300));
     let p = call(
         &app,

@@ -29,6 +29,8 @@ use axum::Router;
 use ip_core::{Core, CoreConfig};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+use tower_http::compression::predicate::{Predicate, SizeAbove};
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
@@ -295,14 +297,61 @@ pub fn build_router_auth(
             axum::http::header::CONTENT_TYPE,
             axum::http::header::AUTHORIZATION,
         ]);
+    // Outside `tidy_json` and the auth layer, so the final JSON is compressed once and the
+    // auth/error responses pass through the same layer; images, event streams and the websocket
+    // upgrade never match the text/JSON predicate.
+    let compression =
+        CompressionLayer::new().compress_when(SizeAbove::new(COMPRESS_MIN_BYTES).and(
+            |_: axum::http::StatusCode,
+             _: axum::http::Version,
+             headers: &axum::http::HeaderMap,
+             _: &axum::http::Extensions| is_compressible(headers),
+        ));
     Router::new()
         .nest("/api", api)
         .fallback(routes::fallback)
         .layer(axum::middleware::from_fn(m5::tidy_json))
         .layer(axum::middleware::from_fn_with_state(auth, auth::middleware))
         .layer(cors)
+        .layer(axum::middleware::from_fn(vary_accept_encoding))
+        .layer(compression)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+/// Responses smaller than this are sent as they are (the gzip header and CPU outweigh the gain).
+const COMPRESS_MIN_BYTES: u64 = 1024;
+
+/// JSON and text (HTML/CSS/JS of the web app) only; never images or `text/event-stream`.
+fn is_compressible(headers: &axum::http::HeaderMap) -> bool {
+    let ct = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if ct.starts_with("text/event-stream") {
+        return false;
+    }
+    ct.starts_with("application/json")
+        || ct.starts_with("application/javascript")
+        || ct.starts_with("text/")
+}
+
+/// Marks every compressible response as varying by `Accept-Encoding` (the compression layer
+/// itself does not), so a shared cache never hands the gzip body to a client that cannot read it.
+async fn vary_accept_encoding(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let mut resp = next.run(req).await;
+    if is_compressible(resp.headers()) {
+        resp.headers_mut().append(
+            axum::http::header::VARY,
+            axum::http::HeaderValue::from_static("accept-encoding"),
+        );
+    }
+    resp
 }
 
 /// A server running in the background (used by the Tauri shell and tests).
