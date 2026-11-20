@@ -250,11 +250,12 @@ class Embedder:
                 x = (np.stack(chunk).astype(np.float32) * (1 / 127.5) - 1.0).transpose(0, 3, 1, 2)
                 try:
                     h = self._load_image_model()
-                    y = (
-                        h.run_image(x)
-                        if isinstance(h, _TorchModel)
-                        else h.run(np.ascontiguousarray(x))
-                    )
+                    with self.manager.pin(self.active_model or ""):
+                        y = (
+                            h.run_image(x)
+                            if isinstance(h, _TorchModel)
+                            else h.run(np.ascontiguousarray(x))
+                        )
                 except Exception as e:  # noqa: BLE001
                     if not _is_oom(e):
                         raise
@@ -264,7 +265,7 @@ class Embedder:
                         continue
                     if not self.force_cpu:
                         log.warning("OOM at batch size 1; falling back to CPU")
-                        self.manager.unload()
+                        self.manager.unload(only_idle=True)
                         self.force_cpu = True
                         self.batch_size = 8
                         continue

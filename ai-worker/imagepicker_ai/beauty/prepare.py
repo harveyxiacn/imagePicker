@@ -362,7 +362,7 @@ class BeautyPreparer:
             if self.masks.force_cpu:
                 raise OutOfMemory(str(e)) from e
             log.warning("OOM in beauty.prepare; retrying on CPU")
-            self.manager.unload()
+            self.manager.unload(only_idle=True)
             self.masks.force_cpu = True
             return fn(*args)
 

@@ -385,7 +385,7 @@ class MaskGenerator:
                     raise OutOfMemory(str(e)) from e
                 raise
             log.warning("OOM while computing mask %s; retrying on CPU", target)
-            self.manager.unload()
+            self.manager.unload(only_idle=True)
             self.force_cpu = True
             return self._compute(photo, target, bbox)
 

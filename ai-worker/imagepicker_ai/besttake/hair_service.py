@@ -122,7 +122,7 @@ class HairTransfer:
                     raise OutOfMemory(str(e)) from e
                 raise
             log.warning("OOM in hair; retrying on CPU")
-            self.manager.unload()
+            self.manager.unload(only_idle=True)
             self.masks.force_cpu = True
             return fn(req, check) if check is not None else fn(req)
 

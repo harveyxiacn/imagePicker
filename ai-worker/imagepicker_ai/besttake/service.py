@@ -142,7 +142,7 @@ class BestTake:
             if check is not None:
                 check()  # a cancelled request does not get a second, CPU retry
             log.warning("OOM in besttake.compose; retrying on CPU")
-            self.manager.unload()
+            self.manager.unload(only_idle=True)
             self.masks.force_cpu = True
             return self._run(req, check)
 
