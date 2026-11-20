@@ -717,6 +717,9 @@ impl Core {
             "folder" => false,
             _ => return Err(CoreError::bad_request("mode must be trash or folder")),
         };
+        // Renames fire the file watcher; a rescan between a rename and the catalog update
+        // would list the old path as a new photo. Same lock as import and rescan.
+        let _guard = self.files.rescan_lock.lock().await;
         let (sid, only) = (req.session_id, req.ids.clone());
         // (photo id, its files: the photo first, then companions)
         let groups: Vec<Vec<RejectFile>> = self
@@ -853,7 +856,7 @@ impl Core {
                     for (id, new, trashed) in &moved {
                         if let Some((rel, name)) = new {
                             tx.execute(
-                                "UPDATE photo SET rel_path=?2, file_name=?3 WHERE id=?1",
+                                "UPDATE photo SET rel_path=?2, file_name=?3, missing=0 WHERE id=?1",
                                 params![id, rel, name],
                             )?;
                             tx.execute("DELETE FROM xmp_state WHERE photo_id=?1", [id])?;
