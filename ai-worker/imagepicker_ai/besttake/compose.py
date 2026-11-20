@@ -24,6 +24,7 @@ import cv2
 import numpy as np
 
 from ..beauty import landmarks as lmk
+from ..cancel import Cancelled, Check
 from ..facemesh import FaceObs, pose_from_landmarks, wrap_pitch
 from ..imgio import Box
 from ..masks.filters import smoothstep
@@ -135,6 +136,26 @@ def _boxes_mask(shape: tuple[int, int], boxes: list[Box], grow: float = 1.25) ->
     return m.astype(np.float32)
 
 
+def guarded(comp: Components, check: Check | None) -> Components:
+    """`comp` with `check()` run before every model call, so a cancel stops at the next stage."""
+    if check is None:
+        return comp
+
+    def wrap(fn: Any) -> Any:
+        if fn is None:
+            return None
+
+        def call(*args: Any) -> Any:
+            check()
+            return fn(*args)
+
+        return call
+
+    return Components(
+        wrap(comp.observe), wrap(comp.parts), wrap(comp.matte), wrap(comp.detect_faces)
+    )
+
+
 class _Timer:
     def __init__(self) -> None:
         self.t = time.perf_counter()
@@ -152,9 +173,17 @@ def compose_arrays(
     base_face: Box,
     src_face: Box,
     comp: Components,
+    check: Check | None = None,
 ) -> ComposeOut:
+    """`check` (see `cancel.py`) runs before every model call and expensive stage; it raises
+    `Cancelled` to unwind. Nothing here holds a resource that needs releasing on the way out."""
     bh, bw = base.shape[:2]
     sh, sw = src.shape[:2]
+    comp = guarded(comp, check)
+
+    def stage() -> None:
+        if check is not None:
+            check()
 
     tm = _Timer()
     # ---- 1. landmarks + head pose
@@ -181,6 +210,7 @@ def compose_arrays(
 
     tm.mark("landmarks")
     # ---- 2. global alignment
+    stage()
     ga = align.align_global(
         base,
         src,
@@ -235,6 +265,7 @@ def compose_arrays(
     feat = cv2.resize(feat_s, (cw, ch), interpolation=cv2.INTER_NEAREST)
     gray_b = cv2.cvtColor(base_crop, cv2.COLOR_RGB2GRAY)
     gray_s = cv2.cvtColor(s0, cv2.COLOR_RGB2GRAY)
+    stage()
     flow = align.refine_flow(gray_b, gray_s, wface, feat, face_w)
     m_x = cv2.remap(
         m0x, gx + flow[..., 0], gy + flow[..., 1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE
@@ -295,6 +326,7 @@ def compose_arrays(
             ),
         )
     tm.mark("parts_matte")
+    stage()
     reg = build_region(bpts_c, spts_c, shape, probs_b, probs_s, matte_b, matte_s, others_mask)
     fw = reg.face_w
     if int(reg.binary.sum()) < 0.2 * fw * reg.face_h:
@@ -309,6 +341,7 @@ def compose_arrays(
 
     tm.mark("color_match")
     # ---- 6. multi-band blend
+    stage()
     sigma_f = max(1.5, 0.045 * fw)
     a_mb = cv2.GaussianBlur(reg.binary.astype(np.float32), (0, 0), sigma_f)
     levels = pyramid_levels(fw, shape)
@@ -396,6 +429,8 @@ def _landmark_error(
     box = (base_face[0] - origin[0], base_face[1] - origin[1], base_face[2], base_face[3])
     try:
         o2 = comp.observe(s_al, box)
+    except Cancelled:
+        raise
     except Exception:  # noqa: BLE001
         return None
     if o2 is None:
