@@ -81,9 +81,9 @@ interface Session {
 | GET | `/api/photos` | 查询参数见下 | `{"photos": Photo[], "total": number, "next_cursor": string \| null}` |
 | GET | `/api/photos/{id}` | — | `{"photo": Photo}` |
 | PATCH | `/api/photos` | `{"ids": number[], "user_rating"?: number \| null, "flag"?: Flag, "color_label"?: ColorLabel}` | `{"updated": number}`；同时广播 `photos.updated` |
-| GET | `/api/thumb/{id}?s=256\|512&v=...` | — | `image/jpeg`；未生成时 **同步生成**后返回（插队）；`Cache-Control: public, max-age=31536000, immutable` |
+| GET | `/api/thumb/{id}?s=256\|512&v=...` | — | `image/jpeg`；未生成时 **同步生成**后返回（插队）；`ETag`，`If-None-Match` 命中返回 `304`，支持 `Range`；`Cache-Control`：URL 带非空 `v` 时 `private, max-age=31536000, immutable`，否则 `private, max-age=60`（`preview`、`full` 同） |
 | GET | `/api/preview/{id}?s=2048` | — | `image/jpeg`，按需生成并缓存（s 允许 1024/2048/4096） |
-| GET | `/api/full/{id}?v=...` | — | `image/jpeg`：全分辨率图（转正、sRGB、照片自身像素尺寸、质量 92；已编辑的照片为全尺寸渲染），Loupe 放大超过 4096 预览所含像素时使用；按需生成并缓存在 `cache/full/`（按最近使用裁剪到 1 GB）；`Cache-Control: public, max-age=3600`；照片不存在或原图缺失 `404 not_found`，原图无法解码（无 HEIF 解码器、RAW 无内嵌预览、文件损坏）`415 unsupported_media` |
+| GET | `/api/full/{id}?v=...` | — | `image/jpeg`：全分辨率图（转正、sRGB、照片自身像素尺寸、质量 92；已编辑的照片为全尺寸渲染），Loupe 放大超过 4096 预览所含像素时使用；按需生成并缓存在 `cache/full/`（按最近使用裁剪到 1 GB）；缓存头同 `thumb`；照片不存在或原图缺失 `404 not_found`，原图无法解码（无 HEIF 解码器、RAW 无内嵌预览、文件损坏）`415 unsupported_media` |
 | GET | `/api/original/{id}` | — | 原文件字节流（Content-Type 按格式；RAW 用 `application/octet-stream`） |
 | POST | `/api/viewport` | `{"ids": number[]}` | `204`；提升这些照片缩略图生成优先级 |
 | POST | `/api/export` | `{"ids": number[], "dest": string, "long_edge"?: number \| null, "quality"?: number=90, "name_template"?: string="{name}", "pair_member"?: "jpeg" \| "raw" \| "both"}` | `202 {"task_id": string}`；进度走事件 |

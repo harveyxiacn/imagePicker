@@ -569,8 +569,37 @@ async fn full_flow_over_http() {
         .await;
         assert_eq!(r.status, StatusCode::OK);
         assert_eq!(r.headers[header::CONTENT_TYPE], "image/jpeg");
+        // not `public`: LAN mode answers authenticated clients only; no version in the URL, so
+        // the browser revalidates after a minute
+        assert_eq!(r.headers[header::CACHE_CONTROL], "private, max-age=60");
         let img = image::load_from_memory(&r.body).unwrap();
         assert_eq!((img.width(), img.height()), (s, s));
+
+        // the same crop again with its validator: 304 and no body; another validator: 200
+        let etag = r.headers[header::ETAG].to_str().unwrap().to_string();
+        let uri = format!("/api/faces/{any_face_id}/crop?s={s}");
+        let revalidate = |tag: String| {
+            let req = Request::builder()
+                .uri(&uri)
+                .header(header::IF_NONE_MATCH, tag)
+                .body(Body::empty())
+                .unwrap();
+            let app = e.app.clone();
+            async move { app.oneshot(req).await.unwrap() }
+        };
+        let r304 = revalidate(etag.clone()).await;
+        assert_eq!(r304.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(r304.headers()[header::ETAG], etag.as_str());
+        assert_eq!(r304.headers()[header::CACHE_CONTROL], "private, max-age=60");
+        assert!(r304
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .is_empty());
+        let other = revalidate("\"not-this-one\"".into()).await;
+        assert_eq!(other.status(), StatusCode::OK);
     }
     assert_eq!(
         call(

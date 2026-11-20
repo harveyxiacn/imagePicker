@@ -1450,3 +1450,199 @@ async fn websocket_withholds_owner_events_from_guests() {
     );
     server.shutdown().await.unwrap();
 }
+
+// ------------------------------------------------- absolute paths hidden from guests
+
+/// Imports a folder called `name` (3 generated photos) and waits until the session is ready.
+/// The returned guard keeps the folder alive.
+async fn import_named(e: &Env, name: &str) -> (tempfile::TempDir, std::path::PathBuf, i64) {
+    let base = tempfile::tempdir().unwrap();
+    let dir = base.path().join(name);
+    std::fs::create_dir(&dir).unwrap();
+    ip_core::testutil::make_photos(&dir, 3);
+    let s = e
+        .core
+        .import(ip_core::ImportRequest {
+            path: dir.to_string_lossy().into_owned(),
+            recursive: true,
+            title: None,
+        })
+        .await
+        .unwrap();
+    e.core
+        .wait_session_ready(s.id, Duration::from_secs(120))
+        .await
+        .unwrap();
+    (base, dir, s.id)
+}
+
+/// What a guest may be shown of a location: a name, with no separator and no drive letter.
+fn assert_name_only(v: &Value, name: &str, what: &str) {
+    let s = v
+        .as_str()
+        .unwrap_or_else(|| panic!("{what}: not a string: {v}"));
+    assert_eq!(s, name, "{what}");
+    assert!(!s.contains(['/', '\\', ':']), "{what}: {s}");
+}
+
+#[tokio::test]
+async fn guest_sees_folder_names_not_absolute_paths() {
+    let e = env();
+    let app = e.lan_app(|_| {});
+    let (_keep, dir, sid) = import_named(&e, "Summer Trip").await;
+    let guest = login(&app, GUEST_PW).await.cookie().unwrap();
+    let owner = login(&app, OWNER_PW).await.cookie().unwrap();
+    let g = |uri: &str| get(uri).lan().cookie(&guest);
+    let o = |uri: &str| get(uri).lan().cookie(&owner);
+    let full = e.core.session(sid).await.unwrap().root_path;
+    assert!(full.contains(['/', '\\']), "{full}");
+
+    // the sessions list and the single session
+    let r = send(&app, g("/api/sessions")).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let list = r.json();
+    let s = list["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == sid)
+        .expect("session in the list");
+    assert_name_only(&s["root_path"], "Summer Trip", "guest sessions list");
+    let r = send(&app, g(&format!("/api/sessions/{sid}"))).await;
+    assert_name_only(
+        &r.json()["session"]["root_path"],
+        "Summer Trip",
+        "guest session",
+    );
+    // other fields are untouched
+    assert_eq!(r.json()["session"]["photo_count"], 3);
+
+    // photo rows carry the file's absolute path too
+    let r = send(&app, g(&format!("/api/photos?session_id={sid}"))).await;
+    let page = r.json();
+    let rows = page["photos"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    for p in rows {
+        assert_name_only(
+            &p["path"],
+            p["file_name"].as_str().unwrap(),
+            "guest photo list",
+        );
+    }
+    let id = rows[0]["id"].as_i64().unwrap();
+    let r = send(&app, g(&format!("/api/photos/{id}"))).await;
+    let p = &r.json()["photo"];
+    assert_name_only(&p["path"], p["file_name"].as_str().unwrap(), "guest photo");
+
+    // the owner still gets the real locations
+    let r = send(&app, o("/api/sessions")).await;
+    let list = r.json();
+    let s = list["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == sid)
+        .unwrap();
+    assert_eq!(s["root_path"], full.as_str());
+    let r = send(&app, o(&format!("/api/sessions/{sid}"))).await;
+    assert_eq!(r.json()["session"]["root_path"], full.as_str());
+    let r = send(&app, o(&format!("/api/photos/{id}"))).await;
+    let p = &r.json()["photo"];
+    let path = std::path::Path::new(p["path"].as_str().unwrap());
+    assert!(path.starts_with(&dir), "{path:?} not under {dir:?}");
+    assert!(path.is_file(), "{path:?}");
+}
+
+#[tokio::test]
+async fn websocket_session_event_hides_root_path_from_guests() {
+    use futures_util::StreamExt;
+    use ip_core::events::Event;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let e = env();
+    let (_keep, _dir, sid) = import_named(&e, "Summer Trip").await;
+    let full = e.core.session(sid).await.unwrap().root_path;
+    let port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let cfg = ServerConfig {
+        port,
+        lan: true,
+        password: Some(OWNER_PW.into()),
+        guest_password: Some(GUEST_PW.into()),
+        ..Default::default()
+    };
+    let server = spawn_with_core(e.core.clone(), &cfg).await.unwrap();
+    server
+        .security
+        .set_lan(LanSettings {
+            enabled: true,
+            port: 7878,
+            guest_enabled: true,
+        })
+        .unwrap();
+    let addr = SocketAddr::from(([127, 0, 0, 1], server.addr.port()));
+    let url = format!("ws://{addr}/api/events");
+    let connect = |cookie: String| {
+        let url = url.clone();
+        async move {
+            let mut req = url.as_str().into_client_request().unwrap();
+            req.headers_mut().insert("cookie", cookie.parse().unwrap());
+            tokio_tungstenite::connect_async(req).await.expect("ws").0
+        }
+    };
+    let mut owner = connect(tcp_login(addr, OWNER_PW).await).await;
+    let mut guest = connect(tcp_login(addr, GUEST_PW).await).await;
+
+    /// The next frame of type `want` (others are skipped), within a generous deadline.
+    async fn frame_of<S>(ws: &mut S, want: &str) -> Value
+    where
+        S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+            + Unpin,
+    {
+        loop {
+            let m = tokio::time::timeout(Duration::from_secs(120), ws.next())
+                .await
+                .expect("timed out waiting for an event")
+                .expect("socket closed")
+                .expect("socket error");
+            if let Message::Text(t) = m {
+                let v: Value = serde_json::from_str(&t).unwrap();
+                if v["type"] == want {
+                    return v;
+                }
+            }
+        }
+    }
+
+    // Barrier: the server subscribes after the upgrade, so keep emitting until both sockets
+    // have received one frame.
+    for ws in [&mut owner, &mut guest] {
+        loop {
+            e.core.events.emit(Event::CollectionsUpdated {});
+            if tokio::time::timeout(
+                Duration::from_millis(200),
+                frame_of(&mut *ws, "collections.updated"),
+            )
+            .await
+            .is_ok()
+            {
+                break;
+            }
+        }
+    }
+    let session = e.core.session(sid).await.unwrap();
+    e.core.events.emit(Event::SessionUpdated { session });
+    let seen = frame_of(&mut owner, "session.updated").await;
+    assert_eq!(seen["session"]["root_path"], full.as_str());
+    let seen = frame_of(&mut guest, "session.updated").await;
+    assert_name_only(
+        &seen["session"]["root_path"],
+        "Summer Trip",
+        "guest session.updated",
+    );
+    assert_eq!(seen["session"]["id"], sid);
+    server.shutdown().await.unwrap();
+}

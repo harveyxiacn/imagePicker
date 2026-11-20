@@ -592,7 +592,7 @@ fn image_etag(path: &std::path::Path, md: &std::fs::Metadata, with_mtime: bool) 
 /// Streams a cached JPEG (Content-Length, Last-Modified, Range) with an ETag and the cache
 /// policy. `If-None-Match` and `If-Modified-Since` answer 304; the latter only when it echoes the
 /// exact `Last-Modified` we sent (a different file can be older than the one the client holds).
-async fn jpeg_file(
+pub(crate) async fn jpeg_file(
     path: PathBuf,
     versioned: bool,
     full: bool,
