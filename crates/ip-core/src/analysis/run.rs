@@ -1117,8 +1117,20 @@ impl Core {
                         break 'jobs;
                     }
                 };
-                if !faces_allowed {
+                // Face detection was part of this batch: allowed (consent, switched on), a
+                // profile that has the step (`lite` has none; a single-step job never asks
+                // for it), and the worker did not skip it. Otherwise the batch says nothing
+                // about faces and the stored ones stay (`store::ingest`).
+                let faces_ran = faces_allowed
+                    && profile != Profile::Lite
+                    && areq
+                        .steps
+                        .as_ref()
+                        .is_none_or(|s| s.iter().any(|x| x == "faces"))
+                    && !resp.skipped_steps.iter().any(|s| s == "faces");
+                if !faces_ran {
                     // whatever the worker did, nothing about faces is stored without consent
+                    // (and nothing from a batch that did not detect faces)
                     for it in &mut resp.items {
                         it.faces.clear();
                         it.identity_file = None;
@@ -1163,7 +1175,7 @@ impl Core {
                             ok_items.into_iter().map(load_ingest).collect();
                         db.with(|c| match &partial {
                             Some(st) => store::ingest_partial(c, &items, st, &versions),
-                            None => store::ingest(c, &items, profile, &versions, &dir),
+                            None => store::ingest(c, &items, profile, &versions, &dir, faces_ran),
                         })
                     }
                 })

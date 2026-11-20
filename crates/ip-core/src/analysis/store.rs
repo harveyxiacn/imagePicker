@@ -44,12 +44,16 @@ fn parse_phash(s: &str) -> Option<u64> {
 
 /// Writes analysis rows and faces of a batch (replacing earlier results of the same photos);
 /// user-assigned face -> person links survive when the same face is found again (IoU >= 0.5).
+/// `faces_ran`: face detection was part of the batch. When it was not (no consent, faces
+/// switched off, the `lite` profile, the step skipped), the stored faces, their people and the
+/// face counts are left as they are: not looking is not the same as finding none.
 pub fn ingest(
     conn: &mut Connection,
     items: &[IngestItem],
     profile: Profile,
     model_versions: &Json,
     artifacts_dir: &str,
+    faces_ran: bool,
 ) -> Result<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let now = now_ms();
@@ -59,7 +63,9 @@ pub fn ingest(
             continue;
         }
         let pid = a.photo_id;
-        let locked: Vec<([f64; 4], i64)> = {
+        let locked: Vec<([f64; 4], i64)> = if !faces_ran {
+            Vec::new()
+        } else {
             let mut st = tx.prepare_cached(
                 "SELECT bbox_x, bbox_y, bbox_w, bbox_h, person_id FROM face
                  WHERE photo_id=?1 AND person_locked=1 AND person_id IS NOT NULL",
@@ -71,7 +77,9 @@ pub fn ingest(
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             v
         };
-        tx.execute("DELETE FROM face WHERE photo_id=?1", [pid])?;
+        if faces_ran {
+            tx.execute("DELETE FROM face WHERE photo_id=?1", [pid])?;
+        }
         let q = a.quality.clone().unwrap_or_default();
         let phash_blob = a
             .phash
@@ -109,6 +117,13 @@ pub fn ingest(
                 q.sharpness_center
             ],
         )?;
+        if !faces_ran {
+            tx.execute(
+                "UPDATE photo SET scene_type=?2, analysis_version=?3 WHERE id=?1",
+                params![pid, a.scene_type, profile.level()],
+            )?;
+            continue;
+        }
         // faces
         let feats: Vec<(FaceFeat, bool)> = a
             .faces
