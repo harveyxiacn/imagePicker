@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -66,21 +67,31 @@ async fn import_dir(core: &Arc<Core>, dir: &Path) -> i64 {
 }
 
 async fn analyze(core: &Arc<Core>, sid: i64, force: bool) {
-    core.analysis_run(AnalysisRunRequest {
+    run_to_end(core, run_req(sid, Profile::Standard, force)).await;
+}
+
+fn run_req(sid: i64, profile: Profile, force: bool) -> AnalysisRunRequest {
+    AnalysisRunRequest {
         session_id: sid,
-        profile: Profile::Standard,
+        profile,
         photo_ids: None,
         force,
         allow_download: false,
         fallback_lite: false,
-    })
-    .await
-    .unwrap();
-    for _ in 0..1200 {
+    }
+}
+
+/// Starts the run and waits until it is over; it must end `done`.
+async fn run_to_end(core: &Arc<Core>, req: AnalysisRunRequest) -> AnalysisStatus {
+    let sid = req.session_id;
+    core.analysis_run(req).await.unwrap();
+    // generous: lite runs are CPU-bound and share a small runner with the whole suite
+    let t = std::time::Instant::now();
+    while t.elapsed() < Duration::from_secs(300) {
         let s = core.analysis_status(sid);
         if s.state != RunState::Running {
             assert_eq!(s.state, RunState::Done, "{s:?}");
-            return;
+            return s;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
@@ -456,6 +467,15 @@ async fn no_face_data_before_consent() {
         2,
         "the rest of the analysis ran"
     );
+    assert_eq!(
+        count(
+            &e.core,
+            "SELECT COUNT(*) FROM photo WHERE face_count IS NOT NULL OR subject_face_count IS NOT NULL"
+        )
+        .await,
+        0,
+        "faces were not looked for: the counts are unknown, not zero"
+    );
     assert!(e.core.people(Some(sid)).await.unwrap().is_empty());
     // the on-device profile does not detect faces either
     assert_eq!(
@@ -495,4 +515,195 @@ async fn no_face_data_before_consent() {
         .await
         .unwrap();
     assert!(e.core.analysis_steps(Profile::Standard).await.is_some());
+}
+
+/// Every stored face (id, photo, person when assigned by hand, locked, has an identity
+/// embedding) and the face counts of every photo, to compare before and after a run.
+type FaceState = (
+    Vec<(i64, i64, Option<i64>, i64, bool)>,
+    Vec<(i64, Option<i64>, Option<i64>)>,
+);
+
+async fn face_state(core: &Arc<Core>) -> FaceState {
+    core.db
+        .call(|c| {
+            let mut st = c.prepare(
+                "SELECT id, photo_id, CASE WHEN person_locked=1 THEN person_id END, person_locked,
+                        embedding IS NOT NULL FROM face ORDER BY id",
+            )?;
+            let faces = st
+                .query_map([], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut st =
+                c.prepare("SELECT id, face_count, subject_face_count FROM photo ORDER BY id")?;
+            let photos = st
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok((faces, photos))
+        })
+        .await
+        .unwrap()
+}
+
+/// Consent given, `f1.jpg` and `f2.jpg` with one face each analysed, and the face in `f1.jpg`
+/// named "Ann" by hand (a locked assignment). Returns the session, the id of `f1.jpg` and Ann.
+async fn named_faces(e: &Env) -> (i64, i64, i64) {
+    grant_face_consent(&e.core);
+    for (name, p) in [("f1.jpg", 1usize), ("f2.jpg", 2)] {
+        write_jpeg(&e.src.path().join(name), 320, 240, 40 * p as u8);
+        let face = FakeFace::new([0.2, 0.2, 0.3, 0.4], person(p, 0.0));
+        e.worker.set(name, FakeSpec::at(0.0).with_faces(vec![face]));
+    }
+    let sid = import_dir(&e.core, e.src.path()).await;
+    analyze(&e.core, sid, false).await;
+    let f1 = by_name(&e.core, sid).await["f1.jpg"].id;
+    let face: i64 = e
+        .core
+        .db
+        .call(
+            move |c| Ok(c.query_row("SELECT id FROM face WHERE photo_id=?1", [f1], |r| r.get(0))?),
+        )
+        .await
+        .unwrap();
+    let ann = e
+        .core
+        .create_person(CreatePersonRequest {
+            face_ids: vec![face],
+            name: Some("Ann".into()),
+        })
+        .await
+        .unwrap();
+    let st = face_state(&e.core).await;
+    assert_eq!(st.0.len(), 2, "{st:?}");
+    assert!(st.0.iter().all(|f| f.4), "identity embeddings: {st:?}");
+    assert!(st.1.iter().all(|p| p.1 == Some(1)), "{st:?}");
+    (sid, f1, ann.id)
+}
+
+#[tokio::test]
+async fn withdrawing_consent_keeps_stored_faces_and_people_on_reanalysis() {
+    let e = env();
+    let (sid, f1, ann) = named_faces(&e).await;
+    let before = face_state(&e.core).await;
+    e.core
+        .patch_settings(json!({"faces": {"consented": false}}))
+        .await
+        .unwrap();
+    let calls = e.worker.analyze_calls.load(Ordering::SeqCst);
+    analyze(&e.core, sid, true).await;
+    assert!(
+        e.worker.analyze_calls.load(Ordering::SeqCst) > calls,
+        "the photos were analysed again"
+    );
+    let steps = e.worker.last_steps.lock().unwrap().clone().unwrap();
+    assert!(!steps.iter().any(|s| s == "faces"), "{steps:?}");
+    // no new face data, and the stored faces, Ann and her face stay until cleared
+    assert_eq!(face_state(&e.core).await, before);
+    assert_eq!(e.core.person_face_ids(ann).await.unwrap().len(), 1);
+
+    // face recognition switched off, the photo re-analysed by id: the same
+    e.core
+        .patch_settings(json!({"faces": {"enabled": false}}))
+        .await
+        .unwrap();
+    run_to_end(
+        &e.core,
+        AnalysisRunRequest {
+            photo_ids: Some(vec![f1]),
+            ..run_req(sid, Profile::Standard, false)
+        },
+    )
+    .await;
+    assert_eq!(face_state(&e.core).await, before);
+    assert_eq!(e.core.person_face_ids(ann).await.unwrap().len(), 1);
+
+    // clearing is what removes them
+    e.core.clear_faces().await.unwrap();
+    assert_eq!(count(&e.core, "SELECT COUNT(*) FROM face").await, 0);
+}
+
+#[tokio::test]
+async fn a_skipped_faces_step_keeps_stored_faces() {
+    let e = env();
+    let (sid, _f1, ann) = named_faces(&e).await;
+    let before = face_state(&e.core).await;
+    // no face detection this time: the worker reports the step skipped and finds no faces
+    for name in ["f1.jpg", "f2.jpg"] {
+        e.worker.set(name, FakeSpec::at(0.0));
+    }
+    e.worker.set_skipped(&["faces", "identity"]);
+    let st = run_to_end(&e.core, run_req(sid, Profile::Standard, true)).await;
+    assert!(
+        st.skipped_steps.iter().any(|s| s == "faces"),
+        "{:?}",
+        st.skipped_steps
+    );
+    assert_eq!(face_state(&e.core).await, before);
+    assert_eq!(e.core.person_face_ids(ann).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn lite_runs_keep_stored_faces() {
+    let e = env();
+    let (sid, _f1, ann) = named_faces(&e).await;
+    let before = face_state(&e.core).await;
+    // the AI is gone at the first batch: the run falls back to lite, which detects no faces
+    e.worker.analyze_unavailable.store(true, Ordering::SeqCst);
+    let st = run_to_end(
+        &e.core,
+        AnalysisRunRequest {
+            fallback_lite: true,
+            ..run_req(sid, Profile::Standard, true)
+        },
+    )
+    .await;
+    assert_eq!(
+        (st.profile, st.fallback_from),
+        (Some(Profile::Lite), Some(Profile::Standard))
+    );
+    assert_eq!(
+        count(
+            &e.core,
+            "SELECT COUNT(*) FROM analysis WHERE profile='lite'"
+        )
+        .await,
+        2
+    );
+    assert_eq!(face_state(&e.core).await, before);
+    // a lite run asked for directly
+    e.worker.analyze_unavailable.store(false, Ordering::SeqCst);
+    run_to_end(&e.core, run_req(sid, Profile::Lite, true)).await;
+    assert_eq!(face_state(&e.core).await, before);
+    assert_eq!(e.core.person_face_ids(ann).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn faces_no_longer_found_are_cleared_when_the_faces_step_ran() {
+    let e = env();
+    let (sid, f1, _ann) = named_faces(&e).await;
+    // consent still given; the face in f1 is not found again
+    e.worker.set("f1.jpg", FakeSpec::at(0.0));
+    analyze(&e.core, sid, true).await;
+    let ph = by_name(&e.core, sid).await;
+    let n1 = e
+        .core
+        .db
+        .call(move |c| {
+            Ok(
+                c.query_row("SELECT COUNT(*) FROM face WHERE photo_id=?1", [f1], |r| {
+                    r.get::<_, i64>(0)
+                })?,
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(n1, 0, "the locked face is gone with its detection");
+    assert_eq!(
+        (ph["f1.jpg"].face_count, ph["f1.jpg"].subject_face_count),
+        (Some(0), Some(0))
+    );
+    assert_eq!(ph["f2.jpg"].face_count, Some(1));
+    assert_eq!(count(&e.core, "SELECT COUNT(*) FROM face").await, 1);
 }

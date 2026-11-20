@@ -1636,6 +1636,96 @@ async fn a_paused_analysis_stays_paused_across_a_restart() {
     assert_eq!(stored(&core).await, 70);
 }
 
+/// Waits for the first `analysis.updated` of the session (a stored batch) and returns its ids.
+async fn first_stored_batch(rx: &mut Receiver<Event>, sid: i64) -> Vec<i64> {
+    tokio::time::timeout(Duration::from_secs(300), async {
+        loop {
+            match rx.recv().await {
+                Ok(Event::AnalysisUpdated { session_id, ids })
+                    if session_id == sid && !ids.is_empty() =>
+                {
+                    return ids
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(e) => panic!("event bus closed: {e}"),
+            }
+        }
+    })
+    .await
+    .expect("a batch is stored")
+}
+
+#[tokio::test]
+async fn analysis_artifacts_go_once_their_batch_is_stored() {
+    let e = env();
+    small_photos(&e, 70);
+    let sid = import(&e).await;
+    // every batch takes a while, so batch 2 is still in the worker when batch 1 is checked
+    e.worker.delay_ms.store(2_000, Ordering::SeqCst);
+    let mut rx = e.core.events.subscribe();
+    let task = e
+        .core
+        .analysis_run(run_req(sid, Profile::Standard))
+        .await
+        .unwrap();
+    let dir = e._data.path().join("cache").join("analysis").join(&task);
+    let first = first_stored_batch(&mut rx, sid).await;
+    assert_eq!(first.len(), 32);
+    for id in &first {
+        let f = dir.join(format!("{id}.emb.npy"));
+        assert!(
+            !f.exists(),
+            "{} is left after its batch was stored",
+            f.display()
+        );
+    }
+    // a paused run that is continued does not need them
+    e.core.analysis_pause(sid).unwrap();
+    let st = wait_state(&e.core, sid, RunState::Paused).await;
+    assert!(st.done >= 32 && st.done < 70, "{st:?}");
+    e.worker.delay_ms.store(0, Ordering::SeqCst);
+    e.core.analysis_continue(sid).await.unwrap();
+    let st = wait_done(&e, sid).await;
+    assert_eq!(
+        (st.state, st.done, st.total),
+        (RunState::Done, 70, 70),
+        "{st:?}"
+    );
+    assert_eq!(stored(&e.core).await, 70);
+    assert!(!dir.exists(), "the run removes its folder");
+}
+
+#[tokio::test]
+async fn start_up_removes_artifacts_no_open_run_owns() {
+    let (data, src) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let worker = Arc::new(FakeWorker::new());
+    worker.delay_ms.store(100, Ordering::SeqCst);
+    let sid = first_process(data.path(), src.path(), &worker, true);
+    worker.delay_ms.store(0, Ordering::SeqCst);
+    let core = open_at(data.path(), &worker);
+    let rec = core.tasks_list(None).await.unwrap();
+    assert_eq!(rec[0].status, "paused");
+    let paused = rec[0].id.clone();
+    // leftovers: a run killed long ago whose task is gone, and the paused one
+    let root = data.path().join("cache").join("analysis");
+    for d in ["analysis-killed", paused.as_str()] {
+        std::fs::create_dir_all(root.join(d)).unwrap();
+        std::fs::write(root.join(d).join("1.emb.npy"), b"x").unwrap();
+    }
+    core.resume_analyses();
+    wait_until("the orphan folder is removed", || {
+        !root.join("analysis-killed").exists()
+    })
+    .await;
+    wait_state(&core, sid, RunState::Paused).await;
+    assert!(root.join(&paused).join("1.emb.npy").exists());
+    // the paused run finishes and removes its own folder
+    core.analysis_continue(sid).await.unwrap();
+    wait_state(&core, sid, RunState::Done).await;
+    assert!(!root.join(&paused).exists());
+    assert_eq!(stored(&core).await, 70);
+}
+
 #[tokio::test]
 async fn deleting_a_session_ends_its_paused_run() {
     let e = env();
