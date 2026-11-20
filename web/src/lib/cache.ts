@@ -367,38 +367,17 @@ export function applyEvents(
 }
 
 /**
- * Query families that server events keep fresh. After a websocket reconnect these may have missed events and are
- * refetched; everything else is either self-polling (tasks while live, runtime install, remote status, import sources)
- * or not touched by events at all, so it stays as it is.
+ * Query families that a missed server event cannot make stale: they poll on their own (remote status, import sources)
+ * or are static for the session (presets, LUTs, the signed-in identity, cache size, onboarding, folder listings).
+ * After a websocket reconnect everything else is refetched. This is a deny-list on purpose: a query family added
+ * later, or one derived from photos or analysis results (devices, filter options, bystanders, best take, masks),
+ * is resynced by default.
  */
-export const EVENT_DRIVEN_KEYS: ReadonlySet<string> = new Set([
-  'photos',
-  'session',
-  'sessions',
-  'analysis',
-  'groups',
-  'timeline',
-  'libTimeline',
-  'deviceOffsets',
-  'burstFaces',
-  'edits',
-  'people',
-  'photoPeople',
-  'collections',
-  'collectionCount',
-  'taste',
-  'hardware',
-  'runtime',
-  'models',
-  'settings',
-  'lan',
-  'assistant',
-  'tasks',
-])
+export const NO_RESYNC_KEYS: ReadonlySet<string> = new Set(['presets', 'luts', 'auth', 'cache', 'onboarding', 'remote', 'import', 'fs'])
 
 /** Refetch everything an event may have changed while the socket was down. */
 export function resyncAfterReconnect(qc: QueryClient): Promise<void> {
-  return qc.invalidateQueries({ predicate: (q) => EVENT_DRIVEN_KEYS.has(String(q.queryKey[0])) })
+  return qc.invalidateQueries({ predicate: (q) => !NO_RESYNC_KEYS.has(String(q.queryKey[0])) })
 }
 
 /** Find current values for the given ids from any cached photo list. */

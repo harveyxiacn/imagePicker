@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EVENT_DRIVEN_KEYS } from '@/lib/cache'
+import { NO_RESYNC_KEYS } from '@/lib/cache'
 import { socketConfig, startEvents, type SocketLike } from './events'
 
 class FakeSocket implements SocketLike {
@@ -107,7 +107,7 @@ describe('startEvents', () => {
     stop()
   })
 
-  it('resyncs only after a reconnect, and only the event-driven query families', () => {
+  it('resyncs only after a reconnect, and skips the static and self-polling query families', () => {
     const qc = new QueryClient()
     const keys: unknown[][] = [
       ['photos', 1, {}],
@@ -115,6 +115,8 @@ describe('startEvents', () => {
       ['groups', 1],
       ['analysis', 'status', 1],
       ['tasks'],
+      ['bystanders', 7],
+      ['filterOptions', 1],
       ['presets'],
       ['luts'],
       ['auth', 'me'],
@@ -130,8 +132,8 @@ describe('startEvents', () => {
     sockets[0].drop()
     vi.advanceTimersByTime(1000)
     sockets[1].open()
-    expect(stale()).toEqual(['photos', 'session', 'groups', 'analysis', 'tasks'])
-    for (const k of keys) expect(EVENT_DRIVEN_KEYS.has(String(k[0])) === (stale().includes(String(k[0])))).toBe(true)
+    expect(stale()).toEqual(['photos', 'session', 'groups', 'analysis', 'tasks', 'bystanders', 'filterOptions'])
+    for (const k of keys) expect(NO_RESYNC_KEYS.has(String(k[0]))).toBe(!stale().includes(String(k[0])))
     stop()
   })
 
