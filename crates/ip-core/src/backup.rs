@@ -333,11 +333,19 @@ fn backup_into(c: &Connection, dir: &Path) -> Result<BackupInfo> {
     let res = c
         .execute("VACUUM INTO ?1", [tmp.to_string_lossy()])
         .map_err(CoreError::from)
-        .and_then(|_| std::fs::rename(&tmp, &dest).map_err(CoreError::from));
+        .and_then(|_| {
+            // flushed before the rename, so a complete-looking backup is complete after a power cut
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&tmp)?
+                .sync_all()?;
+            std::fs::rename(&tmp, &dest).map_err(CoreError::from)
+        });
     if let Err(e) = res {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
+    crate::xmp::sync_parent_dir(&dest);
     prune(dir, AUTO, KEEP);
     info_of(&dest).ok_or_else(|| CoreError::Internal(anyhow::anyhow!("backup vanished")))
 }

@@ -772,3 +772,85 @@ async fn reject_to_the_recycle_bin_goes_through_the_trait() {
     assert!(!ph["a.jpg"].missing && !ph["a.jpg"].companions[0].missing);
     assert_eq!(ph["a.jpg"].flag, -1);
 }
+
+fn reject_req(sid: i64) -> RejectFilesRequest {
+    RejectFilesRequest {
+        session_id: sid,
+        ids: None,
+        mode: "folder".into(),
+        confirm: true,
+    }
+}
+
+async fn flag_rejected(core: &Arc<Core>, id: i64) {
+    core.patch_photos(PatchRequest {
+        ids: vec![id],
+        user_rating: None,
+        flag: Some(-1),
+        color_label: None,
+    })
+    .await
+    .unwrap();
+}
+
+/// Reject (folder mode) must not interleave with a rescan: it holds the rescan lock while it
+/// moves files and updates the catalog.
+#[tokio::test(flavor = "multi_thread")]
+async fn reject_waits_for_a_running_rescan() {
+    let e = env();
+    make_library(e.src.path());
+    let d = e.src.path().to_path_buf();
+    let sid = import_dir(&e.core, &d).await;
+    let ph = photos(&e.core, sid).await;
+    flag_rejected(&e.core, ph["a.jpg"].id).await;
+    let total = ph.len();
+    let guard = e.core.files.rescan_lock.lock().await;
+    let core = e.core.clone();
+    let task = tokio::spawn(async move { core.reject_files(reject_req(sid)).await });
+    // bounded negative wait: with the lock held, nothing may have been moved yet
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !task.is_finished(),
+        "reject ran while the rescan lock was held"
+    );
+    assert!(d.join("a.jpg").is_file() && !d.join("_rejected").exists());
+    drop(guard);
+    let rep = tokio::time::timeout(WAIT * 4, task)
+        .await
+        .expect("reject finished")
+        .unwrap()
+        .unwrap();
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    assert!(d.join("_rejected/a.jpg").is_file() && !d.join("a.jpg").exists());
+    e.core.rescan_session(sid).await.unwrap();
+    assert_eq!(photos(&e.core, sid).await.len(), total);
+    assert_eq!(
+        count(&e.core, "SELECT COUNT(*) FROM photo WHERE missing=1").await,
+        0
+    );
+}
+
+/// A row flagged missing (a refresh that ran between the rename and the catalog update) is
+/// found again once reject has moved the file to its new path.
+#[tokio::test(flavor = "multi_thread")]
+async fn reject_to_a_folder_clears_missing() {
+    let e = env();
+    make_library(e.src.path());
+    let d = e.src.path();
+    let sid = import_dir(&e.core, d).await;
+    let ph = photos(&e.core, sid).await;
+    let a = ph["a.jpg"].id;
+    flag_rejected(&e.core, a).await;
+    e.core
+        .db
+        .call(move |c| {
+            c.execute("UPDATE photo SET missing=1 WHERE id=?1", [a])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let rep = e.core.reject_files(reject_req(sid)).await.unwrap();
+    assert!(rep.errors.is_empty(), "{:?}", rep.errors);
+    assert!(d.join("_rejected/a.jpg").is_file());
+    assert!(!photos(&e.core, sid).await["a.jpg"].missing);
+}

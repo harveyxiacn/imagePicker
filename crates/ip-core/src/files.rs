@@ -206,21 +206,23 @@ pub fn reconcile_pairs(
         i64,
         Option<String>,
     );
+    if companions.is_some_and(<[i64]>::is_empty) {
+        return Ok(Vec::new());
+    }
+    // Read and write in one IMMEDIATE transaction: a rating made in between must not be lost.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let rows: Vec<Row> = {
         let mut sql = "SELECT c.id, p.id, p.user_rating, COALESCE(p.flag,0), p.color_label,
                       c.user_rating, COALESCE(c.flag,0), c.color_label
                FROM photo c JOIN photo p ON p.id=c.pair_id"
             .to_string();
         if let Some(ids) = companions {
-            if ids.is_empty() {
-                return Ok(Vec::new());
-            }
             sql.push_str(&format!(
                 " WHERE c.id IN ({})",
                 ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
             ));
         }
-        let mut st = conn.prepare(&sql)?;
+        let mut st = tx.prepare(&sql)?;
         let v = st
             .query_map([], |r| {
                 Ok((
@@ -237,7 +239,6 @@ pub fn reconcile_pairs(
             .collect::<rusqlite::Result<Vec<_>>>()?;
         v
     };
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut changed = Vec::new();
     for (cid, pid, pr, pf, pl, cr, cf, cl) in rows {
         let (mut r, mut f, mut l) = (pr, pf, pl.clone());
@@ -717,6 +718,9 @@ impl Core {
             "folder" => false,
             _ => return Err(CoreError::bad_request("mode must be trash or folder")),
         };
+        // Renames fire the file watcher; a rescan between a rename and the catalog update
+        // would list the old path as a new photo. Same lock as import and rescan.
+        let _guard = self.files.rescan_lock.lock().await;
         let (sid, only) = (req.session_id, req.ids.clone());
         // (photo id, its files: the photo first, then companions)
         let groups: Vec<Vec<RejectFile>> = self
@@ -853,7 +857,7 @@ impl Core {
                     for (id, new, trashed) in &moved {
                         if let Some((rel, name)) = new {
                             tx.execute(
-                                "UPDATE photo SET rel_path=?2, file_name=?3 WHERE id=?1",
+                                "UPDATE photo SET rel_path=?2, file_name=?3, missing=0 WHERE id=?1",
                                 params![id, rel, name],
                             )?;
                             tx.execute("DELETE FROM xmp_state WHERE photo_id=?1", [id])?;

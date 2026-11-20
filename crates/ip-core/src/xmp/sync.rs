@@ -2,6 +2,7 @@
 //! conflict detection by sidecar mtime and the manual `POST /api/xmp/sync`.
 
 use std::collections::BTreeSet;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -314,22 +315,24 @@ fn write_embedded(path: &Path, cat: &CatalogValues) -> std::result::Result<bool,
     let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
     let tmp = tmp_path(path);
     let res = (|| -> std::io::Result<()> {
-        std::fs::write(&tmp, &out)?;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&out)?;
         if let Some(t) = mtime {
-            std::fs::OpenOptions::new()
-                .write(true)
-                .open(&tmp)?
-                .set_modified(t)?;
+            f.set_modified(t)?;
         }
         if let Ok(md) = std::fs::metadata(path) {
             let _ = std::fs::set_permissions(&tmp, md.permissions());
         }
+        // flushed before the rename: a power cut must not leave an empty original
+        f.sync_all()?;
+        drop(f);
         std::fs::rename(&tmp, path)
     })();
     if let Err(e) = res {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!("write {}: {e}", path.display()));
     }
+    super::sync_parent_dir(path);
     Ok(true)
 }
 
