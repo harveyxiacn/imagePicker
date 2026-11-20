@@ -12,6 +12,7 @@ import {
   useHistory,
   type Change,
   type EditablePatch,
+  type EditableKey,
   type HistoryEntry,
 } from './history'
 import { errorText } from '@/lib/errors'
@@ -23,18 +24,82 @@ export function guestBlocked(): boolean {
   return true
 }
 
-/** Optimistically write `side` values of the changes to the cache, then PATCH the server. */
-async function commit(qc: QueryClient, changes: Change[], side: 'before' | 'after', auto = false): Promise<void> {
-  const other = side === 'after' ? 'before' : 'after'
-  patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c[side]])))
-  const source = auto ? (side === 'before' ? 'undo' : 'auto') : undefined
-  try {
-    await Promise.all(groupPatches(changes, side).map((body) => api.patchPhotos(source ? { ...body, source } : body)))
-  } catch (err) {
-    // Roll back the optimistic write and resync.
-    patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c[other]])))
+/** Per-photo tail of the PATCH chain: writes touching the same photo are sent one after the other, in call order. */
+const chains = new Map<number, Promise<unknown>>()
+/** Writes still on the wire (or queued behind another one). */
+let pending = 0
+/** A failed write, or a list refetch we cancelled, left the cache unsynced: refetch once everything has settled. */
+let needsResync = false
+
+/** Run `run` after every earlier write of any of `ids` has settled (whether it succeeded or not). */
+function enqueue(ids: number[], run: () => Promise<unknown>): Promise<unknown> {
+  const prev = Promise.all(ids.map((id) => chains.get(id)))
+  const next = prev.then(run)
+  const tail = next.then(
+    () => undefined,
+    () => undefined,
+  )
+  for (const id of ids) chains.set(id, tail)
+  void tail.then(() => {
+    for (const id of ids) if (chains.get(id) === tail) chains.delete(id)
+  })
+  return next
+}
+
+/**
+ * Stop list refetches that are already in flight: their response was computed before this edit and would put the old
+ * value back over the optimistic one. Only awaited when one is running, so the common case stays synchronous.
+ */
+async function cancelListRefetch(qc: QueryClient): Promise<void> {
+  if (qc.isFetching({ queryKey: qk.photosAll }) === 0) return
+  needsResync = true // the cancelled refetch carried data we no longer have; ask again after the write
+  await qc.cancelQueries({ queryKey: qk.photosAll })
+}
+
+function settleWrite(qc: QueryClient): void {
+  if (--pending === 0 && needsResync) {
+    needsResync = false
     void qc.invalidateQueries({ queryKey: qk.photosAll })
-    useToasts.getState().push('error', errorText(err))
+  }
+}
+
+/** Roll back only photos whose cached value is still the one this write set; a newer edit keeps its value. */
+function rollBack(qc: QueryClient, changes: Change[], side: 'before' | 'after'): void {
+  const other = side === 'after' ? 'before' : 'after'
+  const cached = new Map(findCachedPhotos(qc, changes.map((c) => c.id)).map((p) => [p.id, p]))
+  const back = new Map<number, EditablePatch>()
+  for (const c of changes) {
+    const p = cached.get(c.id)
+    if (!p) continue
+    const mine = Object.entries(c[side]) as [EditableKey, unknown][]
+    if (mine.every(([k, v]) => p[k] === v)) back.set(c.id, c[other])
+  }
+  patchPhotosInCache(qc, back)
+}
+
+/** Optimistically write `side` values of the changes to the cache, then PATCH the server (ordered per photo). */
+async function commit(qc: QueryClient, changes: Change[], side: 'before' | 'after', auto = false): Promise<void> {
+  pending++
+  try {
+    await cancelListRefetch(qc)
+    patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c[side]])))
+    const source = auto ? (side === 'before' ? 'undo' : 'auto') : undefined
+    const byId = new Map(changes.map((c) => [c.id, c]))
+    const results = await Promise.allSettled(
+      groupPatches(changes, side).map((body) =>
+        enqueue(body.ids, () => api.patchPhotos(source ? { ...body, source } : body)).catch((err) => {
+          rollBack(qc, body.ids.map((id) => byId.get(id)!), side)
+          throw err
+        }),
+      ),
+    )
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (failed) {
+      needsResync = true
+      useToasts.getState().push('error', errorText(failed.reason))
+    }
+  } finally {
+    settleWrite(qc)
   }
 }
 
@@ -105,15 +170,22 @@ export async function acceptAiRatings(qc: QueryClient, ids: number[], label: str
   const changes = planAcceptAi(findCachedPhotos(qc, ids))
   if (changes.length === 0) return 0
   useHistory.getState().push({ label, changes, auto: true })
-  patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c.after])))
+  pending++
   try {
-    await api.acceptAi(changes.map((c) => c.id))
+    await cancelListRefetch(qc)
+    patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c.after])))
+    await enqueue(
+      changes.map((c) => c.id),
+      () => api.acceptAi(changes.map((c) => c.id)),
+    )
   } catch (err) {
-    patchPhotosInCache(qc, new Map(changes.map((c) => [c.id, c.before])))
-    void qc.invalidateQueries({ queryKey: qk.photosAll })
+    rollBack(qc, changes, 'after')
+    needsResync = true
     useHistory.getState().drop(changes)
     useToasts.getState().push('error', errorText(err))
     return 0
+  } finally {
+    settleWrite(qc)
   }
   return changes.length
 }

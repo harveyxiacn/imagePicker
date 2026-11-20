@@ -1,5 +1,5 @@
 export const zhCN = {
-  common: { back: '返回', cancel: '取消', close: '关闭', retry: '重试', soon: '后续版本提供', save: '保存' },
+  common: { back: '返回', cancel: '取消', close: '关闭', retry: '重试', reload: '重新加载', pageFailed: '无法加载此页面。服务器可能已重启或更新，请重新加载后再试。', soon: '后续版本提供', save: '保存' },
   app: {
     language: '切换语言',
     theme: '主题：{{v}}（点击切换）',
