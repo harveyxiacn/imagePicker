@@ -1095,6 +1095,50 @@ async fn lan_info_has_urls_and_qr() {
     assert!(v["qr_svg"].is_null());
 }
 
+#[tokio::test]
+async fn parallel_login_burst_cannot_outrun_the_rate_limit() {
+    let e = env();
+    let app = e.lan_app(|_| {});
+    // 40 simultaneous wrong passwords from one peer: only the allowed number may be evaluated
+    // (a verification answers 401), the rest are refused up front.
+    let burst = (0..40).map(|i| {
+        let app = &app;
+        async move { login(app, &format!("bad password {i}")).await }
+    });
+    let out = futures_util::future::join_all(burst).await;
+    let evaluated = out
+        .iter()
+        .filter(|r| r.status == StatusCode::UNAUTHORIZED)
+        .count();
+    let refused: Vec<&Resp> = out
+        .iter()
+        .filter(|r| r.status == StatusCode::TOO_MANY_REQUESTS)
+        .collect();
+    assert_eq!(
+        evaluated,
+        ServerOptions::default().login_max_failures,
+        "evaluated attempts"
+    );
+    assert_eq!(evaluated + refused.len(), 40, "unexpected statuses");
+    for r in refused {
+        assert_eq!(r.code(), "too_many_requests");
+        assert!(r.headers.get(header::RETRY_AFTER).is_some());
+    }
+    // the flooding peer stays locked out, a different address logs in
+    assert_eq!(
+        login(&app, OWNER_PW).await.status,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    let r = send(&app, {
+        let mut q = post("/api/auth/login", json!({"password": OWNER_PW}));
+        q.peer = Some("192.168.1.99:40000");
+        q
+    })
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["role"], "owner");
+}
+
 // ------------------------------------------------------------------ spawn / WS
 
 #[tokio::test]
