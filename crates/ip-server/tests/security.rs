@@ -1251,3 +1251,152 @@ async fn plain_http_peer_is_loopback_in_dev_mode_over_tcp() {
     assert!(out.starts_with("HTTP/1.1 401"), "{out}");
     server.shutdown().await.unwrap();
 }
+
+/// Plain-HTTP login over TCP: the `name=value` of the session cookie.
+async fn tcp_login(addr: SocketAddr, pw: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let body = json!({ "password": pw }).to_string();
+    let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let req = format!(
+        "POST /api/auth/login HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    s.write_all(req.as_bytes()).await.unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).await.unwrap();
+    assert!(out.starts_with("HTTP/1.1 200"), "{out}");
+    out.lines()
+        .find(|l| l.to_ascii_lowercase().starts_with("set-cookie:"))
+        .and_then(|l| l.split_once(':'))
+        .map(|(_, v)| v.trim().split(';').next().unwrap().to_string())
+        .expect("cookie")
+}
+
+#[tokio::test]
+async fn websocket_withholds_owner_events_from_guests() {
+    use futures_util::{SinkExt, StreamExt};
+    use ip_core::events::Event;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let e = env();
+    // LAN mode with port 0 takes the stored port (7878), which other tests use at the same
+    // time: ask the OS for a free one instead.
+    let port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let cfg = ServerConfig {
+        port,
+        lan: true,
+        password: Some(OWNER_PW.into()),
+        guest_password: Some(GUEST_PW.into()),
+        ..Default::default()
+    };
+    let server = spawn_with_core(e.core.clone(), &cfg).await.unwrap();
+    server
+        .security
+        .set_lan(LanSettings {
+            enabled: true,
+            port: 7878,
+            guest_enabled: true,
+        })
+        .unwrap();
+    // the server binds 0.0.0.0 in LAN mode: connect through loopback
+    let addr = SocketAddr::from(([127, 0, 0, 1], server.addr.port()));
+    let url = format!("ws://{addr}/api/events");
+    let connect = |cookie: String| {
+        let url = url.clone();
+        async move {
+            let mut req = url.as_str().into_client_request().unwrap();
+            req.headers_mut().insert("cookie", cookie.parse().unwrap());
+            tokio_tungstenite::connect_async(req).await.expect("ws").0
+        }
+    };
+    let mut owner = connect(tcp_login(addr, OWNER_PW).await).await;
+    let mut guest = connect(tcp_login(addr, GUEST_PW).await).await;
+
+    // next frame's `type`, within a generous deadline
+    async fn next_type<S>(ws: &mut S) -> String
+    where
+        S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+            + Unpin,
+    {
+        let deadline = Duration::from_secs(120);
+        loop {
+            let m = tokio::time::timeout(deadline, ws.next())
+                .await
+                .expect("timed out waiting for an event")
+                .expect("socket closed")
+                .expect("socket error");
+            if let Message::Text(t) = m {
+                let v: Value = serde_json::from_str(&t).unwrap();
+                return v["type"].as_str().unwrap().to_string();
+            }
+        }
+    }
+
+    // Barrier: the server subscribes after the upgrade, so keep emitting a harmless event until
+    // both sockets have received one.
+    for ws in [&mut owner, &mut guest] {
+        loop {
+            e.core.events.emit(Event::CollectionsUpdated {});
+            if let Ok(t) =
+                tokio::time::timeout(Duration::from_millis(200), next_type(&mut *ws)).await
+            {
+                assert_eq!(t, "collections.updated");
+                break;
+            }
+        }
+    }
+    // a guest's viewport frame is ignored (it must not reorder the owner's thumbnail work)
+    guest
+        .send(Message::Text(r#"{"type":"viewport","ids":[1,2]}"#.into()))
+        .await
+        .unwrap();
+
+    e.core.events.emit(Event::SettingsUpdated {
+        settings: json!({ "roots": ["/home/secret/photos"] }),
+    });
+    e.core.events.emit(Event::PeopleUpdated { session_id: 1 });
+    e.core.events.emit(Event::PhotosAdded {
+        session_id: 1,
+        count: 3,
+    });
+
+    // The server sends frames in emission order: reading up to `photos.added` shows everything
+    // that was delivered before it.
+    async fn until_photos_added<S>(ws: &mut S) -> Vec<String>
+    where
+        S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+            + Unpin,
+    {
+        let mut seen = Vec::new();
+        loop {
+            let t = next_type(&mut *ws).await;
+            let done = t == "photos.added";
+            seen.push(t);
+            if done {
+                return seen;
+            }
+        }
+    }
+    let owner_seen = until_photos_added(&mut owner).await;
+    assert!(
+        owner_seen.contains(&"settings.updated".to_string()),
+        "{owner_seen:?}"
+    );
+    assert!(
+        owner_seen.contains(&"people.updated".to_string()),
+        "{owner_seen:?}"
+    );
+    let guest_seen = until_photos_added(&mut guest).await;
+    assert!(
+        guest_seen
+            .iter()
+            .all(|t| t == "photos.added" || t == "collections.updated"),
+        "guest received {guest_seen:?}"
+    );
+    server.shutdown().await.unwrap();
+}
