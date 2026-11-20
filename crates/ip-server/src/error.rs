@@ -45,10 +45,21 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// A missing original is reported without its absolute path (the photo row already names the
+/// file); the full text goes to the log.
+fn path_free_not_found(m: &str) -> String {
+    const MISSING: &str = "original file is missing";
+    if m.starts_with(MISSING) {
+        tracing::warn!(detail = %m, "{MISSING}");
+        return MISSING.to_string();
+    }
+    m.to_string()
+}
+
 impl From<CoreError> for ApiError {
     fn from(e: CoreError) -> Self {
         match &e {
-            CoreError::NotFound(m) => Self::not_found(m.clone()),
+            CoreError::NotFound(m) => Self::not_found(path_free_not_found(m)),
             CoreError::BadRequest(m) => Self::bad_request(m.clone()),
             CoreError::Unprocessable(m) => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, "unprocessable", m.clone())
@@ -84,8 +95,13 @@ impl From<CoreError> for ApiError {
                 Self::new(StatusCode::CONFLICT, "confirmation_required", m.clone())
             }
             CoreError::Internal(_) => {
-                tracing::error!(error = %e, "internal error");
-                Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string())
+                // the whole anyhow chain (file names, OS errors) stays in the log
+                tracing::error!(error = ?e, "internal error");
+                Self::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal",
+                    "internal server error",
+                )
             }
         }
     }
