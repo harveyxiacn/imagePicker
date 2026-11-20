@@ -49,16 +49,16 @@ pub fn split_command_line(s: &str) -> Vec<String> {
     out
 }
 
-/// Arguments appended to a command that has no `{token}` placeholder.
-pub fn serve_args(token: &str, parent_pid: u32, models_dir: Option<&Path>) -> Vec<String> {
+/// Arguments appended to a command that has no `{token}` placeholder. The auth token is not
+/// among them: it would be readable by other local users in the process list. The worker reads
+/// it from `IP_WORKER_TOKEN`, which [`spawn_with_env`] always sets.
+pub fn serve_args(parent_pid: u32, models_dir: Option<&Path>) -> Vec<String> {
     let mut a: Vec<String> = [
         "serve",
         "--host",
         "127.0.0.1",
         "--port",
         "0",
-        "--token",
-        token,
         "--parent-pid",
         &parent_pid.to_string(),
     ]
@@ -74,7 +74,7 @@ pub fn serve_args(token: &str, parent_pid: u32, models_dir: Option<&Path>) -> Ve
 
 /// Resolves the argv of the worker. `cmd_override` is `IMAGEPICKER_WORKER_CMD`: if it contains
 /// `{token}` it is used verbatim (`{token}` and `{parent_pid}` substituted), otherwise the
-/// `serve ...` arguments are appended to it. Without an override: `uv run imagepicker-ai serve ...`.
+/// `serve ...` arguments are appended to it (the token then only travels in the environment). Without an override: `uv run imagepicker-ai serve ...`.
 pub fn build_argv(
     cmd_override: Option<&str>,
     token: &str,
@@ -91,7 +91,7 @@ pub fn build_argv(
                         .replace("{parent_pid}", &parent_pid.to_string());
                 }
             } else {
-                argv.extend(serve_args(token, parent_pid, models_dir));
+                argv.extend(serve_args(parent_pid, models_dir));
             }
             argv
         }
@@ -100,7 +100,7 @@ pub fn build_argv(
                 .iter()
                 .map(|s| s.to_string())
                 .collect();
-            argv.extend(serve_args(token, parent_pid, models_dir));
+            argv.extend(serve_args(parent_pid, models_dir));
             argv
         }
     }
@@ -422,7 +422,8 @@ mod tests {
     fn default_argv_uses_uv() {
         let a = build_argv(None, "T", 42, None);
         assert_eq!(&a[..3], ["uv", "run", "imagepicker-ai"]);
-        assert!(a.windows(2).any(|w| w == ["--token", "T"]));
+        // the token stays off the command line (it travels as IP_WORKER_TOKEN)
+        assert!(!a.iter().any(|x| x == "--token" || x == "T"), "{a:?}");
         assert!(a.windows(2).any(|w| w == ["--parent-pid", "42"]));
         assert!(a.windows(2).any(|w| w == ["--port", "0"]));
     }
@@ -432,6 +433,7 @@ mod tests {
         let a = build_argv(Some("python -m imagepicker_ai"), "T", 1, None);
         assert_eq!(&a[..3], ["python", "-m", "imagepicker_ai"]);
         assert_eq!(a[3], "serve");
+        assert!(!a.iter().any(|x| x == "--token" || x == "T"), "{a:?}");
         let b = build_argv(
             Some("fake --token {token} --parent {parent_pid}"),
             "SECRET",
