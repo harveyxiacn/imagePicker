@@ -95,12 +95,13 @@ impl From<CoreError> for ApiError {
                 Self::new(StatusCode::CONFLICT, "confirmation_required", m.clone())
             }
             CoreError::Internal(_) => {
-                // the whole anyhow chain (file names, OS errors) stays in the log
+                // The whole anyhow chain stays in the log. The body keeps the reason (the UI
+                // shows it next to its generic line) with folders and photo names masked.
                 tracing::error!(error = ?e, "internal error");
                 Self::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal",
-                    "internal server error",
+                    ip_core::logging::scrub(&e.to_string()),
                 )
             }
         }

@@ -450,7 +450,7 @@ async fn error_bodies_do_not_leak_server_paths() {
         assert_path_free(&uri, &String::from_utf8_lossy(&r.body));
     }
 
-    // an internal error carries the full anyhow chain in the log, not in the body
+    // an internal error keeps its reason in the body, with folders and photo names masked
     let err = CoreError::Internal(
         anyhow::anyhow!("open C:\\Users\\ann\\AppData\\catalog.db")
             .context("read /home/ann/photos/a.jpg"),
@@ -460,5 +460,9 @@ async fn error_bodies_do_not_leak_server_paths() {
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let v: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["error"]["code"], "internal");
-    assert_path_free("internal", &String::from_utf8_lossy(&body));
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(msg.starts_with("read "), "the reason is kept: {msg}");
+    for leak in ["home", "ann", "photos", "a.jpg", "Users", "AppData", "C:"] {
+        assert!(!msg.contains(leak), "{leak} in {msg}");
+    }
 }
