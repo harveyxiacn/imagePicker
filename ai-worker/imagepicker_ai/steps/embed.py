@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from PIL import Image
 
+from ..cpu_fallback import CpuFallback
 from ..errors import ModelUnavailable, OutOfMemory
 from ..hw import HardwareInfo
 from ..models.manager import ModelManager
@@ -169,16 +172,28 @@ class Embedder:
     """Owns model selection, loading through the ModelManager, batching and OOM backoff."""
 
     def __init__(
-        self, manager: ModelManager, hw: HardwareInfo, batch_size: int = 32, backend: str = "auto"
+        self,
+        manager: ModelManager,
+        hw: HardwareInfo,
+        batch_size: int = 32,
+        backend: str = "auto",
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.manager = manager
         self.hw = hw
         self.batch_size = batch_size
         self.backend = backend  # auto | onnx | torch
-        self.force_cpu = hw.device == "cpu"
+        self.fallback = CpuFallback(
+            hw.device == "cpu", on_retry_gpu=lambda: manager.unload(only_idle=True), clock=clock
+        )
         self._lock = threading.Lock()  # one inference at a time per embedder
         self.active_model: str | None = None
         self.active_providers: list[str] = []
+
+    @property
+    def force_cpu(self) -> bool:
+        """CPU provider wanted now: CPU-only hardware, or inside an OOM cool-down."""
+        return self.fallback.active
 
     # ---- model selection
     def required_models(self) -> list[str]:
@@ -266,7 +281,7 @@ class Embedder:
                     if not self.force_cpu:
                         log.warning("OOM at batch size 1; falling back to CPU")
                         self.manager.unload(only_idle=True)
-                        self.force_cpu = True
+                        self.fallback.trip()
                         self.batch_size = 8
                         continue
                     raise OutOfMemory(str(e)) from e

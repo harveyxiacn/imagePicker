@@ -123,7 +123,7 @@ class HairTransfer:
                 raise
             log.warning("OOM in hair; retrying on CPU")
             self.manager.unload(only_idle=True)
-            self.masks.force_cpu = True
+            self.masks.fallback.trip()
             return fn(req, check) if check is not None else fn(req)
 
     # ------------------------------------------------------------------ rank
