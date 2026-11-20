@@ -1804,6 +1804,7 @@ export const en: Messages = {
     hairPoseTooDifferent: 'The head pose in that photo is too different for a hair swap.',
     hairPoseUnknown: 'The head pose in one of the photos could not be determined.',
     hairPersonMismatch: 'That photo shows a different person, so its hair cannot be used here.',
+    invalidResponse: 'The service sent a page instead of data. Reload the page; if it keeps happening, sign in again or check the proxy in front of the app.',
     unknown: 'Something went wrong. Please try again.',
     withDetail: '{{message}} ({{detail}})',
   },
