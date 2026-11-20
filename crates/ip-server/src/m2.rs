@@ -1,8 +1,7 @@
 //! M2 routes (docs/api-contract-m2.md section C.2).
 
-use axum::body::Body;
-use axum::extract::State;
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::extract::{Request, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use ip_core::{
@@ -186,27 +185,17 @@ pub struct CropParams {
     s: Option<u32>,
 }
 
+/// `GET /api/faces/{id}/crop?s=128|256`: the cached square crop, served like the other cached
+/// images (streamed, `ETag`, 304, `private`). The URL carries no version, so the browser
+/// revalidates after a minute: a face that was re-detected or re-cropped shows up within it.
 pub async fn face_crop(
     State(st): State<AppState>,
     ApiPath(id): ApiPath<i64>,
     ApiQuery(q): ApiQuery<CropParams>,
+    req: Request,
 ) -> ApiResult<Response> {
     let path = st.core.face_crop(id, q.s.unwrap_or(128)).await?;
-    let bytes = tokio::fs::read(&path).await.map_err(|e| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal",
-            format!("cache read failed: {e}"),
-        )
-    })?;
-    let mut resp = Response::new(Body::from(bytes));
-    let h = resp.headers_mut();
-    h.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
-    h.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=86400"),
-    );
-    Ok(resp)
+    crate::routes::jpeg_file(path, false, false, req).await
 }
 
 #[derive(Deserialize)]
