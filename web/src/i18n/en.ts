@@ -1,7 +1,7 @@
 import type { Messages } from './zh-CN'
 
 export const en: Messages = {
-  common: { back: 'Back', cancel: 'Cancel', close: 'Close', retry: 'Retry', soon: 'Coming in a later release', save: 'Save' },
+  common: { back: 'Back', cancel: 'Cancel', close: 'Close', retry: 'Retry', reload: 'Reload', pageFailed: 'This page could not be loaded. The server may have been restarted or updated: reload to try again.', soon: 'Coming in a later release', save: 'Save' },
   app: {
     language: 'Switch language',
     theme: 'Theme: {{v}} (click to change)',

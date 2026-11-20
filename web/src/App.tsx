@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { authHooks } from '@/api/client'
@@ -11,20 +11,15 @@ import { showsBottomNav } from '@/lib/layout'
 import { useIsMobile } from '@/lib/useLayout'
 import { onAssistantDone } from '@/lib/assistantRun'
 import { handleXmpConflict } from '@/lib/xmp'
-import { Login } from '@/pages/Login'
-import { Settings } from '@/pages/Settings'
 import { BottomNav } from '@/components/mobile/BottomNav'
+import { RouteShell } from '@/components/RouteShell'
 import { CatalogRecovery } from '@/components/CatalogRecovery'
 import { FaceConsentDialog } from '@/components/FaceConsentDialog'
 import { Onboarding } from '@/components/Onboarding'
 import { useAssistant } from '@/stores/assistant'
 import { genOnDone, genOnTask } from '@/lib/gen'
-import { BestTake } from '@/pages/BestTake'
 import { Home } from '@/pages/Home'
-import { Edit } from '@/pages/Edit'
 import { Library } from '@/pages/Library'
-import { People } from '@/pages/People'
-import { Taste } from '@/pages/Taste'
 import { CommandPalette } from '@/components/CommandPalette'
 import { Toasts } from '@/components/Toasts'
 import { useCardImport } from '@/stores/cardImport'
@@ -32,6 +27,14 @@ import { useToasts } from '@/stores/toasts'
 import { useUi } from '@/stores/ui'
 import i18n from '@/i18n'
 import { activateOverrides } from '@/lib/shortcuts'
+
+// Pages that are not needed for the first paint load on demand (Home and Library stay in the main chunk).
+const Login = lazy(() => import('@/pages/Login').then((m) => ({ default: m.Login })))
+const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m.Settings })))
+const BestTake = lazy(() => import('@/pages/BestTake').then((m) => ({ default: m.BestTake })))
+const Edit = lazy(() => import('@/pages/Edit').then((m) => ({ default: m.Edit })))
+const People = lazy(() => import('@/pages/People').then((m) => ({ default: m.People })))
+const Taste = lazy(() => import('@/pages/Taste').then((m) => ({ default: m.Taste })))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -133,17 +136,19 @@ function Shell() {
     <>
       <div className="flex h-full flex-col">
         <div className="relative min-h-0 flex-1">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/s/:sessionId" element={<Library />} />
-            <Route path="/s/:sessionId/people" element={<People />} />
-            <Route path="/s/:sessionId/edit/:photoId" element={<Edit />} />
-            <Route path="/s/:sessionId/besttake/:burstId" element={<BestTake />} />
-            <Route path="/taste" element={<Taste />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <RouteShell resetKey={pathname}>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/s/:sessionId" element={<Library />} />
+              <Route path="/s/:sessionId/people" element={<People />} />
+              <Route path="/s/:sessionId/edit/:photoId" element={<Edit />} />
+              <Route path="/s/:sessionId/besttake/:burstId" element={<BestTake />} />
+              <Route path="/taste" element={<Taste />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </RouteShell>
         </div>
         {isMobile && showsBottomNav(pathname) && <BottomNav />}
       </div>

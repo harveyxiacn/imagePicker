@@ -14,6 +14,7 @@ export default defineConfig(({ mode }) => ({
         ? undefined
         : { '/api': { target: 'http://127.0.0.1:7878', changeOrigin: true, ws: true } },
   },
-  build: { chunkSizeWarningLimit: 900 },
+  // Largest chunk after the route split is the main one (~694 kB); keep the warning just above it so growth shows up.
+  build: { chunkSizeWarningLimit: 720 },
   test: { environment: 'node', include: ['src/**/*.test.ts'], globals: false },
 }))
