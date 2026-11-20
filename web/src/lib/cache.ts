@@ -113,16 +113,23 @@ export interface ApplyDeps {
 
 /** Up to this many `analysis.updated` ids are re-fetched individually; more triggers a throttled list refetch. */
 export const ANALYSIS_DIRECT_FETCH_MAX = 40
-const LIST_REFETCH_MS = 1500
-const listTimers = new Map<number, ReturnType<typeof setTimeout>>()
+export const LIST_REFETCH_MS = 1500
+// per client, so two clients (tests) never share a pending timer
+const listTimers = new WeakMap<QueryClient, Map<number, ReturnType<typeof setTimeout>>>()
 
-/** At most one background list refetch per session per window (trailing), so streaming results never thrash the grid. */
+/**
+ * At most one background list refetch per session per window (trailing), so streaming results never thrash the grid.
+ * The trailing edge matters: the last event of a burst (e.g. the end of an import) is always followed by a refetch.
+ */
 function scheduleListRefetch(qc: QueryClient, sid: number): void {
-  if (listTimers.has(sid)) return
-  listTimers.set(
+  let timers = listTimers.get(qc)
+  if (!timers) listTimers.set(qc, (timers = new Map()))
+  if (timers.has(sid)) return
+  const mine = timers
+  mine.set(
     sid,
     setTimeout(() => {
-      listTimers.delete(sid)
+      mine.delete(sid)
       void qc.invalidateQueries({ queryKey: ['photos', sid] })
     }, LIST_REFETCH_MS),
   )
@@ -150,7 +157,7 @@ export interface ApplyResult {
 /**
  * Coalesce a batch of server events and apply them to the query cache:
  *  - `photos.updated` + `thumbs.ready` merge per photo id (later wins) into ONE cache pass
- *  - `photos.added` -> one refetch per session
+ *  - `photos.added` -> session counts refresh now, the list refetch is throttled (`scheduleListRefetch`)
  *  - `session.updated` -> last write per session wins
  *  - `task.progress` -> last event per task id is forwarded
  */
@@ -275,7 +282,8 @@ export function applyEvents(
   }
 
   for (const sid of added) {
-    void qc.invalidateQueries({ queryKey: ['photos', sid] })
+    // an import streams these ~10x/s: counts stay live, the (20k-row) list is re-paged at most once per window
+    scheduleListRefetch(qc, sid)
     void qc.invalidateQueries({ queryKey: qk.session(sid) })
   }
 
@@ -356,6 +364,20 @@ export function applyEvents(
     sessions: sessions.size,
     tasks: tasks.size,
   }
+}
+
+/**
+ * Query families that a missed server event cannot make stale: they poll on their own (remote status, import sources)
+ * or are static for the session (presets, LUTs, the signed-in identity, cache size, onboarding, folder listings).
+ * After a websocket reconnect everything else is refetched. This is a deny-list on purpose: a query family added
+ * later, or one derived from photos or analysis results (devices, filter options, bystanders, best take, masks),
+ * is resynced by default.
+ */
+export const NO_RESYNC_KEYS: ReadonlySet<string> = new Set(['presets', 'luts', 'auth', 'cache', 'onboarding', 'remote', 'import', 'fs'])
+
+/** Refetch everything an event may have changed while the socket was down. */
+export function resyncAfterReconnect(qc: QueryClient): Promise<void> {
+  return qc.invalidateQueries({ predicate: (q) => !NO_RESYNC_KEYS.has(String(q.queryKey[0])) })
 }
 
 /** Find current values for the given ids from any cached photo list. */

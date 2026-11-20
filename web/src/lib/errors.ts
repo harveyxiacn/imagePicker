@@ -14,6 +14,7 @@ const CODE_KEYS: Record<string, string> = {
   invalid_code: 'errors.invalidCode',
   pair_expired: 'errors.pairExpired',
   host_unreachable: 'errors.hostUnreachable',
+  invalid_response: 'errors.invalidResponse',
   rate_limited: 'errors.rateLimited',
   too_many_requests: 'errors.rateLimited',
   hair_pose_too_different: 'errors.hairPoseTooDifferent',
