@@ -809,7 +809,10 @@ async fn reject_waits_for_a_running_rescan() {
     let task = tokio::spawn(async move { core.reject_files(reject_req(sid)).await });
     // bounded negative wait: with the lock held, nothing may have been moved yet
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(!task.is_finished(), "reject ran while the rescan lock was held");
+    assert!(
+        !task.is_finished(),
+        "reject ran while the rescan lock was held"
+    );
     assert!(d.join("a.jpg").is_file() && !d.join("_rejected").exists());
     drop(guard);
     let rep = tokio::time::timeout(WAIT * 4, task)
