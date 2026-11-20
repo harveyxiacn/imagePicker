@@ -38,13 +38,14 @@ import cv2
 import numpy as np
 
 from ..beauty import landmarks as lmk
+from ..cancel import Check
 from ..facemesh import FaceObs, pose_from_landmarks, wrap_pitch
 from ..imgio import Box
 from ..masks.filters import smoothstep
 from ..masks.nets import CLS_FACE_SKIN, CLS_HAIR
 from . import align
 from .blend import boundary_ring, seam_metrics
-from .compose import Components
+from .compose import Components, guarded
 from .region import _ell, _keep_component, oval_of
 
 MIN_FACE_PX = 48
@@ -222,9 +223,18 @@ def hair_compose_arrays(
     d_face: Box,
     comp: Components,
     fill: FillFn | None = None,
+    check: Check | None = None,
 ) -> HairOut:
     th, tw = target.shape[:2]
     dh, dw = donor.shape[:2]
+    comp = guarded(comp, check)
+    raw_fill = fill or telea_fill
+
+    def fill_region(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        if check is not None:
+            check()  # the fill may be a LaMa pass
+        return raw_fill(rgb, mask)
+
     if min(t_face[2], d_face[2]) < MIN_FACE_PX:
         return _fail("face_too_small")
     if comp.parts is None:
@@ -311,7 +321,7 @@ def hair_compose_arrays(
     # ---- background fill where the target hair was bigger than the donor's
     base = t_crop
     if fill_m.any():
-        base = (fill or telea_fill)(t_crop, fill_m)
+        base = fill_region(t_crop, fill_m)
         if base.shape != t_crop.shape:
             base = cv2.resize(base, (cw, ch), interpolation=cv2.INTER_LINEAR)
 

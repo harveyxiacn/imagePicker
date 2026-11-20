@@ -95,7 +95,7 @@ class BestTake:
         return Components(mesh.observe, parts, matte, detect)
 
     # ------------------------------------------------------------------ run
-    def _run(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _run(self, req: dict[str, Any], check: Check | None = None) -> dict[str, Any]:
         req["out_dir"].mkdir(parents=True, exist_ok=True)
         base = load_rgb(req["base"])
         src = load_rgb(req["source"])
@@ -111,8 +111,10 @@ class BestTake:
             bf = tuple(v * k for v in bf)  # type: ignore[assignment]
             sf = tuple(v * k for v in sf)  # type: ignore[assignment]
         ph, pw = base.shape[:2]
+        if check is not None:
+            check()  # before the model handles are even acquired
         comp = self._components()
-        out = compose_arrays(base, src, bf, sf, comp)  # type: ignore[arg-type]
+        out = compose_arrays(base, src, bf, sf, comp, check)  # type: ignore[arg-type]
         if out.patch is None or out.rect is None:
             return {"patch": None, "reason": out.reason or "not_composable"}
         name = (
@@ -131,7 +133,7 @@ class BestTake:
         if check is not None:
             check()
         try:
-            return self._run(req)
+            return self._run(req, check)
         except Exception as e:  # noqa: BLE001
             if not _is_oom(e):
                 raise
@@ -140,9 +142,9 @@ class BestTake:
             if check is not None:
                 check()  # a cancelled request does not get a second, CPU retry
             log.warning("OOM in besttake.compose; retrying on CPU")
-            self.manager.unload()
-            self.masks.force_cpu = True
-            return self._run(req)
+            self.manager.unload(only_idle=True)
+            self.masks.fallback.trip()
+            return self._run(req, check)
 
     async def compose(
         self,

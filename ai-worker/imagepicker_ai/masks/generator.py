@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -32,6 +33,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from ..cpu_fallback import CpuFallback
 from ..decode import DecodeError, load_image
 from ..errors import DECODE_FAILED, InvalidParams, ModelUnavailable, OutOfMemory, RpcError
 from ..hw import HardwareInfo
@@ -191,12 +193,23 @@ class _Photo:
 
 
 class MaskGenerator:
-    def __init__(self, manager: ModelManager, hw: HardwareInfo):
+    def __init__(
+        self, manager: ModelManager, hw: HardwareInfo, clock: Callable[[], float] = time.monotonic
+    ):
         self.manager = manager
         self.hw = hw
-        self.force_cpu = hw.device == "cpu"
+        self.fallback = CpuFallback(
+            hw.device == "cpu",
+            on_retry_gpu=lambda: manager.unload(only_idle=True),
+            clock=clock,
+        )
         self.pool = ThreadPoolExecutor(1, thread_name_prefix="mask")
         self._faces: dict[str, FaceAnalyzer] = {}
+
+    @property
+    def force_cpu(self) -> bool:
+        """CPU provider wanted now: CPU-only hardware, or inside an OOM cool-down."""
+        return self.fallback.active
 
     def shutdown(self) -> None:
         self.pool.shutdown(wait=False, cancel_futures=True)
@@ -385,8 +398,8 @@ class MaskGenerator:
                     raise OutOfMemory(str(e)) from e
                 raise
             log.warning("OOM while computing mask %s; retrying on CPU", target)
-            self.manager.unload()
-            self.force_cpu = True
+            self.manager.unload(only_idle=True)
+            self.fallback.trip()
             return self._compute(photo, target, bbox)
 
     def _load_photo(self, req: MaskRequest) -> _Photo:

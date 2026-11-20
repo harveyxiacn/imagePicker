@@ -74,6 +74,9 @@ class ModelManager:
         self._loaded: dict[str, _Loaded] = {}
         self._lock = threading.RLock()
         self._load_locks: dict[str, threading.Lock] = {}
+        # cost of models whose loader is running (outside the lock): `_make_room` counts it, so
+        # two models loading at once cannot both pass the budget check
+        self._reserved: dict[str, int] = {}
 
     # ------------------------------------------------------------------ install state
     def is_installed(self, model_id: str) -> bool:
@@ -136,14 +139,19 @@ class ModelManager:
                     m.last_used = time.monotonic()
                     return m.handle
                 self._make_room(spec, cost_mb)
-            path = self.path(model_id)
-            t0 = time.monotonic()
-            handle = loader(spec, path)
-            log.info("loaded %s in %.2fs", model_id, time.monotonic() - t0)
-            with self._lock:
-                self._loaded[model_id] = _Loaded(
-                    spec, handle, cost_mb if cost_mb is not None else self._cost_mb(spec)
-                )
+                cost = cost_mb if cost_mb is not None else self._cost_mb(spec)
+                self._reserved[model_id] = cost
+            try:
+                path = self.path(model_id)
+                t0 = time.monotonic()
+                handle = loader(spec, path)
+                log.info("loaded %s in %.2fs", model_id, time.monotonic() - t0)
+                with self._lock:
+                    self._loaded[model_id] = _Loaded(spec, handle, cost)
+                    self._reserved.pop(model_id, None)
+            finally:
+                with self._lock:
+                    self._reserved.pop(model_id, None)
             return handle
 
     @contextmanager
@@ -168,6 +176,25 @@ class ModelManager:
                     m.in_use = max(0, m.in_use - 1)
                     m.last_used = time.monotonic()
 
+    @contextmanager
+    def pin(self, model_id: str) -> Iterator[None]:
+        """Mark an already-loaded model in use (an `acquire` user holding the handle across steps).
+
+        Like `lease` it keeps the model out of eviction and idle-only unloads; unlike it, it does not
+        load anything (a model that is not loaded is ignored).
+        """
+        with self._lock:
+            m = self._loaded.get(model_id)
+            if m:
+                m.in_use += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                m = self._loaded.get(model_id)
+                if m:
+                    m.in_use = max(0, m.in_use - 1)
+
     def _make_room(self, spec: ModelSpec, cost_mb: int | None = None) -> None:
         need = cost_mb if cost_mb is not None else self._cost_mb(spec)
         if need > self.budget_mb:
@@ -183,7 +210,7 @@ class ModelManager:
                             f"{spec.exclusive_group})"
                         )
                     self._unload_locked(mid)
-        while self.used_mb() + need > self.budget_mb:
+        while self.used_mb() + sum(self._reserved.values()) + need > self.budget_mb:
             victims = [(mid, m) for mid, m in self._loaded.items() if m.in_use == 0]
             if not victims:
                 raise OutOfMemory(f"cannot fit {spec.id} ({need} MB): all loaded models are in use")
@@ -197,10 +224,17 @@ class ModelManager:
             if model_id in self._loaded:
                 self._loaded[model_id].last_used = time.monotonic()
 
-    def unload(self, model_id: str | None = None) -> list[str]:
-        """Unload one model (or all when None). Returns the ids actually unloaded."""
+    def unload(self, model_id: str | None = None, *, only_idle: bool = False) -> list[str]:
+        """Unload one model (or all when None). Returns the ids actually unloaded.
+
+        Forced by default (the `models.unload` RPC, delete, shutdown). `only_idle=True` skips models
+        that are leased / pinned: the OOM paths use it so that freeing memory for one pool does not
+        close the handle another pool is running on (`OrtHandle.close()` drops the session).
+        """
         with self._lock:
             ids = [model_id] if model_id else list(self._loaded)
+            if only_idle:
+                ids = [i for i in ids if i in self._loaded and self._loaded[i].in_use == 0]
             return [i for i in ids if self._unload_locked(i)]
 
     def _unload_locked(self, model_id: str) -> bool:

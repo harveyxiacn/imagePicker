@@ -261,3 +261,76 @@ def test_not_installed_raises(tmp_path):
     with pytest.raises(ModelUnavailable):
         m.acquire("a", lambda s, p: Handle("a"))
     assert m.list_models()[0]["installed"] is False
+
+
+def test_only_idle_unload_keeps_leased_and_pinned_handles(tmp_path):
+    """The OOM path frees memory without closing a handle another pool is running on."""
+    m = make_manager(tmp_path, budget=2000)
+    made = {n: Handle(n) for n in "abc"}
+    for n in "abc":
+        m.acquire(n, lambda s, p, n=n: made[n])
+    with m.lease("a", lambda s, p: made["a"]), m.pin("b"):
+        assert sorted(m.unload(only_idle=True)) == ["c"]
+        assert made["c"].closed and not made["a"].closed and not made["b"].closed
+        assert m.unload("a", only_idle=True) == []  # named but busy: still skipped
+        assert not made["a"].closed
+    assert sorted(m.unload(only_idle=True)) == ["a", "b"]  # idle again once released
+    assert all(h.closed for h in made.values())
+
+
+def test_forced_unload_still_closes_in_use_handles(tmp_path):
+    m = make_manager(tmp_path, budget=2000)
+    h = Handle("a")
+    m.acquire("a", lambda s, p: h)
+    with m.pin("a"):
+        assert m.unload() == ["a"]  # `models.unload` RPC / shutdown stay forced
+    assert h.closed
+
+
+def test_gen_runtime_pins_the_handle_while_work_runs(tmp_path):
+    """A tiling request keeps its session across steps while another pool hits an OOM."""
+    from imagepicker_ai.runtime import GenRuntime
+
+    m = make_manager(tmp_path, budget=2000)
+    h = Handle("a")
+    m.acquire("a", lambda s, p: h)
+    rt = GenRuntime(m, m.hw)
+    rt.session = lambda model_id, force_cpu=False: h  # type: ignore[method-assign]
+    seen = {}
+
+    def work(handle, tile):
+        seen["freed"] = m.unload(only_idle=True)  # the other pool's OOM path
+        seen["closed"] = handle.closed
+        return "done"
+
+    try:
+        assert rt.run_with_backoff("a", work, 512) == "done"
+    finally:
+        rt.shutdown()
+    assert seen == {"freed": [], "closed": False}
+    assert m.loaded()[0]["in_use"] is False  # released afterwards
+
+
+def test_two_concurrent_loads_cannot_both_pass_the_budget_check(tmp_path):
+    import threading
+
+    m = make_manager(tmp_path, budget=900)  # a (400) + huge2 (600) do not fit together
+    started, release = threading.Event(), threading.Event()
+    done = {}
+
+    def slow(spec, path):
+        started.set()
+        assert release.wait(60)
+        return Handle("a")
+
+    t = threading.Thread(target=lambda: done.setdefault("a", m.acquire("a", slow)))
+    t.start()
+    try:
+        assert started.wait(60)
+        with pytest.raises(OutOfMemory):  # a is still loading: its 400 MB are already spoken for
+            m.acquire("huge2", lambda s, p: Handle("2"))
+    finally:
+        release.set()
+        t.join(60)
+    assert "a" in done
+    assert m.used_mb() == 400 and not m._reserved

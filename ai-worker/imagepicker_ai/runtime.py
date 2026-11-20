@@ -101,7 +101,8 @@ class GenRuntime:
         while True:
             h = self.session(model_id, force_cpu)
             try:
-                return work(h, cur)
+                with self.manager.pin(model_id):  # an OOM elsewhere must not close it mid-request
+                    return work(h, cur)
             except Exception as e:  # noqa: BLE001
                 if not _is_oom(e):
                     raise
