@@ -138,7 +138,7 @@ pub fn resolve_launch(
                 "-m".into(),
                 "imagepicker_ai".into(),
             ];
-            argv.extend(process::serve_args(token, parent_pid, models_dir));
+            argv.extend(process::serve_args(parent_pid, models_dir));
             return Ok(Launch {
                 source: LaunchSource::Runtime,
                 argv,
@@ -219,7 +219,11 @@ mod tests {
         assert!(l.argv[0].contains("python"));
         assert_eq!(&l.argv[1..3], ["-m", "imagepicker_ai"]);
         assert_eq!(l.argv[3], "serve");
-        assert!(l.argv.windows(2).any(|w| w == ["--token", "T"]));
+        assert!(
+            !l.argv.iter().any(|a| a == "--token" || a == "T"),
+            "{:?}",
+            l.argv
+        );
         assert_eq!(l.dir.as_deref(), Some(tmp.path()));
         // no dev repo at all
         let l = resolve_launch(&inputs(None, false, true, Some(&rt)), "T", 1, None).unwrap();

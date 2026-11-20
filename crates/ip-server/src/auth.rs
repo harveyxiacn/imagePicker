@@ -36,6 +36,8 @@ pub const LOGIN_MAX_FAILURES: usize = 5;
 pub const LOGIN_WINDOW: Duration = Duration::from_secs(60);
 const COOKIE_PREFIX: &str = "ip_session";
 const MAX_SESSIONS: usize = 10_000;
+/// Password hashes running at the same time (the rest of a burst waits, cheaply).
+const MAX_CONCURRENT_VERIFIES: usize = 2;
 /// Origins of the Vite dev server (allowed only with `dev_cors`).
 pub const DEV_ORIGINS: [&str; 2] = ["http://localhost:5173", "http://127.0.0.1:5173"];
 
@@ -145,7 +147,12 @@ pub struct AuthState {
     opts: ServerOptions,
     store: SecurityStore,
     sessions: Mutex<HashMap<[u8; 32], SessionRec>>,
+    /// Login attempts per peer inside the window: counted *before* the password is checked
+    /// (released on success), so a parallel burst cannot exceed the limit.
     failures: Mutex<HashMap<IpAddr, VecDeque<Instant>>>,
+    /// Bounds the concurrent password verifications (each Argon2 hash holds ~19 MiB and a
+    /// blocking-pool thread).
+    verify_slots: Arc<tokio::sync::Semaphore>,
     /// Failed `POST /api/remote/pair/complete` attempts per peer (same policy as login).
     pair_failures: Mutex<HashMap<IpAddr, VecDeque<Instant>>>,
     pairing: ip_core::auth::PairingStore,
@@ -168,6 +175,7 @@ impl AuthState {
             opts,
             sessions: Mutex::new(HashMap::new()),
             failures: Mutex::new(HashMap::new()),
+            verify_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_VERIFIES)),
             pair_failures: Mutex::new(HashMap::new()),
             port: AtomicU16::new(0),
         })
@@ -290,12 +298,27 @@ impl AuthState {
 
     // ---------------------------------------------------------- rate limit
 
-    fn retry_after(&self, ip: IpAddr) -> Option<u64> {
-        self.retry_after_in(&self.failures, ip)
-    }
-
-    fn record_failure(&self, ip: IpAddr) {
-        self.record_failure_in(&self.failures, ip)
+    /// Counts a login attempt of `ip` against the limit *before* it is verified, atomically with
+    /// the check: `Err(seconds)` when the peer is locked out. A successful login clears the
+    /// peer's record ([`Self::clear_failures`]); a wrong password leaves the attempt counted.
+    fn reserve_attempt(&self, ip: IpAddr) -> Result<(), u64> {
+        let now = Instant::now();
+        let window = self.opts.login_window;
+        let mut f = lock(&self.failures);
+        if f.len() > 4096 {
+            f.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) < window));
+        }
+        let q = f.entry(ip).or_default();
+        while q.front().is_some_and(|t| now.duration_since(*t) >= window) {
+            q.pop_front();
+        }
+        if q.len() >= self.opts.login_max_failures {
+            let oldest = q.front().copied().unwrap_or(now);
+            let wait = window.saturating_sub(now.duration_since(oldest));
+            return Err(wait.as_secs().max(1));
+        }
+        q.push_back(now);
+        Ok(())
     }
 
     fn clear_failures(&self, ip: IpAddr) {
@@ -545,17 +568,21 @@ fn guest_allows(method: &Method, path: &str, query: Option<&str>) -> bool {
     if first == "photos" || first == "groups" || first == "search" || first == "timeline" {
         if let Some(q) = query {
             if let Ok(pairs) = serde_urlencoded::from_str::<Vec<(String, String)>>(q) {
-                const PERSON_KEYS: [&str; 5] = [
+                // Everything that selects or groups photos by who (or which face) is in them.
+                const PERSON_KEYS: [&str; 9] = [
                     "persons",
                     "exclude_persons",
                     "person_mode",
                     "person_state",
+                    "include_background",
+                    "face_ids",
+                    "face_similarity",
                     "faces_min",
+                    "faces_max",
                 ];
                 if pairs
                     .iter()
                     .any(|(k, v)| PERSON_KEYS.contains(&k.as_str()) && !v.is_empty())
-                    || pairs.iter().any(|(k, v)| k == "faces_max" && !v.is_empty())
                 {
                     return false;
                 }
@@ -743,7 +770,7 @@ async fn login(
     if !a.opts.lan {
         return Err(forbidden("lan_disabled", "LAN access is not enabled"));
     }
-    if let Some(wait) = a.retry_after(peer.ip) {
+    if let Err(wait) = a.reserve_attempt(peer.ip) {
         let mut e = ApiError::new(
             StatusCode::TOO_MANY_REQUESTS,
             "too_many_requests",
@@ -757,7 +784,14 @@ async fn login(
         return Ok(resp);
     }
     let a2 = a.clone();
+    // The permit travels into the blocking task: it is released when the hashing ends, not when
+    // a disconnecting client drops this future.
+    let permit =
+        a.verify_slots.clone().acquire_owned().await.map_err(|e| {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string())
+        })?;
     let role = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         if a2.store.verify_owner(&b.password) {
             Some(Role::Owner)
         } else if a2.store.verify_guest(&b.password) {
@@ -769,7 +803,7 @@ async fn login(
     .await
     .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()))?;
     let Some(role) = role else {
-        a.record_failure(peer.ip);
+        // already counted by `reserve_attempt`
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_credentials",
@@ -961,6 +995,22 @@ mod tests {
         assert!(g(&Method::GET, "/api/timeline", Some("granularity=day")));
         assert!(!g(&Method::GET, "/api/timeline", Some("persons=2")));
         assert!(!g(&Method::POST, "/api/timeline", None));
+        // face-similarity and background-person filters group people just like `persons`
+        for q in [
+            "session_id=1&face_ids=3,4",
+            "session_id=1&face_similarity=0.5",
+            "session_id=1&include_background=1",
+        ] {
+            assert!(!g(&Method::GET, "/api/photos", Some(q)), "{q}");
+            assert!(!g(&Method::GET, "/api/search", Some(q)), "{q}");
+            assert!(!g(&Method::GET, "/api/timeline", Some(q)), "{q}");
+            assert!(!g(&Method::GET, "/api/groups", Some(q)), "{q}");
+        }
+        assert!(g(
+            &Method::GET,
+            "/api/photos",
+            Some("session_id=1&face_ids=&face_similarity=")
+        ));
     }
 
     #[test]

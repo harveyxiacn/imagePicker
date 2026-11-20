@@ -31,11 +31,21 @@ async fn main() {
         tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
         return;
     }
+    if args.iter().any(|a| a == "--die") {
+        // dies before the ready line (start-failure tests)
+        std::process::exit(3);
+    }
+    // like `imagepicker-ai serve`: `--token`, else the environment
     let token = args
         .windows(2)
         .find(|w| w[0] == "--token")
         .map(|w| w[1].clone())
-        .expect("--token required");
+        .or_else(|| {
+            std::env::var("IP_WORKER_TOKEN")
+                .ok()
+                .filter(|t| !t.is_empty())
+        })
+        .expect("--token or IP_WORKER_TOKEN required");
     let mut grandchild: Option<u32> = None;
     if args.iter().any(|a| a == "--grandchild") {
         let exe = std::env::current_exe().unwrap();

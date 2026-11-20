@@ -121,6 +121,18 @@ async fn process_tree_is_killed_on_drop() {
 }
 
 #[tokio::test]
+async fn token_reaches_the_worker_through_the_environment_only() {
+    // No `{token}` placeholder: the default `serve ...` arguments are appended, and they carry
+    // no token, so the worker can only authenticate with `IP_WORKER_TOKEN`.
+    let w = ManagedWorker::new(WorkerConfig {
+        cmd: Some(format!("\"{}\"", env!("CARGO_BIN_EXE_ip-fake-worker"))),
+        ..cfg()
+    });
+    w.system_info().await.expect("authenticated by environment");
+    w.shutdown().await;
+}
+
+#[tokio::test]
 async fn unavailable_when_launcher_is_missing() {
     let w = ManagedWorker::new(WorkerConfig {
         cmd: Some("definitely-not-a-real-program-xyz".into()),
@@ -135,10 +147,10 @@ async fn unavailable_when_launcher_is_missing() {
 
 #[tokio::test]
 async fn repeated_start_failures_become_unavailable() {
-    // Starts, but dies before printing the ready line (no --token => the fake worker panics).
+    // Starts, but dies before printing the ready line (`--die`: the fake worker exits at once).
     let w = ManagedWorker::new(WorkerConfig {
         cmd: Some(format!(
-            "\"{}\" --nope {{token}}",
+            "\"{}\" --die {{token}}",
             env!("CARGO_BIN_EXE_ip-fake-worker")
         )),
         ..cfg()
@@ -285,7 +297,7 @@ async fn worker_exit_reaches_the_crash_sink() {
 async fn a_failed_start_reaches_the_crash_sink_but_a_requested_stop_does_not() {
     let (c, mut rx) = with_sink(WorkerConfig {
         cmd: Some(format!(
-            "\"{}\" --nope {{token}}",
+            "\"{}\" --die {{token}}",
             env!("CARGO_BIN_EXE_ip-fake-worker")
         )),
         ..cfg()
