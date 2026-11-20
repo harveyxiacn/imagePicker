@@ -164,6 +164,17 @@ fn read_f32_file(path: &str) -> Option<Vec<f32>> {
     }
 }
 
+/// Deletes the artifact files of a stored batch (best effort). Only files directly in the
+/// run's folder, whatever paths the worker reported.
+fn remove_artifacts(out_dir: &Path, files: &[String]) {
+    for f in files {
+        let p = Path::new(f);
+        if p.parent() == Some(out_dir) {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
 /// Reads the artifact files a worker result points to.
 fn load_ingest(item: AnalyzeItem) -> IngestItem {
     let embedding = item
@@ -836,10 +847,54 @@ impl Core {
             return;
         };
         let open = std::mem::take(&mut *self.open_analyses.lock().unwrap());
+        self.sweep_artifacts(&rt, &open);
         for o in open {
             let core = self.clone();
             rt.spawn(async move { core.restore_run(o).await });
         }
+    }
+
+    /// Removes the artifact folders (`cache/analysis/<task id>`) of runs that are over: killed
+    /// and never resumed, or ended before their own cleanup. The open runs (`open`, about to
+    /// be resumed or paused) and any run already going keep theirs; each run removes its folder
+    /// when it ends. In the background: a killed run can leave many files.
+    fn sweep_artifacts(
+        self: &Arc<Self>,
+        rt: &tokio::runtime::Handle,
+        open: &[crate::tasks::OpenAnalysis],
+    ) {
+        let root = self.dirs.root.join("cache").join("analysis");
+        let keep: HashSet<String> = open.iter().map(|o| o.id.clone()).collect();
+        // listed now, before a new run can create its folder
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            return;
+        };
+        let gone: Vec<(String, PathBuf)> = entries
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
+            .filter(|(name, _)| !keep.contains(name))
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        let core = self.clone();
+        rt.spawn_blocking(move || {
+            for (name, path) in gone {
+                let active = core
+                    .runs
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .any(|r| r.task_id == name);
+                if active {
+                    continue;
+                }
+                if let Err(e) = std::fs::remove_dir_all(&path) {
+                    tracing::warn!(task = %name, error = %e, "removing analysis artifacts failed");
+                }
+            }
+        });
     }
 
     async fn restore_run(self: &Arc<Self>, o: crate::tasks::OpenAnalysis) {
@@ -1117,6 +1172,15 @@ impl Core {
                         break 'jobs;
                     }
                 };
+                // the batch's artifact files are read by its ingest and never again: a retried
+                // batch is written anew by the worker, a continued or resumed run plans from
+                // the catalog
+                let artifacts: Vec<String> = resp
+                    .items
+                    .iter()
+                    .flat_map(|it| [it.embedding_file.clone(), it.identity_file.clone()])
+                    .flatten()
+                    .collect();
                 // Face detection was part of this batch: allowed (consent, switched on), a
                 // profile that has the step (`lite` has none; a single-step job never asks
                 // for it), and the worker did not skip it. Otherwise the batch says nothing
@@ -1169,14 +1233,18 @@ impl Core {
                 let partial = job.steps.clone();
                 let dir = out_dir.to_string_lossy().into_owned();
                 let res = tokio::task::spawn_blocking({
-                    let db = self.db.clone();
+                    let (db, out) = (self.db.clone(), out_dir.clone());
                     move || {
                         let items: Vec<IngestItem> =
                             ok_items.into_iter().map(load_ingest).collect();
-                        db.with(|c| match &partial {
+                        let r = db.with(|c| match &partial {
                             Some(st) => store::ingest_partial(c, &items, st, &versions),
                             None => store::ingest(c, &items, profile, &versions, &dir, faces_ran),
-                        })
+                        });
+                        if r.is_ok() {
+                            remove_artifacts(&out, &artifacts);
+                        }
+                        r
                     }
                 })
                 .await;
@@ -1212,7 +1280,8 @@ impl Core {
             }
         }
         let t_analyze = started.elapsed();
-        let _ = std::fs::remove_dir_all(&out_dir);
+        // awaited: a continued run (same task id) creates the folder again
+        let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(out_dir)).await;
 
         // ---- paused: stop here, the rest waits for `continue` (no grouping yet)
         if paused && !cancel.is_cancelled() {
