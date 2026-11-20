@@ -1802,6 +1802,7 @@ export const zhCN = {
     hairPoseTooDifferent: '那张照片里的头部姿态差异太大，无法换发。',
     hairPoseUnknown: '其中一张照片的头部姿态无法判断。',
     hairPersonMismatch: '那张照片是另一个人，不能使用它的头发。',
+    invalidResponse: '服务返回了网页而不是数据。请刷新页面；若仍然如此，请重新登录或检查前面的代理。',
     unknown: '出错了，请重试。',
     withDetail: '{{message}}（{{detail}}）',
   },

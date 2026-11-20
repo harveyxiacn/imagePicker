@@ -39,7 +39,8 @@ export function usePhotos(sessionId: number, filter: FilterState) {
   return useQuery({
     queryKey: qk.photos(sessionId, query),
     // a natural-language search is ranked by the server first (best match first); everything else pages the list
-    queryFn: (): Promise<PhotosData & { search?: SearchMeta }> => (query.search ? fetchSearchPhotos(query) : fetchAllPhotos(query)),
+    queryFn: ({ signal }): Promise<PhotosData & { search?: SearchMeta }> =>
+      query.search ? fetchSearchPhotos(query, signal) : fetchAllPhotos(query, signal),
     placeholderData: keepPreviousData,
   })
 }
@@ -48,7 +49,7 @@ export function usePhotos(sessionId: number, filter: FilterState) {
 export function useBurstPhotos(sessionId: number, burstId: number | null) {
   return useQuery({
     queryKey: qk.photos(sessionId, { session_id: sessionId, burst_id: burstId ?? -1 }),
-    queryFn: () => fetchAllPhotos({ session_id: sessionId, burst_id: burstId ?? -1 }),
+    queryFn: ({ signal }) => fetchAllPhotos({ session_id: sessionId, burst_id: burstId ?? -1 }, signal),
     enabled: burstId !== null,
     placeholderData: keepPreviousData,
   })

@@ -8,6 +8,7 @@ pub mod jpeg;
 mod sync;
 
 use std::collections::BTreeSet;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Mutex;
@@ -209,13 +210,38 @@ pub(crate) fn tmp_path(path: &Path) -> PathBuf {
     dir.join(format!(".{name}.ip-tmp-{}-{n}", std::process::id()))
 }
 
-/// Writes `bytes` to `path` through a temporary file in the same directory.
+/// Best effort: makes a rename in the directory of `path` durable (no-op on Windows, where
+/// directories cannot be opened for syncing).
+pub(crate) fn sync_parent_dir(path: &Path) {
+    #[cfg(not(windows))]
+    if let Some(dir) = path.parent() {
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        if let Ok(f) = std::fs::File::open(dir) {
+            let _ = f.sync_all();
+        }
+    }
+    #[cfg(windows)]
+    let _ = path;
+}
+
+/// Writes `bytes` to `path` through a temporary file in the same directory. The data is flushed
+/// to the device before the rename, so a power cut leaves the old or the new file, not an empty one.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = tmp_path(path);
     let res = (|| {
-        std::fs::write(&tmp, bytes)?;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
         std::fs::rename(&tmp, path)
     })();
+    if res.is_ok() {
+        sync_parent_dir(path);
+    }
     if res.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }

@@ -113,18 +113,18 @@ class HairTransfer:
                         log.warning("download of %s failed: %s", mid, e)
         self._check_models()
 
-    def _retry(self, fn: Any, req: dict[str, Any]) -> dict[str, Any]:
+    def _retry(self, fn: Any, req: dict[str, Any], check: Check | None = None) -> dict[str, Any]:
         try:
-            return fn(req)
+            return fn(req, check) if check is not None else fn(req)
         except Exception as e:  # noqa: BLE001
             if not _is_oom(e) or self.masks.force_cpu:
                 if _is_oom(e):
                     raise OutOfMemory(str(e)) from e
                 raise
             log.warning("OOM in hair; retrying on CPU")
-            self.manager.unload()
-            self.masks.force_cpu = True
-            return fn(req)
+            self.manager.unload(only_idle=True)
+            self.masks.fallback.trip()
+            return fn(req, check) if check is not None else fn(req)
 
     # ------------------------------------------------------------------ rank
     def _rank(self, req: dict[str, Any]) -> dict[str, Any]:
@@ -173,7 +173,7 @@ class HairTransfer:
         )
 
     # ------------------------------------------------------------------ compose
-    def _compose(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _compose(self, req: dict[str, Any], check: Check | None = None) -> dict[str, Any]:
         req["out_dir"].mkdir(parents=True, exist_ok=True)
         tgt = load_rgb(req["target"])
         don = load_rgb(req["donor"])
@@ -190,7 +190,7 @@ class HairTransfer:
             don = cv2.resize(don, None, fx=kd, fy=kd, interpolation=cv2.INTER_AREA)
             df = tuple(v * kd for v in df)  # type: ignore[assignment]
         ph, pw = tgt.shape[:2]
-        out = hair_compose_arrays(tgt, don, tf, df, self._components(), self._fill())  # type: ignore[arg-type]
+        out = hair_compose_arrays(tgt, don, tf, df, self._components(), self._fill(), check)  # type: ignore[arg-type]
         if out.patch is None or out.rect is None:
             return {"patch": None, "reason": out.reason or "not_composable"}
         name = (
@@ -223,6 +223,6 @@ class HairTransfer:
         def work() -> dict[str, Any]:
             if check is not None:
                 check()  # do not even start a cancelled transfer
-            return self._retry(self._compose, req)
+            return self._retry(self._compose, req, check)
 
         return await loop.run_in_executor(self.masks.pool, work)

@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/react-query'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AnalysisStatus, HardwareInfo, Photo, ServerEvent, Session } from '@/api/types'
-import { ANALYSIS_DIRECT_FETCH_MAX, applyEvents, findCachedPhotos, qk, type PhotosData } from './cache'
+import { ANALYSIS_DIRECT_FETCH_MAX, applyEvents, LIST_REFETCH_MS, findCachedPhotos, qk, type PhotosData } from './cache'
 import { makePhoto } from './fixtures'
 import { buildPhotosQuery, DEFAULT_FILTER } from './filter'
 
@@ -30,6 +30,13 @@ function setup() {
   qc.setQueryData(qk.sessions, { sessions: [session()] })
   return { qc, all, filtered }
 }
+
+const photoListCalls = (spy: { mock: { calls: unknown[][] } }) =>
+  spy.mock.calls.filter((c) => JSON.stringify((c[0] as { queryKey?: unknown } | undefined)?.queryKey) === JSON.stringify(['photos', 1]))
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 const get = (qc: QueryClient, q: ReturnType<typeof buildPhotosQuery>) => qc.getQueryData<PhotosData>(qk.photos(1, q))!
 
@@ -62,7 +69,8 @@ describe('applyEvents', () => {
     expect(get(qc, all)).toBe(after)
   })
 
-  it('photos.added triggers a single invalidation per session', () => {
+  it('photos.added: one throttled list refetch per session, session counts stay live', () => {
+    vi.useFakeTimers()
     const { qc } = setup()
     const spy = vi.spyOn(qc, 'invalidateQueries')
     const r = applyEvents(qc, [
@@ -70,8 +78,29 @@ describe('applyEvents', () => {
       { type: 'photos.added', session_id: 1, count: 200 },
     ])
     expect(r.invalidatedSessions).toEqual([1])
-    const photoCalls = spy.mock.calls.filter((c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(['photos', 1]))
-    expect(photoCalls).toHaveLength(1)
+    expect(photoListCalls(spy)).toHaveLength(0)
+    // the session record (counts) is refreshed right away
+    expect(spy.mock.calls.filter((c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(['session', 1]))).toHaveLength(1)
+    vi.advanceTimersByTime(LIST_REFETCH_MS)
+    expect(photoListCalls(spy)).toHaveLength(1)
+  })
+
+  it('a 2 s import (20 photos.added batches) re-pages the list at most twice, and the last batch still refetches', () => {
+    vi.useFakeTimers()
+    const { qc } = setup()
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    for (let i = 0; i < 20; i++) {
+      applyEvents(qc, [{ type: 'photos.added', session_id: 1, count: 50 }])
+      vi.advanceTimersByTime(100)
+    }
+    const during = photoListCalls(spy).length
+    // nothing may stay pending: the trailing refetch covers the final batch
+    vi.advanceTimersByTime(2 * LIST_REFETCH_MS)
+    const total = photoListCalls(spy).length
+    expect(total).toBeGreaterThan(during)
+    expect(total).toBeLessThanOrEqual(2)
+    vi.advanceTimersByTime(2 * LIST_REFETCH_MS)
+    expect(photoListCalls(spy)).toHaveLength(total)
   })
 
   it('session.updated: last event wins and is written to list + detail caches', () => {

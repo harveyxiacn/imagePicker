@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { applyEvents, type ApplyDeps, type TaskEvent } from '@/lib/cache'
+import { applyEvents, resyncAfterReconnect, type ApplyDeps, type TaskEvent } from '@/lib/cache'
 import type { ServerEvent } from './types'
 
 export interface SocketLike {
@@ -60,8 +60,8 @@ export function startEvents(qc: QueryClient, opts: EventsOptions = {}): () => vo
     s.onopen = () => {
       attempt = 0
       opts.onStatus?.('open')
-      // After a reconnect we may have missed events: resync everything.
-      if (everOpened) void qc.invalidateQueries()
+      // After a reconnect we may have missed events: resync the event-driven queries (not self-polling or static ones).
+      if (everOpened) void resyncAfterReconnect(qc)
       everOpened = true
     }
     s.onmessage = (m) => {

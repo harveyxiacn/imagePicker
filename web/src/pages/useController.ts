@@ -99,7 +99,8 @@ export function useController(photos: Photo[], hooks: ControllerHooks = {}) {
       const ids = targetIds()
       if (!ids.length) return
       // Toggle off when every target already carries this label.
-      const current = photosRef.current.filter((p) => ids.includes(p.id))
+      const wanted = new Set(ids)
+      const current = photosRef.current.filter((p) => wanted.has(p.id))
       const next = c !== null && current.length > 0 && current.every((p) => p.color_label === c) ? null : c
       void editPhotos(qc, ids, { color_label: next }, t('history.color'))
     },

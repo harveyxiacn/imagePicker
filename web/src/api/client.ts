@@ -98,22 +98,42 @@ export class ApiError extends Error {
 
 const BASE = '/api'
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** True for the rejection of a fetch (or a paging loop) that was cancelled through its AbortSignal. */
+export function isAbortError(e: unknown): boolean {
+  return e instanceof Error && e.name === 'AbortError'
+}
+
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError')
+}
+
+/** Parse a 2xx body as JSON. A non-JSON body (login page, SPA fallback served by a proxy) becomes an `invalid_response` ApiError. */
+async function readJson<T>(res: Response, signal?: AbortSignal): Promise<T> {
+  try {
+    return (await res.json()) as T
+  } catch (e) {
+    if (signal?.aborted || isAbortError(e)) throw e
+    throw new ApiError(res.status, 'invalid_response', 'The response was not JSON')
+  }
+}
+
+async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(BASE + path, {
     method,
     headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
   })
   if (!res.ok) throw await toApiError(res, path)
   if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+  return readJson<T>(res, signal)
 }
 
 /** multipart/form-data request (the browser sets the boundary header). */
 async function requestForm<T>(method: string, path: string, body: FormData): Promise<T> {
   const res = await fetch(BASE + path, { method, body })
   if (!res.ok) throw await toApiError(res, path)
-  return (await res.json()) as T
+  return readJson<T>(res)
 }
 
 /** Hooks installed by the app shell (kept out of this module so it stays free of router imports). */
@@ -255,9 +275,9 @@ export const api = {
     request<{ relocate: RelocateReport }>('POST', `/sessions/${id}/relocate`, { path, dry_run: dryRun }),
   rejectFiles: (body: { session_id: number; ids?: number[]; mode: RejectMode; confirm: boolean }) =>
     request<{ result: RejectFilesReport }>('POST', '/photos/reject-files', body),
-  photos: (q: PhotosQuery) => request<PhotosResponse>('GET', `/photos?${photosQueryString(q)}`),
-  search: (q: PhotosQuery, text: string, limit = SEARCH_LIMIT) =>
-    request<SearchResponse>('GET', `/search?${searchQueryString(q, text, limit)}`),
+  photos: (q: PhotosQuery, signal?: AbortSignal) => request<PhotosResponse>('GET', `/photos?${photosQueryString(q)}`, undefined, signal),
+  search: (q: PhotosQuery, text: string, limit = SEARCH_LIMIT, signal?: AbortSignal) =>
+    request<SearchResponse>('GET', `/search?${searchQueryString(q, text, limit)}`, undefined, signal),
   photo: (id: number) => request<{ photo: Photo }>('GET', `/photos/${id}`),
   photoDuplicates: (id: number) => request<DuplicatesResponse>('GET', `/photos/${id}/duplicates`),
   timeline: (session_id: number) => request<TimelineResponse>('GET', `/sessions/${session_id}/timeline`),
@@ -423,9 +443,10 @@ export const PAGE_SIZE = 5000
  */
 export async function fetchSearchPhotos(
   q: Omit<PhotosQuery, 'cursor' | 'limit'>,
+  signal?: AbortSignal,
 ): Promise<{ photos: Photo[]; total: number; search: SearchMeta }> {
   const text = q.search ?? ''
-  const res = await api.search(q, text)
+  const res = await api.search(q, text, undefined, signal)
   const search: SearchMeta = {
     total_matched: res.total_matched,
     searched: res.searched,
@@ -433,19 +454,21 @@ export async function fetchSearchPhotos(
     low_confidence: res.low_confidence === true,
   }
   if (!res.hits.length) return { photos: [], total: 0, search }
-  const { photos } = await fetchAllPhotos({ session_id: q.session_id, ids: res.hits.map((h) => h.photo_id) })
+  const { photos } = await fetchAllPhotos({ session_id: q.session_id, ids: res.hits.map((h) => h.photo_id) }, signal)
   const ordered = orderByHits(photos, res.hits)
   return { photos: ordered, total: ordered.length, search }
 }
 
-/** Pulls every page of a photos query (client virtualizes up to ~20k items). */
+/** Pulls every page of a photos query (client virtualizes up to ~20k items). Stops paging once `signal` aborts. */
 export async function fetchAllPhotos(
   q: Omit<PhotosQuery, 'cursor' | 'limit'>,
+  signal?: AbortSignal,
 ): Promise<{ photos: Photo[]; total: number }> {
   const photos: Photo[] = []
   let cursor: string | undefined
   for (;;) {
-    const page = await api.photos({ ...q, cursor, limit: PAGE_SIZE })
+    if (signal?.aborted) throw abortError(signal)
+    const page = await api.photos({ ...q, cursor, limit: PAGE_SIZE }, signal)
     photos.push(...page.photos)
     if (!page.next_cursor) return { photos, total: page.total }
     cursor = page.next_cursor
