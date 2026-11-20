@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::Next;
@@ -700,7 +701,73 @@ pub async fn middleware(State(a): State<Arc<AuthState>>, mut req: Request, next:
     }
     req.extensions_mut().insert(peer);
     req.extensions_mut().insert(MaybeIdentity(ident));
-    next.run(req).await
+    let guest = ident.is_some_and(|i| i.role == Role::Guest);
+    let resp = next.run(req).await;
+    if guest {
+        hide_paths_in_response(resp).await
+    } else {
+        resp
+    }
+}
+
+/// Largest JSON body a guest's response is rewritten for.
+const GUEST_JSON_LIMIT: usize = 64 * 1024 * 1024;
+
+/// Where a photo or a folder lives is the owner's business (`GET /api/settings`, with the roots,
+/// is refused to guests): a guest is shown the name only. `root_path` (sessions, the
+/// `session.updated` event) and `path` (photo rows, LUT references in edit stacks) are cut down
+/// to their last component; `rel_path`, names and titles are untouched. A drive root keeps no
+/// name (`D:\` becomes the empty string).
+pub(crate) fn hide_paths(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            for (k, x) in m.iter_mut() {
+                if matches!(k.as_str(), "root_path" | "path") {
+                    if let Value::String(s) = x {
+                        let name = ip_core::logging::base_name(s);
+                        *s = name.trim_end_matches(':').to_string();
+                        continue;
+                    }
+                }
+                hide_paths(x);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(hide_paths),
+        _ => {}
+    }
+}
+
+/// [`hide_paths`] over a JSON response body; anything else passes through.
+async fn hide_paths_in_response(resp: Response) -> Response {
+    let is_json = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/json"));
+    if !is_json {
+        return resp;
+    }
+    let (mut parts, body) = resp.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, GUEST_JSON_LIMIT).await else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "response too large").into_response();
+    };
+    // Most bodies name no path at all: a byte scan decides, no parsing.
+    let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+    if !has(b"\"path\"") && !has(b"\"root_path\"") {
+        return Response::from_parts(parts, Body::from(bytes));
+    }
+    let fallback = bytes.clone();
+    let out = tokio::task::spawn_blocking(move || match serde_json::from_slice::<Value>(&bytes) {
+        Ok(mut v) => {
+            hide_paths(&mut v);
+            serde_json::to_vec(&v).unwrap_or_else(|_| bytes.to_vec())
+        }
+        Err(_) => bytes.to_vec(),
+    })
+    .await
+    .unwrap_or_else(|_| fallback.to_vec());
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, Body::from(out))
 }
 
 fn exchange_token(a: &AuthState, req: &Request) -> Response {

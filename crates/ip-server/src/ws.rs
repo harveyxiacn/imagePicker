@@ -1,7 +1,8 @@
 //! `GET /api/events`: WebSocket stream of core events, coalesced every 100 ms per event type.
 //!
 //! Owners get every event. Guests (read-only, 02 §8) get only the events whose payload the REST
-//! API would also show them; everything else, including event types added later, is withheld.
+//! API would also show them (with locations cut down to names, as there); everything else,
+//! including event types added later, is withheld.
 
 use std::time::Duration;
 
@@ -76,7 +77,16 @@ async fn handle(mut socket: WebSocket, st: AppState, role: Role) {
             },
             _ = tick.tick() => {
                 for ev in co.drain() {
-                    let Ok(text) = ip_core::jsonfix::to_tidy_string(&ev) else { continue };
+                    let text = if role == Role::Guest {
+                        // `session.updated` carries the folder's absolute path
+                        serde_json::to_value(&ev).and_then(|mut v| {
+                            crate::auth::hide_paths(&mut v);
+                            ip_core::jsonfix::to_tidy_string(&v)
+                        })
+                    } else {
+                        ip_core::jsonfix::to_tidy_string(&ev)
+                    };
+                    let Ok(text) = text else { continue };
                     if socket.send(Message::Text(text.into())).await.is_err() {
                         return;
                     }
